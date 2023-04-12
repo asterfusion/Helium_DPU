@@ -1,0 +1,635 @@
+/*! \file req-resp
+    \brief This file is not part of the driver sources.  The contents of this
+           file are used in HTML document generation.
+*/
+
+/*! \page  reqresp Request processing using the OCTEON PCI driver
+
+This section describes the steps involved in sending a request to OCTEON.
+
+<br>
+<br>
+\section rr-sec1 OCTEON Input queue initialization.
+
+The OCTEON PCI host driver is responsible for the initialization of all OCTEON
+devices in the system.
+
+During initialization, the driver would allocate memory for the instruction
+queue used for OCTEON PCI input. For each instruction queue (also referred to
+as input queues), the driver allocates a contiguous memory in host memory that
+can accomodate a fixed number of instructions. The starting address of each
+queue and the number of instructions it accomodates are programmed into OCTEON
+by the driver. OCTEON supports instructions that are 32 or 64 bytes in size.
+The CN73xx/CN78xx by default support 64B instructions, rest all will support 
+32B instructions.
+
+<br>
+<br>
+\section rr-sec2 OCTEON PCI driver application interfaces
+
+ The driver provides ioctl's that can be used by user-space applications to
+ send requests to OCTEON. A user-space library provides a set of API's that act
+as wrappers around these ioctls. User-space applications are encouraged to use
+the API's rather than ioctl. This will allow the applications to be independent
+of any low-level changes in the ioctl interface of the driver. The driver also
+exports API's usable by kernel-space applications. Both set of API's are
+explained in more detail later on in this chapter.
+
+<br>
+<br>
+ \section rr-sec3 Driver interaction with OCTEON for request processing
+
+ To send a request to OCTEON, applications in user-space call the user-space
+ library API (which in turn calls the OCTEON driver ioctl). Kernel applications
+use a different set of API exported by the driver. In all cases, the request has
+to be sent to the driver in a format defined by the octeon_soft_request_t
+structure.
+
+ All requests get converted to a instruction format that is understood by the
+ OCTEON PCI input queues. Each such instruction is copied into the next
+ available location in the instruction queue. The driver notifies availability
+ of new instructions to OCTEON by writing to a doorbell register.
+
+ The OCTEON PCI input queue hardware gets the data pointer from the instruction
+ and fetches all data and buffers it internally in a work queue entry. OCTEON 
+IPD would schedule the work to one of the cores when the core software requests
+work from the hardware. The core gets the data (and instruction contents if it
+was a RAW packet) for the instruction, processes it locally and send a response
+back to host. If a response is required, the instruction would also have a
+return pointer which gives the physical address in host memory where the
+response should be returned.
+
+
+ \anchor PCIcmd32
+ \section rr-cmd32 PCI Input Queue command format
+
+ The driver uses a 32-byte command for the Input Queues by default. The first
+ 16 bytes of the command are defined by the hardware. The PCI instruction
+ format is explained in section 10.3.1. in the CN38XX/CN58XX hardware manual
+ and in section 9.4.1 in CN56XX Hardware manual.The contents of the
+ remaining 16 bytes is setup under the driver's control. The 32-byte command
+ format is as shown below:
+
+
+\verbatim
+  -----------------------------
+ |    Data Pointer       (64-bit) |   Hardware defined
+  --------------------------------
+ | Instruction Header    (64-bit) |   Hardware defined
+  --------------------------------
+ | Return Data Pointer   (64-bit) |   Driver defined
+  --------------------------------
+ | Input Response Header (64-bit) |   Driver defined
+  --------------------------------
+\endverbatim
+
+ <b>  Figure 1: 32-byte PCI Input Queue Command format  </b>
+
+ The data pointer points to a buffer or a gather list of buffers
+ in host memory where the input data is located. The instruction header (IH)
+ format can be found in the hardware manual.
+
+ The return data pointer (rptr) points to a buffer or a scatter list of buffers
+ in host memory where the application running on OCTEON is expected to send
+ the response data.
+
+
+ The Input Response Header (IRH) is specified by the driver and has the
+ following format:
+
+
+ \verbatim
+   63      48 47      40 39       34 33     20  19   18       16 15           0
+   ----------------------------------------------------------------------------
+  | Opcode   |  Param   | Dest Port | rlenssz |  S  | pcie_port | Request ID   |
+   ----------------------------------------------------------------------------
+\endverbatim 
+
+ <b> Figure 2:  Input Response Header format </b>
+
+ Field Description:
+ - opcode & param : application defined values to identify the payload type.
+ - Destport : application defined value to identify the destination; usually an
+OCTEON I/O port.
+ - rlenssz : data length if rptr is a single buffer; count of buffers in
+ gather list if rptr points to a scatter list.
+ - S : indicates if rptr points to a scatter list.
+ - pcie_port - indicates which PCIe interface should be used to send the
+response back to host.
+ - Request ID : index in the driver data structure to identify the request.
+
+
+
+<br>
+<br>
+<br>
+
+\section rr-sec4 OCTEON Request format
+
+ As mentioned before, to send a request to OCTEON, the application should fill a
+ octeon_soft_request_t structure and call the kernel/user-space api to send the
+ request. The structure definition can be found in 
+ $CNNIC_ROOT/modules/driver/inc/cavium_defs.h
+
+The following fields must be filled by the caller:
+
+<ol>
+<li> inbuf  - set the number of input buffers, address and size of each buffer.
+             It is legal to have 0 input buffers.
+
+<li> outbuf - set the number of output buffers, address and size of each buffer.
+             It is legal to have 0 output buffers if no response is expected.
+             Output buffers must be allocated if a response is expected.
+             Kernel applications must allocate an additional 16 bytes to
+             accomodate the response header and status of a response.
+             For user-space applications, driver will allocate the extra bytes.
+
+<li> ih     - instruction header bits. Refer to the OCTEON Hardware Manual 
+             (section 10.3.1) for the format and usage.
+
+<li> irh    -  The opcode field should be set. Optionally the param and dport
+              fields can also be set. All other fields are set by the driver
+              and should not be set by the application.
+              See $CNNIC_ROOT/modules/driver/src/common/octeon-opcodes.h for opcodes 
+              reserved for use by driver and applications released by Cavium.
+
+<li> exhdr  - upto 4 additional 64-bit values can be passed which will be
+             added to the front of the request data bytes.
+
+<li> exhdr_info - Just the exhdr_count field needs to be set.
+
+<li> req_info - The following field needs to be set by application.
+    \li OCTEON_id - OCTEON device id.
+    \li req_mask  - Set the response order, response mode, dma mode and
+                    instruction queue to use.
+    \li timeout   - time in millisecs to wait for response.
+    \li callback  - should not be set by user space application. Kernel
+                    applications can set it to a function pointer.
+    \li callback_arg - additional argument to be passed to callback by driver.
+                    Should not be set by user application.
+    \li status    - Should not be set by any application. Driver will return
+                    status in this field.
+    \li request_id - Should  not be set by any application. Driver will return
+                     request id after request is posted to OCTEON.
+
+</ol>
+ If the call returns success, the current state of the request will be in the
+ req_info.status field of the request.
+
+\anchor  octsoftreqformat
+ Note: There are some changes to octeon_soft_request_t in the 1.0 release. To
+       continue using the old format, recompile the driver after enabling the
+       CVM_SUPPORT_DEPRECATED_API flag in
+       $CNNIC_ROOT/modules/driver/inc/cavium_defs.h. The changes in 1.0 were
+       made to enable support for 32-bit user-space apps to communicate with 
+       the driver in a 64-bit kernel. The changes are listed below:
+
+       - The octeon_request_info_t structure does not have the callback and
+          callback_arg fields when used in user-space applications.
+       - The datatype for req_info field in octeon_soft_request_t and
+          for ptr field in octeon_buffer_t have changed from a pointer type
+          to a union which includes a pointer and a uint64_t value.
+
+       The following macros allow application to transparently access the
+       modified fields:
+       - SOFT_REQ_INBUF(sr, idx)
+       - SOFT_REQ_OUTBUF(sr, idx)
+       - SOFT_REQ_INFO(sr)
+
+      where sr is a pointer to a octeon_soft_request_t structure.
+
+
+ The response sent by the core application to any request is expected in the 
+ following format:
+
+\verbatim
+ -----------------------------
+ | Response Header (8 bytes) |
+ -----------------------------
+ | Response Data             |
+ -----------------------------
+ | Status word     (8 bytes) |
+ -----------------------------
+\endverbatim
+ <b>  Figure 3: Response buffer format  </b>
+
+
+
+ Kernel applications should take care that the response (output) buffer 
+ is created in the above format. For user-space application, the driver
+ builds the buffer in the required format.
+
+ \verbatim
+   63    48 47         42 41              20     19     18              0
+  -----------------------------------------------------------------------
+  | Opcode | Source Port | Destination Port | Reserved |   Request ID   |
+  -----------------------------------------------------------------------
+\endverbatim 
+ <b> Figure 4:  Response Header format </b>
+
+
+
+ \verbatim
+   63        32 31                    16 15              8 7            0
+  -----------------------------------------------------------------------
+  | Reserved   | Application Identifier | Request Status  | DMA status  |
+  -----------------------------------------------------------------------
+\endverbatim 
+ <b> Figure 5:  Status word format </b>
+
+  Only the lower 4 bytes of the status word currently hold the completion
+  status. The upper 4 bytes are reserved. Of the lower 2 bytes, the most
+  significant 2 bytes is used as an application identifier. The least
+  significant 2 bytes hold a 16-bit status value.
+
+  <b> NOTE:</b> The last 8 bits of status word is used as a DMA completion
+        indicator by the driver. Applications have the 24-bits as
+        shown above for their use. If more than 255 error conditions can 
+        occur in an application, it can reserve multiple application 
+        identifiers. The application identifier value 0 is reserved for the
+        driver.
+
+ The OCTEON host driver looks at the 8 byte status word for completion of a 
+ request. When a request is sent, the driver initializes it to all f's.
+ The driver keeps checking that byte[0] of status word changes from 0xff
+ to any other value to consider the request completed.
+
+ <b>NOTE:</b> It is illegal for core applications to set byte[0]
+ of the status word to 0xff.
+
+
+ The next sections describe the response mode, dma mode and response order that
+ can be used with requests sent to the driver.
+
+
+<br>
+<br>
+ \subsection rr-subsec4-1 RESPONSE ORDER 
+
+ The driver supports the following response ordering mechanisms:
+
+<ol>
+<li> <b>ORDERED:</b>
+             An ordered request's response is delivered to the caller only
+             after all previous ORDERED requests have received their responses.
+             This is true even if the timeout values for a ordered
+             request is less than the previous ordered requests. This is the
+             recommended mode to use for kernel-level applications.
+
+<li> <b>UNORDERED:</b>
+             Unordered requests can complete in any order. UNORDERED mode
+             requests are the preferred mode for user-space applications.
+             A user-space application can specify blocking (the function call
+             will not return till a response is received or its times-out) 
+             or non-blocking (the function call returns immediately). For 
+             non-blocking mode, the user-space application is expected to query 
+             for the status of the request at frequent intervals till the status
+             for the request returned indicates that the request completed or
+             timed-out.
+
+<li> <b>NORESPONSE:</b> These requests don't expect a response. The driver buffers
+             them internally only as long as it takes OCTEON to read them in.
+             These type of requests can be sent from kernel and user space
+             applications.
+
+</ol>
+<br>
+<br>
+ \subsection rr-subsec4-2 RESPONSE MODE
+
+ The driver supports the following response modes for UNORDERED requests:
+
+<ol>
+<li> <b>BLOCKING:</b> The driver will not return from the ioctl till the requests
+              completes (or times-out).
+
+<li> <b>NON-BLOCKING:</b>
+              The driver returns as soon as the request is submitted to OCTEON.
+              The user application is required to poll for completion of the
+              request using a query api function.
+</ol>
+
+ For kernel-space applications, all requests are considered NON-BLOCKING
+ operations by the driver.
+
+
+<br>
+<br>
+\subsection rr-subsec4-3 DMA MODES 
+
+ The driver supports the following DMA modes:
+
+<ol>
+<li> <b>DIRECT:</b>
+             In this mode, there is a single input buffer pointer (dptr) in the
+             instruction and a single output buffer pointer (rptr).
+
+<li> <b>GATHER:</b>
+             In this mode, there can be multiple input buffer pointers. Driver
+             creates a gather list with these pointers and passes address of
+             gather list in the instruction. There is only one output buffer.
+
+<li> <b>SCATTER:</b>
+             There is only one input buffer. There can be multiple output buffer
+             pointers. Driver creates a scatter list with these pointers and
+             passes address of scatter list in the instruction.
+
+<li> <b>SCATTER_GATHER:</b>
+             There can be multiple input and output buffers. Driver creates
+             a gather and scatter list and passes the address of these lists in
+             the instrcution.
+
+
+</ol>
+<br>
+<br>
+<br>
+ \section user_space_support Supported Modes for user-space applications.
+
+ For user-space applications, the supported modes are described below. All 
+ constants used below are defined in $CNNIC_ROOT/modules/driver/inc/cavium_defs.h.
+
+<ol>
+<li> <b>DIRECT DMA:</b>
+              Multiple Input or Output buffers are allowed.
+              Multiple input buffers are coalesced internally by the driver.
+              Multiple output buffers are also supported. Driver gets
+              response in a single response buffer and splits it among the
+              multiple user-space output buffers.
+              Maximum Input data size is OCT_MAX_DIRECT_INPUT_DATA_SIZE.
+              Maximum Output data size is OCT_MAX_DIRECT_OUTPUT_DATA_SIZE.
+
+
+<li> <b>GATHER DMA:</b>
+              Multiple Input or Output buffers are allowed.
+              Multiple input buffers are put into a gather list. Maximum 
+              gather input data cannot exceed OCT_MAX_GATHER_DATA_SIZE.
+              Multiple output buffers are also supported. Driver gets
+              response in a single response buffer and splits it among the
+              multiple user-space output buffers. Maximum output data size
+              cannot exceed OCT_MAX_DIRECT_OUTPUT_DATA_SIZE.
+
+
+<li> <b>SCATTER DMA:</b>
+              Multiple Input or Output buffers are allowed.
+              Multiple input buffers are coalesced internally by the driver.
+              Maximum input data cannot exceed OCT_MAX_DIRECT_INPUT_DATA_SIZE.
+              Multiple output buffers are put into a scatter list. Driver 
+              splits the response from internal scatter buffers among the
+              multiple user-space output buffers. Maximum output data size
+              cannot exceed OCT_MAX_SCATTER_DATA_SIZE.
+
+
+<li> <b>SCATTER_GATHER DMA:</b>
+              Multiple Input or Output buffers are allowed.
+              Multiple input buffers are put into a gather list. Maximum 
+              gather input data cannot exceed OCT_MAX_GATHER_DATA_SIZE.
+              Multiple output buffers are put into a scatter list. Driver 
+              splits the response from internal scatter buffers among the
+              multiple user-space output buffers. Maximum output data size
+              cannot exceed OCT_MAX_SCATTER_DATA_SIZE.
+
+
+</ol>
+
+ The following response mode and response orders are supported:
+
+\verbatim
+    Response Order  |  Response mode
+ ---------------------------------------
+ 1. UNORDERED       |  BLOCKING
+
+ 2. UNORDERED       |  NON-BLOCKING
+
+ 3. NORESPONSE      |  NON-BLOCKING
+\endverbatim
+ 
+<b>IMPORTANT</b> ORDERED response order is not supported for user-space applications.
+
+
+<br>
+<br>
+<br>
+\section kernel_space_support Supported Modes for kernel-space applications.
+ 
+ For kernel-space applications, the supported modes are described below. All
+ constants used below are defined in $CNNIC_ROOT/modules/driver/inc/cavium_defs.h
+
+
+<ol>
+<li> <b>DIRECT DMA:</b>
+              Multiple Input buffers are allowed.
+              Multiple input buffers are coalesced internally by the driver.
+              Multiple output buffers are not supported.
+              Maximum Input data size is OCT_MAX_DIRECT_INPUT_DATA_SIZE.
+              Maximum Output data size is OCT_MAX_DIRECT_OUTPUT_DATA_SIZE.
+
+<li> <b>GATHER DMA:</b>
+              Multiple Input buffers are allowed.
+              Multiple input buffers are put into a gather list. Maximum 
+              gather input data cannot exceed OCT_MAX_GATHER_DATA_SIZE.
+              Multiple output buffers are not supported. Maximum output data
+              size cannot exceed OCT_MAX_DIRECT_OUTPUT_DATA_SIZE.
+
+<li> <b>SCATTER DMA:</b>
+              Multiple Input buffers are not allowed.
+              Maximum input data cannot exceed OCT_MAX_DIRECT_INPUT_DATA_SIZE.
+              Multiple output buffers are put into a scatter list. Maximum
+              output data size cannot exceed OCT_MAX_SCATTER_DATA_SIZE. 
+
+<li> <b>SCATTER_GATHER DMA:</b>
+              Multiple Input or Output buffers are allowed.
+              Multiple input buffers are put into a gather list. Maximum 
+              gather input data cannot exceed OCT_MAX_GATHER_DATA_SIZE.
+              Multiple output buffers are put into a scatter list. The core
+              driver has the responsibility to DMA the response data into the
+              buffers pointed by the scatter list.
+              Maximum output data size cannot exceed OCT_MAX_SCATTER_DATA_SIZE.
+
+</ol>
+<b>NOTE: </b> Kernel applications are required to reserve 8 bytes at the start
+              of the output buffer for Response Header and 8 bytes at the end of
+              the output buffer for status bytes. Thus, the actual output buffer
+              size constraints is the maximum data size mentioned in
+              the above paragraphs + 16 bytes. For e.g., to receive the maximum
+              DIRECT DMA data size of OCT_MAX_DIRECT_OUTPUT_DATA_SIZE (16367
+              bytes) the application should allocate a buffer of size 16383
+              bytes.
+
+
+
+ <b>IMPORTANT</b>:
+ The driver supports ORDERED and NORESPONSE type requests for kernel
+ applications. UNORDERED response order is supported, but is not recommended.
+
+ For kernel-space applications, all requests are considered NON-BLOCKING
+ operations by the driver.
+
+
+<br>
+<br>
+<br>
+ \section driver_kernel_api  Request processing from kernel applications
+    The OCTEON host driver provides two functions as entry points for kernel 
+    applications into the driver to support request/response with the OCTEON
+    device. The driver allows kernel level requests to specify a callback which 
+    will be called by the driver on request completion. A request can send
+    data in a single buffer, in multiple buffers (in which case the driver
+    coalesces the buffers into one big buffer) or a gather list of data 
+    buffers. The application can use multiple buffers to get the response if
+    SCATTER dma mode is used, in which case the driver would create a scatter
+    list which would be used by the core driver to copy the response to host.
+
+<br>
+   \subsection kernel_api  API for kernel space applications
+
+<ol>
+   <li> octeon_process_request() - Kernel space applications use this API to 
+   send a request to OCTEON. All 3 response modes described above are
+   supported. ORDERED and NORESPONSE mode requests are recommended for
+   kernel space applications. The required information for a request is
+   filled in a  octeon_soft_request_t structure and passed along with the
+   OCTEON device id as parameters to this function.
+   When this function returns success, the request has been queued
+   successfully by the driver though it may not have been sent yet to OCTEON.
+   A callback may be specified with the request. The callback function will
+   be called by the driver when,
+       \li for ORDERED/UNORDERED: response is received or the request timed-out.
+       \li for NORESPONSE mode: request is sent to OCTEON or if it times-out.
+
+   In case of a time out, the driver returns a status value of  
+   OCTEON_REQUEST_TIMEOUT (decimal 3). A response from the core could also
+   give an error value, but it should never be 3 as that value is reserved
+   for the driver.
+
+
+   <li> octeon_query_request_status() - Kernel space applications call this 
+      function to determine the status of a previously posted UNORDERED request.
+      The request id is presented to the driver in a octeon_query_request_t
+      structure. The current status of the request is returned by the driver in
+      the same structure. The status returned can be one of
+      \li OCTEON_REQUEST_PENDING - the request has not yet completed
+      \li OCTEON_REQUEST_TIMEOUT - the request timed-out before completion
+      \li 32-bit value - which is returned by the application on the core
+      that processed the request. Its value is application dependent.
+
+
+</ol>
+<br>
+   \subsection  kern_samp  Kernel-space application example sources
+
+The kernel-space application example under
+$CNNIC_ROOT/modules/driver/src/host/linux/kernel/req_resp demonstrates request processing
+using the OCTEON PCI driver. It requires the <b>cvmcs</b> core application
+which can be found at $CNNIC_ROOT/modules/driver/src/firmware/apps/base.
+
+<br>
+<br>
+<br>
+ \section driver_user_api  Request processing from user space  applications
+
+ORDERED mode requests are not supported for user space requests. For
+NORESPONSE type of requests, blocking mode is not supported. User mode
+requests cannot specify a callback. Requests can be blocking or
+non-blocking.
+User space applications can send requests with the input in multiple
+buffers. The driver would copy all the input data into one buffer.
+The driver does not support zero-copy gather/scatter with multiple
+user-space buffers but supports a 1-copy operation for all user-space
+input data buffers. User-space applications can give multiple user-space
+buffers to receive the output data. If multiple buffers are specified,
+the driver scatters the output data into the user-space output buffers
+appropriately. 
+
+<br>
+  \subsection dev_file_sec OCTEON device file.
+
+Before any user applications can start using the OCTEON driver, a
+device file should be created. The OCTEON device file is a character 
+device with major number 127 named /dev/octeon_device.
+The OCTEON user api library (liboctapi.a) looks for this device file.
+Note that there is only one device file even when there are multiple
+OCTEON devices in the system. The device file should be considered as
+a entry point to the driver. Each of the ioctls supported by the driver
+has a field identifying the OCTEON device at which the operation is
+directed.
+
+<br>
+
+   \subsection ioctl_sec OCTEON driver ioctls and user level API.
+
+ Once the file has been opened, there are several ioctl's that enable access
+ to the OCTEON device. They provide read/write access to the OCTEON registers
+ and to send requests. The octapi library provides wrappers for all ioctls.
+ The ioctls are defined in $CNNIC_ROOT/modules/driver/inc/octeon_ioctl.h.
+ The preferred method though is to use the octapi library. Check out
+ $CNNIC_ROOT/modules/driver/inc/octeon_user.h for all the api functions
+ available.
+
+
+
+ A request from user space can send the data in multiple input buffers and the
+ result can arrive in multiple output buffers as desired by the user.
+
+    \subsection  user_api API for user space applications.
+
+<ol>
+    <li> octeon_initialize() - This function opens the OCTEON device file and
+            enables a channel of communication with the OCTEON device driver.
+
+    <li> octeon_send_request() - User space applications can send a request by
+            filling        up a octeon_soft_request_t structure and calling this function
+            with the OCTEON device id. User-space applications can send 
+            UNORDERED (blocking or non-blocking) and NORESPONSE mode requests.
+            For non-blocking UNORDERED requests, the caller is expected to query
+            the request's status. For UNORDERED BLOCKING mode, the status is
+            available in the soft request structure when the call returns. For all
+            modes, if the request was queued successfully, the function returns
+            success, else it returns a errno value describing the error encountered.
+
+    <li> octeon_query_request() - User space applications use this function to
+            query the status of a previously posted UNORDERED non-blocking request.
+            The        mechanism used and the return values are the same as for a kernel
+            space octeon_query_request_status() call. See above.
+
+    <li> octeon_shutdown() - This function closes the OCTEON device file and stops
+            the        channel of communication to the OCTEON driver.
+
+</ol>
+
+<br>
+   \subsection  cmd64  Using Input Queues with 64-byte commands.
+
+By default, all the Input Queues are configured to use the 32-byte PCI
+command format. To use the 64-byte format, edit the configuration data
+in  $CNNIC_ROOT/modules/driver/inc/oct_config_data.h to change the
+instr_type field in the input queue configuration from 32 to 64.
+
+NOTE:By default CN73xx/CN78xx uses 64 byte instructions.
+
+Refer to \ref Octdevconf "Section: OCTEON device configuration" to learn
+more about editing OCTEON configuration.
+
+When using a input queue with 64-byte command, the first 32 bytes in the
+command generated by the driver are        identical to the 32-byte command
+described in \ref rr-cmd32 "PCI command format". The remaining 32 bytes 
+are read from the 4 64-bit exhdr fields in the octeon_soft_request_t
+structure.
+
+The setting of the Input queue is transparent to the host application and
+the data bytes from the exhdr and from the input data buffer appear in the
+same way in the WQE received by the application running on the OCTEON cores
+irrespective of the command type set for the Input queues.
+
+
+
+
+<br>
+   \subsection  user_samp  user-space application example sources
+
+The user-space application example (oct_req) under 
+$CNNIC_ROOT/modules/driver/src/host/linux/user/test demonstrates request processing 
+using the OCTEON PCI driver. It requires the <b>cvmcs</b> core application
+which can be found at $CNNIC_ROOT/modules/driver/src/firmware/apps/base.
+
+*/

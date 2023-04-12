@@ -1,0 +1,16 @@
+[binaries]
+c = 'aarch64-marvell-linux-gnu-gcc'
+cpp = 'aarch64-marvell-linux-gnu-cpp'
+ar = 'aarch64-marvell-linux-gnu-ar'
+strip = 'aarch64-marvell-linux-gnu-strip'
+pkgconfig = 'aarch64-marvell-linux-gnu-pkg-config'
+pcap-config = ''
+
+[host_machine]
+system = 'linux'
+cpu_family = 'aarch64'
+cpu = 'armv8-a'
+endian = 'little'
+
+[properties]
+implementor_id = '0x43'

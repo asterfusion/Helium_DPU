@@ -1,0 +1,11 @@
+*.o
+*.o.cmd
+*.ko
+*.mod.c
+*.order
+*.symvers
+*.o.d
+*.ko.cmd
+.cache.mk
+.tmp_versions
+redefine_symbols.mk

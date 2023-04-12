@@ -1,0 +1,10 @@
+v0.2
+----
+- support for facility framework
+
+v0.1
+----
+- basic device initialization (taken from cnnic83xx)
+- setting up the BAR mapping
+- implementation of handshake with base driver on NPU
+- test code to write to NPU memory through BAR1 mapping and interrupt NPU

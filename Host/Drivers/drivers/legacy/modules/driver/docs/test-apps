@@ -1,0 +1,232 @@
+/*! \file test-apps
+    \brief This file is not part of the driver sources.  The contents of this file are used in HTML document generation.
+*/
+
+/*! \page test-main OCTEON PCI Host Test Programs
+
+The PCI base driver package includes sample programs to demonstrate usage of
+the input and output queues and the PCI DMA engines of OCTEON using the PCI
+driver.
+
+The following kernel-space applications are available:
+
+1. req_resp - Provides a linux kernel module that uses the API's exported by
+the driver for request processing to send requests to the OCTEON cores. It
+requires the cvmcs core application to respond to the requests it sends.
+
+2. droq_test - Provides a linux kernel module that registers dispatch
+functions for a set of pre-defined opcodes. It required the cvmcs core
+application to send packets on the PCI output queues with these opcodes.
+
+
+There is also a user-space application:
+
+1. oct_req - It uses the user api's from the host api library to send
+requests to the OCTEON cores. It requires the cvmcs core application to
+respond to the requests it sends.
+
+@if CNNIC_SRC
+<br><br><br>
+\section core_app Core application (cvmcs)
+
+All the test programs running on the PCI host require the <b>cvmcs</b> core
+application. The sources for this application is located at
+$CNNIC_ROOT/modules/driver/src/firmware/apps.
+
+The main initialization routines can be found in apps/base and
+apps/common. All test routines are available from apps/test.
+
+The application can be compiled to perform one or more type of tests at a
+given time. The type of tests that the application runs is determined by the
+definitions in apps/test/cvmcs-test.h file.
+
+By default, the application will process requests with opcode CVMCS_REQRESP_OP.
+If a response is required (the rptr field in PCI instruction will be
+non-zero), the application copies the input bytes into the output buffers
+and sends a response back to the host. If the output buffer is bigger than
+the input, it fills the remaining output bytes with a signature value (0xFA
+currently).
+The host application (either the req_resp kernel application or oct_req
+user-space application) can compare the input and output buffer contents to
+see if the operation was successful.
+
+The application also supports scatter mode responses. The cvmcs-reqresp.c
+file has routines to read a scatter list in blocking and non-blocking mode
+and to send back a scatter response. The application exercises all scatter
+mode API depending on the flags enabled in cvmcs-test.h. The source is
+well-documented and should be self-explanatory. See the core driver html
+documentation for more details on the core driver API.
+
+The following definitions in apps/test/cvmcs-test.h enable other functions:
+
+\li CVMCS_TEST_PKO - Enable this to send test packets on the output queues
+    with opcodes DROQ_PKT_OP1 and DROQ_PKT_OP2. This option is useful
+    when running the <b>droq_test</b> kernel space program. The test allows
+    test to be sequentially increasing upto CMV_MAX_DATA, fixed at
+    CVM_MAX_DATA or random sizes from 1 to CVM_MAX_DATA for each test packet
+    send to host via PKO.
+
+
+\li CVM_MAX_DATA - The packets sent to output queue will not be greater
+    than CVM_MAX_DATA in size.
+
+
+To compile the <b>cvmcs</b> program, do make in 
+$CNNIC_ROOT/modules/driver/src/firmware/apps/base.
+A symbolic link is created from $CNNIC_ROOT/modules/driver/bin
+to the core application.
+
+<b>Note:</b> <br>
+Before re-running the cvmcs core application on the OCTEON, it is necessary
+to reload the PCI Base driver.
+@endif
+
+<br><br>
+\section user_space_app  User space test program
+
+<b> 1. oct_req - test request/response </b> 
+
+The user space test program, called <b>oct_req</b>, uses the user space
+library api to send RAW PCI instructions to OCTEON. It requires the core
+application <b>cvmcs</b> to be running on OCTEON cores for its operation.
+
+The source for <b>oct_req</b> is at $CNNIC_ROOT/modules/driver/src/host/linux/user/test.
+
+<b>oct_req</b> can be used to send requests of UNORDERED and NORESPONSE
+types. The operations can be blocking or non-blocking. The test parameters
+can be modified in the file oct_req.c. The type of request and request mode
+can also be specified on the command line. The command line arguments
+override any settings made in oct_req.c. The default setting in oct_req.c
+is to  send NORESPONSE/NON-BLOCKING type requests in DIRECT DMA mode.
+Requests of NORESPONSE type do not support BLOCKING mode and
+SCATTER/SCATTER_GATHER dma mode.
+
+Command line options:
+\li \<OCTEON_id\> : OCTEON device id (0 for the first OCTEON device).
+\li -d : Change the DMA mode to use for the request. Supported values are
+         "direct", "gather", "scatter" and "scatter_gather".
+\li -b : changes response mode to BLOCKING.
+\li -u : changes response order to UNORDERED.
+\li -I : Input buffer size in bytes.
+\li -O : Output buffer size in bytes.
+\li -q : input queue number (wrong value prints all the queues)
+\li -s : Do not print per-packet messages.
+\li -y : Answer "yes" to all prompts.
+\li [count] - Number of requests to send. If specified, the test will
+       attempts to send <b>count</b> requests and stop, else it will 
+       continue to run till stopped (Press ^C to stop).
+
+To compile the <b>oct_req</b> program, do make in
+$CNNIC_ROOT/modules/driver/src/host/linux/user/test. A symbolic link is created from
+$CNNIC_ROOT/modules/driver/bin to the application.
+
+<b>How to test:</b>
+1. Load the driver and OCTEON application by following the instructions in
+   @ref load_drv.
+<br><br>
+2. Load the test application
+@verbatim
+    cmd> ./oct_req <OCTEON_id> -ubsy   # Starts the test with unordered/blocking requests.
+@endverbatim
+
+
+<br><br><br>
+\section kern_space_app  Kernel space test applications
+
+<b> 1. req_resp - test request/response </b>
+
+The kernel space test program, <b>req_resp</b>, calls driver API's to send
+requests to OCTEON.  It requires the core application <b>cvmcs</b> to be
+running on the OCTEON cores for its operation. 
+
+The source for <b>req_resp</b> is at
+$CNNIC_ROOT/modules/driver/src/host/linux/kernel/req_resp.
+
+<b>req_resp</b> can be used to send requests of ORDERED, UNORDERED and
+NORESPONSE types. It can send requests in both BLOCKING and NON-BLOCKING
+mode, though UNORDERED/NONBLOCKING and ORDERED/BLOCKING cases are not
+supported. Requests of NORESPONSE type do not support BLOCKING mode and
+SCATTER/SCATTER_GATHER dma mode. The default setting is to send
+ORDERED/NONBLOCKING requests. The test program provides a good reference to
+writing kernel mode applications that need to interface with the OCTEON PCI
+driver.
+
+The setting for the application can be changed in octeon_req_resp.c or by
+providing module parameters.
+
+Parameters : 
+\li oct_id = Octeon device id 
+\li iq_no = input queue number
+\li resporder = unordered/ordered/noresponse
+\li respmode = blocking/nonblocking
+\li dma = direct/gather/scatter/scatter_gather
+\li inbuf_cnt = Input buffer count 
+\li outbuf_cnt = Output buffer count 
+\li inbuf_size = Input buffer size in bytes 
+\li outbuf_size = Output buffer size in bytes
+\li pkt_burst = Number of requests to be submitted to the driver
+
+
+To compile the <b>req_resp</b> program, do make in
+$CNNIC_ROOT/modules/driver/src/host/linux/kernel/req_resp. A symbolic link is
+created from driver/bin to the application.
+
+
+
+<b>How to test:</b>
+
+1. Load the driver and OCTEON application by following the instructions in
+   @ref load_drv.
+<br><br>
+2. Load the kernel application
+\verbatim
+    cmd> insmod req_resp.ko oct_id=0 iq_no=0 resporder=ordered dma=direct
+
+\endverbatim
+
+<p><b>NOTE:</b> Maximum input buffers supported is 15 and maximum output buffers
+supported is 13 for both oct_req and req_resp.
+
+
+<br><br>
+<b> 2. droq_test - receive packets from output queue </b>
+
+The kernel space test program, <b>droq_test</b>, registers dispatch
+functions to receive unsolicited packets arriving on the output queues.
+The <b>droq_test</b> program requires the <b>cvmcs</b> core application
+to be running on the OCTEON cores. The cvmcs application must be compiled
+with the CVMCS_TEST_PKO flag enabled.
+
+The source for <b>droq_test</b> is at
+$CNNIC_ROOT/modules/driver/src/host/linux/kernel/droq_test.
+
+The core application, when set accordingly, will generate packets with 
+opcodes DROQ_PKT_OP1 & DROQ_PKT_OP2, and send on the OCTEON output queue.
+The OCTEON PCI driver fetches these packets in its interrupt handler and
+looks for a dispatch function for these opcodes. If a function exists,
+the packet are sent to the dispatch function, else the packets are
+discarded.
+
+<b>droq_test</b> settings can be modied in the OCTEON_droq_test.c file.
+If DROQ_TEST_SEC_OPCODE is enabled, the application registers dispatch
+function for opcodes DROQ_PKT_OP1 and DROQ_PKT_OP2 with the driver, else
+a dispatch function is registered only for DROQ_PKT_OP1.
+
+
+To compile the <b>droq_test</b> program, do make in
+$CNNIC_ROOT/modules/driver/src/host/linux/kernel/droq_test. A symbolic link is
+created from driver/bin to the application.
+
+<b>How to test:</b>
+
+1. Load the driver and OCTEON application by following the instructions in
+   @ref load_drv.
+<br><br>
+2. Load the kernel application
+\verbatim
+    cmd> insmod droq_test.ko
+
+\endverbatim
+
+
+*/

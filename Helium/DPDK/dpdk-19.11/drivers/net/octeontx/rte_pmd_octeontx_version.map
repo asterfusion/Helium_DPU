@@ -1,0 +1,8 @@
+DPDK_20.0 {
+	global:
+
+	rte_octeontx_chan_mask;
+	rte_octeontx_pchan_map;
+
+	local: *;
+};

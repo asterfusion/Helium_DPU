@@ -1,0 +1,142 @@
+#
+#
+# CNNIC SDK
+#
+# Copyright (c) 2018 Cavium Networks. All rights reserved.
+#
+# This file, which is part of the CNNIC SDK which also includes the
+# CNNIC SDK Package from Cavium Networks, contains proprietary and
+# confidential information of Cavium Networks and in some cases its
+# suppliers.
+#
+# Any licensed reproduction, distribution, modification, or other use of
+# this file or the confidential information or patented inventions
+# embodied in this file is subject to your license agreement with Cavium
+# Networks. Unless you and Cavium Networks have agreed otherwise in
+# writing, the applicable license terms "OCTEON SDK License Type 5" can be
+# found under the directory: $CNNIC_ROOT/licenses/
+#
+# All other use and disclosure is prohibited.
+#
+# Contact Cavium Networks at info@caviumnetworks.com for more information.
+#
+################################################################################
+#
+# This file provides system-wide defaults to compile the driver sources.
+#
+# IMPORTANT: Do not leave spaces at the end of directory paths.
+#
+
+#Get running kernel version
+KERNEL_VERSION ?= $(shell uname -r)
+
+# Enable this flag if the driver and applications will run on an OCTEON
+# in PCI Host mode(ie, when OCTEON is the Host ).
+#HOST_IS_OCTEON=1
+
+# Define COMPILEFOR = OCTEON_VF to compile the kernel modules for VFs. These
+# modules will run on OCTEON VF BASE drivers.
+#COMPILEFOR = OCTEON_VF
+
+ifeq ($(HOST_IS_OCTEON), 1)
+DEFAULT_CROSS_COMPILE = $(shell \
+        if grep -q ^CONFIG_CPU_LITTLE_ENDIAN $(OCTEON_ROOT)/linux/kernel/linux/.config && \
+        which mips64el-octeon-linux-gnu-gcc > /dev/null 2>&1 ; then \
+                echo -n mips64el-octeon-linux-gnu-; \
+        else \
+                echo -n mips64-octeon-linux-gnu-; fi)
+
+
+CROSS_COMPILE ?= $(strip $(DEFAULT_CROSS_COMPILE))
+
+export CROSS_COMPILE
+ARCH = mips
+export ARCH
+
+OCTDRVFLAGS  += -DOCTEON_HOST 
+
+# The compiler needs to be changed only for the host sources.
+# No changes are made if the core application includes this file.
+ifneq ($(findstring OCTEON_CORE_DRIVER,$(COMPILE)), OCTEON_CORE_DRIVER)
+kernel_source := $(OCTEON_ROOT)/linux/kernel/linux
+CC=mips64-octeon-linux-gnu-gcc
+AR=mips64-octeon-linux-gnu-ar
+endif
+else
+kernel_source := /lib/modules/$(KERNEL_VERSION)/build
+ENABLE_CURSES=1
+endif
+
+# The driver sources are assumed to be in this directory.
+# Modify it if you installed the sources in a different directory.
+#DRIVER_ROOT := $(OCTEON_ROOT)/components/driver
+
+BINDIR := $(CNNIC_ROOT)/modules/driver/bin
+
+#Enables Advanced Error Reporting of the PCIe bus
+#OCTDRVFLAGS  += -DPCIE_AER
+
+#extract kernel major version from kernel version
+KERNEL_MAJOR = $(shell echo $(KERNEL_VERSION) | \
+sed -e 's/^\([0-9][0-9]*\)\.[0-9][0-9]*\.[0-9][0-9]*.*/\1/')
+
+#extract kernel minor version from kernel version
+KERNEL_MINOR = $(shell echo $(KERNEL_VERSION) | \
+sed -e 's/^[0-9][0-9]*\.\([0-9][0-9]*\)\.[0-9][0-9]*.*/\1/')
+
+#extarct kernel revision from kernel version
+KERNEL_REVISION = $(shell echo $(KERNEL_VERSION) | \
+sed -e 's/^[0-9][0-9]*\.[0-9][0-9]*\.\([0-9][0-9]*\).*/\1/')
+
+#subroutine for comparing kernel version
+kernel_compare = $(shell \
+echo test | awk '{ \
+if($(KERNEL_MAJOR) > $(1)) {print 1} \
+else if($(KERNEL_MAJOR) == $(1)){ \
+if($(KERNEL_MINOR) > $(2)) {print 1} \
+else if($(KERNEL_MINOR) == $(2)){ \
+if($(KERNEL_REVISION) >= $(3)) {print 1} else { print 0 } \
+}else {print 0}}else{print 0}}' \
+)
+
+#This can be used for testing IQ/OQs base mode performance on CN73xx/CN78xxpass2
+#OCTDRVFLAGS  += -DIOQ_PERF_MODE_O3
+
+#Enable this when IOMMU is ON in host machine, for DROQ functional tests.
+OCTDRVFLAGS  += -DDROQ_TEST_REUSE_BUFS
+
+OCTDRVFLAGS += -DBUFPTR_ONLY_MODE
+
+#New flag for OCTEON-III models. Code specific to OCTEON-III will be kept under this.
+#Disable the other models, if OCTEON-III is enabled.
+#ifneq ($(or $(findstring OCTEON_CN73XX, $(OCTEON_MODEL)), \
+            $(findstring OCTEON_CN78XX, $(OCTEON_MODEL)), \
+            $(findstring OCTEON_CN23XX, $(OCTEON_MODEL))), )
+OCTDRVFLAGS += -DENABLE_OCTEON_III=1
+#Enable this flag to use NAPI for only NIC mode operation.
+OCTDRVFLAGS += -DOCT_NIC_USE_NAPI
+#OCTDRVFLAGS += -DOCT_NIC_IQ_USE_NAPI
+#OCTDRVFLAGS += -DOCT_TX2_ISM_INT
+
+#This feature is meant for kernel versions above 3.4.110
+ifeq ($(call kernel_compare, 3, 4, 110), 1)
+#Enable this flag to reuse Rx DMA buffers for only NIC mode operation.
+#OCTDRVFLAGS += -DOCT_REUSE_RX_BUFS
+endif
+
+#Enable this flag for using host driver with only one PF
+#OCTDRVFLAGS += -DUSE_SINGLE_PF
+
+#Enable this flag for using host driver with emulator
+#OCTDRVFLAGS += -DBUILD_FOR_EMULATOR
+#endif
+
+ifeq ($(PORT_EXTENDER_ENABLED),1)
+ifeq ($(PPORT_INC_DIR),)
+$(error PPORT_INC_DIR is not set)
+endif
+INCLUDE = -I$(PPORT_INC_DIR)
+OCTDRVFLAGS += -DCONFIG_PPORT
+endif
+
+# $Id$ 

@@ -1,0 +1,14 @@
+Linux PCI Driver for Cavium NIC Processors (Version [PCIREL])
+============================================================
+
+                               Change History
+                               --------------
+
+ Release 6.2.0
+ =============
+ * EA Release with SE2 based NIC firmware.
+ 
+ Release 6.1.0
+ =============
+ * EA Release with BDK based NIC firmware.
+ * Added support for OCTEONTX CN83XX PF domain operation.

@@ -1,0 +1,943 @@
+
+#include "cavium_sysdep.h"
+#include "octeon_hw.h"
+#include "cn93xx_vf_device.h"
+#include "octeon_macros.h"
+#include "octeon-pci.h"
+
+extern int cn93xx_droq_intr_handler(octeon_ioq_vector_t * ioq_vector);
+
+extern void cn93xx_iq_intr_handler(octeon_ioq_vector_t * ioq_vector);
+
+void cn93xx_dump_vf_iq_regs(octeon_device_t * oct)
+{
+
+}
+
+void cn93xx_dump_vf_initialized_regs(octeon_device_t * oct)
+{
+}
+
+static int cn93xx_vf_soft_reset(octeon_device_t * oct)
+{
+	return 0;
+}
+
+void cn93xx_dump_regs(octeon_device_t * oct, int qno)
+{
+//	printk("R[%d]_IN_INSTR_DBELL: 0x%016llx\n", qno, octeon_read_csr64(oct,
+//			   CN93XX_SDP_EPF_R_IN_INSTR_DBELL(oct->epf_num, qno)));
+	printk("IQ register dump\n");
+	printk("R[%d]_IN_INSTR_DBELL[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_IN_INSTR_DBELL(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_IN_INSTR_DBELL(qno)));
+	printk("R[%d]_IN_CONTROL[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_IN_CONTROL(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_IN_CONTROL(qno)));
+	printk("R[%d]_IN_ENABLE[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_IN_ENABLE(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_IN_ENABLE(qno)));
+	printk("R[%d]_IN_INSTR_BADDR[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_IN_INSTR_BADDR(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_IN_INSTR_BADDR(qno)));
+	printk("R[%d]_IN_INSTR_RSIZE[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_IN_INSTR_RSIZE(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_IN_INSTR_RSIZE(qno)));
+	printk("R[%d]_IN_CNTS[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_IN_CNTS(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_IN_CNTS(qno)));
+	printk("R[%d]_IN_INT_LEVELS[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_IN_INT_LEVELS(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_IN_INT_LEVELS(qno)));
+	printk("R[%d]_IN_PKT_CNT[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_IN_PKT_CNT(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_IN_PKT_CNT(qno)));
+	printk("R[%d]_IN_BYTE_CNT[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_IN_BYTE_CNT(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_IN_BYTE_CNT(qno)));
+
+	printk("OQ register dump\n");
+	printk("R[%d]_OUT_SLIST_DBELL[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_OUT_SLIST_DBELL(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_OUT_SLIST_DBELL(qno)));
+	printk("R[%d]_OUT_CONTROL[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_OUT_CONTROL(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_OUT_CONTROL(qno)));
+	printk("R[%d]_OUT_ENABLE[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_OUT_ENABLE(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_OUT_ENABLE(qno)));
+	printk("R[%d]_OUT_SLIST_BADDR[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_OUT_SLIST_BADDR(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_OUT_SLIST_BADDR(qno)));
+	printk("R[%d]_OUT_SLIST_RSIZE[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_OUT_SLIST_RSIZE(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_OUT_SLIST_RSIZE(qno)));
+	printk("R[%d]_OUT_CNTS[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_OUT_CNTS(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_OUT_CNTS(qno)));
+	printk("R[%d]_OUT_INT_LEVELS[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_OUT_INT_LEVELS(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_OUT_INT_LEVELS(qno)));
+	printk("R[%d]_OUT_PKT_CNT[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_OUT_PKT_CNT(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_OUT_PKT_CNT(qno)));
+	printk("R[%d]_OUT_BYTE_CNT[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_OUT_BYTE_CNT(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_OUT_BYTE_CNT(qno)));
+
+	printk("R[%d]_ERR_TYPE[0x%llx]: 0x%016llx\n", qno,
+		CN93XX_SDP_R_ERR_TYPE(qno), octeon_read_csr64(oct,
+		CN93XX_SDP_R_ERR_TYPE(qno)));
+
+}
+
+
+/* Check if these function not for VF */
+void cn93xx_enable_vf_error_reporting(octeon_device_t * oct)
+{
+	uint32_t regval;
+
+	OCTEON_READ_PCI_CONFIG(oct, CN93XX_CONFIG_PCIE_DEVCTL, &regval);
+	if (regval & 0x000f0000) {
+		cavium_error("PCI-E Link error detected: 0x%08x\n",
+			     regval & 0x000f0000);
+	}
+
+	regval |= 0xf;		/* Enable Link error reporting */
+
+	cavium_print_msg("OCTEON[%d]: Enabling PCI-E error reporting.\n",
+			 oct->octeon_id);
+	OCTEON_WRITE_PCI_CONFIG(oct, CN93XX_CONFIG_PCIE_DEVCTL, regval);
+}
+
+int cn93xx_vf_reset_iq(octeon_device_t * oct, int q_no)
+{
+	volatile uint64_t d64 = 0ULL;
+	uint64_t loop = CAVIUM_TICKS_PER_SEC;
+
+	/* There is no RST for a ring. 
+	 * Clear all registers one by one after disabling the ring
+	 */
+
+	octeon_write_csr64(oct, CN93XX_VF_SDP_R_IN_ENABLE(q_no), d64);
+
+	octeon_write_csr64(oct, CN93XX_VF_SDP_R_IN_INSTR_BADDR(q_no), d64);
+
+	octeon_write_csr64(oct, CN93XX_VF_SDP_R_IN_INSTR_RSIZE(q_no), d64);
+
+	d64 = 0xFFFFFFFF;
+	octeon_write_csr64(oct, CN93XX_VF_SDP_R_IN_INSTR_DBELL(q_no), d64);
+	d64 =
+	    octeon_read_csr64(oct, CN93XX_VF_SDP_R_IN_INSTR_DBELL(q_no));
+	while ((d64 != 0) && loop--) {
+
+		octeon_write_csr64(oct,
+				   CN93XX_VF_SDP_R_IN_INSTR_DBELL(q_no), d64);
+		cavium_sleep_timeout(1);
+		d64 = octeon_read_csr64(oct,
+					CN93XX_VF_SDP_R_IN_INSTR_DBELL(q_no));
+	}
+
+	d64 =
+	    octeon_read_csr64(oct, CN93XX_VF_SDP_R_IN_CNTS(q_no));
+
+	loop = CAVIUM_TICKS_PER_SEC;
+
+	while ((d64 != 0) && loop--) {
+		octeon_write_csr64(oct, CN93XX_VF_SDP_R_IN_CNTS(q_no), d64);
+		cavium_sleep_timeout(1);
+		d64 = octeon_read_csr64(oct, CN93XX_VF_SDP_R_IN_CNTS(q_no));
+	}
+	d64 = 0;
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_IN_INT_LEVELS(q_no), d64);
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_IN_PKT_CNT(q_no), d64);
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_IN_BYTE_CNT(q_no), d64);
+
+	return 0;
+}
+
+int cn93xx_vf_reset_oq(octeon_device_t * oct, int q_no)
+{
+	volatile uint64_t d64 = 0ULL;
+	uint64_t loop = CAVIUM_TICKS_PER_SEC;
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_ENABLE(q_no), d64);
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_SLIST_BADDR(q_no), d64);
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_SLIST_RSIZE(q_no), d64);
+
+	d64 = 0xFFFFFFFF;
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_SLIST_DBELL(q_no), d64);
+	d64 =
+	    octeon_read_csr64(oct,
+			      CN93XX_VF_SDP_R_OUT_SLIST_DBELL(q_no));
+
+	while ((d64 != 0) && loop--) {
+
+		octeon_write_csr64(oct,
+				   CN93XX_VF_SDP_R_OUT_SLIST_DBELL(q_no), d64);
+		cavium_sleep_timeout(1);
+		d64 = octeon_read_csr64(oct,
+					CN93XX_VF_SDP_R_OUT_SLIST_DBELL(q_no));
+	}
+
+	d64 =
+	    octeon_read_csr64(oct,
+			      CN93XX_VF_SDP_R_OUT_CNTS(q_no));
+
+	loop = CAVIUM_TICKS_PER_SEC;
+
+	while ((d64 != 0) && (loop--)) {
+		octeon_write_csr64(oct,
+				   CN93XX_VF_SDP_R_OUT_CNTS(q_no), d64);
+		cavium_sleep_timeout(1);
+		d64 = octeon_read_csr64(oct,
+					CN93XX_VF_SDP_R_OUT_CNTS(q_no));
+	}
+
+	d64 = 0;
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_INT_LEVELS(q_no), d64);
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_PKT_CNT(q_no), d64);
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_BYTE_CNT(q_no), d64);
+
+	return 0;
+}
+
+static void cn93xx_vf_setup_global_iq_reg(octeon_device_t * oct, int q_no)
+{
+	volatile uint64_t reg_val = 0ULL;
+
+	/* Select ES, RO, NS, RDSIZE,DPTR Fomat#0 for IQs 
+	 * IS_64B is by default enabled.
+	 */
+	reg_val =
+	    octeon_read_csr64(oct,
+			      CN93XX_VF_SDP_R_IN_CONTROL(q_no));
+
+	reg_val |= CN93XX_R_IN_CTL_RDSIZE;
+	reg_val |= CN93XX_R_IN_CTL_IS_64B;
+	reg_val |= CN93XX_R_IN_CTL_ESR;
+
+#ifdef IOQ_PERF_MODE_O3
+	reg_val &= ~(CN93XX_R_IN_CTL_IS_64B);
+	reg_val |= CN93XX_R_IN_CTL_D_NSR;
+#endif
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_IN_CONTROL(q_no), reg_val);
+}
+
+static void cn93xx_vf_setup_global_oq_reg(octeon_device_t * oct, int q_no)
+{
+	volatile uint64_t reg_val = 0ULL;
+	reg_val =
+	    octeon_read_csr64(oct,
+			      CN93XX_VF_SDP_R_OUT_CONTROL(q_no));
+
+#if defined(BUFPTR_ONLY_MODE)
+	reg_val &= ~(CN93XX_R_OUT_CTL_IMODE);
+#else
+	reg_val |= (CN93XX_R_OUT_CTL_IMODE);
+#endif
+	reg_val &= ~(CN93XX_R_OUT_CTL_ROR_P);
+	reg_val &= ~(CN93XX_R_OUT_CTL_NSR_P);
+	reg_val &= ~(CN93XX_R_OUT_CTL_ROR_I);
+	reg_val &= ~(CN93XX_R_OUT_CTL_NSR_I);
+	reg_val &= ~(CN93XX_R_OUT_CTL_ES_I);
+	reg_val &= ~(CN93XX_R_OUT_CTL_ROR_D);
+	reg_val &= ~(CN93XX_R_OUT_CTL_NSR_D);
+	reg_val &= ~(CN93XX_R_OUT_CTL_ES_D);
+
+    /* INFO/DATA ptr swap is requires on 93xx ??? */
+	reg_val |= (CN93XX_R_OUT_CTL_ES_P);
+
+#ifdef IOQ_PERF_MODE_O3
+	/* Manoj: Force NoSnoop to be enabled */
+	reg_val |= (CN93XX_R_OUT_CTL_NSR_I);
+	reg_val |= (CN93XX_R_OUT_CTL_NSR_D);
+#endif
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_CONTROL(q_no), reg_val);
+}
+
+uint32_t cn93xx_get_oq_ticks(octeon_device_t * oct, uint32_t time_intr_in_us)
+{
+	/* This gives the SLI clock per microsec */
+	uint32_t oqticks_per_us =
+	    CFG_GET_COPROC_TICS_PER_US(CHIP_FIELD(oct, cn93xx_vf, conf));
+
+	/* core clock per us / oq ticks will be fractional. TO avoid that
+	 * we use the method below. 
+	 */
+
+	/* This gives the clock cycles per millisecond */
+	oqticks_per_us *= 1000;
+
+	/* This gives the oq ticks (1024 core clock cycles) per millisecond */
+	oqticks_per_us /= 1024;
+
+	/* time_intr is in microseconds. The next 2 steps gives the oq ticks
+	 *  corressponding to time_intr. 
+	 */
+	oqticks_per_us *= time_intr_in_us;
+	oqticks_per_us /= 1000;
+
+	return oqticks_per_us;
+}
+
+int cn93xx_vf_reset_input_queues(octeon_device_t * oct)
+{
+	int q_no = 0;
+	cavium_print(PRINT_DEBUG, " %s : OCTEON_CN93XX PF\n", __FUNCTION__);
+
+	for (q_no = 0; q_no < oct->sriov_info.rings_per_vf; q_no++) {
+		cn93xx_vf_reset_iq(oct, q_no);
+	}
+	return 0;
+}
+
+int cn93xx_vf_reset_output_queues(octeon_device_t * oct)
+{
+	uint64_t q_no = 0ULL;
+	cavium_print(PRINT_DEBUG, " %s : OCTEON_CN93XX PF\n", __FUNCTION__);
+
+	for (q_no = 0; q_no < oct->sriov_info.rings_per_vf; q_no++) {
+		cn93xx_vf_reset_oq(oct, q_no);
+	}
+	return 0;
+}
+
+static void cn93xx_vf_setup_global_input_regs(octeon_device_t * oct)
+{
+	uint64_t q_no = 0ULL;
+
+	/* Select ES, RO, NS, RDSIZE,DPTR Fomat#0 for 
+	 * the Input Queues 
+	 */
+	cn93xx_vf_reset_input_queues(oct);
+	for (q_no = 0; q_no < (oct->rings_per_vf); q_no++) {
+		cn93xx_vf_setup_global_iq_reg(oct, q_no);
+	}
+}
+
+void cn93xx_vf_setup_global_output_regs(octeon_device_t * oct)
+{
+	uint32_t q_no;
+
+	cn93xx_vf_reset_output_queues(oct);
+	for (q_no = 0; q_no < (oct->rings_per_vf); q_no++) {
+		cn93xx_vf_setup_global_oq_reg(oct, q_no);
+	}
+}
+
+static int cn93xx_setup_vf_device_regs(octeon_device_t * oct)
+{
+	cn93xx_vf_setup_global_input_regs(oct);
+	cn93xx_vf_setup_global_output_regs(oct);
+
+	return 0;
+}
+
+static void cn93xx_setup_vf_iq_regs(octeon_device_t * oct, int iq_no)
+{
+	volatile uint64_t reg_val = 0ULL;
+	octeon_instr_queue_t *iq = oct->instr_queue[iq_no];
+	octeon_cn93xx_vf_t *cn93xx = (octeon_cn93xx_vf_t *) oct->chip;
+
+	reg_val =
+	    octeon_read_csr64(oct,
+			      CN93XX_VF_SDP_R_IN_CONTROL(iq_no));
+
+	/* wait for IDLE to set to 1, as cannot configure BADDR as long as IDLE is 0 */
+	if (!(reg_val & CN93XX_R_IN_CTL_IDLE)) {
+		do {
+			reg_val =
+			    octeon_read_csr64(oct,
+					      CN93XX_VF_SDP_R_IN_CONTROL(iq_no));
+		}
+		while (!(reg_val & CN93XX_R_IN_CTL_IDLE));
+	}
+
+	/* Write the start of the input queue's ring and its size  */
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_IN_INSTR_BADDR(iq_no),
+			   iq->base_addr_dma);
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_IN_INSTR_RSIZE(iq_no),
+			   iq->max_count);
+
+	/* Remember the doorbell & instruction count register addr 
+	 * for this queue 
+	 */
+	iq->doorbell_reg = (uint8_t *) oct->mmio[0].hw_addr
+	    + CN93XX_VF_SDP_R_IN_INSTR_DBELL(iq_no);
+	iq->inst_cnt_reg = (uint8_t *) oct->mmio[0].hw_addr
+	    + CN93XX_VF_SDP_R_IN_CNTS(iq_no);
+
+	cavium_print(PRINT_DEBUG,
+		     "InstQ[%d]:dbell reg @ 0x%p instcnt_reg @ 0x%p\n", iq_no,
+		     iq->doorbell_reg, iq->inst_cnt_reg);
+
+	/* Store the current instruction counter (used in flush_iq calculation) */
+	iq->reset_instr_cnt = OCTEON_READ32(iq->inst_cnt_reg);
+
+	/* IN INTR_THRESHOLD is set to max(FFFFFFFF) to diables the IN INTR to raise */
+	reg_val =
+	    octeon_read_csr64(oct,
+			      CN93XX_VF_SDP_R_IN_INT_LEVELS(iq_no));
+	reg_val = CFG_GET_IQ_INTR_THRESHOLD(cn93xx->conf) & 0xffffffff;
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_IN_INT_LEVELS(iq_no), reg_val);
+}
+
+static void cn93xx_setup_vf_oq_regs(octeon_device_t * oct, int oq_no)
+{
+	volatile uint64_t reg_val = 0ULL;
+	uint64_t time_threshold = 0ULL, oq_ctl = 0ULL;
+	//uint64_t loop = CAVIUM_TICKS_PER_SEC;
+	octeon_droq_t *droq = oct->droq[oq_no];
+	octeon_cn93xx_vf_t *cn93xx = (octeon_cn93xx_vf_t *) oct->chip;
+
+	reg_val =
+	    octeon_read_csr64(oct,
+			      CN93XX_VF_SDP_R_OUT_CONTROL(oq_no));
+
+	/* wait for IDLE to set to 1, as cannot configure BADDR as long as IDLE is 0 */
+	if (!(reg_val & CN93XX_R_OUT_CTL_IDLE)) {
+		do {
+			reg_val =
+			    octeon_read_csr64(oct,
+					      CN93XX_VF_SDP_R_OUT_CONTROL(oq_no));
+		}
+		while (!(reg_val & CN93XX_R_OUT_CTL_IDLE));
+	}
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_SLIST_BADDR(oq_no),
+			   droq->desc_ring_dma);
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_SLIST_RSIZE(oq_no),
+			   droq->max_count);
+
+	oq_ctl =
+	    octeon_read_csr64(oct,
+			      CN93XX_VF_SDP_R_OUT_CONTROL(oq_no));
+	oq_ctl &= ~0x7fffffULL;	//clear the ISIZE and BSIZE (22-0)
+	oq_ctl |= (droq->buffer_size & 0xffff);	//populate the BSIZE (15-0)
+#ifndef BUFPTR_ONLY_MODE
+	oq_ctl |= ((OCT_RESP_HDR_SIZE << 16) & 0x7fffff);//populate ISIZE(22-16)
+#endif
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_CONTROL(oq_no), oq_ctl);
+
+	/* Get the mapped address of the pkt_sent and pkts_credit regs */
+	droq->pkts_sent_reg = (uint8_t *) oct->mmio[0].hw_addr +
+	    CN93XX_VF_SDP_R_OUT_CNTS(oq_no);
+	droq->pkts_credit_reg = (uint8_t *) oct->mmio[0].hw_addr +
+	    CN93XX_VF_SDP_R_OUT_SLIST_DBELL(oq_no);
+
+	reg_val =
+	    octeon_read_csr64(oct,
+			      CN93XX_VF_SDP_R_OUT_INT_LEVELS(oq_no));
+	time_threshold = cn93xx_get_oq_ticks(oct, (uint32_t)
+						CFG_GET_OQ_INTR_TIME
+						(cn93xx->conf));
+	time_threshold = CFG_GET_OQ_INTR_TIME(cn93xx->conf);
+#ifdef IOQ_PERF_MODE_O3
+	time_threshold = 0x3fffff;
+#endif
+	printk("OQ Interrupt Thresholds: Timer:0x%X Counter:0x%X\n",
+			CFG_GET_OQ_INTR_TIME(cn93xx->conf), CFG_GET_OQ_INTR_PKT(cn93xx->conf));
+	/*TODO: commented to avoid compilation error. need to resolve */
+    reg_val = ( ((time_threshold & 0x3fffff) << CN93XX_R_OUT_INT_LEVELS_TIMET ) |
+                CFG_GET_OQ_INTR_PKT(cn93xx->conf) );
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_INT_LEVELS(oq_no), reg_val);
+	reg_val =
+	    octeon_read_csr64(oct,
+			      CN93XX_VF_SDP_R_OUT_INT_LEVELS(oq_no));
+	printk("SDP_R[%d]_OUT_INT_LEVELS:%llx\n", oq_no, reg_val);
+
+#if 0
+	/* Reset the oq doorbell register during setup as well to handle abrupt
+	   guest reboot, IOQ reset does not reset doorbell registers */
+	OCTEON_WRITE32(droq->pkts_credit_reg, 0xFFFFFFFF);
+	while ((OCTEON_READ32(droq->pkts_credit_reg) != 0ULL) && loop--) {
+		OCTEON_WRITE32(droq->pkts_credit_reg, 0xFFFFFFFF);
+		cavium_sleep_timeout(1);
+	}
+
+	loop = CAVIUM_TICKS_PER_SEC;
+
+	reg_val = OCTEON_READ32(droq->pkts_sent_reg);
+	OCTEON_WRITE32(droq->pkts_sent_reg, reg_val);
+	while (((OCTEON_READ32(droq->pkts_sent_reg)) != 0ULL)
+	       && loop--) {
+		reg_val = OCTEON_READ32(droq->pkts_sent_reg);
+		OCTEON_WRITE32(droq->pkts_sent_reg, reg_val);
+		cavium_sleep_timeout(1);
+	}
+#endif
+
+}
+
+static void cn93xx_setup_vf_mbox_regs(octeon_device_t * oct, int q_no)
+{
+	octeon_mbox_t *mbox = oct->mbox[q_no];
+
+	mbox->q_no = q_no;
+
+	/* PF mbox interrupt reg */
+	mbox->mbox_int_reg = (uint8_t *) oct->mmio[0].hw_addr +
+	    CN93XX_VF_SDP_R_MBOX_PF_VF_INT(q_no);
+
+	/* PF to VF DATA reg. PF writes into this reg */
+	mbox->mbox_write_reg = (uint8_t *) oct->mmio[0].hw_addr +
+	    CN93XX_VF_SDP_R_MBOX_VF_PF_DATA(q_no);
+	/* VF to PF DATA reg. PF reads from this reg */
+	mbox->mbox_read_reg = (uint8_t *) oct->mmio[0].hw_addr +
+	    CN93XX_VF_SDP_R_MBOX_PF_VF_DATA(q_no);
+
+}
+
+static void cn93xx_enable_vf_input_queue(octeon_device_t * oct, int q_no)
+{
+	volatile uint64_t reg_val = 0ULL;
+	uint64_t loop = CAVIUM_TICKS_PER_SEC;
+
+	/* Resetting doorbells during IQ enabling also to handle abrupt guest reboot.
+	 * IQ reset does not clear the doorbells.*/
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_IN_INSTR_DBELL(q_no),
+			   0xFFFFFFFF);
+
+	while (((octeon_read_csr64(oct,
+				   CN93XX_VF_SDP_R_IN_INSTR_DBELL(q_no))) != 0ULL)
+	       && loop--) {
+		cavium_sleep_timeout(1);
+	}
+	reg_val = octeon_read_csr64(oct,
+				    CN93XX_VF_SDP_R_IN_ENABLE(q_no));
+	reg_val |= 0x1ULL;
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_IN_ENABLE(q_no),
+			   reg_val);
+
+}
+
+static void cn93xx_enable_vf_output_queue(octeon_device_t * oct, int q_no)
+{
+	volatile uint64_t reg_val = 0ULL;
+
+	reg_val = octeon_read_csr64(oct, CN93XX_VF_SDP_R_OUT_INT_LEVELS(q_no));
+	reg_val |= (0x1ULL << 62);
+	octeon_write_csr64(oct, CN93XX_VF_SDP_R_OUT_INT_LEVELS(q_no), reg_val);
+	 
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_SLIST_DBELL(q_no),
+			   0xFFFFFFFF);
+
+	reg_val = octeon_read_csr64(oct,
+				    CN93XX_VF_SDP_R_OUT_ENABLE(q_no));
+	reg_val |= 0x1ULL;
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_ENABLE(q_no),
+			   reg_val);
+
+}
+
+static void cn93xx_enable_vf_io_queues(octeon_device_t * oct)
+{
+	int q_no = 0;
+
+	for (q_no = 0; q_no < oct->num_iqs; q_no++) {
+		cn93xx_enable_vf_input_queue(oct, q_no);
+		cn93xx_enable_vf_output_queue(oct, q_no);
+	}
+}
+
+static void cn93xx_disable_vf_input_queue(octeon_device_t * oct, int q_no)
+{
+	uint64_t loop = CAVIUM_TICKS_PER_SEC;
+	volatile uint64_t reg_val = 0ULL;
+
+	loop = CAVIUM_TICKS_PER_SEC;
+
+	/* Reset the doorbell register for this Input Queue. */
+	reg_val = octeon_read_csr64(oct,
+				    CN93XX_VF_SDP_R_IN_ENABLE(q_no));
+	reg_val &= ~0x1ULL;
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_IN_ENABLE(q_no),
+			   reg_val);
+}
+
+static void cn93xx_disable_vf_output_queue(octeon_device_t * oct, int q_no)
+{
+	volatile uint64_t reg_val = 0ULL;
+
+	reg_val = octeon_read_csr64(oct,
+				    CN93XX_VF_SDP_R_OUT_ENABLE(q_no));
+	reg_val &= ~0x1ULL;
+
+	octeon_write_csr64(oct,
+			   CN93XX_VF_SDP_R_OUT_ENABLE(q_no), reg_val);
+
+}
+
+static void cn93xx_disable_vf_io_queues(octeon_device_t * oct)
+{
+	int q_no = 0;
+
+	/*** Disable Input Queues. ***/
+	for (q_no = 0; q_no < oct->num_iqs; q_no++) {
+		cn93xx_disable_vf_input_queue(oct, q_no);
+		cn93xx_disable_vf_output_queue(oct, q_no);
+	}
+}
+
+void cn93xx_handle_vf_mbox_intr(octeon_ioq_vector_t * ioq_vector)
+{
+	OCTEON_WRITE64(ioq_vector->mbox->mbox_int_reg,
+		       OCTEON_READ64(ioq_vector->mbox->mbox_int_reg));
+}
+
+// *INDENT-OFF*
+cvm_intr_return_t
+cn93xx_vf_msix_interrupt_handler(void  *dev)
+{
+	octeon_ioq_vector_t *ioq_vector	= (octeon_ioq_vector_t *)dev;
+	octeon_device_t  *oct    = ioq_vector->oct_dev;
+	uint64_t          intr64;
+
+	cavium_print(PRINT_FLOW," In %s octeon_dev @ %p  \n", 
+				__CVM_FUNCTION__, oct);
+	//intr64 = OCTEON_READ64(ioq_vector->droq->pkts_sent_reg);
+	intr64 = OCTEON_READ64(ioq_vector->droq->pkts_sent_reg);
+
+	/* If our device has interrupted, then proceed. Also check 
+	 * for all f's if interrupt was triggered on an error
+  	 * and the PCI read fails. 
+  	 */
+	if (!intr64 || (intr64 == -1ULL))
+		return CVM_INTR_NONE;
+
+	cavium_atomic_set(&oct->in_interrupt, 1);
+
+
+	oct->stats.interrupts++;
+
+	cavium_atomic_inc(&oct->interrupts);
+
+
+	/* Write count reg in sli_pkt_cnts to clear these int.*/
+	if(intr64 & CN93XX_INTR_R_OUT_INT){
+#ifdef OCT_NIC_USE_NAPI
+        cavium_disable_irq_nosync(ioq_vector->droq->irq_num);
+#endif
+		cn93xx_droq_intr_handler(ioq_vector);
+	}
+	
+	/* Handle PI int, write count in IN_DONE reg to clear these int*/
+    if (intr64 & CN93XX_INTR_R_IN_INT) {
+		cn93xx_iq_intr_handler(ioq_vector);
+	}
+
+	if(intr64 & CN93XX_INTR_R_MBOX_INT){
+		cn93xx_handle_vf_mbox_intr(ioq_vector);
+	}
+
+	cavium_atomic_set(&oct->in_interrupt, 0);
+
+	return CVM_INTR_HANDLED;
+}
+// *INDENT-ON*
+
+static void cn93xx_reinit_regs(octeon_device_t * oct)
+{
+	uint32_t i;
+
+	cavium_print_msg("-- %s =--\n", __CVM_FUNCTION__);
+
+	for (i = 0; i < (oct->rings_per_vf); i++) {
+		if (!(oct->io_qmask.iq & (1UL << i)))
+			continue;
+		oct->fn_list.setup_iq_regs(oct, i);
+	}
+
+	for (i = 0; i < (oct->rings_per_vf); i++) {
+		if (!(oct->io_qmask.oq & (1UL << i)))
+			continue;
+		oct->fn_list.setup_oq_regs(oct, i);
+	}
+
+	oct->fn_list.setup_device_regs(oct);
+
+	oct->fn_list.enable_interrupt(oct->chip, OCTEON_ALL_INTR);
+
+	oct->fn_list.enable_io_queues(oct);
+
+	for (i = 0; i < (oct->rings_per_vf); i++) {
+		if (!(oct->io_qmask.oq & (1UL << i)))
+			continue;
+		OCTEON_WRITE32(oct->droq[i]->pkts_credit_reg,
+			       oct->droq[i]->max_count);
+	}
+}
+
+static uint32_t cn93xx_update_read_index(octeon_instr_queue_t * iq)
+{
+	uint32_t new_idx = OCTEON_READ32(iq->inst_cnt_reg);
+
+	/* The new instr cnt reg is a 32-bit counter that can roll over.
+	 * We have noted the counter's initial value at init time into
+	 * reset_instr_cnt
+	 */
+	if (iq->reset_instr_cnt < new_idx)
+		new_idx -= iq->reset_instr_cnt;
+	else
+		new_idx += (0xffffffff - iq->reset_instr_cnt) + 1;
+
+	/* Modulo of the new index with the IQ size will give us
+	 * the new index.
+	 */
+	new_idx %= iq->max_count;
+
+	return new_idx;
+}
+
+static void cn93xx_enable_vf_interrupt(void *chip, uint8_t intr_flag)
+{
+	octeon_cn93xx_vf_t *cn93xx = (octeon_cn93xx_vf_t *) chip;
+	octeon_device_t *oct = (octeon_device_t *) cn93xx->oct;
+	uint32_t q_no;
+
+	for (q_no = 0; q_no < oct->rings_per_vf; q_no++) {
+		octeon_write_csr64(oct,
+				   CN93XX_VF_SDP_R_MBOX_PF_VF_INT(q_no), 0x2ULL);
+	}
+	cavium_print_msg(" MBOX interrupts enabled.\n");
+}
+
+static void cn93xx_disable_vf_interrupt(void *chip, uint8_t intr_flag)
+{
+	volatile uint64_t reg_val = 0ULL;
+	octeon_cn93xx_vf_t *cn93xx = (octeon_cn93xx_vf_t *) chip;
+	octeon_device_t *oct = (octeon_device_t *) cn93xx->oct;
+	uint32_t q_no;
+
+	for (q_no = 0; q_no < oct->rings_per_vf; q_no++) {
+		reg_val =
+		    octeon_read_csr64(oct,
+				      CN93XX_VF_SDP_R_MBOX_PF_VF_INT(q_no));
+		reg_val &= ~(0x2ULL);
+		octeon_write_csr64(oct,
+				   CN93XX_VF_SDP_R_MBOX_PF_VF_INT(q_no), reg_val);
+	}
+	cavium_print_msg(" MBOX interrupts enabled.\n");
+}
+
+int setup_cn98xx_octeon_vf_device(octeon_device_t * oct)
+{
+	uint64_t reg_val = 0ULL;
+	octeon_cn93xx_vf_t *cn98xx = (octeon_cn93xx_vf_t *) oct->chip;
+	//Should always be 0
+	oct->epf_num = 0;
+	//oct->pcie_port = 2; //for pem2 
+
+	cn98xx->oct = oct;
+
+	if (octeon_map_pci_barx(oct, 0, 0))
+		return 1;
+
+	cn98xx->conf = (cn93xx_vf_config_t *) oct_get_config_info(oct);
+	if (cn98xx->conf == NULL) {
+		cavium_error("%s No Config found for CN93XX\n", __FUNCTION__);
+		octeon_unmap_pci_barx(oct, 0);
+		return 1;
+	}
+
+	reg_val =
+	    octeon_read_csr64(oct,
+			      CN93XX_VF_SDP_R_IN_CONTROL(0));
+	oct->rings_per_vf = ((reg_val >> CN93XX_R_IN_CTL_RPVF_POS) &
+			     CN93XX_R_IN_CTL_RPVF_MASK);
+
+	cavium_print_msg("RINGS PER VF ARE:::%d\n", oct->rings_per_vf);
+
+	oct->drv_flags |= OCTEON_MSIX_CAPABLE;
+	oct->drv_flags |= OCTEON_MBOX_CAPABLE;
+	oct->drv_flags |= OCTEON_MSIX_AFFINITY_CAPABLE;
+
+	oct->fn_list.setup_iq_regs = cn93xx_setup_vf_iq_regs;
+	oct->fn_list.setup_oq_regs = cn93xx_setup_vf_oq_regs;
+	oct->fn_list.setup_mbox_regs = cn93xx_setup_vf_mbox_regs;
+
+	oct->fn_list.msix_interrupt_handler = cn93xx_vf_msix_interrupt_handler;
+
+	oct->fn_list.soft_reset = cn93xx_vf_soft_reset;
+	oct->fn_list.setup_device_regs = cn93xx_setup_vf_device_regs;
+	oct->fn_list.reinit_regs = cn93xx_reinit_regs;
+	oct->fn_list.update_iq_read_idx = cn93xx_update_read_index;
+
+	oct->fn_list.enable_interrupt = cn93xx_enable_vf_interrupt;
+	oct->fn_list.disable_interrupt = cn93xx_disable_vf_interrupt;
+
+	oct->fn_list.enable_io_queues = cn93xx_enable_vf_io_queues;
+	oct->fn_list.disable_io_queues = cn93xx_disable_vf_io_queues;
+
+	oct->fn_list.enable_input_queue = cn93xx_enable_vf_input_queue;
+	oct->fn_list.enable_output_queue = cn93xx_enable_vf_output_queue;
+
+	oct->fn_list.disable_input_queue = cn93xx_disable_vf_input_queue;
+	oct->fn_list.disable_output_queue = cn93xx_disable_vf_output_queue;
+
+	oct->fn_list.dump_registers = cn93xx_dump_vf_initialized_regs;
+
+	return 0;
+}
+
+int setup_cn93xx_octeon_vf_device(octeon_device_t * oct)
+{
+	uint64_t reg_val = 0ULL;
+	octeon_cn93xx_vf_t *cn93xx = (octeon_cn93xx_vf_t *) oct->chip;
+	//Should always be 0
+	oct->epf_num = 0;
+	//oct->pcie_port = 2; //for pem2 
+
+	cn93xx->oct = oct;
+
+	if (octeon_map_pci_barx(oct, 0, 0))
+		return 1;
+
+	cn93xx->conf = (cn93xx_vf_config_t *) oct_get_config_info(oct);
+	if (cn93xx->conf == NULL) {
+		cavium_error("%s No Config found for CN93XX\n", __FUNCTION__);
+		octeon_unmap_pci_barx(oct, 0);
+		return 1;
+	}
+
+	reg_val =
+	    octeon_read_csr64(oct,
+			      CN93XX_VF_SDP_R_IN_CONTROL(0));
+	oct->rings_per_vf = ((reg_val >> CN93XX_R_IN_CTL_RPVF_POS) &
+			     CN93XX_R_IN_CTL_RPVF_MASK);
+
+	cavium_print_msg("RINGS PER VF ARE:::%d\n", oct->rings_per_vf);
+
+	oct->drv_flags |= OCTEON_MSIX_CAPABLE;
+	oct->drv_flags |= OCTEON_MBOX_CAPABLE;
+	oct->drv_flags |= OCTEON_MSIX_AFFINITY_CAPABLE;
+
+	oct->fn_list.setup_iq_regs = cn93xx_setup_vf_iq_regs;
+	oct->fn_list.setup_oq_regs = cn93xx_setup_vf_oq_regs;
+	oct->fn_list.setup_mbox_regs = cn93xx_setup_vf_mbox_regs;
+
+	oct->fn_list.msix_interrupt_handler = cn93xx_vf_msix_interrupt_handler;
+
+	oct->fn_list.soft_reset = cn93xx_vf_soft_reset;
+	oct->fn_list.setup_device_regs = cn93xx_setup_vf_device_regs;
+	oct->fn_list.reinit_regs = cn93xx_reinit_regs;
+	oct->fn_list.update_iq_read_idx = cn93xx_update_read_index;
+
+	oct->fn_list.enable_interrupt = cn93xx_enable_vf_interrupt;
+	oct->fn_list.disable_interrupt = cn93xx_disable_vf_interrupt;
+
+	oct->fn_list.enable_io_queues = cn93xx_enable_vf_io_queues;
+	oct->fn_list.disable_io_queues = cn93xx_disable_vf_io_queues;
+
+	oct->fn_list.enable_input_queue = cn93xx_enable_vf_input_queue;
+	oct->fn_list.enable_output_queue = cn93xx_enable_vf_output_queue;
+
+	oct->fn_list.disable_input_queue = cn93xx_disable_vf_input_queue;
+	oct->fn_list.disable_output_queue = cn93xx_disable_vf_output_queue;
+
+	oct->fn_list.dump_registers = cn93xx_dump_vf_initialized_regs;
+
+	return 0;
+}
+
+int validate_cn93xx_vf_config_info(cn93xx_vf_config_t * conf93xx)
+{
+	uint64_t total_instrs = 0ULL;
+
+	if (CFG_GET_IQ_MAX_Q(conf93xx) > CN93XX_MAX_INPUT_QUEUES) {
+		cavium_error("%s: Num IQ (%d) exceeds Max (%d)\n",
+			     __CVM_FUNCTION__, CFG_GET_IQ_MAX_Q(conf93xx),
+			     CN93XX_MAX_INPUT_QUEUES);
+		return 1;
+	}
+
+	if (CFG_GET_OQ_MAX_Q(conf93xx) > CN93XX_MAX_OUTPUT_QUEUES) {
+		cavium_error("%s: Num OQ (%d) exceeds Max (%d)\n",
+			     __CVM_FUNCTION__, CFG_GET_OQ_MAX_Q(conf93xx),
+			     CN93XX_MAX_OUTPUT_QUEUES);
+		return 1;
+	}
+
+	if (CFG_GET_IQ_INSTR_TYPE(conf93xx) != OCTEON_32BYTE_INSTR &&
+	    CFG_GET_IQ_INSTR_TYPE(conf93xx) != OCTEON_64BYTE_INSTR) {
+		cavium_error("%s: Invalid instr type for IQ\n",
+			     __CVM_FUNCTION__);
+		return 1;
+	}
+
+	if (!(CFG_GET_IQ_NUM_DESC(conf93xx)) || !(CFG_GET_IQ_DB_MIN(conf93xx))
+	    || !(CFG_GET_IQ_DB_TIMEOUT(conf93xx))) {
+		cavium_error("%s: Invalid parameter for IQ\n",
+			     __CVM_FUNCTION__);
+		return 1;
+	}
+
+	total_instrs =
+	    CFG_GET_IQ_NUM_DESC(conf93xx) * CFG_GET_IQ_MAX_Q(conf93xx);
+
+	if (CFG_GET_IQ_PENDING_LIST_SIZE(conf93xx) < total_instrs) {
+		cavium_error
+		    ("%s Pending list size (%d) should be >= total instructions queue size (%d)\n",
+		     __CVM_FUNCTION__, CFG_GET_IQ_PENDING_LIST_SIZE(conf93xx),
+		     (int)total_instrs);
+		return 1;
+	}
+
+	if (!(CFG_GET_OQ_INFO_PTR(conf93xx)) ||
+	    !(CFG_GET_OQ_PKTS_PER_INTR(conf93xx)) ||
+	    !(CFG_GET_OQ_NUM_DESC(conf93xx)) ||
+	    !(CFG_GET_OQ_REFILL_THRESHOLD(conf93xx)) ||
+	    !(CFG_GET_OQ_BUF_SIZE(conf93xx))) {
+		cavium_error("%s: Invalid parameter for OQ\n",
+			     __CVM_FUNCTION__);
+		return 1;
+	}
+
+	if (!(CFG_GET_OQ_INTR_TIME(conf93xx))) {
+		cavium_error("%s: Invalid parameter for OQ\n",
+			     __CVM_FUNCTION__);
+		return 1;
+	}
+
+	return 0;
+}
+
+/* $Id$ */

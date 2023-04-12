@@ -1,0 +1,8 @@
+DPDK_20.0 {
+	global:
+
+	dpaa_sec_eventq_attach;
+	dpaa_sec_eventq_detach;
+
+	local: *;
+};
