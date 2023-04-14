@@ -1,3 +1,5 @@
+English  |  [简体中文](./README.md) 
+
 - [Overview](#intro)
 - [Features](#features)
 - [Application Scenario](#scene)
