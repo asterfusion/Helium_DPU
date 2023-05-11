@@ -109,6 +109,7 @@ Helium智能网卡采用高性能DPU架构设计，提供全开放的软件开�
 <a id="quickuse"></a>
 # 快速使用
 - [用户手册](Doc/User%20Manual/Helium%20DPU%20%E7%94%A8%E6%88%B7%E6%89%8B%E5%86%8C.pdf)
+- [四层负载均衡DPVS验证](https://asterfusion.com/wp-content/uploads/2023/03/%E5%8A%9F%E8%83%BD%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91-DPU%E6%89%A3%E5%8D%A1%E7%9B%B8%E5%85%B3%E5%8A%9F%E8%83%BD%E9%AA%8C%E8%AF%81%EF%BC%88DPVS%EF%BC%89-e-20230224-v1.0.mp4)
 
 <a id="contribute"></a>
 # 如何贡献
