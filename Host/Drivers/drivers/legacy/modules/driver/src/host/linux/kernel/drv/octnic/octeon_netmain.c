@@ -1179,10 +1179,11 @@ int octnet_init_nic_module(int octeon_id, void *octeon_dev)
 	(oct->chip_id == OCTEON_CN93XX_PF) ||
 	(oct->chip_id == OCTEON_CN98XX_PF)) 
         /* dbell needs to be programmed after enabling OQ. */
-        for (j = 0; j < oct->num_oqs; j++) {
+    { for (j = 0; j < oct->num_oqs; j++) {
             OCTEON_WRITE32(oct->droq[j]->pkts_credit_reg,
                 oct->droq[j]->max_count);
         }
+    }
 
 	cavium_atomic_set(&oct->status, OCT_DEV_RUNNING);
 #ifndef ETHERPCI
