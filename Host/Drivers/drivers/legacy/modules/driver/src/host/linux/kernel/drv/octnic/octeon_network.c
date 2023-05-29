@@ -466,7 +466,12 @@ octnet_push_packet(int octeon_id,
 #endif
 
 #ifdef OCT_NIC_USE_NAPI
-		if (rc != GRO_DROP) {
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 12, 0))
+			if (rc!= GRO_MERGED_FREE) {
+#else
+			if (rc != GRO_DROP) {
+#endif
 #else
 		if (rc != NET_RX_DROP) {
 #endif
