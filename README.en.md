@@ -21,19 +21,19 @@ Take NFV offloading as an example：
 
 | Product | Performance | Latency | Connection Per Second|Power Consumption|Cost|
 |----|---|--|--|--|--|
-|2U Server（2 x Intel Xeon Gold 5118 24 Cores）|60Gbps|200us|120.000|350W|>30.000|
-|Helium DPU SNIC 24 Cores |60Gbps|100us|150.000|60W|<20.000|
+|2U Server（2 x Intel Xeon Gold 5118 24 Cores）|60Gbps|200us|120.000|350W|X|
+|Helium DPU SNIC 24 Cores |60Gbps|100us|150.000|60W|0.5X|
  
-From the above data, it can be found that the power consumption of the Helium SmartNIC is only 1/6 of that of the server, and the purchase cost is saved by more than 1/3, while providing lower forwarding delay and higher number of new flow sessions. Of course, this is the data obtained from the test of a single NFV business dimension. If we start from the dimension of the overall construction plan of cloud services, what will be the result?
+From the above data, it can be found that the power consumption of the Helium SmartNIC is only 1/6 of that of the server, and the purchase cost is saved by more than 1/2, while providing lower forwarding delay and higher number of new flow sessions. Of course, this is the data obtained from the test of a single NFV business dimension. If we start from the dimension of the overall construction plan of cloud services, what will be the result?
 Take cloud gateway access as an example：
 
 
 |Environment|Devices|Rack Space|Power Consumption|Connection per 1U|Cost|
 |--|--|--|--|--|--|
-|1.44Tbps|24 x 2U Server|48U，two 42U standard cabinet|8400W|6000|720.000|
-|1.44Tbps|3 x 4U Server，24 x Helium DPU，1 x Switch|14U，half of 42U standard cabinet|3390W|20000|640.000|
+|1.44Tbps|24 x 2U Server|48U，two 42U standard cabinet|8400W|6000|Y|
+|1.44Tbps|3 x 4U Server，24 x Helium DPU，1 x Switch|14U，half of 42U standard cabinet|3390W|20000|0.5Y|
  
-Under the premise of ensuring the total number of access users, the solution of introducing Helium SmartNIC has obvious advantages in terms of rack space occupation, total power consumption, and cost compared with the solution of pure 2U servers. The rack space is saved by more than 2/3, the total power consumption is saved by more than 1/2, and the construction cost is saved by 1.5W dollars. Moreover, the average number of users connected to 1U of the rack is increased by more than 3 times.
+Under the premise of ensuring the total number of access users, the solution of introducing Helium SmartNIC has obvious advantages in terms of rack space occupation, total power consumption, and cost compared with the solution of pure 2U servers. The rack space is saved by more than 2/3, the total power consumption is saved by more than 1/2, and the construction cost is saved by 1/2 dollars. Moreover, the average number of users connected to 1U of the rack is increased by more than 3 times.
 In addition, Helium SmartNIC also provides rich application scenario verification (such as OVS, 5G UPF, DPVS, IPsec, SSL), ensuring high-reliability and high-performance for business. 
 Adhering to the concept of open network, Asterfusion opens product information and code to all customers, and sincerely invites everyone to jointly build the DPU product ecosystem. 
 
