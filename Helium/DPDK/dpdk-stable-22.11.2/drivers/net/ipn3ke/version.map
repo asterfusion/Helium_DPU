@@ -1,0 +1,9 @@
+DPDK_23 {
+	local: *;
+};
+
+INTERNAL {
+	global:
+
+	ipn3ke_bridge_func;
+};
