@@ -85,10 +85,10 @@ Adhering to the concept of open network, Asterfusion opens product information a
 | Category | Helium EC2004Y | Helium EC2002P |
 |-----------|----------------|----------------|
 | Network interfaces     |  4 x 25GE SFP28| 2 x 100GE QSFP28|
-|Host interface | PCIe x8 Gen3.0/Gen4.0 |PCIe x16 Gen3.0/Gen4.0 |
+|Host interface | PCIe x8 Gen3.0/Gen4.0 |PCIe x8 Gen3.0/Gen4.0 |
 |Management interface| 1 x Console Micro USB，1*GE RJ45 OOB port | 1 x Console Micro USB，1*GE RJ45 OOB port |
 |Power consumption|60W|60W|
-|Dimension (W x H x D, mm)|111.15 x 21.8 x 167.65|111.15 x 21.8 x 184.16|
+|Dimension (W x H x D, mm)|111.15 x 18.91 x 178.48|111.15 x 18.91 x 194.35|
 |Weight (kg)|0.8|0.8|
 |Operating temperature| 0~35℃ | 0~35℃|
 |Operating humidity|10%~90% (non-condensing)| 10%~90% (non-condensing)|
