@@ -1,0 +1,125 @@
+/*
+ * Copyright (c) 2015-2016 Cisco and/or its affiliates.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/** \file
+
+    This file defines packet-generator interface APIs.
+*/
+
+option version = "2.0.0";
+
+import "vnet/interface_types.api";
+
+enum pg_interface_mode : u8
+{
+ PG_API_MODE_ETHERNET = 0,
+ PG_API_MODE_IP4,
+ PG_API_MODE_IP6,
+};
+
+/** \brief PacketGenerator create interface request
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param interface_id - interface index
+    @param gso_enabled - enable gso on this interface
+    @param gso_size - gso size on this interface
+*/
+define pg_create_interface
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t interface_id;
+  bool gso_enabled;
+  u32 gso_size;
+};
+define pg_create_interface_v2
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t interface_id;
+  bool gso_enabled;
+  u32 gso_size;
+  vl_api_pg_interface_mode_t mode;
+};
+
+/** \brief PacketGenerator create interface response
+    @param context - sender context, to match reply w/ request
+    @param retval - return value for request
+*/
+define pg_create_interface_reply
+{
+  u32 context;
+  i32 retval;
+  vl_api_interface_index_t sw_if_index;
+};
+define pg_create_interface_v2_reply
+{
+  u32 context;
+  i32 retval;
+  vl_api_interface_index_t sw_if_index;
+};
+
+/** \brief PacketGenerator interface enable/disable packet coalesce
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param interface_id - interface index
+    @param coalesce_enabled - enable/disable packet coalesce on this interface
+*/
+autoreply define pg_interface_enable_disable_coalesce
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool coalesce_enabled;
+  option status="in_progress";
+};
+
+/** \brief PacketGenerator capture packets on given interface request
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param interface_id - pg interface index
+    @param is_enabled - 1 if enabling streams, 0 if disabling
+    @param count - number of packets to be captured
+    @param pcap_file_name - pacp file name to store captured packets
+*/
+autoreply define pg_capture
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t interface_id;
+  bool is_enabled [default=true];
+  u32 count;
+  string pcap_file_name[];
+};
+
+/** \brief Enable / disable packet generator request
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_enabled - 1 if enabling streams, 0 if disabling
+    @param stream_name - stream name to be enable/disabled, if not specified handle all streams
+*/
+autoreply define pg_enable_disable
+{
+  u32 client_index;
+  u32 context;
+  bool is_enabled [default=true];
+  string stream_name[];
+};
+
+/*
+ * Local Variables:
+ * eval: (c-set-style "gnu")
+ * End:
+ */

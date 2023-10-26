@@ -1,0 +1,136 @@
+
+LINUX XFRM PLUGIN
+=================
+The idea behind introducing Linux XFRM plugin is to mirror Linux XFRM
+configurations to VPP IPsec subsystem. The Linux XFRM cfgs can be either
+manual configured using ip commands or via Keying daemons like strongswan.
+In both cases the Netlink notifications generated from Linux are read by
+this XFRM plugin and translated into VPP's IPsec configuration.
+
+Highlights:
+===========
+1. The plugin piggy backs on the existing the linux-cp plugin.
+
+2. The plugin piggy backs on the libnl-xfrm system library for
+parsing/extracting netlink messages.
+
+3. The plugin will be dependent on Kernel XFRM Netlink notifications. So to be
+able to read those messages, plugin would register to XFRMGRP_SA,
+XFRMGRP_POLICY and XFRMGRP_EXPIRE groups of NETLINK_XFRM protocol of
+AF_NETLINK family.
+
+4. The plugin will support both policy based and tunnel/route based IPsec.
+Selection of mode can be done via startup.conf
+
+5. The plugin will support packet and byte based soft life and hard life expiry
+as the datapath will be handled in VPP.
+
+6. Though plugin is designed to work with Linux's XFRM Netlink notification
+(be it manual or via any keying daemon), the plugin's design is optimized and
+extensively tested to work with strongswan.
+
+Design:
+=======
+The plugin is divided into 3 components, one that reads XFRM NL notifications
+and the other that configures the VPP IPsec based on NL notifications read,
+whereas the last component deals with handling SA expiry.
+
+1. Reading the XFRM NL notifications
+   This part of the design is similar to linux-nl plugin. It involves creating
+netlink socket of type NETLINK_XFRM and registering to multicasr groups like
+XFRMGRP_SA, XFRMGRP_POLICY, XFRMGRP_EXPIRE.
+   Now once the NL messages are read from netlink xfrm socket, based on the
+message type it will be handled accordingly. This is where the second part of
+the plugin i.e configuring VPP IPsec starts.
+
+2. Configuring VPP IPsec
+   Based on the startup configuration (point 4 of Highlights), VPP IPsec will
+be configured to run in one of the 2 IPsec modes.
+   Policy based IPsec:
+   -------------------
+   a. In VPP IPsec, SA and Policy are tightly coupled during configuration
+   via SA id is which is unique for a given SA. So a protect policy in VPP
+   cannot be configured without a valid SA id. But the XFRM kernel doesnt
+   have the notion of SA identifier. So in this plugin, we derive a unique
+   32bit SA id, based on SPI/DIP/Proto for a given SA. This ID will be used
+   to bind SA to a policy.
+
+   b. Due to a limitation (point 3 of Limitations), the SA message addition
+   will also take care of inbound policy addition. Whereas the outbound policy
+   will be handled as part of Policy notification.
+
+   c. Based on the tunnel end point IP address, we find out the VPP interface
+   on which the ipsec/spd needs to be enabled
+
+   d. Once SPD is created and enabled on a given interface, all packets going
+   through that interface will undergo policy lookup. For one that doesn't have
+   matching policies, we are adding allow all bypass policies internally which
+   would allow IKE , Neigh discivery and keep alive messages.
+
+   e. The configuration of bypass polices are done internally and there won't
+   be a NL notification for the same. It will be added when the first SA or
+   protect policy notification is handled and will be deleted when there aren't
+   anymore protect polices in the system.
+
+
+   Route based IPsec:
+   ------------------
+   a. Similar to policy based scheme, here also we derive SA id. In addition to
+   that as part of SA notification, we also create ipip tunnel and protect the
+   tunnel with inb and outb SAs. A maximum of 4 inb and 1 outb SAs can be bound
+   to a tunnel.
+
+   b. As part of Policy notifications we are only handling FIB entry via tunnel
+   interfaces. We dont add policies in route mode.
+
+3. SA Expiry
+   VPP doesn't support Soft/hard byte/packet based expiries. So to handle this
+   we have created a process node that will continuously poll on a fixed interval
+   on all available SA counters. Based on expiry values recieved from XFRM SA NL,
+   the plugin will build NL SA expiry message XFRM_MSG_EXPIRE, set it as
+   hard/soft and send a NL message to Kernel. Kernel will then validate this
+   msg against its database and initiate a XFRM_MSG_EXPIRE towards IKE daemon
+   to initiate a rekeying.
+   If its soft SA expiry, then daemon will initiate a rekeying, so we don't
+   have to handle this message in our plugin. Rekeying will take care of
+   adding new SA/SP and deleting old ones.
+   If its hard SA expiry, there wont be separate notification to delete the SA.
+   So in the plugin, we delete SA when we get hard expiry notification.
+
+Limitations
+===========
+1. The plugin doesn't support on-demand SA creation by installing trap
+policies, as VPP can't install a policy without an valid SA id. So the
+strongswan configuration (auto = route) cannot be supported.
+
+2. Since VPP doesn't support configuring anti-replay window size(which is fixed
+at 64), the plugin doesn't honor the replay-window size configured in
+strongswan(except for enabling/disabling the use-anti-replay flag in VPP).
+
+3. When negotiating between peers, there is a possibility that peer sends ESP
+packet with old SA( SPI X), whereas the strongswan on DUT has updated its inb
+policy to point to newly negotiated SA ( SPI Y), which will lead to packet drop
+in DUT in inb direction till the peer updates its policy to use new SA (SPI Y).
+To avoid this behaviour, in the plugin the INB policy addition/deletion is
+handled as part of SA addition/deletion. So as long as there is an SA in the
+VPP, all the INB packets matching that SA/SPI would be accepted. And whenever
+we get del SA notification from kernel, we delete the SA and its INB policy.
+
+4. The above point also means that we don't handle the INB policy notification
+from Kernel.We dont handle FWD policies as well in the plugin as we dont have
+use case. Also the Plugin purposefully doesn't handle XFRM Policy notifications
+for BYPASS and DROP actions, as we optimized the plugin design to work with
+daemons like strongswan. We expect only one user-template to be present
+in NL policy notification.
+
+5. The plugin is currently tested with AES-GCM and AES-CBC only.
+
+6. In route/tunnel mode, VPP supports max 4 INB SAs and 1 OUTB SA bound to the
+tunnel.
+
+7. In route/tunnel mode, if we configure strongswan such that more than one
+connection uses same tunnel end point, then it leads to undefined behaviour.
+Reason being, tunnel (ipipX) instance is created based on tunnel endpoints and
+tunnel type. And since endpoints and type of tunnel are same for both
+connections, it could happen that second connection (tunnel creation) fails in
+VPP.

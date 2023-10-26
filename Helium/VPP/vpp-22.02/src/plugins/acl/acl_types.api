@@ -1,0 +1,97 @@
+/* Hey Emacs use -*- mode: C -*- */
+/*
+ * Copyright (c) 2016 Cisco and/or its affiliates.
+ * Copyright 2019 Vinci Consulting Corp.  All Rights Reserved.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+option version = "1.0.0";
+
+import "vnet/ip/ip_types.api";
+import "vnet/ethernet/ethernet_types.api";
+
+enum acl_action : u8
+{
+  ACL_ACTION_API_DENY = 0,
+  ACL_ACTION_API_PERMIT = 1,
+  ACL_ACTION_API_PERMIT_REFLECT = 2,
+};
+
+/** \brief Access List Rule entry
+    @param is_permit - deny (0), permit (1), or permit+reflect(2) action on this rule.
+    @param src_prefix - Source prefix
+    @param dst_prefix - Destination prefix
+    @param proto - L4 protocol (http://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml)
+    @param srcport_or_icmptype_first - beginning of source port or ICMP4/6 type range
+    @param srcport_or_icmptype_last - end of source port or ICMP4/6 type range
+    @param dstport_or_icmpcode_first - beginning of destination port or ICMP4/6 code range
+    @param dstport_or_icmpcode_last - end of destination port or ICMP4/6 code range
+    @param tcp_flags_mask - if proto==6, match masked TCP flags with this value
+    @param tcp_flags_value - if proto==6, mask to AND the TCP flags in the packet with
+*/
+
+typedef acl_rule
+{
+  vl_api_acl_action_t is_permit;
+  vl_api_prefix_t src_prefix;
+  vl_api_prefix_t dst_prefix;
+/*
+ * L4 protocol. IANA number. 1 = ICMP, 58 = ICMPv6, 6 = TCP, 17 = UDP.
+ * 0 => ignore L4 and ignore the ports/tcpflags when matching.
+ */
+  vl_api_ip_proto_t proto;
+/*
+ * If the L4 protocol is TCP or UDP, the below
+ * hold ranges of ports, else if the L4 is ICMP/ICMPv6
+ * they hold ranges of ICMP(v6) types/codes.
+ *
+ * Ranges are inclusive, i.e. to match "any" TCP/UDP port,
+ * use first=0,last=65535. For ICMP(v6),
+ * use first=0,last=255.
+ */
+  u16 srcport_or_icmptype_first;
+  u16 srcport_or_icmptype_last;
+  u16 dstport_or_icmpcode_first;
+  u16 dstport_or_icmpcode_last;
+/*
+ * for proto = 6, this matches if the
+ * TCP flags in the packet, ANDed with tcp_flags_mask,
+ * is equal to tcp_flags_value.
+ */
+  u8 tcp_flags_mask;
+  u8 tcp_flags_value;
+};
+
+
+/** \brief MACIP Access List Rule entry
+    @param is_permit - deny (0), permit (1) action on this rule.
+    @param src_mac - match masked source MAC address against this value
+    @param src_mac_mask - AND source MAC address with this value before matching
+    @param src_prefix - Source prefix value
+*/
+
+typedef macip_acl_rule
+{
+  vl_api_acl_action_t is_permit;
+/*
+ * The source mac of the packet ANDed with src_mac_mask.
+ * The source ip[46] address in the packet is matched
+ * against src_prefix set to 0.
+ *
+ * For better performance, minimize the number of
+ * (src_mac_mask, src_prefix.len) combinations
+ * in a MACIP ACL.
+ */
+  vl_api_mac_address_t src_mac;
+  vl_api_mac_address_t src_mac_mask;
+  vl_api_prefix_t src_prefix;
+};

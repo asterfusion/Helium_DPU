@@ -1,0 +1,19 @@
+[Unit]
+Description=Vector Packet Processing Process
+After=syslog.target network.target auditd.service
+
+[Service]
+ExecStartPre=-/bin/rm -f /dev/shm/db /dev/shm/global_vm /dev/shm/vpe-api
+ExecStartPre=-/sbin/modprobe uio_pci_generic
+ExecStart=/usr/bin/vpp -c /etc/vpp/startup.conf
+Type=simple
+Restart=on-failure
+RestartSec=5s
+# Uncomment the following line to enable VPP coredumps on crash
+# You still need to configure the rest of the system to collect them, see
+# https://fdio-vpp.readthedocs.io/en/latest/troubleshooting/reportingissues/reportingissues.html#core-files
+# for details
+#LimitCORE=infinity
+
+[Install]
+WantedBy=multi-user.target

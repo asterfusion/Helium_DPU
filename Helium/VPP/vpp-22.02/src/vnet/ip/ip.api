@@ -1,0 +1,900 @@
+/* Hey Emacs use -*- mode: C -*- */
+/*
+ * Copyright (c) 2018 Cisco and/or its affiliates.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/** \file
+
+    This file defines vpp IP control-plane API messages which are generally
+    called through a shared memory interface.
+*/
+
+option version = "3.2.0";
+
+import "vnet/interface_types.api";
+import "vnet/fib/fib_types.api";
+import "vnet/ethernet/ethernet_types.api";
+import "vnet/mfib/mfib_types.api";
+import "vnet/interface_types.api";
+
+/** \brief An IP table
+    @param is_ipv6 - V4 or V6 table
+    @param table_id - table ID associated with the route
+                     This table ID will apply to both the unicast
+		      and multicast FIBs
+    @param name - A client provided name/tag for the table. If this is
+                  not set by the client, then VPP will generate something
+		  meaningful.
+*/
+typedef ip_table
+{
+  u32 table_id;
+  bool is_ip6;
+  string name[64];
+};
+
+/** \brief Add / del table request
+           A table can be added multiple times, but need be deleted only once.
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+autoreply define ip_table_add_del
+{
+  u32 client_index;
+  u32 context;
+  bool is_add [default=true];
+  vl_api_ip_table_t table;
+};
+
+/** \brief Allocate an unused table
+           A table can be added multiple times.
+           If a large number of tables are in use (millions), this API might
+           fail to find a free ID with very low probability, and will return
+           EAGAIN. A subsequent attempt may be successful.
+  @param client_index - opaque cookie to identify the sender
+  @param context - sender context, to match reply w/ request
+  @param table - if table.table_id == ~0, vpp allocates an unused table_id and
+                    proceeds as in ip_table_add_del with is_add = true
+                 if table.table_id != ~0, vpp uses the table.table_id and
+                    proceeds as in ip_table_add_del with is_add = true
+                 table.table_id should never be 0
+*/
+define ip_table_allocate
+{
+  u32 client_index;
+  u32 context;
+
+  vl_api_ip_table_t table;
+};
+
+define ip_table_allocate_reply
+{
+  u32 context;
+  i32 retval;
+
+  vl_api_ip_table_t table;
+};
+
+/** \brief Dump IP all fib tables
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define ip_table_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+/** \brief IP table replace being
+
+    The use-case is that, for some unspecified reason, the control plane
+    has a very different set of entries it wants in the table than VPP
+    currently has. The CP would thus like to 'replace' VPP's current table
+    only by specifying what the new set of entries shall be, i.e. it is not
+    going to delete anything that already exists.
+    the CP declares the start of this procedure with this begin_replace
+    API Call, and when it has populated all the entries it wants, it calls
+    the below end_replace API. From this point on it is of course free
+    to add and delete entries as usual.
+    The underlying mechanism by which VPP implements this replace is
+    purposefully left unspecified.
+
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param table - The table to resync
+*/
+autoreply define ip_table_replace_begin
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip_table_t table;
+};
+
+/** \brief IP table replace end
+
+    see replace start/
+
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param table - The table that has converged
+*/
+autoreply define ip_table_replace_end
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip_table_t table;
+};
+
+/** \brief IP table flush
+    Flush a table of all routes
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param table - The table to flush
+*/
+autoreply define ip_table_flush
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip_table_t table;
+};
+
+/** \brief IP FIB table response
+    @param context - sender context
+    @param table - description of the table
+*/
+define ip_table_details
+{
+  u32 context;
+  vl_api_ip_table_t table;
+};
+
+/** \brief An IP route
+  @param table_id The IP table the route is in
+  @param stats_index The index of the route in the stats segment
+  @param prefix the prefix for the route
+  @param n_paths The number of paths the route has
+  @param src The entity adding the route. either 0 for default
+             or a value returned from fib_source_sdd.
+  @param paths The paths of the route
+*/
+typedef ip_route
+{
+  u32 table_id;
+  u32 stats_index;
+  vl_api_prefix_t prefix;
+  u8 n_paths;
+  vl_api_fib_path_t paths[n_paths];
+};
+typedef ip_route_v2
+{
+  u32 table_id;
+  u32 stats_index;
+  vl_api_prefix_t prefix;
+  u8 n_paths;
+  u8 src;
+  vl_api_fib_path_t paths[n_paths];
+};
+
+/** \brief Add / del route request
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_multipath - Set to 1 if these paths will be added/removed
+                          to/from the existing set, or 0 to replace
+			  the existing set.
+                          is_add=0 & is_multipath=0 implies delete all paths
+    @param is_add - Are the paths being added or removed
+*/
+define ip_route_add_del
+{
+  u32 client_index;
+  u32 context;
+  bool is_add [default=true];
+  bool is_multipath;
+  vl_api_ip_route_t route;
+};
+define ip_route_add_del_v2
+{
+  option in_progress;
+  u32 client_index;
+  u32 context;
+  bool is_add [default=true];
+  bool is_multipath;
+  vl_api_ip_route_v2_t route;
+};
+define ip_route_add_del_reply
+{
+  u32 context;
+  i32 retval;
+  u32 stats_index;
+};
+define ip_route_add_del_v2_reply
+{
+  option in_progress;
+  u32 context;
+  i32 retval;
+  u32 stats_index;
+};
+
+/** \brief Dump IP routes from a table
+    @param client_index - opaque cookie to identify the sender
+    @param src The entity adding the route. either 0 for default
+               or a value returned from fib_source_sdd.
+    @param table - The table from which to dump routes (ony ID an AF are needed)
+*/
+define ip_route_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip_table_t table;
+};
+define ip_route_v2_dump
+{
+  option in_progress;
+  u32 client_index;
+  u32 context;
+  /* vl_api_fib_source_t src; */
+  u8 src;
+  vl_api_ip_table_t table;
+};
+
+/** \brief IP FIB table entry response
+    @param route The route entry in the table
+*/
+define ip_route_details
+{
+  u32 context;
+  vl_api_ip_route_t route;
+};
+define ip_route_v2_details
+{
+  option in_progress;
+  u32 context;
+  vl_api_ip_route_v2_t route;
+};
+
+/** \brief Lookup IP route from a table
+    @param client_index - opaque cookie to identify the sender
+    @param table_id - The IP table to look the route up in
+    @param exact - 0 for normal route lookup, 1 for exact match only
+    @param prefix - The prefix (or host) for route lookup.
+*/
+define ip_route_lookup
+{
+  u32 client_index;
+  u32 context;
+  u32 table_id;
+  u8 exact;
+  vl_api_prefix_t prefix;
+};
+define ip_route_lookup_v2
+{
+  option in_progress;
+  u32 client_index;
+  u32 context;
+  u32 table_id;
+  u8 exact;
+  vl_api_prefix_t prefix;
+};
+
+/** \brief IP FIB table lookup response
+    @param retval - return code of the lookup
+    @param route - The route entry in the table if found
+*/
+define ip_route_lookup_reply
+{
+  u32 context;
+  i32 retval;
+  vl_api_ip_route_t route;
+};
+define ip_route_lookup_v2_reply
+{
+  option in_progress;
+  u32 context;
+  i32 retval;
+  vl_api_ip_route_v2_t route;
+};
+
+/** \brief Set the ip flow hash config for a fib request
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param vrf_id - vrf/fib id
+    @param is_ipv6 - if non-zero the fib is ip6, else ip4
+    @param src - if non-zero include src in flow hash
+    @param dst - if non-zero include dst in flow hash
+    @param sport - if non-zero include sport in flow hash
+    @param dport - if non-zero include dport in flow hash
+    @param proto -if non-zero include proto in flow hash
+    @param reverse - if non-zero include reverse in flow hash
+    @param symmetric - if non-zero include symmetry in flow hash
+*/
+autoreply define set_ip_flow_hash
+{
+  option deprecated;
+  u32 client_index;
+  u32 context;
+  u32 vrf_id;
+  bool is_ipv6;
+  bool src;
+  bool dst;
+  bool sport;
+  bool dport;
+  bool proto;
+  bool reverse;
+  bool symmetric;
+};
+
+/**
+    @brief flow hash settings for an IP table
+    @param src - include src in flow hash
+    @param dst - include dst in flow hash
+    @param sport - include sport in flow hash
+    @param dport - include dport in flow hash
+    @param proto - include proto in flow hash
+    @param reverse - include reverse in flow hash
+    @param symmetric - include symmetry in flow hash
+    @param flowlabel - include flowlabel in flow hash
+*/
+enumflag ip_flow_hash_config
+{
+  IP_API_FLOW_HASH_SRC_IP = 0x01,
+  IP_API_FLOW_HASH_DST_IP = 0x02,
+  IP_API_FLOW_HASH_SRC_PORT = 0x04,
+  IP_API_FLOW_HASH_DST_PORT = 0x08,
+  IP_API_FLOW_HASH_PROTO = 0x10,
+  IP_API_FLOW_HASH_REVERSE = 0x20,
+  IP_API_FLOW_HASH_SYMETRIC = 0x40,
+  IP_API_FLOW_HASH_FLOW_LABEL = 0x80,
+};
+
+autoreply define set_ip_flow_hash_v2
+{
+  u32 client_index;
+  u32 context;
+  u32 table_id;
+  vl_api_address_family_t af;
+  vl_api_ip_flow_hash_config_t flow_hash_config;
+};
+
+/** \brief Set the ip flow hash router ID
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param router_id - The ID of the router. Mixed into the hash.
+                       Used to prevent polarisation across a network,
+                       since each router is assumed to have a different ID
+*/
+autoreply define set_ip_flow_hash_router_id
+{
+  u32 client_index;
+  u32 context;
+  u32 router_id;
+};
+
+/** \brief IPv6 interface enable / disable request
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - interface used to reach neighbor
+    @param enable - if non-zero enable ip6 on interface, else disable
+*/
+autoreply define sw_interface_ip6_enable_disable
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool enable;			/* set to true if enable */
+};
+
+/** \brief Dump IP multicast fib table
+    @param client_index - opaque cookie to identify the sender
+*/
+define ip_mtable_dump
+{
+  u32 client_index;
+  u32 context;
+};
+define ip_mtable_details
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip_table_t table;
+};
+
+/** \brief Add / del route request
+
+    Adds a route, consisting both of the MFIB entry to match packets
+    (which may already exist) and a path to send those packets down.
+    Routes can be entered repeatedly to add multiple paths.  Deletions are
+    per-path.
+
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param table_id - fib table /vrf associated with the route
+    @param is_add - true if adding a route; false if deleting one
+    @param is_ipv6 - true iff all the addresses are v6
+    @param entry_flags - see fib_entry_flag_t
+    @param itf_flags - see mfib_entry_flags_t
+    @param next_hop_afi - see dpo_proto_t; the type of destination description
+    @param src_address - the source of the packet
+    @param grp_address - the group the packet is destined to
+    @param nh_address - the nexthop to forward the packet to
+    @param next_hop_sw_if_index - interface to emit packet on
+
+    BIER AFIs use the BIER imposition ID.  v4 and v6 AFIs use either the
+    interface or the nexthop address.
+
+    Note that if the route is source-specific (S is supplied, not all 0s),
+    the prefix match is treated as exact (prefixlen /32 or /128).
+
+    FIXME not complete yet
+*/
+typedef ip_mroute
+{
+  u32 table_id;
+  vl_api_mfib_entry_flags_t entry_flags;
+  u32 rpf_id;
+  vl_api_mprefix_t prefix;
+  u8 n_paths;
+  vl_api_mfib_path_t paths[n_paths];
+};
+
+define ip_mroute_add_del
+{
+  u32 client_index;
+  u32 context;
+  bool is_add [default=true];
+  bool is_multipath;
+  vl_api_ip_mroute_t route;
+};
+define ip_mroute_add_del_reply
+{
+  u32 context;
+  i32 retval;
+  u32 stats_index;
+};
+
+/** \brief Dump IP multicast fib table
+    @param table - The table from which to dump routes (ony ID an AF are needed)
+*/
+define ip_mroute_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip_table_t table;
+};
+
+/** \brief IP Multicast Route Details
+    @param route - Details of the route
+*/
+define ip_mroute_details
+{
+  u32 context;
+  vl_api_ip_mroute_t route;
+};
+
+define ip_address_details
+{
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_address_with_prefix_t prefix;
+};
+
+define ip_address_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool is_ipv6;
+};
+
+/** \brief IP unnumbered configurations
+    @param sw_if_index The interface that has unnumbered configuration
+    @param ip_sw_if_index The IP interface that it is unnumbered to
+*/
+define ip_unnumbered_details
+{
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_interface_index_t ip_sw_if_index;
+};
+
+/** \brief Dump IP unnumbered configurations
+    @param sw_if_index ~0 for all interfaces, else the interface desired
+*/
+define ip_unnumbered_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index [default=0xffffffff];
+};
+
+define ip_details
+{
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool is_ipv6;
+};
+
+define ip_dump
+{
+  u32 client_index;
+  u32 context;
+  bool is_ipv6;
+};
+
+define mfib_signal_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+define mfib_signal_details
+{
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u32 table_id;
+  vl_api_mprefix_t prefix;
+  u16 ip_packet_len;
+  u8 ip_packet_data[256];
+};
+
+/** \brief IP punt policer
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_add - 1 to add neighbor, 0 to delete
+    @param is_ipv6 - 1 for IPv6 neighbor, 0 for IPv4
+    @param policer_index - Index of policer to use
+*/
+autoreply define ip_punt_police
+{
+  u32 client_index;
+  u32 context;
+  u32 policer_index;
+  bool is_add [default=true];
+  bool is_ip6;
+};
+
+/** \brief Punt redirect type
+    @param rx_sw_if_index - specify the original RX interface of traffic
+                            that should be redirected. ~0 means any interface.
+    @param tx_sw_if_index - the TX interface to which traffic should be
+                            redirected.
+    @param nh - the next-hop to redirect the traffic to.
+    @param is_ipv6 - 1 for IPv6 neighbor, 0 for IPv4
+*/
+typedef punt_redirect
+{
+  vl_api_interface_index_t rx_sw_if_index;
+  vl_api_interface_index_t tx_sw_if_index;
+  vl_api_address_t nh;
+};
+
+/** \brief IP punt redirect
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param punt - punt definition
+    @param is_add - 1 to add neighbor, 0 to delete
+*/
+autoreply define ip_punt_redirect
+{
+  option deprecated;
+  u32 client_index;
+  u32 context;
+  vl_api_punt_redirect_t punt;
+  bool is_add [default=true];
+};
+
+define ip_punt_redirect_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool is_ipv6;
+};
+
+define ip_punt_redirect_details
+{
+  u32 context;
+  vl_api_punt_redirect_t punt;
+};
+
+/** \brief Punt redirect type
+    @param rx_sw_if_index - specify the original RX interface of traffic
+                            that should be redirected. ~0 means any interface.
+    @param af - Address family (ip4 or ip6)
+    @param paths - the TX paths to which traffic should be redirected.
+*/
+typedef punt_redirect_v2
+{
+  vl_api_interface_index_t rx_sw_if_index [default=0xffffffff];
+  vl_api_address_family_t af;
+  u32 n_paths;
+  vl_api_fib_path_t paths[n_paths];
+};
+
+/** \brief Add IP punt redirect rule
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param punt - punt definition
+    @param is_add - 1 to add punt_redirect rule, 0 to delete
+*/
+autoreply define add_del_ip_punt_redirect_v2
+{
+  u32 client_index;
+  u32 context;
+  bool is_add [default=true];
+  vl_api_punt_redirect_v2_t punt;
+};
+
+define ip_punt_redirect_v2_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_address_family_t af;
+};
+
+define ip_punt_redirect_v2_details
+{
+  u32 context;
+  vl_api_punt_redirect_v2_t punt;
+};
+
+autoreply define ip_container_proxy_add_del
+{
+  u32 client_index;
+  u32 context;
+  vl_api_prefix_t pfx;
+  vl_api_interface_index_t sw_if_index;
+  bool is_add [default=true];
+};
+
+define ip_container_proxy_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+define ip_container_proxy_details
+{
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_prefix_t prefix;
+};
+
+/** \brief Configure IP source and L4 port-range check
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_ip6 - 1 if source address type is IPv6
+    @param is_add - 1 if add, 0 if delete
+    @param ip - prefix to match
+    @param number_of_ranges - length of low_port and high_port arrays (must match)
+    @param low_ports[32] - up to 32 low end of port range entries (must have corresponding high_ports entry)
+    @param high_ports[32] - up to 32 high end of port range entries (must have corresponding low_ports entry)
+    @param vrf_id - fib table/vrf id to associate the source and port-range check with
+    @note To specify a single port set low_port and high_port entry the same
+*/
+autoreply define ip_source_and_port_range_check_add_del
+{
+  u32 client_index;
+  u32 context;
+  bool is_add [default=true];
+  vl_api_prefix_t prefix;
+  u8 number_of_ranges;
+  u16 low_ports[32];
+  u16 high_ports[32];
+  u32 vrf_id;
+};
+
+/** \brief Set interface source and L4 port-range request
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param interface_id - interface index
+    @param tcp_vrf_id - VRF associated with source and TCP port-range check
+    @param udp_vrf_id - VRF associated with source and TCP port-range check
+*/
+autoreply define ip_source_and_port_range_check_interface_add_del
+{
+  u32 client_index;
+  u32 context;
+  bool is_add [default=true];
+  vl_api_interface_index_t sw_if_index;
+  u32 tcp_in_vrf_id;
+  u32 tcp_out_vrf_id;
+  u32 udp_in_vrf_id;
+  u32 udp_out_vrf_id;
+};
+
+/** \brief IPv6 set link local address on interface request
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - interface to set link local on
+    @param ip - the new link local address
+*/
+autoreply define sw_interface_ip6_set_link_local_address
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_ip6_address_t ip;
+};
+
+/** \brief IPv6 get link local address on interface request
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - interface to set link local on
+*/
+define sw_interface_ip6_get_link_local_address
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+};
+
+/** \brief IPv6 link local address detail
+    @param context - sender context, to match reply w/ request
+    @param ip - the link local address
+*/
+define sw_interface_ip6_get_link_local_address_reply
+{
+  u32 context;
+  i32 retval;
+  vl_api_ip6_address_t ip;
+};
+
+/** \brief IOAM enable : Enable in-band OAM
+    @param id - profile id
+    @param seqno - To enable Seqno Processing
+    @param analyse - Enabling analysis of iOAM at decap node
+    @param pow_enable - Proof of Work enabled or not flag
+    @param trace_enable - iOAM Trace enabled or not flag
+*/
+autoreply define ioam_enable
+{
+  u32 client_index;
+  u32 context;
+  u16 id;
+  bool seqno;
+  bool analyse;
+  bool pot_enable;
+  bool trace_enable;
+  u32 node_id;
+};
+
+/** \brief iOAM disable
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param index - MAP Domain index
+*/
+autoreply define ioam_disable
+{
+  u32 client_index;
+  u32 context;
+  u16 id;
+};
+
+enum ip_reass_type
+{
+  IP_REASS_TYPE_FULL = 0,
+  IP_REASS_TYPE_SHALLOW_VIRTUAL = 0x1,
+};
+
+autoreply define ip_reassembly_set
+{
+  u32 client_index;
+  u32 context;
+  u32 timeout_ms;
+  u32 max_reassemblies;
+  u32 max_reassembly_length;
+  u32 expire_walk_interval_ms;
+  bool is_ip6;
+  vl_api_ip_reass_type_t type;
+};
+
+define ip_reassembly_get
+{
+  u32 client_index;
+  u32 context;
+  bool is_ip6;
+  vl_api_ip_reass_type_t type;
+};
+
+define ip_reassembly_get_reply
+{
+  u32 context;
+  i32 retval;
+  u32 timeout_ms;
+  u32 max_reassemblies;
+  u32 max_reassembly_length;
+  u32 expire_walk_interval_ms;
+  bool is_ip6;
+};
+
+/** \brief Enable/disable reassembly feature
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - interface to enable/disable feature on
+    @param enable_ip4 - enable ip4 reassembly if non-zero, disable if 0
+    @param enable_ip6 - enable ip6 reassembly if non-zero, disable if 0
+*/
+autoreply define ip_reassembly_enable_disable
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool enable_ip4;
+  bool enable_ip6;
+  vl_api_ip_reass_type_t type;
+};
+
+/**
+    @brief Set a Path MTU value. i.e. a MTU value for a given neighbour.
+           The neighbour can be described as attached (w/ interface and next-hop)
+           or remote (w/ table_id and next-hop);
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param table_id - table-ID for next-hop
+    @param nh - Next hop
+    @param path_mtu - value to set, 0 is disable.
+*/
+typedef ip_path_mtu
+{
+  u32 client_index;
+  u32 context;
+  u32 table_id;
+  vl_api_address_t nh;
+  u16 path_mtu;
+};
+autoreply define ip_path_mtu_update
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip_path_mtu_t pmtu;
+};
+define ip_path_mtu_get
+{
+  u32 client_index;
+  u32 context;
+  u32 cursor;
+};
+define ip_path_mtu_get_reply
+{
+  u32 context;
+  i32 retval;
+  u32 cursor;
+};
+define ip_path_mtu_details
+{
+  u32 context;
+  vl_api_ip_path_mtu_t pmtu;
+};
+service {
+  rpc ip_path_mtu_get returns ip_path_mtu_get_reply
+    stream ip_path_mtu_details;
+};
+
+autoreply define ip_path_mtu_replace_begin
+{
+  u32 client_index;
+  u32 context;
+};
+autoreply define ip_path_mtu_replace_end
+{
+  u32 client_index;
+  u32 context;
+};
+
+/*
+ * Local Variables:
+ * eval: (c-set-style "gnu")
+ * End:
+ */

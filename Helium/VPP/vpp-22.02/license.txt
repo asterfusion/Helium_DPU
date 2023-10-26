@@ -1,0 +1,70 @@
+VPP License Summary
+===================
+
+This VPP package contains source code from open source FD.io VPP project along
+with code developed by Marvell. This file gives a short overview of the various
+files and pointers to the exact license information. In the event of a
+conflict, the license file for a specific file(s) takes precedence over
+this file.  This is just a summary file.
+
+VPP Licenses
+============
+
+License:       GNU General Public License v2.0
+License Text:  https://spdx.org/licenses/GPL-2.0.html
+Project URL:   https://git.fd.io/vpp/tree/?h=v22.02
+Files:         extras/bpf/af_xdp.bpf.c test/test_lisp.py
+Notes:         No changes from Marvell. These files are taken as it is from
+               open source
+
+License:       BSD 2-Clause "Simplified" License
+License Test:  http://www.opensource.org/licenses/bsd-license.php
+Project URL:   https://git.fd.io/vpp/tree/?h=v22.02
+Files:         extras/deprecated/netmap/net_netmap.h
+               extras/deprecated/netmap/netmap.h
+               src/vppinfra/xxhash.h
+Notes:         No changes from Marvell. These files are taken as it is from
+               open source
+
+
+License:       Creative Commons Zero v1.0 Universal
+License Text:  http://creativecommons.org/publicdomain/zero/1.0/
+Project URL:   https://git.fd.io/vpp/tree/?h=v22.02
+File:          src/vppinfra/dlmalloc.[ch]
+Notes:         No changes from Marvell. These files are taken as it is from
+               open source
+
+
+License:       Eclipse Public License 1.0
+License Text:  http://www.eclipse.org/legal/epl-v10.html
+Project URL:   https://git.fd.io/vpp/tree/?h=v22.02
+File:          extras/deprecated/vom/test/vom_test.cpp
+Notes:         No changes from Marvell. This file is taken as it is from
+               open source
+
+
+License:       BSD-Style
+Project URL:   https://git.fd.io/vpp/tree/?h=v22.02
+File:          extras/vpp_stats_fs/cmd.go
+Notes:         No changes from Marvell. This file is taken as it is from
+               open source
+
+
+License:       BSD 3-Clause "New" or "Revised" License
+License Text:  https://spdx.org/licenses/BSD-3-Clause.html#licenseText
+Project URL:   https://git.fd.io/vpp/tree/?h=v22.02
+Files:         extras/vpp_config/scripts/dpdk-devbind.py
+               src/plugins/crypto_native/ghash.h
+               src/vcl/ldp_socket_wrapper.c
+               src/vcl/ldp_socket_wrapper.h
+               src/vnet/util/radix.c
+               src/vnet/util/radix.h
+               src/vppinfra/longjmp.S
+Notes:         No changes from Marvell. These files are taken as it is from
+               open source
+
+
+License:       Apache License 2.0
+License Text:  http://www.apache.org/licenses/LICENSE-2.0
+Project URL:   https://git.fd.io/vpp/tree/?h=v22.02
+Files:         Everything Else

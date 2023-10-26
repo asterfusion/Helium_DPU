@@ -1,0 +1,50 @@
+From faf3f19b7b65d6beb20aaa449a137fade14f6ff3 Mon Sep 17 00:00:00 2001
+From: Nitin Saxena <nsaxena@marvell.com>
+Date: Tue, 21 Sep 2021 17:41:31 -0400
+Subject: [PATCH] support octeon cross compiler
+
+Signed-off-by: Nitin Saxena <nsaxena@marvell.com>
+Signed-off-by: Bheemappa Agasimudin <bagasimudin@marvell.com>
+---
+ Makefile | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index cb56282..bf60d8f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -38,7 +38,13 @@ PCDIR := ${CURDIR}/pkgconfig
+ #DEFINE += -DTEST_DEBUG
+
+ # build flags
++ifdef CROSS_TARGET
++CC = $(CROSS_TARGET)-gcc
++ARM8_LIB = /lib
++else
+ CC = gcc
++ARM8_LIB = $(shell pwd)
++endif
+ CFLAGS += -O3
+ CFLAGS += -Wall -static
+ CFLAGS += -I$(SRCDIR)
+@@ -115,11 +121,12 @@ libAArch64crypto.a: $(OBJS)
+ 	ar -rcs $@ $(OBJDIR)/*.o
+
+ $(PACKAGE_NAME).pc:
+-	mkdir ${PCDIR}
++	mkdir -p ${PCDIR}
++	rm -f ${PKGCONFIG}
+ 	@echo '--- Creating pkg-config file'
+ 	@echo 'prefix='$(shell pwd) >> ${PKGCONFIG}
+ 	@echo 'exec_prefix=$${prefix}' >> ${PKGCONFIG}
+-	@echo 'libdir=$${prefix}' >> ${PKGCONFIG}
++	@echo 'libdir='$(ARM8_LIB) >> ${PKGCONFIG}
+ 	@echo 'includedir=$${prefix}' >> ${PKGCONFIG}
+ 	@echo '' >> ${PKGCONFIG}
+ 	@echo 'Name: '$(PACKAGE_NAME) >> ${PKGCONFIG}
+ 	@echo 'Description: '$(PACKAGE_DESCRIPTION) >> ${PKGCONFIG}
+ 	@echo 'URL: '$(PACKAGE_URL) >> ${PKGCONFIG}
+ 	@echo 'Version: '$(PACKAGE_VERSION) >> ${PKGCONFIG}
+-	@echo 'Libs: -L$${libdir} -lAArch64crypto' >> ${PKGCONFIG}
++	@echo 'Libs: -L$${Libdir} -lAArch64crypto' >> ${PKGCONFIG}
+ 	@echo 'Cflags: -I$${includedir}' >> ${PKGCONFIG}
