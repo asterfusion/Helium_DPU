@@ -384,6 +384,7 @@ dpdk_device_output (vlib_main_t *vm, vlib_node_runtime_t *node,
   u32 tx_pkts = 0;
   struct rte_mbuf **mb;
   vlib_buffer_t *b[4];
+  int has_subintf = 0;
 
   ASSERT (n_packets <= VLIB_FRAME_SIZE);
 
@@ -394,6 +395,11 @@ dpdk_device_output (vlib_main_t *vm, vlib_node_runtime_t *node,
 
   n_left = n_packets;
   mb = ptd->mbufs;
+
+  if(xd->num_subifs)
+  {
+    has_subintf = 1;
+  }
 
 #if (CLIB_N_PREFETCHES >= 8)
   while (n_left >= 8)
@@ -426,6 +432,19 @@ dpdk_device_output (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  dpdk_validate_rte_mbuf (vm, b[2], 0, mempool_deplete_enable, ptd);
 	  dpdk_validate_rte_mbuf (vm, b[3], 0, mempool_deplete_enable, ptd);
 	}
+
+	  if(has_subintf)
+      {
+        mb[0]->ol_flags |= PKT_TX_VLAN_PKT;
+        mb[1]->ol_flags |= PKT_TX_VLAN_PKT;
+        mb[2]->ol_flags |= PKT_TX_VLAN_PKT;
+        mb[3]->ol_flags |= PKT_TX_VLAN_PKT;
+    
+        mb[0]->vlan_tci = vnet_buffer(b[0])->sw_if_index[VLIB_TX] - 4 + 1;
+        mb[1]->vlan_tci = vnet_buffer(b[1])->sw_if_index[VLIB_TX] - 4 + 1;
+        mb[2]->vlan_tci = vnet_buffer(b[2])->sw_if_index[VLIB_TX] - 4 + 1;
+        mb[3]->vlan_tci = vnet_buffer(b[3])->sw_if_index[VLIB_TX] - 4 + 1;
+      }
 
       if (PREDICT_FALSE ((xd->flags & DPDK_DEVICE_FLAG_TX_OFFLOAD) &&
 			 (or_flags & VNET_BUFFER_F_OFFLOAD)))
@@ -480,6 +499,15 @@ dpdk_device_output (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  dpdk_validate_rte_mbuf (vm, b[1], 0, mempool_deplete_enable, ptd);
 	}
 
+	  if(has_subintf)
+      {
+        mb[0]->ol_flags |= PKT_TX_VLAN_PKT;
+        mb[1]->ol_flags |= PKT_TX_VLAN_PKT;
+    
+        mb[0]->vlan_tci = vnet_buffer(b[0])->sw_if_index[VLIB_TX] - 4 + 1;
+        mb[1]->vlan_tci = vnet_buffer(b[1])->sw_if_index[VLIB_TX] - 4 + 1;
+      }
+
       if (PREDICT_FALSE ((xd->flags & DPDK_DEVICE_FLAG_TX_OFFLOAD) &&
 			 (or_flags & VNET_BUFFER_F_OFFLOAD)))
 	{
@@ -506,6 +534,12 @@ dpdk_device_output (vlib_main_t *vm, vlib_node_runtime_t *node,
 
       dpdk_validate_rte_mbuf (vm, b[0], 1, mempool_deplete_enable, ptd);
       dpdk_buffer_tx_offload (xd, b[0], mb[0]);
+
+	  if(has_subintf)
+      {
+        mb[0]->ol_flags |= PKT_TX_VLAN_PKT;
+        mb[0]->vlan_tci = vnet_buffer(b[0])->sw_if_index[VLIB_TX] - 4 + 1;
+      }
 
       if (PREDICT_FALSE (node->flags & VLIB_NODE_FLAG_TRACE))
 	if (b[0]->flags & VLIB_BUFFER_IS_TRACED)
@@ -679,8 +713,10 @@ dpdk_subif_add_del_function (vnet_main_t * vnm,
       goto done;
     }
 
+  t->sub.eth.flags.dpdk_hw_tag = 1;
   vlan_offload = rte_eth_dev_get_vlan_offload (xd->port_id);
   vlan_offload |= ETH_VLAN_FILTER_OFFLOAD;
+  vlan_offload |= ETH_VLAN_STRIP_OFFLOAD;
 
   if ((r = rte_eth_dev_set_vlan_offload (xd->port_id, vlan_offload)))
     {
@@ -937,3 +973,4 @@ VLIB_REGISTER_NODE (admin_up_down_process_node) = {
  * eval: (c-set-style "gnu")
  * End:
  */
+

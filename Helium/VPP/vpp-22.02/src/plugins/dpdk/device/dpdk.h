@@ -255,6 +255,10 @@ typedef struct
 #define DPDK_DEVICE_TSO_DEFAULT 0
 #define DPDK_DEVICE_TSO_OFF 1
 #define DPDK_DEVICE_TSO_ON  2
+  u8 vlantag;
+#define DPDK_DEVICE_VLANTAG_DEFAULT 0
+#define DPDK_DEVICE_VLANTAG_OFF 1
+#define DPDK_DEVICE_VLANTAG_ON  2
 } dpdk_device_config_t;
 
 typedef struct
@@ -376,7 +380,7 @@ typedef struct
   vlib_buffer_t buffer;		/* Copy of VLIB buffer; pkt data stored in pre_data. */
 } dpdk_rx_trace_t;
 
-void dpdk_device_setup (dpdk_device_t * xd);
+void dpdk_device_setup (dpdk_device_t * xd, dpdk_device_config_t *devconf);
 void dpdk_device_start (dpdk_device_t * xd);
 void dpdk_device_stop (dpdk_device_t * xd);
 int dpdk_port_state_callback (dpdk_portid_t port_id,

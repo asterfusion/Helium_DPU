@@ -165,7 +165,7 @@ dpdk_ol_flags_extract (struct rte_mbuf **mb, u32 *flags, int count)
 
 static_always_inline uword
 dpdk_process_rx_burst (vlib_main_t *vm, dpdk_per_thread_data_t *ptd,
-		       uword n_rx_packets, int maybe_multiseg, u32 *or_flagsp)
+		       uword n_rx_packets, int maybe_multiseg, u32 *or_flagsp, int has_subintf)
 {
   u32 n_left = n_rx_packets;
   vlib_buffer_t *b[4];
@@ -218,6 +218,14 @@ dpdk_process_rx_burst (vlib_main_t *vm, dpdk_per_thread_data_t *ptd,
 	  n_bytes += dpdk_process_subseq_segs (vm, b[3], mb[3], &bt);
 	}
 
+	  if(has_subintf)
+      {
+        vnet_buffer(b[0])->dont_waste_me = (mb[0]->vlan_tci & 0xFFF);
+        vnet_buffer(b[1])->dont_waste_me = (mb[1]->vlan_tci & 0xFFF);
+        vnet_buffer(b[2])->dont_waste_me = (mb[2]->vlan_tci & 0xFFF);
+        vnet_buffer(b[3])->dont_waste_me = (mb[3]->vlan_tci & 0xFFF);
+      }
+
       /* next */
       mb += 4;
       n_left -= 4;
@@ -236,6 +244,10 @@ dpdk_process_rx_burst (vlib_main_t *vm, dpdk_per_thread_data_t *ptd,
       if (maybe_multiseg)
 	n_bytes += dpdk_process_subseq_segs (vm, b[0], mb[0], &bt);
 
+      if(has_subintf)
+     {
+       vnet_buffer(b[0])->dont_waste_me = (mb[0]->vlan_tci & 0xFFF);
+     }
       /* next */
       mb += 1;
       n_left -= 1;
@@ -365,6 +377,8 @@ dpdk_device_input (vlib_main_t *vm, dpdk_main_t *dm, dpdk_device_t *xd,
   u32 or_flags;
   u32 n;
   int single_next = 0;
+  int has_subintf = 0;
+  vlib_frame_t *f_tmp = NULL;
 
   dpdk_per_thread_data_t *ptd = vec_elt_at_index (dm->per_thread_data,
 						  thread_index);
@@ -414,10 +428,14 @@ dpdk_device_input (vlib_main_t *vm, dpdk_main_t *dm, dpdk_device_t *xd,
   if (PREDICT_FALSE (vnet_device_input_have_features (xd->sw_if_index)))
     vnet_feature_start_device_input_x1 (xd->sw_if_index, &next_index, bt);
 
+  if(xd->num_subifs)
+  {
+    has_subintf = 1;
+  }
   if (xd->flags & DPDK_DEVICE_FLAG_MAYBE_MULTISEG)
-    n_rx_bytes = dpdk_process_rx_burst (vm, ptd, n_rx_packets, 1, &or_flags);
+    n_rx_bytes = dpdk_process_rx_burst (vm, ptd, n_rx_packets, 1, &or_flags, has_subintf);
   else
-    n_rx_bytes = dpdk_process_rx_burst (vm, ptd, n_rx_packets, 0, &or_flags);
+    n_rx_bytes = dpdk_process_rx_burst (vm, ptd, n_rx_packets, 0, &or_flags, has_subintf);
 
   if (PREDICT_FALSE ((or_flags & RTE_MBUF_F_RX_LRO)))
     dpdk_process_lro_offload (xd, ptd, n_rx_packets);
@@ -459,6 +477,36 @@ dpdk_device_input (vlib_main_t *vm, dpdk_main_t *dm, dpdk_device_t *xd,
       vlib_buffer_enqueue_to_next (vm, node, ptd->buffers, ptd->next,
 				   n_rx_packets);
     }
+
+  else if(has_subintf)
+  {
+      u32 *to_next, n_left_to_next;
+
+      vlib_get_new_next_frame (vm, node, next_index, to_next, n_left_to_next);
+      vlib_get_buffer_indices_with_offset (vm, (void **) ptd->mbufs, to_next,
+					   n_rx_packets,
+					   sizeof (struct rte_mbuf));
+
+      if (PREDICT_TRUE (next_index == VNET_DEVICE_INPUT_NEXT_ETHERNET_INPUT))
+   	{
+   	  vlib_next_frame_t *nf;
+   	  vlib_frame_t *f;
+   	  nf = vlib_node_runtime_get_next_frame (vm, node, next_index);
+   	  f = vlib_get_frame (vm, nf->frame);
+	  f_tmp = f;
+   
+   	  /* if PMD supports ip4 checksum check and there are no packets
+   	     marked as ip4 checksum bad we can notify ethernet input so it
+   	     can send pacets to ip4-input-no-checksum node */
+   	  if (xd->flags & DPDK_DEVICE_FLAG_RX_IP4_CKSUM &&
+   	      (or_flags & PKT_RX_IP_CKSUM_BAD) == 0)
+   	    f->flags |= ETH_INPUT_FRAME_F_IP4_CKSUM_OK;
+   	  vlib_frame_no_append (f);
+   	}
+      n_left_to_next -= n_rx_packets;
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+      single_next = 0;
+  }
   else
     {
       u32 *to_next, n_left_to_next;
@@ -476,6 +524,7 @@ dpdk_device_input (vlib_main_t *vm, dpdk_main_t *dm, dpdk_device_t *xd,
 	  nf = vlib_node_runtime_get_next_frame (vm, node, next_index);
 	  f = vlib_get_frame (vm, nf->frame);
 	  f->flags = ETH_INPUT_FRAME_F_SINGLE_SW_IF_IDX;
+	  f_tmp = f;
 
 	  ef = vlib_frame_scalar_args (f);
 	  ef->sw_if_index = xd->sw_if_index;
@@ -503,7 +552,14 @@ dpdk_device_input (vlib_main_t *vm, dpdk_main_t *dm, dpdk_device_t *xd,
 					     sizeof (struct rte_mbuf));
 
       n_left = n_rx_packets;
-      buffers = ptd->buffers;
+      if (f_tmp)
+      {
+          buffers = vlib_frame_vector_args(f_tmp);
+      }
+      else
+      {
+          buffers = ptd->buffers;
+      }
       mb = ptd->mbufs;
       next = ptd->next;
 
@@ -612,6 +668,7 @@ dpdk_mempools_refill_from_vlib (vlib_main_t *vm, vlib_node_runtime_t *node,
       vec_foreach (bp, vm->buffer_main->buffer_pools)
 	{
 	  /*TBD: Use SIMD for faster comparison */
+	  
 	  if (ptd->refill_deplete_count_per_pool[bp->index] >=
 	      ptd->default_refill_count_per_pool[bp->index])
 	    {
@@ -689,3 +746,4 @@ VLIB_REGISTER_NODE (dpdk_input_node) = {
  * eval: (c-set-style "gnu")
  * End:
  */
+

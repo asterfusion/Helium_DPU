@@ -804,6 +804,7 @@ typedef struct
 	u16 default_sub:1;
 	u16 outer_vlan_id_any:1;
 	u16 inner_vlan_id_any:1;
+	u16 dpdk_hw_tag:1; /* let dpdk hw handle the tag */
       } flags;
     };
   } eth;

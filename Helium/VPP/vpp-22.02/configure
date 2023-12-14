@@ -61,7 +61,7 @@ while (( "$#" )); do
       fi
       ;;
     -w|--wipe)
-      git clean -fdx --exclude=startup.\*
+      #git clean -fdx --exclude=startup.\*
       exit 1
       ;;
     -*|--*=) # unsupported flags

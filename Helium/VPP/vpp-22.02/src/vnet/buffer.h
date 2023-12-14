@@ -157,8 +157,9 @@ typedef struct
   i16 l3_hdr_offset;
   i16 l4_hdr_offset;
   u8 feature_arc_index;
+  u8 dont_waste_me : 4;
   /* offload flags */
-  vnet_buffer_oflags_t oflags : 8;
+  vnet_buffer_oflags_t oflags : 4;
 
   union
   {

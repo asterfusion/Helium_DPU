@@ -524,7 +524,7 @@ dpdk_lib_init (dpdk_main_t * dm)
       if (devconf->max_lro_pkt_size)
 	xd->conf.max_lro_pkt_size = devconf->max_lro_pkt_size;
 
-      dpdk_device_setup (xd);
+      dpdk_device_setup (xd, devconf);
 
       /* rss queues should be configured after dpdk_device_setup() */
       if (devconf->rss_queues)
@@ -882,6 +882,8 @@ dpdk_device_config (dpdk_config_main_t *conf, void *addr,
       devconf->dev_addr_type = VNET_DEV_ADDR_VMBUS;
     }
 
+  devconf->vlantag = DPDK_DEVICE_VLANTAG_DEFAULT;
+
   if (!input)
     return 0;
 
@@ -916,6 +918,14 @@ dpdk_device_config (dpdk_config_main_t *conf, void *addr,
       else if (unformat (input, "tso off"))
 	{
 	  devconf->tso = DPDK_DEVICE_TSO_OFF;
+	}
+      else if (unformat (input, "vlantag on"))
+	{
+	  devconf->vlantag = DPDK_DEVICE_VLANTAG_ON;
+	}
+      else if (unformat (input, "vlantag off"))
+	{
+	  devconf->vlantag = DPDK_DEVICE_VLANTAG_OFF;
 	}
       else if (unformat (input, "devargs %s", &devconf->devargs))
 	;

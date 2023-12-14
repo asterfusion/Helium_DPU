@@ -54,7 +54,7 @@ dpdk_device_error (dpdk_device_t * xd, char *str, int rv)
 }
 
 void
-dpdk_device_setup (dpdk_device_t * xd)
+dpdk_device_setup (dpdk_device_t * xd, dpdk_device_config_t *devconf)
 {
   vlib_main_t *vm = vlib_get_main ();
   vnet_main_t *vnm = vnet_get_main ();
@@ -186,6 +186,11 @@ dpdk_device_setup (dpdk_device_t * xd)
 #if RTE_VERSION >= RTE_VERSION_NUM(21, 11, 0, 0)
   conf.rxmode.mtu = mtu;
 #endif
+
+  if (devconf && devconf->vlantag == DPDK_DEVICE_VLANTAG_ON && hi != NULL)
+  {
+    conf.txmode.offloads |= DEV_TX_OFFLOAD_VLAN_INSERT;
+  }
 
 retry:
   rv = rte_eth_dev_configure (xd->port_id, xd->conf.n_rx_queues,

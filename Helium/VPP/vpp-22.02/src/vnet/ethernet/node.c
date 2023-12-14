@@ -145,6 +145,53 @@ parse_header (ethernet_input_variant_t variant,
   *match_flags = SUBINT_CONFIG_VALID | SUBINT_CONFIG_MATCH_0_TAG;
   vlan_count = 0;
 
+  if(vnet_buffer(b0)->dont_waste_me != 0)
+  {
+    ethernet_vlan_header_t *h0;
+      u16 tag;
+
+    *match_flags = SUBINT_CONFIG_VALID | SUBINT_CONFIG_MATCH_1_TAG;
+    *outer_id = vnet_buffer(b0)->dont_waste_me;
+    *orig_type = ETHERNET_TYPE_VLAN;
+
+      if (*type == ETHERNET_TYPE_VLAN)
+	{
+	  // Double tagged packet
+	  *match_flags = SUBINT_CONFIG_VALID | SUBINT_CONFIG_MATCH_2_TAG;
+
+	  h0 = (void *) (b0->data + b0->current_data);
+
+	  tag = clib_net_to_host_u16 (h0->priority_cfi_and_id);
+
+	  *inner_id = tag & 0xfff;
+
+	  *type = clib_net_to_host_u16 (h0->type);
+
+	  vlib_buffer_advance (b0, sizeof (h0[0]));
+	  vlan_count = 1;
+	  if (*type == ETHERNET_TYPE_VLAN)
+	    {
+	      // More than double tagged packet
+	      *match_flags = SUBINT_CONFIG_VALID | SUBINT_CONFIG_MATCH_3_TAG;
+
+        h0 = (void *) (b0->data + b0->current_data);
+
+        *type = clib_net_to_host_u16 (h0->type);
+
+        vlib_buffer_advance (b0, sizeof (h0[0]));
+        vlan_count = 2;
+	  
+      if (*type == ETHERNET_TYPE_VLAN)
+        {
+          vlib_buffer_advance (b0, sizeof (h0[0]));
+          vlan_count = 3;	// "unknown" number, aka, 3-or-more
+        }
+
+	    }
+	}
+
+  }
+  else
   // check for vlan encaps
   if (ethernet_frame_is_tagged (*type))
     {
@@ -1273,7 +1320,8 @@ ethernet_input_inline (vlib_main_t * vm,
 	  /* Speed-path for the untagged case */
 	  if (PREDICT_TRUE (variant == ETHERNET_INPUT_VARIANT_ETHERNET
 			    && !ethernet_frame_is_any_tagged_x2 (type0,
-								 type1)))
+								 type1))
+                && !(vnet_buffer(b0)->dont_waste_me || vnet_buffer(b1)->dont_waste_me)  )
 	    {
 	      main_intf_t *intf0;
 	      subint_config_t *subint0;
@@ -1528,7 +1576,8 @@ ethernet_input_inline (vlib_main_t * vm,
 
 	  /* Speed-path for the untagged case */
 	  if (PREDICT_TRUE (variant == ETHERNET_INPUT_VARIANT_ETHERNET
-			    && !ethernet_frame_is_tagged (type0)))
+			    && !ethernet_frame_is_tagged (type0))
+			    && !(vnet_buffer(b0)->dont_waste_me))
 	    {
 	      main_intf_t *intf0;
 	      subint_config_t *subint0;
@@ -2364,3 +2413,4 @@ ethernet_register_l3_redirect (vlib_main_t * vm, u32 node_index)
  * eval: (c-set-style "gnu")
  * End:
  */
+

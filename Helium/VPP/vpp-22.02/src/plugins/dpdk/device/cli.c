@@ -315,7 +315,7 @@ set_dpdk_if_desc (vlib_main_t * vm, unformat_input_t * input,
   if (nb_tx_desc != (u32) ~ 0)
     xd->conf.n_tx_desc = nb_tx_desc;
 
-  dpdk_device_setup (xd);
+  dpdk_device_setup (xd, NULL);
 
   if (vec_len (xd->errors))
     return clib_error_return (0, "%U", format_dpdk_device_errors, xd);

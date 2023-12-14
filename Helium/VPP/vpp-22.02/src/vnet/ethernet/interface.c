@@ -100,7 +100,7 @@ ethernet_build_rewrite (vnet_main_t * vnm,
     is_p2p = 1;
   if (sub_sw != sup_sw)
     {
-      if (sub_sw->sub.eth.flags.one_tag)
+      if (sub_sw->sub.eth.flags.one_tag && !(sub_sw->sub.eth.flags.dpdk_hw_tag))
 	{
 	  n_bytes += sizeof (ethernet_vlan_header_t);
 	}
@@ -158,7 +158,7 @@ ethernet_build_rewrite (vnet_main_t * vnm,
 	clib_memset (h->dst_address, ~0, sizeof (h->dst_address));	/* broadcast */
     }
 
-  if (PREDICT_FALSE (!is_p2p) && sub_sw->sub.eth.flags.one_tag)
+  if (PREDICT_FALSE (!is_p2p) && sub_sw->sub.eth.flags.one_tag && !(sub_sw->sub.eth.flags.dpdk_hw_tag))
     {
       ethernet_vlan_header_t *outer = (void *) (h + 1);
 

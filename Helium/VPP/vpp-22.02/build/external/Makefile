@@ -21,7 +21,8 @@ BUILD_DIR        ?= $(CURDIR)/_build
 INSTALL_DIR      ?= $(CURDIR)/_install
 #PKG_VERSION ?= $(shell git describe --abbrev=0 | cut -d- -f1 | cut -dv -f2 | cut -d. -f1,2)
 PKG_VERSION ?= 22.02
-PKG_SUFFIX  ?= $(shell git log --oneline | wc -l)
+@PKG_SUFFIX  ?= $(shell git log --oneline | wc -l)
+PKG_SUFFIX  ?= 1
 #PKG_SUFFIX ?= $(shell git log --oneline v$(PKG_VERSION)-rc0.. . | wc -l)
 JOBS := $(if $(shell [ -f /proc/cpuinfo ] && head /proc/cpuinfo),\
 	$(shell grep -c ^processor /proc/cpuinfo), 2)
