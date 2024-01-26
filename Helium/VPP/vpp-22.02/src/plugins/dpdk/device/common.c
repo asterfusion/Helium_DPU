@@ -87,7 +87,7 @@ dpdk_device_setup (dpdk_device_t * xd, dpdk_device_config_t *devconf)
 		  format_dpdk_rte_device, dev_info.device);
 
   /* create rx and tx offload wishlist */
-  rxo = DEV_RX_OFFLOAD_IPV4_CKSUM;
+  rxo = DEV_RX_OFFLOAD_IPV4_CKSUM | DEV_RX_OFFLOAD_VLAN_STRIP;
   txo = 0;
 
   if (xd->conf.enable_tcp_udp_checksum)
