@@ -487,6 +487,10 @@ dpdk_device_input (vlib_main_t *vm, dpdk_main_t *dm, dpdk_device_t *xd,
 					   n_rx_packets,
 					   sizeof (struct rte_mbuf));
 
+      for (n = 0; n < n_rx_packets; n++)
+      {
+          ptd->next[n] = next_index;
+      }
       if (PREDICT_TRUE (next_index == VNET_DEVICE_INPUT_NEXT_ETHERNET_INPUT))
    	{
    	  vlib_next_frame_t *nf;
