@@ -301,7 +301,7 @@ dpdk_mempool_deplete (vlib_main_t *vm, u32 buffer_pool_index,
       if (PREDICT_FALSE (
 	    rte_mempool_get_bulk (mp, buffers, n_buffers_to_deplete)))
 	{
-	  dpdk_log_err ("rte_mempool_get_bulk failed for mp: %0xlx", mp);
+	  dpdk_log_warn ("rte_mempool_get_bulk failed for mp: %0xlx", mp);
 	  return 0;
 	}
 

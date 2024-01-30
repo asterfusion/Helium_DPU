@@ -321,13 +321,13 @@ typedef struct
   int fp_refill_deplete_enable;
 
   /*current refill/deplete count per pool */
-  i16 *refill_deplete_count_per_pool;
+  u32 *refill_deplete_count_per_pool;
 
   /*Initialized value to be compared against during refill */
-  i16 *default_refill_count_per_pool;
+  u32 *default_refill_count_per_pool;
 
   /*Initialized value to be compared against during deplete */
-  i16 *default_deplete_count_per_pool;
+  u32 *default_deplete_count_per_pool;
 } dpdk_per_thread_data_t;
 
 typedef struct
