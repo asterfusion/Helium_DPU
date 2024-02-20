@@ -27,6 +27,7 @@ typedef enum
   VNET_DEVICE_INPUT_NEXT_MPLS_INPUT,
   VNET_DEVICE_INPUT_NEXT_ETHERNET_INPUT,
   VNET_DEVICE_INPUT_NEXT_DROP,
+  VNET_DEVICE_INPUT_NEXT_DSA_INPUT,
 
   /* For tunnels */
   VNET_DEVICE_INPUT_NEXT_IP4_DROP,
@@ -47,6 +48,7 @@ typedef enum
     [VNET_DEVICE_INPUT_NEXT_IP4_DROP] = "ip4-drop",                           \
     [VNET_DEVICE_INPUT_NEXT_IP6_DROP] = "ip6-drop",                           \
     [VNET_DEVICE_INPUT_NEXT_PUNT] = "punt-dispatch",                          \
+    [VNET_DEVICE_INPUT_NEXT_DSA_INPUT] = "dsa-input",                         \
   }
 
 typedef struct

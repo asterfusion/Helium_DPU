@@ -34,7 +34,7 @@ typedef struct
 
   /* maximum number of dynamically learned mac entries */
   u32 global_learn_limit;
-
+  u8  g_dsa_port_start;
   /* maximum number of dynamically learned mac entries per bridge domain */
   u32 bd_default_learn_limit;
 

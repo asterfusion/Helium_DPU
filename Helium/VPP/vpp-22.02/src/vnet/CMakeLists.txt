@@ -134,6 +134,7 @@ list(APPEND VNET_SOURCES
   ethernet/p2p_ethernet.c
   ethernet/p2p_ethernet_input.c
   ethernet/p2p_ethernet_api.c
+  ethernet/dsa_input.c
 )
 
 list(APPEND VNET_MULTIARCH_SOURCES

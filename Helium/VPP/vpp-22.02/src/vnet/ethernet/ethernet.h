@@ -73,6 +73,75 @@ static const u16x8 tagged_ethertypes = {
 };
 #endif
 
+enum {
+    DSA_TAG_TO_CPU,
+    DSA_TAG_FROM_CPU,
+    DSA_TAG_TO_SNIFFER,
+    DSA_TAG_FORWARD
+};
+
+typedef union dsa_header {
+    struct {
+#ifdef CPU_BIG_ENDIAN
+        uint32_t cmd        : 2;    /* [31:30]
+                                     * 0: TO_CPU_TAG
+                                     * 1: FROM_CPU_TAG
+                                     * 2: TO_SNIFFER_TAG
+                                     * 3: FORWARD_TAG */
+        uint32_t T          : 1;    /* [29]
+                                     * 0: frame recieved(or to egress) untag
+                                     * 1: frame recieved(or to egress) tagged */
+        uint32_t dev        : 5;    /* [28:24] */
+        uint32_t port       : 5;    /* [23:19] */
+        uint32_t R2         : 1;    /* [18]
+                                     * R: 0 or 1.
+                                     * W: must be 0. */
+        uint32_t R1         : 1;    /* [17] */
+        uint32_t C          : 1;    /* [16] Frame's CFI */
+
+        uint32_t prio       : 3;    /* [15:13] */
+        uint32_t R0         : 1;    /* [12] code=[R2:R1:R0] while cmd=TO_CPU_TAG */
+        uint32_t vlan       : 12;   /* [11:00] */
+        uint8_t	 eh[];              /* extend headr, 4 bytes. */
+#else
+        uint8_t dev         : 5;    /* [28:24] */
+        uint8_t T           : 1;    /* [29]
+                                     * 0: frame recieved(or to egress) untag
+                                     * 1: frame recieved(or to egress) tagged */ 
+        uint8_t cmd         : 2;    /* [31:30]
+                                     * 0: TO_CPU_TAG
+                                     * 1: FROM_CPU_TAG
+                                     * 2: TO_SNIFFER_TAG
+                                     * 3: FORWARD_TAG */
+
+        uint8_t C           : 1;    /* [16] Frame's CFI */
+        uint8_t R1          : 1;    /* [17] */
+        uint8_t R2          : 1;    /* [18]
+                                     * R: 0 or 1.
+                                     * W: must be 0. */
+        uint8_t port        : 5;    /* [23:19] */
+
+        uint8_t vlan_up4    : 4;	/* [11:00] */
+        uint8_t R0          : 1;	/* [12] code=[R2:R1:R0] while cmd=TO_CPU_TAG */
+        uint8_t prio        : 3;	/* [15:13] */
+
+        uint8_t vlan_low8   : 8;	/* [11:00] */
+       // uint8_t	 eh[];              /* extend headr, 4 bytes. */
+#endif
+    };
+    uint32_t dsa;
+}dsa_header_t;
+
+typedef struct dsa_eth_header {
+    uint8_t dst_address[6];
+    uint8_t src_address[6];
+    dsa_header_t dsah;
+     uint16_t type;
+    
+   
+}dsa_eth_header_t;
+
+
 static_always_inline int
 ethernet_frame_is_tagged (u16 type)
 {
@@ -344,6 +413,7 @@ typedef struct ethernet_main_t_
 } ethernet_main_t;
 
 extern ethernet_main_t ethernet_main;
+extern u8 g_dsa_port_start;
 
 always_inline ethernet_type_info_t *
 ethernet_get_type_info (ethernet_main_t * em, ethernet_type_t type)

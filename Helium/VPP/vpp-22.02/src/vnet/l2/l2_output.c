@@ -25,7 +25,10 @@
 #include <vppinfra/vector/count_equal.h>
 #include <vnet/l2/feat_bitmap.h>
 #include <vnet/l2/l2_output.h>
+#include <vnet/l2/l2_learn.h>
 
+
+static uint8_t dsa_output_port[8] = {5, 6, 7, 8, 1, 2, 3, 4};
 
 #ifndef CLIB_MARCH_VARIANT
 /* Feature graph node names */
@@ -288,6 +291,24 @@ l2output_process_batch (vlib_main_t * vm, vlib_node_runtime_t * node,
 				   l2_efp, l2_vtr, l2_pbb, 1, 1);
 }
 
+void static add_dsa_tag(vlib_buffer_t *v_buf, u32 index)
+{
+	dsa_header_t *hdr_array = (dsa_header_t *)(v_buf->data + v_buf->current_data - 4);
+
+	// copy mac
+	hdr_array[0].dsa = hdr_array[1].dsa;
+	hdr_array[1].dsa = hdr_array[2].dsa;
+	hdr_array[2].dsa = hdr_array[3].dsa;
+
+	hdr_array[3].dsa = 0;
+	hdr_array[3].cmd = DSA_TAG_FROM_CPU;
+	hdr_array[3].port = dsa_output_port[index];
+
+	vlib_buffer_advance(v_buf, -4);
+
+
+}
+
 VLIB_NODE_FN (l2output_node) (vlib_main_t * vm,
 			      vlib_node_runtime_t * node,
 			      vlib_frame_t * frame)
@@ -300,6 +321,7 @@ VLIB_NODE_FN (l2output_node) (vlib_main_t * vm,
   i16 cur_data_offsets[VLIB_FRAME_SIZE], *cdo;
   l2_output_config_t *config;
   u32 feature_bitmap;
+  l2learn_main_t *lm = &l2learn_main;
 
   from = vlib_frame_vector_args (frame);
   n_left = frame->n_vectors;	/* number of packets to process */
@@ -319,12 +341,28 @@ VLIB_NODE_FN (l2output_node) (vlib_main_t * vm,
       vlib_prefetch_buffer_header (b[7], LOAD);
 
       sw_if_index[0] = vnet_buffer (b[0])->sw_if_index[VLIB_TX];
+      if (sw_if_index[0] >= lm->g_dsa_port_start && sw_if_index[0] < lm->g_dsa_port_start + 8)
+      {
+            add_dsa_tag(b[0], sw_if_index[0] - lm->g_dsa_port_start);
+      }
       cdo[0] = b[0]->current_data;
       sw_if_index[1] = vnet_buffer (b[1])->sw_if_index[VLIB_TX];
+      if (sw_if_index[1] >= lm->g_dsa_port_start && sw_if_index[1] < lm->g_dsa_port_start + 8)
+      {       
+            add_dsa_tag(b[1], sw_if_index[1] - lm->g_dsa_port_start);
+      }
       cdo[1] = b[1]->current_data;
       sw_if_index[2] = vnet_buffer (b[2])->sw_if_index[VLIB_TX];
+      if (sw_if_index[2] >= lm->g_dsa_port_start && sw_if_index[2] < lm->g_dsa_port_start + 8)
+      {       
+            add_dsa_tag(b[2], sw_if_index[2] - lm->g_dsa_port_start);
+      }
       cdo[2] = b[2]->current_data;
       sw_if_index[3] = vnet_buffer (b[3])->sw_if_index[VLIB_TX];
+      if (sw_if_index[3] >= lm->g_dsa_port_start && sw_if_index[3] < lm->g_dsa_port_start + 8)
+      {       
+            add_dsa_tag(b[3], sw_if_index[3] - lm->g_dsa_port_start);
+      }
       cdo[3] = b[3]->current_data;
 
       /* next */
@@ -336,6 +374,11 @@ VLIB_NODE_FN (l2output_node) (vlib_main_t * vm,
   while (n_left)
     {
       sw_if_index[0] = vnet_buffer (b[0])->sw_if_index[VLIB_TX];
+      if (sw_if_index[0] >= lm->g_dsa_port_start && sw_if_index[0] < lm->g_dsa_port_start + 8)
+      {
+          add_dsa_tag(b[0], sw_if_index[0] - lm->g_dsa_port_start);
+      }
+
       cdo[0] = b[0]->current_data;
 
       /* next */

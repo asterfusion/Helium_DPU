@@ -82,6 +82,7 @@ typedef struct
 
   /* API message ID base */
   u16 msg_id_base;
+  
 } mrvl_pp2_main_t;
 
 extern vnet_device_class_t mrvl_pp2_device_class;

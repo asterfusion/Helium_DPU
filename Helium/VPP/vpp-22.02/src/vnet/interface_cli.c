@@ -2605,6 +2605,42 @@ VLIB_CLI_COMMAND (cmd_show_tx_hash, static) = {
   .short_help = "show interface tx-hash [interface]",
   .function = show_tx_hash,
 };
+static clib_error_t *
+set_hw_rx_redirect (vlib_main_t * vm,
+	      unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  vnet_main_t *vnm = vnet_get_main ();
+ // vnet_interface_main_t *im = &vnm->interface_main;
+  clib_error_t *error=NULL;
+  int err;
+  u32 hw_if_index, node_index = ~0;
+  hw_if_index = ~0;
+  if (!unformat_user (input, unformat_vnet_hw_interface, vnm, &hw_if_index))
+    {
+      error = clib_error_return (0, "unknown hardware interface `%U'",
+				 format_unformat_error, input);
+      goto done;
+    }
+  if (!unformat_user(input,  unformat_vlib_node, vm, &node_index))
+{
+error = clib_error_return (0, "unknown node name `%U'",
+				 format_unformat_error, input);
+      goto done;
+}
+  err = vnet_hw_interface_rx_redirect_to_node(vnm, hw_if_index, node_index);
+  if (err)
+    goto done;
+done:
+  return error;
+
+}
+/* *INDENT-OFF* */
+VLIB_CLI_COMMAND (set_hw_rx_redirect_command, static) = {
+  .path = "set interface rx_redirect",
+  .short_help = "Set interface rx_redirect",
+  .function = set_hw_rx_redirect,
+};
+/* *INDENT-ON* */
 
 /*
  * fd.io coding-style-patch-verification: ON

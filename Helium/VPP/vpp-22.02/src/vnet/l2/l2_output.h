@@ -22,7 +22,7 @@
 #include <vnet/vnet.h>
 #include <vnet/l2/feat_bitmap.h>
 #include <vnet/l2/l2_vtr.h>
-
+#include <vppinfra/bihash_8_8.h>
 
 /* The L2 output feature configuration, a per-interface struct */
 typedef struct

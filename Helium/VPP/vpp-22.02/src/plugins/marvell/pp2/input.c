@@ -99,8 +99,8 @@ mrvl_pp2_set_buf_data_len_flags (vlib_buffer_t * b, struct pp2_ppio_desc *d,
   if (add_flags & VNET_BUFFER_F_L3_HDR_OFFSET_VALID)
     vnet_buffer (b)->l4_hdr_offset = vnet_buffer (b)->l3_hdr_offset +
       DM_RXD_GET_IPHDR_LEN (d) * 4;
-
-  return len;
+  
+  return len+4;
 }
 
 static_always_inline u16
@@ -181,6 +181,12 @@ mrvl_pp2_device_input_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
   u32 *buffers;
   int i;
 
+  if(ppif->ppio->pp2_id == 0){
+
+    next_index = VNET_DEVICE_INPUT_NEXT_DSA_INPUT;
+
+  }
+
   vec_validate_aligned (ptd->descs, n_desc, CLIB_CACHE_LINE_BYTES);
   if (PREDICT_FALSE (pp2_ppio_recv (ppif->ppio, 0, qid, ptd->descs, &n_desc)))
     {
@@ -191,7 +197,15 @@ mrvl_pp2_device_input_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
   n_rx_packets = n_desc;
 
   for (i = 0; i < n_desc; i++)
+  {
     ptd->buffers[i] = pp2_ppio_inq_desc_get_cookie (&ptd->descs[i]);
+    
+    if (pp2_ppio_inq_desc_get_pkt_error(&ptd->descs[i]) != PP2_DESC_ERR_OK)
+    {
+      printf("pp2_ppio_inq_desc_get_pkt_error failed n_desc %d\n", n_desc);
+      return 0;
+    }
+  }
 
   d = ptd->descs;
   buffers = ptd->buffers;

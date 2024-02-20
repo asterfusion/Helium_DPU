@@ -45,6 +45,7 @@
 #include <vppinfra/sparse_vec.h>
 #include <vnet/l2/l2_bvi.h>
 #include <vnet/classify/pcap_classify.h>
+static subint_config_t *ethernet_sw_interface_get_config (vnet_main_t * vnm, u32 sw_if_index, u32 * flags, u32 * unsupported);
 
 #define foreach_ethernet_input_next		\
   _ (PUNT, "error-punt")			\
@@ -247,6 +248,64 @@ ethernet_input_inline_dmac_check (vnet_hw_interface_t * hi,
 				  u32 n_packets, ethernet_interface_t * ei,
 				  u8 have_sec_dmac);
 
+always_inline u32
+eth_identify_subint_dsa (vnet_hw_interface_t * hi,
+                     vlib_buffer_t * b0,
+		     u32 match_flags,
+		     main_intf_t * main_intf,
+		     vlan_intf_t * vlan_intf,
+		     qinq_intf_t * qinq_intf,
+		     u32 * new_sw_if_index, u8 * error0, u32 * is_l2)
+{
+  subint_config_t *subint;
+  u32 sw_if_index0;
+  sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+  u32 dummy_flags;
+  u32 dummy_unsup;
+  vnet_main_t *vnm = vnet_get_main ();
+ 
+  if (g_dsa_port_start > 0)
+  {
+    subint = ethernet_sw_interface_get_config (vnm, sw_if_index0, &dummy_flags, &dummy_unsup);
+    goto matched;
+  } 
+  // check for specific double tag
+  subint = &qinq_intf->subint;
+  if ((subint->flags & match_flags) == match_flags)
+    goto matched;
+
+  // check for specific outer and 'any' inner
+  subint = &vlan_intf->inner_any_subint;
+  if ((subint->flags & match_flags) == match_flags)
+    goto matched;
+
+  // check for specific single tag
+  subint = &vlan_intf->single_tag_subint;
+  if ((subint->flags & match_flags) == match_flags)
+    goto matched;
+
+  // check for default interface
+  subint = &main_intf->default_subint;
+  if ((subint->flags & match_flags) == match_flags)
+    goto matched;
+
+  // check for untagged interface
+  subint = &main_intf->untagged_subint;
+  if ((subint->flags & match_flags) == match_flags)
+    goto matched;
+
+  // No matching subinterface
+  *new_sw_if_index = ~0;
+  *error0 = ETHERNET_ERROR_UNKNOWN_VLAN;
+  *is_l2 = 0;
+  return 0;
+
+matched:
+  *new_sw_if_index = subint->sw_if_index;
+  *is_l2 = subint->flags & SUBINT_CONFIG_L2;
+  return 1;
+}
+
 // Determine the subinterface for this packet, given the result of the
 // vlan table lookups and vlan header parsing. Check the most specific
 // matches first.
@@ -263,7 +322,7 @@ identify_subint (ethernet_main_t * em,
   u32 matched;
   ethernet_interface_t *ei = ethernet_get_interface (em, hi->hw_if_index);
 
-  matched = eth_identify_subint (hi, match_flags, main_intf, vlan_intf,
+  matched = eth_identify_subint_dsa (hi, b0, match_flags, main_intf, vlan_intf,
 				 qinq_intf, new_sw_if_index, error0, is_l2);
 
   if (matched)
@@ -1337,14 +1396,35 @@ ethernet_input_inline (vlib_main_t * vm,
 
 	      /* Now sw_if_index0 == sw_if_index1  */
 	      if (PREDICT_FALSE (cached_sw_if_index != sw_if_index0))
-		{
-		  cached_sw_if_index = sw_if_index0;
-		  hi = vnet_get_sup_hw_interface (vnm, sw_if_index0);
-		  ei = ethernet_get_interface (em, hi->hw_if_index);
-		  intf0 = vec_elt_at_index (em->main_intfs, hi->hw_if_index);
-		  subint0 = &intf0->untagged_subint;
-		  cached_is_l2 = is_l20 = subint0->flags & SUBINT_CONFIG_L2;
-		}
+		// {
+		//   cached_sw_if_index = sw_if_index0;
+		//   hi = vnet_get_sup_hw_interface (vnm, sw_if_index0);
+		//   ei = ethernet_get_interface (em, hi->hw_if_index);
+		//   intf0 = vec_elt_at_index (em->main_intfs, hi->hw_if_index);
+		//   subint0 = &intf0->untagged_subint;
+		//   cached_is_l2 = is_l20 = subint0->flags & SUBINT_CONFIG_L2;
+		// }
+      {
+                  if (g_dsa_port_start && sw_if_index0 >= g_dsa_port_start)
+                  {
+                      u32 dummy_flags;
+                      u32 dummy_unsup;
+                      subint0 = ethernet_sw_interface_get_config (vnm, sw_if_index0, &dummy_flags, &dummy_unsup);
+                      cached_is_l2 = is_l20 = subint0->flags & SUBINT_CONFIG_L2;
+                      hi = vnet_get_sup_hw_interface (vnm, sw_if_index0);
+                      ei = ethernet_get_interface (em, hi->hw_if_index);
+                  }
+                  
+                  else
+                  {
+                      cached_sw_if_index = sw_if_index0;
+                      hi = vnet_get_sup_hw_interface (vnm, sw_if_index0);
+                      ei = ethernet_get_interface (em, hi->hw_if_index);
+                      intf0 = vec_elt_at_index (em->main_intfs, hi->hw_if_index);
+                      subint0 = &intf0->untagged_subint;
+                      cached_is_l2 = is_l20 = subint0->flags & SUBINT_CONFIG_L2;
+                  }
+              }
 
 	      if (PREDICT_TRUE (is_l20 != 0))
 		{
@@ -1569,6 +1649,8 @@ ethernet_input_inline (vlib_main_t * vm,
 	  error0 = ETHERNET_ERROR_NONE;
 	  e0 = vlib_buffer_get_current (b0);
 	  type0 = clib_net_to_host_u16 (e0->type);
+   
+
 
 	  /* Set the L2 header offset for all packets */
 	  vnet_buffer (b0)->l2_hdr_offset = b0->current_data;
@@ -1587,14 +1669,35 @@ ethernet_input_inline (vlib_main_t * vm,
 	      is_l20 = cached_is_l2;
 
 	      if (PREDICT_FALSE (cached_sw_if_index != sw_if_index0))
-		{
-		  cached_sw_if_index = sw_if_index0;
-		  hi = vnet_get_sup_hw_interface (vnm, sw_if_index0);
-		  ei = ethernet_get_interface (em, hi->hw_if_index);
-		  intf0 = vec_elt_at_index (em->main_intfs, hi->hw_if_index);
-		  subint0 = &intf0->untagged_subint;
-		  cached_is_l2 = is_l20 = subint0->flags & SUBINT_CONFIG_L2;
-		}
+		// {
+		//   cached_sw_if_index = sw_if_index0;
+		//   hi = vnet_get_sup_hw_interface (vnm, sw_if_index0);
+		//   ei = ethernet_get_interface (em, hi->hw_if_index);
+		//   intf0 = vec_elt_at_index (em->main_intfs, hi->hw_if_index);
+		//   subint0 = &intf0->untagged_subint;
+		//   cached_is_l2 = is_l20 = subint0->flags & SUBINT_CONFIG_L2;
+		// }
+       {
+                  if (g_dsa_port_start && sw_if_index0 >= g_dsa_port_start)
+                  {
+                      u32 dummy_flags;
+                      u32 dummy_unsup;
+                      subint0 = ethernet_sw_interface_get_config (vnm, sw_if_index0, &dummy_flags, &dummy_unsup);
+                      cached_is_l2 = is_l20 = subint0->flags & SUBINT_CONFIG_L2;
+                      hi = vnet_get_sup_hw_interface (vnm, sw_if_index0);
+                      ei = ethernet_get_interface (em, hi->hw_if_index);
+                  }
+                  
+                  else
+                  {
+                      cached_sw_if_index = sw_if_index0;
+                      hi = vnet_get_sup_hw_interface (vnm, sw_if_index0);
+                      ei = ethernet_get_interface (em, hi->hw_if_index);
+                      intf0 = vec_elt_at_index (em->main_intfs, hi->hw_if_index);
+                      subint0 = &intf0->untagged_subint;
+                      cached_is_l2 = is_l20 = subint0->flags & SUBINT_CONFIG_L2;
+                  }
+              }
 
 
 	      if (PREDICT_TRUE (is_l20 != 0))

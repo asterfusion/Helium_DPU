@@ -483,7 +483,7 @@ l2learn_init (vlib_main_t * vm)
    * of buckets.
    */
   mp->global_learn_limit = L2LEARN_DEFAULT_LIMIT;
-
+  mp->g_dsa_port_start = 0;
   /*
    * Set the default number of dynamically learned macs to the number
    * of buckets.
@@ -558,6 +558,10 @@ l2learn_config (vlib_main_t * vm, unformat_input_t * input)
     {
       if (unformat (input, "limit %d", &mp->global_learn_limit))
 	;
+      else if (unformat (input, "dsa-port-start %d", &mp->g_dsa_port_start))
+      {
+          g_dsa_port_start = mp->g_dsa_port_start;
+      }
 
       else
 	return clib_error_return (0, "unknown input `%U'",

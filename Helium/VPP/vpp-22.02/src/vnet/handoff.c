@@ -183,7 +183,7 @@ VLIB_REGISTER_NODE (worker_handoff_node) = {
 #ifndef CLIB_MARCH_VARIANT
 
 int
-interface_handoff_enable_disable (vlib_main_t *vm, u32 sw_if_index,
+interface_handoff_enable_disable (vlib_main_t *vm, u32 sw_if_index,u32 dsa_index,
 				  uword *bitmap, u8 is_sym, int is_l4,
 				  int enable_disable)
 {
@@ -204,10 +204,20 @@ interface_handoff_enable_disable (vlib_main_t *vm, u32 sw_if_index,
     return VNET_API_ERROR_INVALID_WORKER;
 
   if (hm->frame_queue_index == ~0)
-    {
-      vlib_node_t *n = vlib_get_node_by_name (vm, (u8 *) "ethernet-input");
+  {
+      vlib_node_t *n = NULL;
+      if (sw_if_index == dsa_index)
+      {
+          n = vlib_get_node_by_name (vm, (u8 *) "dsa-input");
+      }
+
+      else
+      {
+          n = vlib_get_node_by_name (vm, (u8 *) "ethernet-input");
+      }
+      //vlib_node_t *n = vlib_get_node_by_name (vm, (u8 *) "ethernet-input");
       hm->frame_queue_index = vlib_frame_queue_main_init (n->index, 0);
-    }
+  }
 
   vec_validate (hm->if_data, sw_if_index);
   d = vec_elt_at_index (hm->if_data, sw_if_index);
@@ -255,12 +265,15 @@ set_interface_handoff_command_fn (vlib_main_t * vm,
   u32 sw_if_index = ~0, is_sym = 0, is_l4 = 0;
   int enable_disable = 1;
   uword *bitmap = 0;
+  int dsa_enable = 0;
   int rv = 0;
 
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
       if (unformat (input, "disable"))
 	enable_disable = 0;
+      else if (unformat (input, "dsa_enable"))
+        dsa_enable = 1;
       else if (unformat (input, "workers %U", unformat_bitmap_list, &bitmap))
 	;
       else if (unformat (input, "%U", unformat_vnet_sw_interface,
@@ -282,8 +295,19 @@ set_interface_handoff_command_fn (vlib_main_t * vm,
   if (bitmap == 0)
     return clib_error_return (0, "Please specify list of workers...");
 
-  rv = interface_handoff_enable_disable (vm, sw_if_index, bitmap, is_sym,
+  // rv = interface_handoff_enable_disable (vm, sw_if_index, bitmap, is_sym,
+	// 				 is_l4, enable_disable);
+            if (dsa_enable)
+  {
+        rv = interface_handoff_enable_disable (vm, sw_if_index, sw_if_index,bitmap, is_sym,
 					 is_l4, enable_disable);
+  }
+
+  else
+  {
+        rv = interface_handoff_enable_disable (vm, sw_if_index, 0,bitmap, is_sym,
+					 is_l4, enable_disable);
+  }
 
   switch (rv)
     {

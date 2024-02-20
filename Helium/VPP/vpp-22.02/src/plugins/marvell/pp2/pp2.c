@@ -28,7 +28,7 @@
 #include <vnet/interface/rx_queue_funcs.h>
 
 /* size of DMA memory used by musdk (not used for buffers) */
-#define MV_SYS_DMA_MEM_SZ		(2 << 20)
+#define MV_SYS_DMA_MEM_SZ		(2 << 22)
 /* number of HIFs reserved (first X) */
 #define NUM_HIFS_RSVD			4
 /* number of buffer pools reserved (first X) */
@@ -240,9 +240,15 @@ mrvl_pp2_create_if (mrvl_pp2_create_if_args_t * args)
     }
 
   /* FIXME bpool bit select per pp */
-  s = format (s, "pool-%d:%d%c", pp2_id, pp2_id + 8, 0);
+  s = format (s, "pool-%d:%d%c", pp2_id, port_id + 8, 0);
   bpool_params.match = (char *) s;
   bpool_params.buff_len = vlib_buffer_get_default_data_size (vm);
+
+  bpool_params.buff_len+=64;
+  if (bpool_params.buff_len%32 !=0){
+    bpool_params.buff_len=bpool_params.buff_len+(32-bpool_params.buff_len%32);
+  }
+  
   /* FIXME +64 ? */
   if (pp2_bpool_init (&bpool_params, &ppif->inqs[0].bpool))
     {
