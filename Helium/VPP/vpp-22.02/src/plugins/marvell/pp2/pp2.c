@@ -240,7 +240,7 @@ mrvl_pp2_create_if (mrvl_pp2_create_if_args_t * args)
     }
 
   /* FIXME bpool bit select per pp */
-  s = format (s, "pool-%d:%d%c", pp2_id, port_id + 8, 0);
+  s = format (s, "pool-%d:%d%c", pp2_id, port_id + 9, 0);
   bpool_params.match = (char *) s;
   bpool_params.buff_len = vlib_buffer_get_default_data_size (vm);
 
