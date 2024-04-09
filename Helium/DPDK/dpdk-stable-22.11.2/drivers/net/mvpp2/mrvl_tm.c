@@ -875,10 +875,10 @@ mrvl_hierarchy_commit(struct rte_eth_dev *dev, int clear_on_fail,
 			if (!node->profile)
 				continue;
 
-			priv->ppio_params.rate_limit_enable = 1;
-			priv->ppio_params.rate_limit_params.cir =
+			priv->ppio_params.rate_limit.rate_limit_enable = 1;
+			priv->ppio_params.rate_limit.rate_limit_params.cir =
 				node->profile->params.peak.rate * 8 / 1000;
-			priv->ppio_params.rate_limit_params.cbs =
+			priv->ppio_params.rate_limit.rate_limit_params.cbs =
 				node->profile->params.peak.size / 1000;
 
 			MRVL_LOG(INFO,
@@ -905,17 +905,17 @@ mrvl_hierarchy_commit(struct rte_eth_dev *dev, int clear_on_fail,
 		}
 
 		if (node->profile) {
-			p->rate_limit_enable = 1;
+			p->rate_limit.rate_limit_enable = 1;
 			/* convert Bytes/s to kilo bits/s */
-			p->rate_limit_params.cir =
+			p->rate_limit.rate_limit_params.cir =
 				node->profile->params.peak.rate * 8 / 1000;
 			/* convert bits to kilo bits */
-			p->rate_limit_params.cbs =
+			p->rate_limit.rate_limit_params.cbs =
 				node->profile->params.peak.size / 1000;
 		} else {
-			p->rate_limit_enable = 0;
-			p->rate_limit_params.cir = 0;
-			p->rate_limit_params.cbs = 0;
+			p->rate_limit.rate_limit_enable = 0;
+			p->rate_limit.rate_limit_params.cir = 0;
+			p->rate_limit.rate_limit_params.cbs = 0;
 		}
 	}
 
@@ -929,9 +929,9 @@ mrvl_hierarchy_commit(struct rte_eth_dev *dev, int clear_on_fail,
 
 			p->sched_mode = PP2_PPIO_SCHED_M_WRR;
 			p->weight = 0;
-			p->rate_limit_enable = 0;
-			p->rate_limit_params.cir = 0;
-			p->rate_limit_params.cbs = 0;
+			p->rate_limit.rate_limit_enable = 0;
+			p->rate_limit.rate_limit_params.cir = 0;
+			p->rate_limit.rate_limit_params.cbs = 0;
 		}
 	}
 

@@ -1141,9 +1141,9 @@ mrvl_configure_txqs(struct mrvl_priv *priv, uint16_t portid,
 	if (mrvl_cfg == NULL)
 		return 0;
 
-	priv->ppio_params.rate_limit_enable = port_cfg->rate_limit_enable;
+	priv->ppio_params.rate_limit.rate_limit_enable = port_cfg->rate_limit_enable;
 	if (port_cfg->rate_limit_enable)
-		priv->ppio_params.rate_limit_params =
+		priv->ppio_params.rate_limit.rate_limit_params =
 			port_cfg->rate_limit_params;
 
 	for (i = 0; i < max_queues; i++) {
@@ -1152,8 +1152,8 @@ mrvl_configure_txqs(struct mrvl_priv *priv, uint16_t portid,
 
 		params->sched_mode = port_cfg->outq[i].sched_mode;
 		params->weight = port_cfg->outq[i].weight;
-		params->rate_limit_enable = port_cfg->outq[i].rate_limit_enable;
-		params->rate_limit_params = port_cfg->outq[i].rate_limit_params;
+		params->rate_limit.rate_limit_enable = port_cfg->outq[i].rate_limit_enable;
+		params->rate_limit.rate_limit_params = port_cfg->outq[i].rate_limit_params;
 	}
 
 	return 0;
