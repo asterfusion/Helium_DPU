@@ -250,7 +250,8 @@ struct octep_device {
 	/* Octeon Chip type. */
 	u16 chip_id;
 	u16 rev_id;
-
+	u16 reset;
+	//u16 hadreset;
 	/* Device capabilities enabled */
 	u64 caps_enabled;
 	/* Device capabilities supported */
@@ -311,6 +312,10 @@ struct octep_device {
 
 	/* Work entry to handle Tx timeout */
 	struct work_struct tx_timeout_task;
+	
+		
+	struct delayed_work firmware_status;
+
 
 	/* control mbox over pf */
 	struct octep_ctrl_mbox ctrl_mbox;

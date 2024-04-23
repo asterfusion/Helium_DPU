@@ -1,0 +1,2 @@
+rmmod octeon_ep_vf
+rmmod octeon_ep

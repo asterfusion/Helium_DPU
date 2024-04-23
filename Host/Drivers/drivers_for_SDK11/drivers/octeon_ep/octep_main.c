@@ -1390,6 +1390,125 @@ static const char *octep_devid_to_str(struct octep_device *oct)
 	}
 }
 
+
+static void octep_firmware_status(struct work_struct *work)
+{
+	u32 pos = 0;
+	u16 vsec_id;
+	u8 status = 0;
+
+	int err,i;
+	struct octep_device *oct = container_of(work, struct octep_device,
+											firmware_status.work);
+	struct net_device *netdev = oct->netdev;
+	struct pci_dev *pdev = oct->pdev;
+	
+	while ((pos = pci_find_next_ext_capability(oct->pdev, pos,
+											   PCI_EXT_CAP_ID_VNDR)))
+	{
+		pci_read_config_word(oct->pdev, pos + 4, &vsec_id);
+#define FW_STATUS_VSEC_ID 0xA3
+		if (vsec_id != FW_STATUS_VSEC_ID)
+			continue;
+
+		pci_read_config_byte(oct->pdev, (pos + 8), &status);
+		// dev_info(&oct->pdev->dev, "Firmware ready status = %u\n", status);
+		if (status == 0)
+		{
+			oct->reset = 1;
+		}
+		if (oct->reset == 1 && status == 1)
+		{
+			// err = octep_device_setup(oct);
+			// octep_device_setup_cn93_pf(oct);
+			// rtnl_lock();
+
+			// 		octep_stop(netdev);
+			// 		octep_open(netdev);
+
+			// rtnl_unlock();
+			if (!oct->conf)
+				return ;
+
+			/* Map BAR regions */
+			for (i = 0; i < OCTEP_MMIO_REGIONS; i++)
+			{
+				oct->mmio[i].hw_addr =
+					ioremap(pci_resource_start(oct->pdev, i * 2),
+							pci_resource_len(oct->pdev, i * 2));
+				if (!oct->mmio[i].hw_addr)
+				{
+					dev_err(&pdev->dev,
+							"Failed to remap BAR-%d; start=0x%llx len=0x%llx\n",
+							i, pci_resource_start(oct->pdev, i * 2),
+							pci_resource_len(oct->pdev, i * 2));
+					return;
+				}
+
+				else
+				{
+					dev_info(&pdev->dev, "Successed to remap BAR-%d; start=0x%llx len=0x%llx, hw_addr = %p\n",
+							 i, pci_resource_start(oct->pdev, i * 2),
+							 pci_resource_len(oct->pdev, i * 2), oct->mmio[i].hw_addr);
+				}
+				oct->mmio[i].mapped = 1;
+			}
+
+			oct->chip_id = pdev->device;
+			oct->rev_id = pdev->revision;
+			dev_info(&pdev->dev, "chip_id = 0x%x\n", pdev->device);
+
+			switch (oct->chip_id)
+			{
+			case OCTEP_PCI_DEVICE_ID_CN98_PF:
+			case OCTEP_PCI_DEVICE_ID_CN93_PF:
+			case OCTEP_PCI_DEVICE_ID_CNF95O_PF:
+			case OCTEP_PCI_DEVICE_ID_CNF95N_PF:
+				dev_info(&pdev->dev, "Setting up OCTEON %s PF PASS%d.%d\n",
+						 octep_devid_to_str(oct), OCTEP_MAJOR_REV(oct), OCTEP_MINOR_REV(oct));
+				octep_device_setup_cn93_pf(oct);
+				break;
+			case OCTEP_PCI_DEVICE_ID_CNF10KA_PF:
+			case OCTEP_PCI_DEVICE_ID_CN10KA_PF:
+			case OCTEP_PCI_DEVICE_ID_CNF10KB_PF:
+			case OCTEP_PCI_DEVICE_ID_CN10KB_PF:
+				dev_info(&pdev->dev, "Setting up OCTEON %s PF PASS%d.%d\n",
+						 octep_devid_to_str(oct), OCTEP_MAJOR_REV(oct), OCTEP_MINOR_REV(oct));
+				octep_device_setup_cnxk_pf(oct);
+				break;
+			default:
+				dev_err(&pdev->dev,
+						"%s: unsupported device\n", __func__);
+				return;
+			}
+
+			err = octep_ctrl_net_init(oct);
+			if (err)
+				return ;
+
+			err = octep_setup_pfvf_mbox(oct);
+			if (err)
+			{
+				dev_err(&pdev->dev, " pfvf mailbox setup failed\n");
+				octep_ctrl_net_uninit(oct);
+				return ;
+			}
+
+
+
+
+			queue_work(octep_wq, &oct->tx_timeout_task);
+			oct->reset = 0;
+			
+
+		}
+	}
+	queue_delayed_work(octep_wq, &oct->firmware_status,
+					   msecs_to_jiffies(1000));
+}
+
+
+
 /**
  * octep_device_setup() - Setup Octeon Device.
  *
@@ -1475,7 +1594,12 @@ int octep_device_setup(struct octep_device *oct)
 			   msecs_to_jiffies(OCTEP_INTR_POLL_TIME_MSECS));
 
 	atomic_set(&oct->hb_miss_cnt, 0);
-	INIT_DELAYED_WORK(&oct->hb_task, octep_hb_timeout_task);
+	// INIT_DELAYED_WORK(&oct->hb_task, octep_hb_timeout_task);
+
+	INIT_DELAYED_WORK(&oct->firmware_status, octep_firmware_status);
+
+	queue_delayed_work(octep_wq, &oct->firmware_status,
+					   msecs_to_jiffies(1000));
 
 	return 0;
 
@@ -1504,7 +1628,8 @@ static void octep_device_cleanup(struct octep_device *oct)
 
 	dev_info(&oct->pdev->dev, "Cleaning up Octeon Device ...\n");
 	cancel_all_tasks(oct);
-	cancel_delayed_work_sync(&oct->hb_task);
+	// cancel_delayed_work_sync(&oct->hb_task);
+	cancel_delayed_work_sync(&oct->firmware_status);
 
 	oct->hw_ops.soft_reset(oct);
 	for (i = 0; i < OCTEP_MMIO_REGIONS; i++) {
@@ -1552,7 +1677,8 @@ static void octep_dev_setup_task(struct work_struct *work)
 	struct net_device *netdev = oct->netdev;
 	int max_rx_pktlen;
 	int err;
-
+	int status;
+	
 	atomic_set(&oct->status, OCTEP_DEV_STATUS_WAIT_FOR_FW);
 	while (true) {
 		if (get_fw_ready_status(oct))
@@ -1581,10 +1707,9 @@ static void octep_dev_setup_task(struct work_struct *work)
 	octep_ctrl_net_get_info(oct, OCTEP_CTRL_NET_INVALID_VFID,
 				&oct->conf->fw_info);
 	dev_info(&oct->pdev->dev, "Heartbeat interval %u msecs Heartbeat miss count %u\n",
-		 oct->conf->fw_info.hb_interval,
-		 oct->conf->fw_info.hb_miss_count);
-	queue_delayed_work(octep_wq, &oct->hb_task,
-			   msecs_to_jiffies(oct->conf->fw_info.hb_interval));
+			 oct->conf->fw_info.hb_interval,
+			 oct->conf->fw_info.hb_miss_count);
+	// queue_delayed_work(octep_wq, &oct->hb_task,msecs_to_jiffies(oct->conf->fw_info.hb_interval));
 
 	netdev->netdev_ops = &octep_netdev_ops;
 	octep_set_ethtool_ops(netdev);
@@ -1608,9 +1733,11 @@ static void octep_dev_setup_task(struct work_struct *work)
 	netdev->max_mtu = max_rx_pktlen - (ETH_HLEN + ETH_FCS_LEN);
 	netdev->mtu = OCTEP_DEFAULT_MTU;
 
-	if (OCTEP_TX_TSO(oct->conf->fw_info.tx_ol_flags)) {
+	if (OCTEP_TX_TSO(oct->conf->fw_info.tx_ol_flags))
+	{
 		netdev->hw_features |= NETIF_F_TSO;
-		netif_set_gso_max_size(netdev, netdev->max_mtu);
+		// netif_set_gso_max_size(netdev, netdev->max_mtu);
+		netif_set_tso_max_size(netdev, netdev->max_mtu);
 	}
 
 	netdev->features |= netdev->hw_features;

@@ -23,6 +23,12 @@ all: $(SUBDIRS)
 		for d in $(SUBDIRS); do \
 				if test -d $$d; then $(OCTEONTX_BUILD_ENV) $(MAKE) -s -C $$d || exit 1; fi; \
 		done
+
+install :
+	 /usr/bin/install -c -m 644 mod-service/helium_insmod.sh mod-service/helium_rmmod.sh '/usr/bin'
+	 /usr/bin/install -c -m 644 mod-service/helium-mod.service '/etc/systemd/system'
+	 systemctl daemon-reload
+	 echo -e "octeon_ep_path=$(OCTEONTX_HOST_ROOT)/drivers/octeon_ep/octeon_ep.ko\nocteon_ep_vf_path=$(OCTEONTX_HOST_ROOT)/drivers/octeon_ep_vf/octeon_ep_vf.ko\nvf_num=4">/etc/helium_mod.conf
 clean:
 		for d in $(SUBDIRS); do \
 				if test -d $$d; then $(OCTEONTX_BUILD_ENV) $(MAKE) -s -C $$d $@ || exit 1; fi; \
