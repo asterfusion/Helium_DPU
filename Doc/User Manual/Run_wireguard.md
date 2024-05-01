@@ -15,6 +15,7 @@
  git clone https://git.zx2c4.com/wireguard-tools
  git clone https://git.zx2c4.com/wireguard-linux-compat
 ```
+The wireguard-linux-compat is only for kernel 3.10-5.5, you can see the details from <https://git.zx2c4.com/wireguard-linux-compat/about/>
 
 3. Install the required tools
 ```bash
@@ -22,6 +23,7 @@
 ```
 
 4、Compile and install wireguard
+- For kernel 3.10-5.5, compile wireguard-linux-compat
 ```bash
  cd wireguard-linux-compat/src
  make dkms-install
@@ -36,7 +38,23 @@
  dkms install wireguard/1.0.20220627/
  insmod /lib/modules/`uname -r`/updates/dkms/wireguard.ko
 ```
+- For kernel 6.1 above, compile the linux source code
+check the .config file
+```txt
+CONFIG_WIREGUARD=m
+```
+rebuild the kernel
+```bash
+make -j 20
+make -j 20 modules_install
+```
+after success, you can install wireguard module
+```bash
+depmod -a
+modprobe wireguard
+```
 
+  
 5. Install wireguard-tools
 ```bash
  cd <path>/wireguard-tools/src/
