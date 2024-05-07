@@ -1,0 +1,23 @@
+Pcie_ep_octeon host License Summary
+===================================
+
+Pcie_ep_octeon_host project contains linux kernel drivers and applications
+developed by Marvell to enable using Octeon in endpoint mode.This file gives a
+short overview of the various components and pointers to their exact license
+information.In the event of a conflict, the license header of a specific file
+takes precedence over this file. This is just a summary file.
+
+Pcie_ep_octeon_host components
+==============================
+
+Component:      drivers
+License:        GPL-2.0 (SDPX-License-Identifier: GPL-2.0)
+License Text:   https://spdx.org/licenses/GPL-2.0.html
+Project URL:    N/A
+Directories:    drivers
+
+Component:      apps
+License:        Apache-2.0 (SPDX-License-Identifier: Apache-2.0)
+License Text:   https://spdx.org/licenses/Apache-2.0.html
+Project URL:    N/A
+Directories:    apps

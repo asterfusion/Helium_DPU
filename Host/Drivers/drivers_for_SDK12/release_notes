@@ -1,0 +1,73 @@
+PCIe-EP Octeon Host Release Notes
+=================================
+
+Supported Host Linux Kernel Version range
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- 5.4.0 to 5.15.0
+
+Known Issues
+------------
+- Only single PF per PEM is supported
+- octboot_net can intermittently fail with multiple devices
+- Remove and rescan of PF device shouldn't be done while octboot_net driver is loaded
+
+Change Logs
+-----------
+v24.03
+~~~~~
+- octeon_ep: Fix race condtition in driver remove.
+- phc: Fix initialization path.
+- octboot_net: Fix creation of sysfs entry.
+- octboot_net: Provide interface to trigger secondary bus reset.
+
+v24.02
+~~~~~
+- octeon_ep_vf: Set VF carrier OFF when heartbeats timeout.
+- octboot_net: Add module parameter to control default target reset behavior on load.
+- phc:For kernels 6.2 and above use "adjfine" handler.
+
+v24.01
+~~~~~
+- octeon_ep_vf: avoid compiler optimizations and IQ/OQ reordering.
+- octeon_ep: avoid compiler optimizations and IQ/OQ reordering.
+
+v23.11
+~~~~~
+- octboot_net: fix: properly remove sysfs entry when the device hasn't been "activated".
+
+v23.10
+~~~~~
+- octeon_ep_vf: fixed OQ/IQ synchronization issue during repeated open and close operations.
+- octeon_ep: fixed OQ/IQ synchronization issue during repeated open and close operations.
+- octeon_ep_vf: Prevent kernel crash for unexpected errors detected during packet processing.
+- octeon_ep: Prevent kernel crash for unexpected errors detected during packet processing.
+- phc: fix crash during remove sequence.
+
+v23.08
+~~~~~
+- octboot_net: add target reset functionality
+- octboot_net: add graceful FLR support
+- octeon_ep: add graceful PF FLR support
+- octeon_ep_vf: add graceful PF FLR support
+- octeon_ep: firmware_ready bit reset handling for CNF95
+- octboot_net: Interface to be numbered based on pci entry index
+- octboot_net: Fixed asymmetric lock sequence
+
+v23.07
+~~~~~
+- Octeon_ep: increase send mbox response timeout
+- Octeon_ep: firmware ready should explicitly test for ready value
+- Updates to makefiles to support CI
+
+v23.06
+~~~~~
+- octboot_net: mark state transitions more accurately
+
+v23.05
+~~~~~
+- octboot_net: fix issues around mulitple card reset
+- octeon_ep: Add checksum and tso offload commands for pf and vf
+
+v23.04
+~~~~~
+- Initial release of host drivers

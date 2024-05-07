@@ -1,0 +1,82 @@
+Octeon host Drivers for CN9K and CN10K series
+=============================================
+
+Copyright (C) 2023 Marvell.
+
+This repo contains Marvell Octeon host Drivers.
+Provided "AS IS" and WITHOUT SUPPORT. No support for any changes made to this code. No support on building from this source.
+This is just reference host driver for Octeon PCIe card and is not at production level quality.
+
+Contents
+========
+
+- Overview
+- Identifying CN9K/CN10K device
+- Building and Installation
+
+Overview
+========
+The purpose pcie_ep_octeon_host drivers is to provide the necessary linux kernel
+drivers for the host side for running packet IO between host and an
+Octeon CN9K or CN10K (referered collectively as CNXK) connected to that host
+in PCIe Endpoint mode.
+
+
+Identifying CN9K/CN10K device
+=============================
+#. Use lspci command to list Octeon devices on Host, as below:
+
+   .. code-block:: shell-session
+
+      # lspci | grep Cavium
+
+   The above command should show an output similar to
+
+   .. code-block:: shell-session
+
+      01:00.0 Network controller: Cavium, Inc. Device b200 /* 96xx PF  */
+      01:02.0 Network controller: Cavium, Inc. Device b203 /* 96xx VF0 */
+
+      01:00.0 Network controller: Cavium, Inc. Device b100 /* 98xx PF  */
+      01:02.0 Network controller: Cavium, Inc. Device b103 /* 98xx VF0 */
+
+      01:00.0 Network controller: Cavium, Inc. Device b400 /* F95N PF  */
+      01:02.0 Network controller: Cavium, Inc. Device b403 /* F95N VF0 */
+
+      81:00.0 Network controller: Cavium, Inc. Device b900 /* cn10ka PF  */
+      81:02.0 Network controller: Cavium, Inc. Device b903 /* cn10ka VF0 */
+
+      81:00.0 Network controller: Cavium, Inc. Device ba00 /* cnf10ka PF  */
+      81:02.0 Network controller: Cavium, Inc. Device ba03 /* cnf10ka VF0 */
+
+      81:00.0 Network controller: Cavium, Inc. Device bc00 /* cnf10kb PF  */
+      81:02.0 Network controller: Cavium, Inc. Device bc03 /* cnf10kb VF0 */
+
+   The PCI BDFs in the above example will vary from system to system.
+
+
+Building the Drivers
+====================
+#. Install the kernel development headers
+#. Run "make" from top level directory.
+
+   .. code-block:: shell-session
+
+     # make
+
+#. Find below kernel modules (.ko files) generated once make is finished.
+
+   .. code-block:: shell-session
+
+     ./drivers/octboot_net/octboot_net.ko
+     ./drivers/octeon_ep_vf/octeon_ep_vf.ko
+     ./drivers/phc/oct_ep_phc.ko
+     ./drivers/octeon_ep/octeon_ep.ko
+
+Testing the Drivers
+===================
+Testing the host drivers requires bring up of software on Octeon
+along with the host drivers.
+
+Refer PCIE-EP section in SDK documentation for instructions on how to
+bring up host drivers along with software on Octeon.
