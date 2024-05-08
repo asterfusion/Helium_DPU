@@ -4,10 +4,10 @@ ___
 
 ### 1.Drivers for sdk10
 ```
-	cd Helium_DPU/Host/Drivers
+	cd Helium_DPU/Host/Drivers/drivers_for_SDK10
 	make
 ```
-The .ko files are located in the Helium_DPU/Host/Drivers/drivers directory.
+The .ko files are located in the Helium_DPU/Host/Drivers/drivers_for_SDK10 directory.
 
 ### 2.Drivers for sdk11
 ```
