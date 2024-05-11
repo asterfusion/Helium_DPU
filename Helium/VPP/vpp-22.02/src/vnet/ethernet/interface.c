@@ -85,7 +85,7 @@ ethernet_build_rewrite (vnet_main_t * vnm,
 			vnet_link_t link_type, const void *dst_address)
 {
   vnet_sw_interface_t *sub_sw = vnet_get_sw_interface (vnm, sw_if_index);
-  //vnet_sw_interface_t *sup_sw = vnet_get_sup_sw_interface (vnm, sw_if_index);
+  vnet_sw_interface_t *sup_sw = vnet_get_sup_sw_interface (vnm, sw_if_index);
   vnet_hw_interface_t *hw = vnet_get_sup_hw_interface (vnm, sw_if_index);
   ethernet_main_t *em = &ethernet_main;
   ethernet_interface_t *ei;
@@ -98,6 +98,7 @@ ethernet_build_rewrite (vnet_main_t * vnm,
   if ((sub_sw->type == VNET_SW_INTERFACE_TYPE_P2P) ||
       (sub_sw->type == VNET_SW_INTERFACE_TYPE_PIPE))
     is_p2p = 1;
+
 #if 0
   if (sub_sw != sup_sw)
     {
@@ -146,6 +147,10 @@ ethernet_build_rewrite (vnet_main_t * vnm,
   h = (ethernet_header_t *) rewrite;
   ei = pool_elt_at_index (em->interfaces, hw->hw_instance);
   clib_memcpy (h->src_address, &ei->address, sizeof (h->src_address));
+  if (sub_sw != sup_sw && PREDICT_FALSE (!is_p2p))
+  {
+      h->src_address[5] = (u8)(sw_if_index);
+  }
   if (is_p2p)
     {
       clib_memcpy (h->dst_address, sub_sw->p2p.client_mac,

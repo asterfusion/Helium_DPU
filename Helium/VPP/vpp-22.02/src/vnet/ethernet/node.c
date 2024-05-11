@@ -731,7 +731,7 @@ eth_input_tag_lookup (vlib_main_t * vm, vnet_main_t * vnm,
   l->n_bytes += vlib_buffer_length_in_chain (vm, b);
 }
 
-#define DMAC_MASK clib_net_to_host_u64 (0xFFFFFFFFFFFF0000)
+#define DMAC_MASK clib_net_to_host_u64 (0xFFFFFFFFFF000000)
 #define DMAC_IGBIT clib_net_to_host_u64 (0x0100000000000000)
 
 #ifdef CLIB_HAVE_VEC256
@@ -748,7 +748,7 @@ static_always_inline u8
 is_dmac_bad (u64 dmac, u64 hwaddr)
 {
   u64 r0 = dmac & DMAC_MASK;
-  return (r0 != hwaddr) && ((r0 & DMAC_IGBIT) == 0);
+  return (r0 != (hwaddr& DMAC_MASK)) && ((r0 & DMAC_IGBIT) == 0);
 }
 
 static_always_inline u8
@@ -1239,6 +1239,7 @@ ethernet_input_trace (vlib_main_t * vm, vlib_node_runtime_t * node,
 {
   vnet_main_t *vnm = vnet_get_main ();
   u32 *from, n_left;
+
   if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE)))
     {
       from = vlib_frame_vector_args (from_frame);
