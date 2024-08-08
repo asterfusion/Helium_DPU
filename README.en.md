@@ -1,5 +1,6 @@
 English  |  [简体中文](./README.md) 
 
+- [ET2500 Product](./ET2500/README.en.md)
 - [Overview](#intro)
 - [Features](#features)
 - [Application Scenario](#scene)
