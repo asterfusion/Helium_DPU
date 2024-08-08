@@ -1,5 +1,6 @@
 [English](./README.en.md)  |  简体中文  
 
+- [ET2500 Product](./ET2500/README.en.md)
 - [Helium DPU 概览](#intro)
 - [产品特性](#features)
 - [应用场景](#scene)
