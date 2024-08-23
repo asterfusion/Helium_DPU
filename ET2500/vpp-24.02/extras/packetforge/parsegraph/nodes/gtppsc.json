@@ -1,0 +1,32 @@
+{
+    "type" : "node",
+    "name" : "gtppsc",
+    "layout" : [
+        {
+            "name" : "length",
+            "size" : "8",
+            "default" : "1",
+            "readonly" : "true"
+        },
+        {
+            "name" : "pdutype",
+            "size" : "4"
+        },
+        {
+            "name" : "reserved",
+            "size" : "4"
+        },
+        {
+            "name" : "reserved",
+            "size" : "2"
+        },
+        {
+            "name" : "qfi",
+            "size" : "6"
+        },
+        {
+            "name" : "nextext",
+            "size" : "8"
+        }
+    ]
+}

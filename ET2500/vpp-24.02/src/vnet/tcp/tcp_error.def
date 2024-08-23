@@ -1,0 +1,52 @@
+/*
+ * Copyright (c) 2016-2019 Cisco and/or its affiliates.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+tcp_error (NONE, none, INFO, "no error")
+tcp_error (WRONG_THREAD, wrong_thread, ERROR, "Wrong worker thread")
+tcp_error (FILTERED, filtered, INFO, "Packets filtered")
+tcp_error (LENGTH, length, ERROR, "inconsistent ip/tcp lengths")
+tcp_error (NO_LISTENER, no_listener, ERROR, "no listener for dst port")
+tcp_error (LOOKUP_DROPS, lookup_drops, ERROR, "lookup drops")
+tcp_error (DISPATCH, dispatch, ERROR, "Dispatch error")
+tcp_error (ENQUEUED, enqueued, INFO, "Packets pushed into rx fifo")
+tcp_error (ENQUEUED_OOO, enqueued_ooo, WARN, "OOO packets pushed into rx fifo")
+tcp_error (FIFO_FULL, fifo_full, ERROR, "Packets dropped for lack of rx fifo space")
+tcp_error (PARTIALLY_ENQUEUED, partially_enqueued, WARN, "Packets partially pushed into rx fifo")
+tcp_error (SEGMENT_OLD, segment_old, WARN, "Old segment")
+tcp_error (SEGMENT_INVALID, segment_invalid, ERROR, "Invalid segments")
+tcp_error (SYNS_RCVD, syns_rcvd, INFO, "SYNs received")
+tcp_error (SPURIOUS_SYN, spurious_syn, WARN, "Spurious SYNs received")
+tcp_error (SYN_ACKS_RCVD, syn_acks_rcvd, INFO, "SYN-ACKs received")
+tcp_error (SPURIOUS_SYN_ACK, spurious_syn_ack, WARN, "Spurious SYN-ACKs received")
+tcp_error (MSG_QUEUE_FULL, msg_queue_full, ERROR, "Events not sent for lack of msg queue space")
+tcp_error (CREATE_SESSION_FAIL, create_session_fail, ERROR, "Sessions couldn't be allocated")
+tcp_error (ACK_OK, ack_ok, INFO, "Pure ACKs received")
+tcp_error (ACK_INVALID, ack_invalid, ERROR, "Invalid ACK")
+tcp_error (ACK_DUP, ack_dup, WARN, "Duplicate ACK")
+tcp_error (ACK_OLD, ack_old, WARN, "Old ACK")
+tcp_error (ACK_FUTURE, ack_future, WARN, "Future ACK")
+tcp_error (PKTS_SENT, pkts_sent, INFO, "Packets sent")
+tcp_error (RST_SENT, rst_sent, INFO, "Resets sent")
+tcp_error (RST_RCVD, rst_rcvd, INFO, "Resets received")
+tcp_error (INVALID_CONNECTION, invalid_connection, ERROR, "Invalid connection")
+tcp_error (CONNECTION_CLOSED, connection_closed, WARN, "Connection closed")
+tcp_error (CREATE_EXISTS, create_exists, ERROR, "Connection already exists")
+tcp_error (PUNT, punt, INFO, "Packets punted")
+tcp_error (OPTIONS, options, ERROR, "Could not parse options")
+tcp_error (PAWS, paws, ERROR, "PAWS check failed")
+tcp_error (RCV_WND, rcv_wnd, WARN, "Segment not in receive window")
+tcp_error (FIN_RCVD, fin_rcvd, INFO, "FINs received")
+tcp_error (LINK_LOCAL_RW, link_local_rw, ERROR, "No rewrite for link local connection")
+tcp_error (ZERO_RWND, zero_rwnd, WARN, "Zero receive window")
+tcp_error (CONN_ACCEPTED, conn_accepted, INFO, "Connections accepted")

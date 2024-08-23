@@ -1,0 +1,161 @@
+/*
+ * Copyright (c) 2015-2019 Cisco and/or its affiliates.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+option version = "2.2.1";
+import "vnet/ip/ip_types.api";
+
+/** \brief The types of packets to be punted
+*/
+enum punt_type
+{
+    /* L4 (UDP) packets */
+    PUNT_API_TYPE_L4,
+    /* IP proto (i.e. OSPF, RIP, etc) packets */
+    PUNT_API_TYPE_IP_PROTO,
+    /* Exception packets handled by the VLIB punt infra */
+    PUNT_API_TYPE_EXCEPTION,
+};
+
+/** \brief Punt L4 traffic definition
+    @param af - Address Family, IPv4 or IPV6
+    @param protocol - L4 protocol to be punted
+    @param port - TCP/UDP port to be punted
+*/
+typedef punt_l4
+{
+    vl_api_address_family_t af;
+    vl_api_ip_proto_t protocol;
+    u16 port;
+};
+
+/** \brief Punt IP protocol traffic definition
+    @param af - Address Family, IPv4 or IPV6
+    @param protocol - IP protocol to be punted
+*/
+typedef punt_ip_proto
+{
+    vl_api_address_family_t af;
+    vl_api_ip_proto_t protocol;
+};
+
+/** \brief The ID of the punt exception reason
+           Dump all the reasons to obtain this
+*/
+typedef punt_exception
+{
+    u32 id;
+};
+
+/** \brief Union of the different punt packet descriptions
+*/
+union punt_union
+{
+    vl_api_punt_exception_t exception;
+    vl_api_punt_l4_t l4;
+    vl_api_punt_ip_proto_t ip_proto;
+};
+
+/** \brief Full description of which packets are requested to be punted
+    @param type - Which packet type
+    @param punt - Description corresponding to the type
+*/
+typedef punt
+{
+    vl_api_punt_type_t type;
+    vl_api_punt_union_t punt;
+};
+
+/** \brief Punt traffic to the host
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_add - add punt if non-zero, else delete
+    @param punt - punt definition, only UDP (0x11) is supported
+*/
+autoreply define set_punt {
+    u32 client_index;
+    u32 context;
+    bool is_add;
+    vl_api_punt_t punt;
+};
+
+/** \brief Punt traffic to the host via socket
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param header_version - expected meta data header version (currently 1)
+    @param punt - punt definition
+*/
+define punt_socket_register {
+    u32 client_index;
+    u32 context;
+    u32 header_version;
+    vl_api_punt_t punt;
+    string pathname[108]; /* Linux sun_path defined to be 108 bytes, see unix(7) */
+};
+
+define punt_socket_register_reply
+{
+    u32 context;
+    i32 retval;
+    string pathname[108];
+};
+
+define punt_socket_dump
+{
+    u32 client_index;
+    u32 context;
+    vl_api_punt_type_t type;
+};
+
+define punt_socket_details
+{
+    u32 context;
+    vl_api_punt_t punt;
+    string pathname[108];
+};
+
+autoreply define punt_socket_deregister {
+    u32 client_index;
+    u32 context;
+    vl_api_punt_t punt;
+};
+
+typedef punt_reason
+{
+    u32 id;
+    string name[];
+};
+
+/** \brief Dump all or one of the exception punt reasons
+*   @param - If the string is not set punt dump all reasons
+*            else dump only the one specified
+*/
+define punt_reason_dump
+{
+    u32 client_index;
+    u32 context;
+    vl_api_punt_reason_t reason;
+};
+
+define punt_reason_details
+{
+    u32 context;
+    vl_api_punt_reason_t reason;
+};
+
+/*
+ * Local Variables:
+ * eval: (c-set-style "gnu")
+ * End:
+ */

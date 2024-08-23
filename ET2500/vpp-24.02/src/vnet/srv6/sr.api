@@ -1,0 +1,383 @@
+/* Hey Emacs use -*- mode: C -*- */
+/*
+ * Copyright (c) 2015-2016 Cisco and/or its affiliates.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+option version = "2.1.0";
+
+import "vnet/interface_types.api";
+import "vnet/ip/ip_types.api";
+import "vnet/srv6/sr_types.api";
+
+
+typedef srv6_sid_list
+{
+  u8 num_sids;
+  u32 weight;
+  vl_api_ip6_address_t sids[16];
+};
+
+typedef srv6_sid_list_with_sl_index
+{
+  u8 num_sids;
+  u32 weight;
+  u32 sl_index;
+  vl_api_ip6_address_t sids[16];
+};
+
+/** \brief IPv6 SR LocalSID add/del request
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_del Boolean of whether its a delete instruction
+    @param localsid_addr IPv6 address of the localsid
+    @param end_psp Boolean of whether decapsulation is allowed in this function
+    @param behavior Type of behavior (function) for this localsid
+    @param sw_if_index Only for L2/L3 xconnect. OIF. In VRF variant the
+     fib_table. Default:0xffffffff
+    @param vlan_index Only for L2 xconnect. Outgoing VLAN tag.
+    @param fib_table  FIB table in which we should install the localsid entry
+    @param nh_addr Next Hop IPv46 address. Only for L2/L3 xconnect.
+*/
+autoreply define sr_localsid_add_del
+{
+  u32 client_index;
+  u32 context;
+  bool is_del [default=false];
+  vl_api_ip6_address_t localsid;
+  bool end_psp;
+  vl_api_sr_behavior_t behavior;
+  vl_api_interface_index_t sw_if_index [default=0xffffffff];
+  u32 vlan_index;
+  u32 fib_table;
+  vl_api_address_t nh_addr;
+};
+
+/** \brief IPv6 SR policy add
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param bsid is the bindingSID of the SR Policy
+    @param weight is the weight of the sid list. optional.
+    @param is_encap is the behavior of the SR policy. (0.SRH insert // 1.Encapsulation)
+    @param is_spray is the type of the SR policy. (0.Default // 1.Spray)
+    @param fib_table is the VRF where to install the FIB entry for the BSID
+    @param sids is a srv6_sid_list object
+*/
+autoreply define sr_policy_add
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip6_address_t bsid_addr;
+  u32 weight;
+  bool is_encap;
+  bool is_spray;
+  u32 fib_table;
+  vl_api_srv6_sid_list_t sids;
+};
+
+/** \brief IPv6 SR policy modification
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param bsid is the bindingSID of the SR Policy
+    @param sr_policy_index is the index of the SR policy
+    @param fib_table is the VRF where to install the FIB entry for the BSID
+    @param operation is the operation to perform (among the top ones)
+    @param sl_index is the index of the Segment List to modify/delete
+    @param weight is the weight of the sid list. optional.
+    @param sids is a srv6_sid_list object
+*/
+autoreply define sr_policy_mod
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip6_address_t bsid_addr;
+  u32 sr_policy_index;
+  u32 fib_table;
+  vl_api_sr_policy_op_t operation;
+  u32 sl_index;
+  u32 weight;
+  vl_api_srv6_sid_list_t sids;
+};
+
+enum sr_policy_type : u8
+{
+  SR_API_POLICY_TYPE_DEFAULT = 0,
+  SR_API_POLICY_TYPE_SPRAY = 1,
+  SR_API_POLICY_TYPE_TEF = 2,
+};
+
+/** \brief IPv6 SR policy add
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param bsid is the bindingSID of the SR Policy
+    @param weight is the weight of the sid list. optional.
+    @param is_encap is the behavior of the SR policy. (0.SRH insert // 1.Encapsulation)
+    @param type is the SR policy param. (0.Default // 1.Spray // 2.Tef)
+    @param fib_table is the VRF where to install the FIB entry for the BSID
+    @param sids is a srv6_sid_list object
+    @param encap_src is a encaps IPv6 source addr. optional.
+*/
+autoreply define sr_policy_add_v2
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip6_address_t bsid_addr;
+  u32 weight;
+  bool is_encap;
+  vl_api_sr_policy_type_t type [default=0x0];
+  u32 fib_table;
+  vl_api_srv6_sid_list_t sids;
+  vl_api_ip6_address_t encap_src;
+  option status="in_progress";
+};
+
+/** \brief IPv6 SR policy modification
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param bsid is the bindingSID of the SR Policy
+    @param sr_policy_index is the index of the SR policy
+    @param fib_table is the VRF where to install the FIB entry for the BSID
+    @param operation is the operation to perform (among the top ones)
+    @param sl_index is the index of the Segment List to modify/delete
+    @param weight is the weight of the sid list. optional.
+    @param sids is a srv6_sid_list object
+    @param encap_src is a encaps IPv6 source addr. optional.
+*/
+autoreply define sr_policy_mod_v2
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip6_address_t bsid_addr;
+  u32 sr_policy_index;
+  u32 fib_table;
+  vl_api_sr_policy_op_t operation;
+  u32 sl_index;
+  u32 weight;
+  vl_api_srv6_sid_list_t sids;
+  vl_api_ip6_address_t encap_src;
+  option status="in_progress";
+};
+
+/** \brief IPv6 SR policy deletion
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param bsid is the bindingSID of the SR Policy
+    @param index is the index of the SR policy
+*/
+autoreply define sr_policy_del
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip6_address_t bsid_addr;
+  u32 sr_policy_index;
+};
+
+/** \brief IPv6 SR Set SRv6 encapsulation source
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param bsid is the bindingSID of the SR Policy
+    @param index is the index of the SR policy
+*/
+autoreply define sr_set_encap_source
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip6_address_t encaps_source;
+};
+
+/** \brief IPv6 SR Set SRv6 encapsulation hop-limit
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param hop_limit is the hop-limit value to set
+*/
+autoreply define sr_set_encap_hop_limit
+{
+  u32 client_index;
+  u32 context;
+  u8 hop_limit;
+};
+
+/** \brief IPv6 SR steering add/del
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_del
+    @param bsid is the bindingSID of the SR Policy (alt to sr_policy_index)
+    @param sr_policy is the index of the SR Policy (alt to bsid)
+    @param table_id is the VRF where to install the FIB entry for the BSID
+    @param prefix is the IPv4/v6 address for L3 traffic type
+    @param mask_width is the mask for L3 traffic type
+    @param sw_if_index is the incoming interface for L2 traffic
+    @param traffic_type describes the type of traffic
+*/
+autoreply define sr_steering_add_del
+{
+  u32 client_index;
+  u32 context;
+  bool is_del [default=false];
+  vl_api_ip6_address_t bsid_addr;
+  u32 sr_policy_index;
+  u32 table_id;
+  vl_api_prefix_t prefix;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_sr_steer_t traffic_type;
+};
+
+/** \brief Dump the list of SR LocalSIDs
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define sr_localsids_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+define sr_localsids_details
+{
+  u32 context;
+  vl_api_ip6_address_t addr;
+  bool end_psp;
+  vl_api_sr_behavior_t behavior;
+  u32 fib_table;
+  u32 vlan_index;
+  vl_api_address_t xconnect_nh_addr;
+  u32 xconnect_iface_or_vrf_table;
+};
+
+
+/** \brief Dump the list of SR LocalSIDs along with packet statistics
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define sr_localsids_with_packet_stats_dump
+{
+  u32 client_index;
+  u32 context;
+  option status="in_progress";
+};
+
+define sr_localsids_with_packet_stats_details
+{
+  u32 context;
+  vl_api_ip6_address_t addr;
+  bool end_psp;
+  vl_api_sr_behavior_t behavior;
+  u32 fib_table;
+  u32 vlan_index;
+  vl_api_address_t xconnect_nh_addr;
+  u32 xconnect_iface_or_vrf_table;
+  u64 good_traffic_bytes;
+  u64 good_traffic_pkt_count;
+  u64 bad_traffic_bytes;
+  u64 bad_traffic_pkt_count;
+  option status="in_progress";
+};
+
+
+
+/** \brief Dump the list of SR policies
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define sr_policies_dump
+{
+  option deprecated;
+
+  u32 client_index;
+  u32 context;
+};
+
+
+define sr_policies_details
+{
+  u32 context;
+  vl_api_ip6_address_t bsid;
+  bool is_spray;
+  bool is_encap;
+  u32 fib_table;
+  u8 num_sid_lists;
+  vl_api_srv6_sid_list_t sid_lists[num_sid_lists];
+};
+
+/** \brief Dump the list of SR policies v2
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define sr_policies_v2_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+define sr_policies_v2_details
+{
+  u32 context;
+  vl_api_ip6_address_t bsid;
+  vl_api_ip6_address_t encap_src;
+  vl_api_sr_policy_type_t type;
+  bool is_encap;
+  u32 fib_table;
+  u8 num_sid_lists;
+  vl_api_srv6_sid_list_t sid_lists[num_sid_lists];
+};
+
+/** \brief Dump the list of SR policies along with actual segment list index on VPP
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define sr_policies_with_sl_index_dump
+{
+  u32 client_index;
+  u32 context;
+  option status="in_progress";
+};
+
+
+define sr_policies_with_sl_index_details
+{
+  u32 context;
+  vl_api_ip6_address_t bsid;
+  bool is_spray;
+  bool is_encap;
+  u32 fib_table;
+  u8 num_sid_lists;
+  vl_api_srv6_sid_list_with_sl_index_t sid_lists[num_sid_lists];
+  option status="in_progress";
+};
+
+/** \brief Dump the steering policies
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define sr_steering_pol_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+define sr_steering_pol_details
+{
+  u32 context;
+  vl_api_sr_steer_t traffic_type;
+  u32 fib_table;
+  vl_api_prefix_t prefix;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_ip6_address_t bsid;
+};
+
+/*
+ * fd.io coding-style-patch-verification: OFF
+ * Local Variables:
+ * eval: (c-set-style "gnu")
+ * End:
+ */

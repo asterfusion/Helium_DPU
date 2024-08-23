@@ -1,0 +1,11 @@
+Metadata-Version: 2.1
+Name: vpp-papi
+Version: 2.0.0
+Summary: VPP Python binding
+Home-page: https://wiki.fd.io/view/VPP/Python_API
+Author: Ole Troan
+Author-email: ot@cisco.com
+License: Apache-2.0
+License-File: LICENSE.txt
+
+VPP Python language binding.

@@ -1,0 +1,9 @@
+---
+name: Hash infrastructure
+maintainer: Mohsin Kazmi <mohsin.kazmi14@gmail.com>, Damjan Marion <damarion@cisco.com>
+features:
+  - Ethernet
+  - IP
+description: "Hash infrastructure"
+state: development
+properties: [CLI]

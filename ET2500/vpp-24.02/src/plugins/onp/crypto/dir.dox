@@ -1,0 +1,18 @@
+/*
+ * Copyright (c) 2021 Marvell.
+ * SPDX-License-Identifier: Apache-2.0
+ * https://spdx.org/licenses/Apache-2.0.html
+ */
+
+/* Doxygen directory documentation */
+
+/**
+ * @dir
+ * @brief ONP crypto interface.
+ *
+ * This directory contains the source code for ONP crypto
+ * control path functions
+ */
+/*? %%clicmd:group_label ONP Crypto%% ?*/
+/*? %%syscfg:group_label ONP Crypto%% ?*/
+

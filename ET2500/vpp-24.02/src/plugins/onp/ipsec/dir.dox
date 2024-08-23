@@ -1,0 +1,17 @@
+/*
+ * Copyright (c) 2021 Marvell.
+ * SPDX-License-Identifier: Apache-2.0
+ * https://spdx.org/licenses/Apache-2.0.html
+ */
+
+/* Doxygen directory documentation */
+
+/**
+ * @dir
+ * @brief ONP IPsec nodes.
+ *
+ * This directory contains the source code for ONP IPsec nodes.
+ */
+/*? %%clicmd:group_label ONP IPsec%% ?*/
+/*? %%syscfg:group_label ONP IPsec%% ?*/
+

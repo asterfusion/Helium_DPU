@@ -1,0 +1,12 @@
+---
+name: Tap Device
+maintainer: damarion@cisco.com sluong@cisco.com mohsin.kazmi14@gmail.com
+features:
+  - Virtio
+  - Persistence
+  - Attach to an existing tap at host
+  - Filter packet dump output with SW if index
+description: "Create a tap v2 device interface, which connects to a
+              tap interface on the host system."
+state: production
+properties: [API, CLI, STATS, MULTITHREAD]

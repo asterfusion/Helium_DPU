@@ -1,0 +1,23 @@
+---
+devices:
+  - name: "client"
+    type: "netns"
+
+  - name: "server"
+    type: "netns"
+
+  - name: "hst_client_vpp"
+    type: "veth"
+    peer:
+      name: "client"
+      netns: "client"
+      ip4:
+        network: 1
+
+  - name: "hst_server_vpp"
+    type: "veth"
+    peer:
+      name: "server"
+      netns: "server"
+      ip4:
+        network: 2

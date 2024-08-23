@@ -1,0 +1,31 @@
+ARG UBUNTU_VERSION
+
+FROM ubuntu:${UBUNTU_VERSION}
+
+RUN apt-get update \
+ && apt-get install -y openssl libapr1 libnuma1 libsubunit0 \
+    iproute2 libnl-3-dev libnl-route-3-dev python3 iputils-ping  \
+    vim gdb \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV DIR=vpp-data/lib/vpp_plugins
+COPY \
+   $DIR/af_packet_plugin.so \
+   $DIR/hs_apps_plugin.so \
+   $DIR/http_plugin.so \
+   $DIR/unittest_plugin.so \
+   $DIR/quic_plugin.so \
+   $DIR/http_static_plugin.so \
+   $DIR/prom_plugin.so \
+   $DIR/tlsopenssl_plugin.so \
+   /usr/lib/x86_64-linux-gnu/vpp_plugins/
+
+COPY vpp-data/bin/vpp /usr/bin/
+COPY vpp-data/bin/vppctl /usr/bin/
+COPY vpp-data/bin/vpp_echo /usr/bin/
+COPY vpp-data/bin/vcl_* /usr/bin/
+COPY vpp-data/lib/*.so /usr/lib/
+
+RUN addgroup vpp
+
+ENTRYPOINT ["tail", "-f", "/dev/null"]

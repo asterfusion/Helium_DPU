@@ -1,0 +1,467 @@
+/*
+ * Copyright (c) 2015-2016 Cisco and/or its affiliates.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+option version = "2.0.0";
+
+import "vnet/interface_types.api";
+import "vnet/ip/ip_types.api";
+
+enum bfd_state {
+  BFD_STATE_API_ADMIN_DOWN = 0,
+  BFD_STATE_API_DOWN = 1,
+  BFD_STATE_API_INIT = 2,
+  BFD_STATE_API_UP = 3,
+};
+
+/** \brief Set BFD echo source
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - interface to use as echo source
+*/
+autoreply define bfd_udp_set_echo_source
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+};
+
+/** \brief Delete BFD echo source
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+autoreply define bfd_udp_del_echo_source
+{
+  u32 client_index;
+  u32 context;
+};
+
+/** \brief Get BFD echo source
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define bfd_udp_get_echo_source
+{
+  u32 client_index;
+  u32 context;
+};
+
+/** \brief Get BFD echo source reply
+    @param context - sender context, to match reply w/ request
+    @param retval - return code
+    @param sw_if_index - interface to use as echo source
+    @param is_set - non-zero if set
+    @param have_usable_ip4 - non-zero if have usable IPv4 address
+    @param ip4_addr - IPv4 address
+    @param have_usable_ip6 - non-zero if have usable IPv6 address
+    @param ip6_addr - IPv6 address
+*/
+define bfd_udp_get_echo_source_reply
+{
+  u32 context;
+  i32 retval;
+  vl_api_interface_index_t sw_if_index;
+  bool is_set;
+  bool have_usable_ip4;
+  vl_api_ip4_address_t ip4_addr;
+  bool have_usable_ip6;
+  vl_api_ip6_address_t ip6_addr;
+};
+
+/** \brief Add UDP BFD session on interface
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - sw index of the interface
+    @param desired_min_tx - desired min transmit interval (microseconds)
+    @param required_min_rx - required min receive interval (microseconds)
+    @param local_addr - local address
+    @param peer_addr - peer address
+    @param is_ipv6 - local_addr, peer_addr are IPv6 if non-zero, otherwise IPv4
+    @param detect_mult - detect multiplier (# of packets missed before connection goes down)
+    @param is_authenticated - non-zero if authentication is required
+    @param bfd_key_id - key id sent out in BFD packets (if is_authenticated)
+    @param conf_key_id - id of already configured key (if is_authenticated)
+*/
+autoreply define bfd_udp_add
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u32 desired_min_tx;
+  u32 required_min_rx;
+  vl_api_address_t local_addr;
+  vl_api_address_t peer_addr;
+  u8 detect_mult;
+  bool is_authenticated;
+  u8 bfd_key_id;
+  u32 conf_key_id;
+};
+define bfd_udp_upd
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u32 desired_min_tx;
+  u32 required_min_rx;
+  vl_api_address_t local_addr;
+  vl_api_address_t peer_addr;
+  u8 detect_mult;
+  bool is_authenticated;
+  u8 bfd_key_id;
+  u32 conf_key_id;
+};
+define bfd_udp_upd_reply
+{
+  u32 context;
+  i32 retval;
+  u32 stats_index;
+};
+
+/** \brief Modify UDP BFD session on interface
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - sw index of the interface
+    @param desired_min_tx - desired min transmit interval (microseconds)
+    @param required_min_rx - required min receive interval (microseconds)
+    @param local_addr - local address
+    @param peer_addr - peer address
+    @param is_ipv6 - local_addr, peer_addr are IPv6 if non-zero, otherwise IPv4
+    @param detect_mult - detect multiplier (# of packets missed before connection goes down)
+*/
+autoreply define bfd_udp_mod
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u32 desired_min_tx;
+  u32 required_min_rx;
+  vl_api_address_t local_addr;
+  vl_api_address_t peer_addr;
+  u8 detect_mult;
+};
+
+/** \brief Delete UDP BFD session on interface
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - sw index of the interface
+    @param local_addr - local address
+    @param peer_addr - peer address
+    @param is_ipv6 - local_addr, peer_addr are IPv6 if non-zero, otherwise IPv4
+*/
+autoreply define bfd_udp_del
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_address_t local_addr;
+  vl_api_address_t peer_addr;
+};
+
+/** \brief Get all BFD sessions
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define bfd_udp_session_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+/** \brief BFD session details structure
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - sw index of the interface
+    @param local_addr - local address
+    @param peer_addr - peer address
+    @param is_ipv6 - local_addr, peer_addr are IPv6 if non-zero, otherwise IPv4
+    @param state - session state
+    @param is_authenticated - non-zero if authentication in-use, zero otherwise
+    @param bfd_key_id - ID of key currently in-use if auth is on
+    @param conf_key_id - configured key ID for this session
+    @param required_min_rx - required min receive interval (microseconds)
+    @param desired_min_tx - desired min transmit interval (microseconds)
+    @param detect_mult - detect multiplier (# of packets missed before connection goes down)
+*/
+define bfd_udp_session_details
+{
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_address_t local_addr;
+  vl_api_address_t peer_addr;
+  vl_api_bfd_state_t state;
+  bool is_authenticated;
+  u8 bfd_key_id;
+  u32 conf_key_id;
+  u32 required_min_rx;
+  u32 desired_min_tx;
+  u8 detect_mult;
+};
+
+/** \brief Set flags of BFD UDP session
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - sw index of the interface
+    @param local_addr - local address
+    @param peer_addr - peer address
+    @param is_ipv6 - local_addr, peer_addr are IPv6 if non-zero, otherwise IPv4
+    @param flags - set the admin state, 1 = up, 0 = down
+*/
+autoreply define bfd_udp_session_set_flags
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_address_t local_addr;
+  vl_api_address_t peer_addr;
+  vl_api_if_status_flags_t flags;
+};
+
+service {
+  rpc want_bfd_events returns want_bfd_events_reply
+    events bfd_udp_session_event;
+};
+
+/** \brief Register for BFD events
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param enable_disable - 1 => register for events, 0 => cancel registration
+    @param pid - sender's pid
+*/
+autoreply define want_bfd_events
+{
+  u32 client_index;
+  u32 context;
+  bool enable_disable;
+  u32 pid;
+};
+
+define bfd_udp_session_event
+{
+  u32 client_index;
+  u32 pid;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_address_t local_addr;
+  vl_api_address_t peer_addr;
+  vl_api_bfd_state_t state;
+  bool is_authenticated;
+  u8 bfd_key_id;
+  u32 conf_key_id;
+  u32 required_min_rx;
+  u32 desired_min_tx;
+  u8 detect_mult;
+};
+
+/** \brief BFD UDP - add/replace key to configuration
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param conf_key_id - key ID to add/replace/delete
+    @param key_len - length of key (must be non-zero)
+    @param auth_type - authentication type (RFC 5880/4.1/Auth Type)
+    @param key - key data
+*/
+autoreply define bfd_auth_set_key
+{
+  u32 client_index;
+  u32 context;
+  u32 conf_key_id;
+  u8 key_len;
+  u8 auth_type;
+  u8 key[20];
+};
+
+/** \brief BFD UDP - delete key from configuration
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param conf_key_id - key ID to add/replace/delete
+    @param key_len - length of key (must be non-zero)
+    @param key - key data
+*/
+autoreply define bfd_auth_del_key
+{
+  u32 client_index;
+  u32 context;
+  u32 conf_key_id;
+};
+
+/** \brief Get a list of configured authentication keys
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define bfd_auth_keys_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+/** \brief BFD authentication key details
+    @param context - sender context, to match reply w/ request
+    @param conf_key_id - configured key ID
+    @param use_count - how many BFD sessions currently use this key
+    @param auth_type - authentication type (RFC 5880/4.1/Auth Type)
+*/
+define bfd_auth_keys_details
+{
+  u32 context;
+  u32 conf_key_id;
+  u32 use_count;
+  u8 auth_type;
+};
+
+/** \brief BFD UDP - activate/change authentication
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - sw index of the interface
+    @param local_addr - local address
+    @param peer_addr - peer address
+    @param is_ipv6 - local_addr, peer_addr are IPv6 if non-zero, otherwise IPv4
+    @param is_delayed - change is applied once peer applies the change (on first received packet with this auth)
+    @param bfd_key_id - key id sent out in BFD packets
+    @param conf_key_id - id of already configured key
+*/
+autoreply define bfd_udp_auth_activate
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_address_t local_addr;
+  vl_api_address_t peer_addr;
+  bool is_delayed;
+  u8 bfd_key_id;
+  u32 conf_key_id;
+};
+
+/** \brief BFD UDP - deactivate authentication
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - sw index of the interface
+    @param local_addr - local address
+    @param peer_addr - peer address
+    @param is_ipv6 - local_addr, peer_addr are IPv6 if non-zero, otherwise IPv4
+    @param is_delayed - change is applied once peer applies the change (on first received non-authenticated packet)
+*/
+autoreply define bfd_udp_auth_deactivate
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_address_t local_addr;
+  vl_api_address_t peer_addr;
+  bool is_delayed;
+};
+
+/* must be compatible with bfd_error_t */
+counters bfd_udp {
+  none {
+    severity info;
+    type counter64;
+    units "packets";
+    description "OK";
+  };
+  bad {
+    severity error;
+    type counter64;
+    units "packets";
+    description "bad packet";
+  };
+  disabled {
+    severity error;
+    type counter64;
+    units "packets";
+    description "bfd packets received on disabled interfaces";
+  };
+  version {
+    severity error;
+    type counter64;
+    units "packets";
+    description "version";
+  };
+  length {
+    severity error;
+    type counter64;
+    units "packets";
+    description "too short";
+  };
+  detect_multi {
+    severity error;
+    type counter64;
+    units "packets";
+    description "detect-multi";
+  };
+  multi_point {
+    severity error;
+    type counter64;
+    units "packets";
+    description "multi-point";
+  };
+  my_disc {
+    severity error;
+    type counter64;
+    units "packets";
+    description "my-disc";
+  };
+  your_disc {
+    severity error;
+    type counter64;
+    units "packets";
+    description "your-disc";
+  };
+  admin_down {
+    severity error;
+    type counter64;
+    units "packets";
+    description "session admin-down";
+  };
+  no_session {
+    severity error;
+    type counter64;
+    units "packets";
+    description "no-session";
+  };
+  failed_verification {
+    severity error;
+    type counter64;
+    units "packets";
+    description "failed-verification";
+  };
+  src_mismatch {
+    severity error;
+    type counter64;
+    units "packets";
+    description "src-mismatch";
+  };
+  dst_mismatch {
+    severity error;
+    type counter64;
+    units "packets";
+    description "dst-mismatch";
+  };
+  ttl {
+    severity error;
+    type counter64;
+    units "packets";
+    description "ttl";
+  };
+};
+
+paths {
+  "/err/bfd-udp4-input" "bfd";
+  "/err/bfd-udp6-input" "bfd";
+  "/err/bfd-udp4-echo-input" "bfd";
+  "/err/bfd-udp6-echo-input" "bfd";
+};
+
+/*
+ * Local Variables:
+ * eval: (c-set-style "gnu")
+ * End:
+ */

@@ -1,0 +1,20 @@
+---
+name: Virtio PCI Device
+maintainer: mohsin.kazmi14@gmail.com sluong@cisco.com
+features:
+  - Driver mode to emulate PCI interface presented to VPP from
+    the host interface.
+  - Device mode to emulate vhost-user interface presented to VPP from the
+    guest VM.
+  - Support virtio 1.0 in virtio
+  - Support virtio 1.1 packed ring in virtio [experimental]
+  - Support multi-queue, GSO, checksum offload, indirect descriptor,
+    jumbo frame, and packed ring.
+  - Support virtio 1.1 packed ring in vhost
+  - Support for tx queue size configuration (tested on host kernel 5.15
+    and qemu version 6.2.0)
+description: "Virtio implementation"
+missing:
+  - API dump filtering by sw_if_index
+state: production
+properties: [API, CLI, STATS, MULTITHREAD]

@@ -1,0 +1,279 @@
+/* Hey Emacs use -*- mode: C -*- */
+/*
+ * Copyright (c) 2017 Cisco and/or its affiliates.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+option version = "3.1.0";
+
+import "vnet/interface_types.api";
+import "vnet/ethernet/ethernet_types.api";
+
+enum memif_role
+{
+  MEMIF_ROLE_API_MASTER = 0,
+  MEMIF_ROLE_API_SLAVE = 1,
+};
+
+enum memif_mode
+{
+  MEMIF_MODE_API_ETHERNET = 0,
+  MEMIF_MODE_API_IP = 1,
+  MEMIF_MODE_API_PUNT_INJECT = 2,
+};
+
+/** \brief Create or remove named socket file for memif interfaces
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_add - 0 = remove, 1 = add association
+    @param socket_id - non-0 32-bit integer used to identify a socket file
+    @param socket_filename - filename of the socket to be used for connection
+           establishment; id 0 always maps to default "/var/vpp/memif.sock";
+	   no socket filename needed when is_add == 0.
+*/
+autoreply define memif_socket_filename_add_del
+{
+  option deprecated;
+
+  u32 client_index;
+  u32 context;
+  bool is_add;		/* 0 = remove, 1 = add association */
+  u32 socket_id;	/* unique non-0 id for given socket file name */
+  string socket_filename[108];	/* NUL terminated filename */
+  option vat_help = "[add|del] id <id> filename <file>";
+};
+
+/** \brief Create or remove named socket file for memif interfaces
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_add - 0 = remove, 1 = add association
+    @param socket_id - non-0 32-bit integer used to identify a socket file
+          ~0 means autogenerate
+    @param socket_filename - filename of the socket to be used for connection
+           establishment; id 0 always maps to default "/var/vpp/memif.sock";
+	   no socket filename needed when is_add == 0.
+	   socket_filename starting with '@' will create an abstract socket
+	   in the given namespace
+*/
+define memif_socket_filename_add_del_v2
+{
+  u32 client_index;
+  u32 context;
+  bool is_add;		                /* 0 = remove, 1 = add association */
+  u32 socket_id [default=0xffffffff];	/* unique non-0 id for given socket file name */
+  string socket_filename[];             /* NUL terminated filename */
+  option vat_help = "[add|del] id <id> filename <file>";
+};
+
+/** \brief Create memory interface socket file response
+    @param context - sender context, to match reply w/ request
+    @param retval - return value for request
+    @param socket_id - non-0 32-bit integer used to identify a socket file
+*/
+define memif_socket_filename_add_del_v2_reply
+{
+  u32 context;
+  i32 retval;
+  u32 socket_id;
+};
+
+/** \brief Create memory interface
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param role - role of the interface in the connection (master/slave)
+    @param mode - interface mode
+    @param rx_queues - number of rx queues (only valid for slave)
+    @param tx_queues - number of tx queues (only valid for slave)
+    @param id - 32bit integer used to authenticate and match opposite sides
+           of the connection
+    @param socket_id - socket filename id to be used for connection
+           establishment
+    @param ring_size - the number of entries of RX/TX rings
+    @param buffer_size - size of the buffer allocated for each ring entry
+    @param no_zero_copy - if true, disable zero copy
+    @param hw_addr - interface MAC address
+    @param secret - optional, default is "", max length 24
+*/
+define memif_create
+{
+  option deprecated;
+
+  u32 client_index;
+  u32 context;
+
+  vl_api_memif_role_t role; /* 0 = master, 1 = slave */
+  vl_api_memif_mode_t mode; /* 0 = ethernet, 1 = ip, 2 = punt/inject */
+  u8 rx_queues; /* optional, default is 1 */
+  u8 tx_queues; /* optional, default is 1 */
+  u32 id; /* optional, default is 0 */
+  u32 socket_id; /* optional, default is 0, "/var/vpp/memif.sock" */
+  u32 ring_size; /* optional, default is 1024 entries, must be power of 2 */
+  u16 buffer_size; /* optional, default is 2048 bytes */
+  bool no_zero_copy; /* disable zero copy */
+  vl_api_mac_address_t hw_addr; /* optional, randomly generated if zero */
+  string secret[24]; /* optional, default is "", max length 24 */
+  option vat_help = "[id <id>] [socket-id <id>] [ring_size <size>] [buffer_size <size>] [hw_addr <mac_address>] [secret <string>] [mode ip] <master|slave>";
+};
+
+/** \brief Create memory interface response
+    @param context - sender context, to match reply w/ request
+    @param retval - return value for request
+    @param sw_if_index - software index of the newly created interface
+*/
+define memif_create_reply
+{
+  option deprecated;
+
+  u32 context;
+  i32 retval;
+  vl_api_interface_index_t sw_if_index;
+};
+
+/** \brief Create memory interface
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param role - role of the interface in the connection (master/slave)
+    @param mode - interface mode
+    @param rx_queues - number of rx queues (only valid for slave)
+    @param tx_queues - number of tx queues (only valid for slave)
+    @param id - 32bit integer used to authenticate and match opposite sides
+           of the connection
+    @param socket_id - socket filename id to be used for connection
+           establishment
+    @param ring_size - the number of entries of RX/TX rings
+    @param buffer_size - size of the buffer allocated for each ring entry
+    @param no_zero_copy - if true, disable zero copy
+    @param use_dma - if true, use dma accelerate memory copy
+    @param hw_addr - interface MAC address
+    @param secret - optional, default is "", max length 24
+*/
+define memif_create_v2
+{
+  u32 client_index;
+  u32 context;
+
+  vl_api_memif_role_t role; /* 0 = master, 1 = slave */
+  vl_api_memif_mode_t mode; /* 0 = ethernet, 1 = ip, 2 = punt/inject */
+  u8 rx_queues; /* optional, default is 1 */
+  u8 tx_queues; /* optional, default is 1 */
+  u32 id; /* optional, default is 0 */
+  u32 socket_id; /* optional, default is 0, "/var/vpp/memif.sock" */
+  u32 ring_size; /* optional, default is 1024 entries, must be power of 2 */
+  u16 buffer_size; /* optional, default is 2048 bytes */
+  bool no_zero_copy; /* disable zero copy */
+  bool use_dma; /* use dma acceleration */
+  vl_api_mac_address_t hw_addr; /* optional, randomly generated if zero */
+  string secret[24]; /* optional, default is "", max length 24 */
+  option vat_help = "[id <id>] [socket-id <id>] [ring_size <size>] [buffer_size <size>] [hw_addr <mac_address>] [secret <string>] [mode ip] <master|slave>";
+};
+
+/** \brief Create memory interface response
+    @param context - sender context, to match reply w/ request
+    @param retval - return value for request
+    @param sw_if_index - software index of the newly created interface
+*/
+define memif_create_v2_reply
+{
+  u32 context;
+  i32 retval;
+  vl_api_interface_index_t sw_if_index;
+};
+
+/** \brief Delete memory interface
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - software index of the interface to delete
+*/
+autoreply define memif_delete
+{
+  u32 client_index;
+  u32 context;
+
+  vl_api_interface_index_t sw_if_index;
+  option vat_help = "<sw_if_index>";
+};
+
+/** \brief Memory interface details structure
+    @param context - sender context, to match reply w/ request
+    @param socket_id - u32 used to identify the given socket filename
+    @param socket_filename - corresponding NUL terminated socket filename
+*/
+define memif_socket_filename_details
+{
+  u32 context;
+  u32 socket_id;
+  string socket_filename[108];
+};
+
+/** \brief Dump the table of socket ids and corresponding filenames
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define memif_socket_filename_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+/** \brief Memory interface details structure
+    @param context - sender context, to match reply w/ request (memif_dump)
+    @param sw_if_index - index of the interface
+    @param hw_addr - interface MAC address
+    @param id - id associated with the interface
+    @param role - role of the interface in the connection (master/slave)
+    @param mode - interface mode
+    @param zero_copy - zero copy flag present
+    @param socket_id - id of the socket filename used by this interface
+           to establish new connections
+    @param ring_size - the number of entries of RX/TX rings
+    @param buffer_size - size of the buffer allocated for each ring entry
+    @param flags - interface_status flags
+    @param if_name - name of the interface
+
+*/
+define memif_details
+{
+  u32 context;
+
+  vl_api_interface_index_t sw_if_index;
+  vl_api_mac_address_t hw_addr;
+
+  /* memif specific parameters */
+  u32 id;
+  vl_api_memif_role_t role; /* 0 = master, 1 = slave */
+  vl_api_memif_mode_t mode; /* 0 = ethernet, 1 = ip, 2 = punt/inject */
+  bool zero_copy;
+  u32 socket_id;
+  u32 ring_size;
+  u16 buffer_size; /* optional, default is 2048 bytes */
+
+  vl_api_if_status_flags_t flags;
+
+  string if_name[64];
+};
+
+/** \brief Dump all memory interfaces
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define memif_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+/*
+ * Local Variables:
+ * eval: (c-set-style "gnu")
+ * End:
+ */

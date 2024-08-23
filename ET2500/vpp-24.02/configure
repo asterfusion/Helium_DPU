@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+set -o pipefail -o errtrace -o nounset -o errexit
+
+# Experimental script, please consult with dmarion@me.com before
+# submitting any changes
+
+# defaults
+platform=default
+build_dir=.
+install_dir=/usr/local
+build_type=release
+src_dir="$(dirname "$(readlink -f "$0")")"
+host_arch=$(uname -m)
+arch=${host_arch}
+native_only=no
+wipe=no
+args=()
+
+help()
+{
+  cat << __EOF__
+VPP Build Configuration Script
+
+USAGE: ${0} [options]
+
+OPTIONS:
+  --help, -h              This help
+  --arch, -a              Cross-compile for specified target architecture (aarch64, riscv64, i386, ...)
+  --build-dir, -b         Build directory
+  --install-dir, -i       Install directory
+  --build-type, -t        Build type (release, debug, ...)
+  --native-only, -n       Only compile for Native CPU (no multiarch)
+  --wipe, -w              Wipe whole repo (except startup.* files)
+  --sanitize, -s          Enable sanitizer (mem)
+  --platform, -p          Specify target platform
+__EOF__
+}
+
+while (( "$#" )); do
+  case "$1" in
+    -h|--help)
+      help
+      exit 1
+      ;;
+    -b|--build-dir)
+      if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        build_dir=$2
+        shift 2
+      else
+        echo "Error: Argument for $1 is missing" >&2
+        exit 1
+      fi
+      ;;
+    -a|--arch)
+      if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+	arch=$2
+        shift 2
+      else
+        echo "Error: Argument for $1 is missing" >&2
+        exit 1
+      fi
+      ;;
+    -i|--install-dir)
+      if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        install_dir=$2
+        shift 2
+      else
+        echo "Error: Argument for $1 is missing" >&2
+        exit 1
+      fi
+      ;;
+    -t|--build-type)
+      if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        build_type=$2
+        shift 2
+      else
+        echo "Error: Argument for $1 is missing" >&2
+        exit 1
+      fi
+      ;;
+    -p|--platform)
+      if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        platform=$2
+        shift 2
+      else
+        echo "Error: Argument for $1 is missing" >&2
+        exit 1
+      fi
+      ;;
+    -n|--native-only)
+      native_only=yes
+      shift 1
+      ;;
+    -w|--wipe)
+      wipe=yes
+      shift 1
+      ;;
+    -s|--sanitize)
+      shift 1
+      case "$1" in
+	mem)
+	  shift 1
+	  args+=("-DVPP_ENABLE_SANITIZE_ADDR=ON")
+	  ;;
+      esac
+      ;;
+    -*|--*=) # unsupported flags
+      echo "Error: Unsupported flag $1" >&2
+      exit 1
+      ;;
+    *) # preserve positional arguments
+      PARAMS="$PARAMS $1"
+      shift
+      ;;
+  esac
+done
+
+if [ "${arch}" != "${host_arch}" ] ; then
+  args+=("-DCMAKE_SYSTEM_NAME=Linux")
+  args+=("-DCMAKE_SYSTEM_PROCESSOR=${arch}")
+  args+=("-DCMAKE_C_COMPILER=clang")
+  args+=("-DCMAKE_C_COMPILER_TARGET=${arch}-linux-gnu")
+  args+=("-DCMAKE_ASM_COMPILER_TARGET=${arch}-linux-gnu")
+  args+=("-DCMAKE_FIND_ROOT_PATH=/usr/${arch}-linux-gnu")
+  args+=("-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER")
+  args+=("-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH")
+  args+=("-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH")
+  args+=("-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY")
+fi
+
+args+=("-DCMAKE_PREFIX_PATH=/opt/vpp/external/${arch}")
+args+=("-DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=ON")
+args+=("-DCMAKE_INSTALL_PREFIX=${install_dir}")
+args+=("-DCMAKE_BUILD_TYPE:STRING=${build_type}")
+args+=("-DVPP_PLATFORM=${platform}")
+[ "${native_only}" == "yes" ] && args+=("-DVPP_BUILD_NATIVE_ONLY:BOOL=ON")
+
+[ "${wipe}" == "yes" ] && git clean -fdx --exclude=startup.\*
+
+cmake ${args[@]} -G Ninja -S ${src_dir}/src -B ${build_dir}
+
+cat << __EOF__
+
+  Useful build commands:
+
+  ninja                   Build VPP
+  ninja set-build-type-*  Change build type to <debug|release|gcov|...>
+  ninja config            Start build configuration TUI
+  ninja run               Runs VPP using startup.conf in the build directory
+  ninja debug             Runs VPP inside GDB using startup.conf in the build directory
+  ninja pkg-deb           Create .deb packages
+  ninja install           Install VPP to $install_dir
+
+__EOF__

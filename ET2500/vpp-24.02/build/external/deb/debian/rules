@@ -1,0 +1,33 @@
+#!/usr/bin/make -f
+DH_VERBOSE = 1
+DEB_BUILD_OPTIONS = noddebs
+DEB_CFLAGS_MAINT_STRIP = -flto=auto -ffat-lto-objects -flto=auto -ffat-lto-objects -O2
+DEB_LDFLAGS_MAINT_STRIP = -flto=auto -ffat-lto-objects -flto=auto -ffat-lto-objects
+DEB_CFLAGS_MAINT_APPEND = -O3
+PKG=vpp-ext-deps
+
+VERSION = $(shell dpkg-parsechangelog | sed -nr '/^Version:/s/Version: //p')
+BASE_VER = $(word 1, $(subst -, ,$(VERSION)))
+
+export BUILD_DIR=$(CURDIR)/_build
+export INSTALL_DIR=$(CURDIR)/debian/tmp/opt/vpp/external/$(shell uname -m)/
+
+MAKE_ARGS=-C ..
+
+include /usr/share/dpkg/default.mk
+
+%:
+	dh $@
+
+override_dh_clean:
+	make $(MAKE_ARGS) clean
+
+override_dh_auto_configure:
+
+override_dh_install:
+	make $(MAKE_ARGS) install
+	@mkdir -p $(INSTALL_DIR)
+	dh_install -p$(PKG) --autodest /opt
+
+override_dh_shlibdeps:
+	dh_shlibdeps -l$(INSTALL_DIR)lib/

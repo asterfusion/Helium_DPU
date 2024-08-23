@@ -1,0 +1,215 @@
+/* Hey Emacs use -*- mode: C -*- */
+/*
+ * tracedump.api - streaming packet trace dump API
+ *
+ * Copyright (c) 2020 Cisco and/or its affiliates
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * @file tracedump.api
+ * @brief VPP control-plane API messages.
+ *
+ * This file defines VPP control-plane binary API messages which are generally
+ * called through a shared memory interface.
+ */
+
+
+option version = "0.2.0";
+
+enum trace_filter_flag : u32
+{
+  TRACE_FF_NONE = 0,
+  TRACE_FF_INCLUDE_NODE = 1,
+  TRACE_FF_EXCLUDE_NODE = 2,
+  TRACE_FF_INCLUDE_CLASSIFIER = 3,
+  TRACE_FF_EXCLUDE_CLASSIFIER = 4,
+};
+
+
+/** \brief trace_set_filters
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param flag - One of the trace_filter_flag values
+    @param node_index = The node-index to include/exclude 
+    @param classifier_table_index = The include/exclude classifier table
+    @param count = The number of packets to include/exclude
+*/
+autoreply define trace_set_filters
+{
+  u32 client_index;
+  u32 context;
+  vl_api_trace_filter_flag_t flag;	/* TRACE_FF_* */
+  u32 count;
+  u32 node_index [default = 0xffffffff];
+  u32 classifier_table_index [default = 0xffffffff];
+  option vat_help =   "trace_set_filters [none] | [(include_node|exclude_node) <node-index>] | [(include_classifier|exclude_classifier) <classifier-index>] [count <count>]";
+};
+
+
+/** \brief trace_capture_packets
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param node_index - graph input node whose packets are captured
+    @param max_packets - maximum number of packets to capture
+    @param use_filter - if true, apply filters to select/reject packets
+    @param verbose - if true, set verbose packet capture flag
+    @param pre_capture_clear - if true, clear buffer before capture begins
+*/
+autoreply define trace_capture_packets
+{
+  u32 client_index;
+  u32 context;
+  u32 node_index;
+  u32 max_packets;
+  bool use_filter;
+  bool verbose;
+  bool pre_capture_clear;
+  option vat_help = "trace_capture_packets [node_index <index>] [max <max>] [pre_capture_clear] [use_filter] [verbose]";
+};
+
+
+/** \brief trace_clear_capture
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+autoreply define trace_clear_capture
+{
+  u32 client_index;
+  u32 context;
+  option vat_help = "trace_clear_capture";
+};
+
+
+service {
+    rpc trace_dump returns trace_dump_reply
+        stream trace_details;
+};
+
+define trace_dump {
+    /* Client identifier, set from api_main.my_client_index */
+    u32 client_index;
+
+    /* Arbitrary context, so client can match reply to request */
+    u32 context;
+
+    /* Dispose of any cached data before we begin */
+    u8 clear_cache;
+
+    /* iterator positions, both ~0 to just clear the cache */
+    u32 thread_id;
+    u32 position;
+
+    /* Max number of replies per burst */
+    u32 max_records;
+
+    option vat_help = "trace_dump [thread_id <tid>] [position <pos>] [max <max>]";
+};
+
+define trace_dump_reply {
+    u32 context;
+    i32 retval;
+    u32 last_thread_id;
+    u32 last_position;
+    u8 more_this_thread;
+    u8 more_threads;
+    u8 flush_only;
+    u8 done;
+};
+
+define trace_details {
+    /* Client identifier, set from api_main.my_client_index */
+    u32 client_index;
+
+    /* Arbitrary context, so client can match reply to request */
+    u32 context;
+
+    /* Position in the cache of this record */
+    u32 thread_id;
+    u32 position;
+
+    /* More or not */
+    u8 more_this_thread;
+    u8 more_threads;
+    /* Needed when set ends in the middle of a batch */
+    u8 done;
+
+    u32 packet_number;
+    string trace_data[];
+};
+
+/** \brief trace_clear_cache
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+autoreply define trace_clear_cache {
+    u32 client_index;
+    u32 context;
+};
+
+/** \brief trace_v2_dump
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param thread_id - specific thread to dump from, ~0 to dump from all
+    @param position - position of the first packet to dump in the per thread cache, ~0 to only clear the cache
+    @param max - maximum of packets to dump from each thread
+    @param clear_cache - dispose of any cached data before we begin
+*/
+define trace_v2_dump {
+    u32 client_index;
+    u32 context;
+
+    u32 thread_id [default=0xffffffff];
+    u32 position;
+    u32 max [default=50];
+    bool clear_cache;
+
+    option vat_help = "trace_v2_dump [thread_id <tid>] [position <pos>] [max <max>]";
+};
+
+/** \brief trace_v2_details
+    @param context - sender context, to match reply w/ request
+    @param thread_id - thread index from which the packet come from
+    @param position - position of the packet in its thread cache
+    @param more - true if there is still more packets to dump for this thread
+    @param trace_data - string packet data
+*/
+define trace_v2_details {
+    u32 context;
+
+    u32 thread_id;
+    u32 position;
+    bool more;
+
+    string trace_data[];
+};
+
+autoreply define trace_set_filter_function
+{
+    u32 client_index;
+    u32 context;
+
+    string filter_function_name[];
+};
+
+define trace_filter_function_dump {
+    u32 client_index;
+    u32 context;
+};
+
+define trace_filter_function_details {
+    u32 context;
+
+    bool selected;
+    string name[];
+};
