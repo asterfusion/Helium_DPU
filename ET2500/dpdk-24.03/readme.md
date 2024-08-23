@@ -7,6 +7,6 @@
 ```shell
    cd dpdk
    meson build -Dmax_lcores=8
-   ninjia -C build
+   ninja -C build
 ```
 ## the dpdk-app is built in the build directory
