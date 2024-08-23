@@ -1,0 +1,251 @@
+/* SPDX-License-Identifier: BSD-3-Clause
+ * Copyright 2018 Mellanox Technologies, Ltd
+ */
+
+#include <stddef.h>
+#include <string.h>
+#include <sys/queue.h>
+
+#include <rte_errno.h>
+#include <rte_malloc.h>
+#include <rte_tailq.h>
+#include <rte_flow.h>
+
+#include "eth_bond_private.h"
+
+static struct rte_flow *
+bond_flow_alloc(int numa_node, const struct rte_flow_attr *attr,
+		   const struct rte_flow_item *items,
+		   const struct rte_flow_action *actions)
+{
+	struct rte_flow *flow;
+	const struct rte_flow_conv_rule rule = {
+		.attr_ro = attr,
+		.pattern_ro = items,
+		.actions_ro = actions,
+	};
+	struct rte_flow_error error;
+	int ret;
+
+	ret = rte_flow_conv(RTE_FLOW_CONV_OP_RULE, NULL, 0, &rule, &error);
+	if (ret < 0) {
+		RTE_BOND_LOG(ERR, "Unable to process flow rule (%s): %s",
+			     error.message ? error.message : "unspecified",
+			     strerror(rte_errno));
+		return NULL;
+	}
+	flow = rte_zmalloc_socket(NULL, offsetof(struct rte_flow, rule) + ret,
+				  RTE_CACHE_LINE_SIZE, numa_node);
+	if (unlikely(flow == NULL)) {
+		RTE_BOND_LOG(ERR, "Could not allocate new flow");
+		return NULL;
+	}
+	ret = rte_flow_conv(RTE_FLOW_CONV_OP_RULE, &flow->rule, ret, &rule,
+			    &error);
+	if (ret < 0) {
+		RTE_BOND_LOG(ERR, "Failed to copy flow rule (%s): %s",
+			     error.message ? error.message : "unspecified",
+			     strerror(rte_errno));
+		rte_free(flow);
+		return NULL;
+	}
+	return flow;
+}
+
+static void
+bond_flow_release(struct rte_flow **flow)
+{
+	rte_free(*flow);
+	*flow = NULL;
+}
+
+static int
+bond_flow_validate(struct rte_eth_dev *dev, const struct rte_flow_attr *attr,
+		   const struct rte_flow_item patterns[],
+		   const struct rte_flow_action actions[],
+		   struct rte_flow_error *err)
+{
+	struct bond_dev_private *internals = dev->data->dev_private;
+	int i;
+	int ret;
+
+	for (i = 0; i < internals->member_count; i++) {
+		ret = rte_flow_validate(internals->members[i].port_id, attr,
+					patterns, actions, err);
+		if (ret) {
+			RTE_BOND_LOG(ERR, "Operation rte_flow_validate failed"
+				     " for member %d with error %d", i, ret);
+			return ret;
+		}
+	}
+	return 0;
+}
+
+static struct rte_flow *
+bond_flow_create(struct rte_eth_dev *dev, const struct rte_flow_attr *attr,
+		 const struct rte_flow_item patterns[],
+		 const struct rte_flow_action actions[],
+		 struct rte_flow_error *err)
+{
+	struct bond_dev_private *internals = dev->data->dev_private;
+	struct rte_flow *flow;
+	int i;
+
+	flow = bond_flow_alloc(dev->data->numa_node, attr, patterns, actions);
+	if (unlikely(flow == NULL)) {
+		rte_flow_error_set(err, ENOMEM, RTE_FLOW_ERROR_TYPE_UNSPECIFIED,
+				   NULL, rte_strerror(ENOMEM));
+		return NULL;
+	}
+	for (i = 0; i < internals->member_count; i++) {
+		flow->flows[i] = rte_flow_create(internals->members[i].port_id,
+						 attr, patterns, actions, err);
+		if (unlikely(flow->flows[i] == NULL)) {
+			RTE_BOND_LOG(ERR, "Failed to create flow on member %d",
+				     i);
+			goto err;
+		}
+	}
+	TAILQ_INSERT_TAIL(&internals->flow_list, flow, next);
+	return flow;
+err:
+	/* Destroy all members flows. */
+	for (i = 0; i < internals->member_count; i++) {
+		if (flow->flows[i] != NULL)
+			rte_flow_destroy(internals->members[i].port_id,
+					 flow->flows[i], err);
+	}
+	bond_flow_release(&flow);
+	return NULL;
+}
+
+static int
+bond_flow_destroy(struct rte_eth_dev *dev, struct rte_flow *flow,
+		  struct rte_flow_error *err)
+{
+	struct bond_dev_private *internals = dev->data->dev_private;
+	int i;
+	int ret = 0;
+
+	for (i = 0; i < internals->member_count; i++) {
+		int lret;
+
+		if (unlikely(flow->flows[i] == NULL))
+			continue;
+		lret = rte_flow_destroy(internals->members[i].port_id,
+					flow->flows[i], err);
+		if (unlikely(lret != 0)) {
+			RTE_BOND_LOG(ERR, "Failed to destroy flow on member %d:"
+				     " %d", i, lret);
+			ret = lret;
+		}
+	}
+	TAILQ_REMOVE(&internals->flow_list, flow, next);
+	bond_flow_release(&flow);
+	return ret;
+}
+
+static int
+bond_flow_flush(struct rte_eth_dev *dev, struct rte_flow_error *err)
+{
+	struct bond_dev_private *internals = dev->data->dev_private;
+	struct rte_flow *flow;
+	void *tmp;
+	int ret = 0;
+	int lret;
+
+	/* Destroy all bond flows from its members instead of flushing them to
+	 * keep the LACP flow or any other external flows.
+	 */
+	RTE_TAILQ_FOREACH_SAFE(flow, &internals->flow_list, next, tmp) {
+		lret = bond_flow_destroy(dev, flow, err);
+		if (unlikely(lret != 0))
+			ret = lret;
+	}
+	if (unlikely(ret != 0))
+		RTE_BOND_LOG(ERR, "Failed to flush flow in all members");
+	return ret;
+}
+
+static int
+bond_flow_query_count(struct rte_eth_dev *dev, struct rte_flow *flow,
+		      const struct rte_flow_action *action,
+		      struct rte_flow_query_count *count,
+		      struct rte_flow_error *err)
+{
+	struct bond_dev_private *internals = dev->data->dev_private;
+	struct rte_flow_query_count member_count;
+	int i;
+	int ret;
+
+	count->bytes = 0;
+	count->hits = 0;
+	count->bytes_set = 0;
+	count->hits_set = 0;
+	rte_memcpy(&member_count, count, sizeof(member_count));
+	for (i = 0; i < internals->member_count; i++) {
+		ret = rte_flow_query(internals->members[i].port_id,
+				     flow->flows[i], action,
+				     &member_count, err);
+		if (unlikely(ret != 0)) {
+			RTE_BOND_LOG(ERR, "Failed to query flow on"
+				     " member %d: %d", i, ret);
+			return ret;
+		}
+		count->bytes += member_count.bytes;
+		count->hits += member_count.hits;
+		count->bytes_set |= member_count.bytes_set;
+		count->hits_set |= member_count.hits_set;
+		member_count.bytes = 0;
+		member_count.hits = 0;
+		member_count.bytes_set = 0;
+		member_count.hits_set = 0;
+	}
+	return 0;
+}
+
+static int
+bond_flow_query(struct rte_eth_dev *dev, struct rte_flow *flow,
+		const struct rte_flow_action *action, void *arg,
+		struct rte_flow_error *err)
+{
+	switch (action->type) {
+	case RTE_FLOW_ACTION_TYPE_COUNT:
+		return bond_flow_query_count(dev, flow, action, arg, err);
+	default:
+		return rte_flow_error_set(err, ENOTSUP,
+					  RTE_FLOW_ERROR_TYPE_ACTION, arg,
+					  rte_strerror(ENOTSUP));
+	}
+}
+
+static int
+bond_flow_isolate(struct rte_eth_dev *dev, int set,
+		  struct rte_flow_error *err)
+{
+	struct bond_dev_private *internals = dev->data->dev_private;
+	int i;
+	int ret;
+
+	for (i = 0; i < internals->member_count; i++) {
+		ret = rte_flow_isolate(internals->members[i].port_id, set, err);
+		if (unlikely(ret != 0)) {
+			RTE_BOND_LOG(ERR, "Operation rte_flow_isolate failed"
+				     " for member %d with error %d", i, ret);
+			internals->flow_isolated_valid = 0;
+			return ret;
+		}
+	}
+	internals->flow_isolated = set;
+	internals->flow_isolated_valid = 1;
+	return 0;
+}
+
+const struct rte_flow_ops bond_flow_ops = {
+	.validate = bond_flow_validate,
+	.create = bond_flow_create,
+	.destroy = bond_flow_destroy,
+	.flush = bond_flow_flush,
+	.query = bond_flow_query,
+	.isolate = bond_flow_isolate,
+};

@@ -1,0 +1,38 @@
+========
+OVERVIEW
+========
+This directory contains the test application for testing hardware
+BPHY interrupts.
+
+================
+TEST APPLICATION
+================
+The test application demonstrates the process of initializing BPHY
+interrupt subsystem, interrupt registration and handler execution.
+In contrary to rawdevice selftest this application does not only
+test API correctness but actually triggers real interrupts by
+accessing PSM registers.
+
+==========
+HOW TO RUN
+==========
+
+The application run with no arguments will print information about correct
+parameters format:
+
+ ./bphy-irq
+
+while the actual tests need BPHY BDF device in the following format:
+
+ ./bphy-irq BB:DD.F
+
+for example:
+
+ ./bphy-irq 06:00.0
+
+There is a dedicated test script which lists available PCI devices and
+if one matches BPHY device id chooses it for execution.
+
+Notes:
+------
+Works for 9k platform only.

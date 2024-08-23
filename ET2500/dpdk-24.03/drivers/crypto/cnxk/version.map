@@ -1,0 +1,23 @@
+EXPERIMENTAL {
+	global:
+
+	# added in 24.03
+	rte_pmd_cnxk_crypto_submit;
+	rte_pmd_cnxk_crypto_qptr_get;
+};
+
+INTERNAL {
+	global:
+
+	cn9k_cpt_crypto_adapter_enqueue;
+	cn9k_cpt_crypto_adapter_dequeue;
+	cn10k_cpt_sg_ver1_crypto_adapter_enqueue;
+	cn10k_cpt_sg_ver2_crypto_adapter_enqueue;
+	cn10k_cpt_crypto_adapter_dequeue;
+	cn10k_cpt_crypto_adapter_vector_dequeue;
+
+	cn10k_cryptodev_sec_inb_rx_inject;
+	cn10k_cryptodev_sec_rx_inject_configure;
+
+	local: *;
+};

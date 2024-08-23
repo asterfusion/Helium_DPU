@@ -1,0 +1,91 @@
+========
+OVERVIEW
+========
+This directory contains the test application for testing the external
+buffer feature.
+
+The external buffer implementation is deviating from the spec in terms
+of free callback handling. The mbuf to which the external buffer is
+attached to will immediately get freed in the Tx routine before the
+Tx is completed. So user should *ALWAYS* pass a dummy free callback
+so that the driver does not seg fault when tx is completed due to
+missing callback.
+
+The actual freeing of the external buffers should be handled separately
+by the user in the application.
+
+
+================
+TEST APPLICATION
+================
+There are 2 modes to extbuf App.
+
+Normal Mode
+-----------
+This mode demonstrates the Tx of a 5-segmented packet where each
+segment is as follows. Each segment is 64B in length.
+
+Seg 1, 2, and 3 are allocated every time in the loop.
+Seg 4 and 5 are allocated once.
+
+ * Segment 1 - Normal MBuf.
+ * Segment 2 - External Mbuf at offset 0 of user buffer.
+ * Segment 3 - External MBuf at offset 64 of Seg 1.
+ * Segment 4 - External Mbuf at offset 64 of user buffer.
+ * Segment 5 - External Mbuf at offset 0 of Seg 1. Data offset is 128.
+
+The start of each of these segments are marked with a magic pattern. The
+application also runs in an Rx mode where it checks whether the received
+buffers are valid by verifying the magic patterns.
+
+Note: With this mode, packet drops will be observed as this is not
+      performance optimized.
+
+Performance Mode
+----------------
+This mode sends single segmented packets of size 64B in bursts of 512.
+The single segment in each packet is attached to an external mbuf
+pointing to the user buffer.
+
+Note: In both normal and performance mode, 100 flows are created in Tx.
+
+Note: In both normal and performance mode, each worker core is assigned
+a port and a queue. So the total number of cores enabled should be
+>= Number of ports * Number of queues per port.
+
+==========
+HOW TO RUN
+==========
+
+Simply launching the application with no arguments will start Tx in all
+available ports.
+
+ ./dpdk-extbuf
+
+
+Users can also give the usual EAL arguments to restrict
+the number of ports and lcores where the application runs on.
+
+ ./dpdk-extbuf -c 0x5 -a 0002:01:00.1
+
+
+To limit the number of packets being sent, run as follows.
+
+ ./dpdk-extbuf -c 0x5 -a 0002:01:00.1 -- --max-pkts 1000
+
+
+To run in Rx mode, run as follows.
+
+ ./dpdk-extbuf -c 0x5 -a 0002:01:00.1 -- --rx
+
+
+To run performance mode, add the --perf option.
+
+ ./dpdk-extbuf -c 0x5 -a 0002:01:00.1 -- --perf
+ ./dpdk-extbuf -c 0x5 -a 0002:01:00.1 -- --rx --perf
+
+To change the number of descriptors used, --ndesc option can be used.
+Default number of descriptors is 1024.
+
+To change the number of queues per port, use the --nqueue option. Default
+number of queues per port is 1.

@@ -1,0 +1,26 @@
+From 461916cc881b03b6fcb57a9050b0db5e9c72d710 Mon Sep 17 00:00:00 2001
+From: Ashwin Sekhar T K <asekhar@marvell.com>
+Date: Thu, 15 Dec 2022 21:25:28 +0530
+Subject: [PATCH] patch
+
+---
+ lib/Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/Makefile b/lib/Makefile
+index fa9e9a8..4677cfe 100644
+--- a/lib/Makefile
++++ b/lib/Makefile
+@@ -226,8 +226,8 @@ CFLAGS := $(subst -fno-strict-overflow,,$(CFLAGS))
+ endif # CC
+ 
+ # so or static build
+-ifeq ($(SHARED),y)
+ CFLAGS += -fPIC
++ifeq ($(SHARED),y)
+ ifneq ($(MINGW),0)
+ LIBNAME = $(LIB).dll
+ else
+-- 
+2.25.1
+

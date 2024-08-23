@@ -1,0 +1,14 @@
+diff --git a/lib/lpm/rte_lpm_sve.h b/lib/lpm/rte_lpm_sve.h
+index 2e319373e5..2bcfc07db6 100644
+--- a/lib/lpm/rte_lpm_sve.h
++++ b/lib/lpm/rte_lpm_sve.h
+@@ -11,8 +11,7 @@
+ extern "C" {
+ #endif
+ 
+-__rte_internal
+-static void
++static inline void
+ __rte_lpm_lookup_vec(const struct rte_lpm *lpm, const uint32_t *ips,
+ 		uint32_t *__rte_restrict next_hops, const uint32_t n)
+ {
