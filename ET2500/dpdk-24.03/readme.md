@@ -10,3 +10,7 @@
    ninja -C build
 ```
 ## the dpdk-app is built in the build directory
+If you want to install it, and compile other dpdk-app, such as pktgen/vpp, then exec
+```shell
+   ninja -C build install
+```
