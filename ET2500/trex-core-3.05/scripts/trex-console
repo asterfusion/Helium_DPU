@@ -1,0 +1,11 @@
+#!/bin/bash
+
+INPUT_ARGS=$@
+
+source find_python.sh
+
+export PYTHONPATH=automation/trex_control_plane/interactive
+
+printf "\nUsing '$PYTHON' as Python interpeter\n\n"
+
+$PYTHON -m trex.console.trex_console $INPUT_ARGS

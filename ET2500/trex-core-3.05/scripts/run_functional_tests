@@ -1,0 +1,18 @@
+#!/bin/bash
+
+INPUT_ARGS=${@//--python[23]/}
+
+source find_python.sh
+cd automation/regression
+
+echo Python3 test
+$PYTHON trex_unit_test.py --functional --wireless $INPUT_ARGS $SKIP_GTESTS
+if [ $? -eq 0 ]; then
+    printf "\n$PYTHON test succeeded\n\n"
+else
+    printf "\n*** $PYTHON test failed\n\n"
+    exit -1
+fi
+cd -
+
+

@@ -1,0 +1,155 @@
+{
+   DL issue
+   Memcheck:Cond
+   fun:index
+   fun:expand_dynamic_string_token
+   fun:fillin_rpath
+   fun:_dl_init_paths
+   fun:dl_main
+   fun:_dl_sysdep_start
+   fun:_dl_start_final
+   fun:_dl_start
+   obj:/lib/x86_64-linux-gnu/ld-2.19.so
+   obj:*
+   obj:*
+   obj:*
+   obj:*
+}
+
+{
+   DPDK threads
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:calloc
+   fun:allocate_dtv
+   fun:_dl_allocate_tls
+   fun:allocate_stack
+   fun:pthread_create@@GLIBC_2.2.5
+   fun:rte_eal_init
+   fun:_Z9main_testiPPc
+   fun:(below main)
+}
+
+{
+   DPDK interrupt thread
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:calloc
+   fun:allocate_dtv
+   fun:_dl_allocate_tls
+   fun:allocate_stack
+   fun:pthread_create@@GLIBC_2.2.5
+   fun:rte_eal_intr_init
+   fun:rte_eal_init
+   fun:_Z9main_testiPPc
+   fun:(below main)
+}
+
+{
+   DPDK epoll ctl
+   Memcheck:Param
+   epoll_ctl(event)
+   fun:epoll_ctl
+   fun:eal_intr_thread_main
+   fun:start_thread
+   fun:clone
+}
+
+{
+   IXGBE PCI probe leak
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:rte_zmalloc
+   fun:rte_ring_create
+   fun:rte_hash_create
+   fun:ixgbe_fdir_filter_init
+   fun:eth_ixgbe_dev_init
+   fun:rte_eth_dev_pci_probe
+   fun:rte_eal_pci_probe_one_driver
+   fun:pci_probe_all_drivers.part.0
+   fun:pci_probe_all_drivers
+   fun:rte_eal_pci_probe
+   fun:rte_eal_init
+   fun:_Z9main_testiPPc
+   fun:(below main)
+}
+
+{
+   PCI probe leak
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:rte_zmalloc
+   fun:pci_uio_alloc_resource
+   fun:pci_uio_map_resource
+   fun:rte_eal_pci_probe_one_driver
+   fun:pci_probe_all_drivers.part.0
+   fun:pci_probe_all_drivers
+   fun:rte_eal_pci_probe
+   fun:rte_eal_init
+   fun:_Z9main_testiPPc
+   fun:(below main)
+}
+
+{
+   mempools not released
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:rte_zmalloc
+   fun:rte_mempool_create_empty
+   fun:rte_mempool_create
+   fun:_Z22utl_rte_mempool_createPKcjjji
+   fun:_ZN11CGlobalInfo10init_poolsEjj
+   fun:_ZN11CGlobalTRex6CreateEv
+   fun:_Z9main_testiPPc
+   fun:(below main)
+}
+
+{
+   IXGBE filter init leak
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:rte_zmalloc
+   fun:rte_hash_create
+   fun:ixgbe_fdir_filter_init
+   fun:eth_ixgbe_dev_init
+   fun:rte_eth_dev_pci_probe
+   fun:rte_eal_pci_probe_one_driver
+   fun:pci_probe_all_drivers.part.0
+   fun:pci_probe_all_drivers
+   fun:rte_eal_pci_probe
+   fun:rte_eal_init
+   fun:_Z9main_testiPPc
+   fun:(below main)
+}
+
+{
+   Rings - reserve memory
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:rte_zmalloc
+   fun:rte_ring_create
+   fun:common_ring_alloc
+   fun:rte_mempool_populate_phys
+   fun:rte_mempool_populate_default
+   fun:rte_mempool_create
+   fun:_Z22utl_rte_mempool_createPKcjjji
+   fun:_ZN11CGlobalInfo10init_poolsEjj
+   fun:_ZN11CGlobalTRex6CreateEv
+   fun:_Z9main_testiPPc
+   fun:(below main)
+}
+
+{
+   rings leak (reserve memory)
+   Memcheck:Leak
+   match-leak-kinds: definite
+   fun:rte_zmalloc
+   fun:rte_ring_create
+   fun:Create
+   fun:_ZN17CMessagingManager6CreateEhSs
+   fun:_ZN7CMsgIns6CreateEh
+   fun:_ZN11CGlobalTRex6CreateEv
+   fun:_Z9main_testiPPc
+   fun:(below main)
+}
+

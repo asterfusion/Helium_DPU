@@ -1,0 +1,518 @@
+[IMPORTANT]
+The following section relies on 'service mode' - please refer to 'service mode' section for more details
+
+==== Overview
+
+While under 'service mode', TRex provides the ability to run 'services'.
+
+A 'service' is an instance of a 'service type' that has a certain
+request / response state machine.
+
+
+image::images/trex_services_instances.png[title="Services Instances",align="left",width={p_width}, link="images/trex_services_instances.png"]
+
+
+For example, the *ARP* service type provides a way to create ARP request instances
+that can be then executed by TRex in a *parallel* way supporting up to ~1000 requests in parallel.
+
+The following diagram illustrates how 'services' fit in the general flow:
+
+image::images/trex_services_flow.png[title="Services Execution Flow",align="center",width={p_width_1b}, link="images/trex_services_flow.png"]
+
+
+[NOTE]
+A simple example
+
+
+The simplest example of a service execution:
+
+
+[source,Python]
+----
+# import the ARP service
+from trex_stl_lib.services.trex_stl_service_arp import STLServiceARP
+
+# create a service context on port 0
+ctx  = client.create_service_ctx(port = 0)
+
+# generate single ARP request from 1.1.1.5 to 1.1.1.1
+arp = STLServiceARP(ctx, src_ip = '1.1.1.5', dst_ip = '1.1.1.1')
+
+# move to service mode and execute service
+client.set_service_mode(ports = 0)
+try:
+    ctx.run(arp)
+finally:
+    client.set_service_mode(ports = 0, enabled = False)
+
+# show the ARP result
+print(arp.get_record())
+----
+
+[source,bash]
+----
+Received ARP reply from: 1.1.1.1, hw: b8:46:dd:63:21:e4"
+----
+
+
+There are two main usages for services:
+
+* *Customizing Tests*
+* *Control Plane Stress*
+
+==== Customizing Tests
+
+Services provides an easy way to customize tests:
+
+executing services can be used to dynamically acquire data prior to the test and then generate a test based on the results.
+
+
+[NOTE]
+An example of using DHCP service to cutomize a test
+
+
+Let's assume that our topology includes a DHCP server which will allow traffic from previously leased address only.
+Without services we will not be able to statically generate a test that will be accepted by the server.
+
+However,
+with services we can generate clients using the DHCP service type and used the leased addresses to generate traffic.
+
+image::images/trex_services_two_phase.png[title="Services Two Phase Based Test",align="center",width={p_width_1}, link="images/trex_services_two_phase.png"]
+
+Let's take a deep dive into how to use Python API to implement the above example:
+
+[source,Python]
+----
+
+# first we import the relevant service
+from trex_stl_lib.services.trex_stl_service_dhcp import STLServiceDHCP
+
+# next we generate a service context on the required port
+# all services will be executed on the same port - there is no cross-port service execution
+ctx  = client.create_service_ctx(port = 0)
+
+# generate 100 clients from random MACs (random MAC function omitted)
+# you can, of course, supply specific MAC addresses
+dhcps = [STLServiceDHCP(mac = random_mac()) for _ in range(100)]
+
+# now we execute the service context under service mode
+
+client.set_service_mode(ports = 0)
+try:
+    ctx.run(dhcps)
+finally:
+    client.set_service_mode(ports = 0, enabled = False)
+ 
+
+# inspect the DHCP execution result
+for dhcp in dhcps:
+    record = dhcp.get_record()
+    print('client: MAC {0} - DHCP: {1}'.format(dhcp.get_mac(),record))
+ 
+# let's filter all the DHCPs that successfully moved to 'BOUND' state
+# refer to the DHCP code reference to see all the available states
+bounded_dhcps = [dhcp for dhcp in dhcps if dhcp.state == 'BOUND']
+
+# we can use the above results to generate traffic from the leased addresses
+
+streams = []
+for bound_dhcp in bounded_dhcps:
+    record = bound_dhcp.get_record()
+    
+    pkt = STLPktBuilder(pkt = Ether(src=record.client_mac)/
+                              IP(src=record.client_ip,dst=record.server_ip)/
+                              UDP)
+    streams.append(STLStream(packet = pkt, mode = STLTXSingleBurst(total_pkts = 1000)))
+    
+# add streams and generate traffic
+client.add_streams(ports = 0, streams = streams)
+client.start(ports = 0, mult = '100%')
+client.wait_on_traffic()
+----
+
+And here is how the output (partial) looks like:
+
+[source,bash]
+----
+client: MAC 3c:1d:08:91:7f:34 - DHCP: ip: 1.1.1.8,  server_ip: 1.1.1.1, subnet: 255.255.255.0
+client: MAC 21:3c:a3:3f:cb:a7 - DHCP: ip: 1.1.1.5,  server_ip: 1.1.1.1, subnet: 255.255.255.0
+client: MAC f9:ba:11:51:91:8b - DHCP: ip: 1.1.1.7,  server_ip: 1.1.1.1, subnet: 255.255.255.0
+client: MAC b8:46:dd:63:21:e4 - DHCP: ip: 1.1.1.11, server_ip: 1.1.1.1, subnet: 255.255.255.0
+client: MAC b8:38:f9:c7:1c:6e - DHCP: ip: 1.1.1.9,  server_ip: 1.1.1.1, subnet: 255.255.255.0
+client: MAC 44:27:f1:f3:9a:bd - DHCP: ip: 1.1.1.10, server_ip: 1.1.1.1, subnet: 255.255.255.0
+client: MAC cd:8d:c6:c9:5c:6a - DHCP: ip: 1.1.1.2,  server_ip: 1.1.1.1, subnet: 255.255.255.0
+client: MAC 51:ee:33:d9:d8:9f - DHCP: ip: 1.1.1.3,  server_ip: 1.1.1.1, subnet: 255.255.255.0
+client: MAC 75:f2:22:ce:86:47 - DHCP: ip: 1.1.1.4,  server_ip: 1.1.1.1, subnet: 255.255.255.0
+client: MAC 19:bb:56:20:52:3b - DHCP: ip: 1.1.1.6,  server_ip: 1.1.1.1, subnet: 255.255.255.0
+
+----
+
+[NOTE]
+An example of using IPv6 ND to establish IPv6 neighborships before running DP tests.
+
+The IPv6 ND service has many options, most of them are not mandatory:
+mandatory parameters:
+
+* ctx: the service context object
+* dst_ip: the IPv6 neighbor address to be resolved
+* src_ip: the IPv6 source address to be used
+
+optional parameters:
+
+* retries: number of retries in case of timeouts (default=1)
+* src_mac: source mac address to be used in Ethernet packets (default taken from port in use) 
+* timeout: timeout in seconds to wait for neighbor advertisements in response to our neighbor solicitation packets (default 2)
+* verify_timeout: timeout in seconds to wait for neighbor solicitation messages from a neighbor, after our NS was answered (Neighbor verification is not always performed, but depends on *our* state in the neighbors ND cache).
+* vlan: vlan identifiers used for dot1q/dot1ad vlan headers (e.g. [200,2] uses outer vlan 200, inner vlan 2)
+* fmt: encapsulation format used for vlan tagging ('Q': dot1q, 'D': dot1ad). Double tagging can be formatted with "QQ" (double-dot1q) or "DQ" (dot1q in dot1ad), or 'DD' or 'QD' ....
+* verbose_level: increase logging of IPv6 service instances (e.g service_level = STLServiceIPv6ND.ERROR)
+
+[source,Python]
+----
+#!/usr/bin/python
+
+from stl_path import *
+from trex_stl_lib.api import *
+from trex_stl_lib.services.trex_stl_service_IPv6ND import STLServiceIPv6ND
+
+c = STLClient()
+c.connect()
+c.acquire(force = True)
+c.set_service_mode(ports = 0)
+
+# create service context
+ctx  = c.create_service_ctx(port = 0)
+
+nd_service = STLServiceIPv6ND(  ctx,
+                                src_ip = "2001:db8:10:22::15",
+                                dst_ip = "2001:db8:10:22::1",
+                                vlan = [ 500, 22],
+                                timeout=2,
+                                verify_timeout=6,
+                                fmt = "QQ",
+                                verbose_level = STLServiceIPv6ND.INFO
+
+                                    )
+ctx.run(nd_service)
+print nd_service.get_record()
+----
+
+==== Control Plane Stress Tests
+
+Another practical use-case of services is to simply use the first phase as the main phase
+and focus on generating many control plane requests.
+
+For example,
+the same DHCP example can be used to stress out a DHCP server by generating many requests.
+
+Now,
+even though service mode is *slower* that regular mode, and service context execution is even
+slower as we wait for response from the server there are still two major benefits:
+
+* *Parallelism* - When generating many service instances, there will be minimum impact on
+ the total run time as we execute services in parallel
+ 
+* *Flexibility* - Putting aside performance, TRex services are written in Python and uses Scapy to
+generate traffic and thus are very easy to manipulate and custom fit
+
+==== Currently Provided Services
+
+Currently, the implemented services provided with TRex package are:
+
+* *ARP* - provides an ARP resolution for an IPv4 address
+* *ICMPv4* - provides Ping IPv4 for an IPv4 address
+* *DHCP* - provides a DHCP bound/release lease address
+* *IPv6ND* - provides IPv6 neighbor discovery
+
+We are planning to add more and hope for contribution in this area
+
+==== A Detailed DHCP Example
+Full DHCP example can be found under the following GitHub link:
+
+* link:{github_stl_examples_path}/stl_dhcp_example[stl_dhcp_example.py]
+
+
+==== Limitations
+
+There is no limitation on the *types* of services that are being executed.
+It is possible to run 'ARP' and 'DHCP' in *parallel* if it is needed.
+
+The only limitation is that 'services' run under context which is bounded to
+a single port.
+
+There is no way to forward response from another port to the context.
+
+Also, the number of service instances per execution is currently limited to *1000*.
+
+==== Console plugins
+
+Another usage of services (or even mix of them) is plugins infrastructure in trex-console. +
+Plugins system is a way to dynamically import and run some code.
+
+[source,bash]
+----
+trex>plugins -h
+usage: plugins [-h]  ...
+
+Show / load / use plugins
+
+optional arguments:
+  -h, --help  show this help message and exit
+
+command:
+  
+    show      Show / search for plugins
+    load      Load (or implicitly reload) plugin by name
+    unload    Unload plugin by name
+----
+
+Plugins are located in console/plugins directory, and their filename begins with "plugin_". +
+They can be searched via "show" command and loaded via "load" command:
+
+[source,bash]
+----
+trex>plugins load wlc
+
+Loading plugin: wlc                                          [SUCCESS]
+
+trex>plugins show
++----------------------+-----------------+
+|     Plugin name      |     Loaded      |
++======================+=================+
+|        IPv6ND        |       No        |
++----------------------+-----------------+
+|        hello         |       No        |
++----------------------+-----------------+
+|         wlc          |       Yes       |
++----------------------+-----------------+
+----
+
+Now, loaded plugin can be seen in menu of plugins and used:
+
+[source,bash]
+----
+trex>plugins -h
+usage: plugins [-h]  ...
+
+Show / load / use plugins
+
+optional arguments:
+  -h, --help  show this help message and exit
+
+command:
+  
+    show      Show / search for plugins
+    load      Load (or implicitly reload) plugin by name
+    unload    Unload plugin by name
+    wlc       WLC testing related functionality
+
+trex>plugins wlc -h
+usage: plugins wlc [-h]
+                   {add_client,base,close,create_ap,reconnect,show,start} ...
+
+optional arguments:
+  -h, --help            show this help message and exit
+
+commands:
+  {add_client,base,close,create_ap,reconnect,show,start}
+    add_client          Add client(s) to AP(s)
+    base                Set base values of MAC, IP etc. for created AP/Client.
+                        Will be increased for each new device.
+    close               Closes all wlc-related stuff
+    create_ap           Create AP(s) on port
+    reconnect           Reconnect disconnected AP(s) or Client(s).
+    show                Show status of APs
+    start               Start traffic on behalf on client(s).
+
+trex>plugins wlc create_ap -p 0
+
+Enabling service mode on port(s) [0]:                        [SUCCESS]
+
+
+Discovering WLC                                              [SUCCESS]
+
+
+Establishing DTLS connection                                 [SUCCESS]
+
+
+Join WLC and get SSID                                        [SUCCESS]
+----
+
+Example of plugin (file console/plugins/plugin_hello.py):
+
+[source,python]
+----
+#!/usr/bin/python
+
+from console.plugins import *
+
+'''
+Example plugin
+'''
+
+class Hello_Plugin(ConsolePlugin):
+    def plugin_description(self):
+        return 'Simple example'
+
+    # used to init stuff
+    def plugin_load(self):
+        # Adding arguments to be used at do_* functions
+        self.add_argument(type = str,
+                dest = 'username', # <----- variable name to be used
+                help = 'Username to greet')
+
+    # We build argparser from do_* functions, stripping the "do_" from name
+    def do_greet(self, username): # <------ username was registered in plugin_load
+        '''Greet some username'''
+        self.trex_client.logger.log('Hello, %s!' % bold(username.capitalize())) # <--- trex_client is set implicitly
+----
+
+
+[NOTE]
+An plugin that uses the IPv6 service, that allows experimenting with IPv6 from the console.
+
+[source,bash]
+----
+trex(service)>plugins load IPv6ND
+
+Loading plugin: IPv6ND                                       [SUCCESS]
+
+trex(service)>plugins IPv6ND -h
+usage: plugins IPv6ND [-h] {clear,resolve,status} ...
+
+optional arguments:
+  -h, --help            show this help message and exit
+
+commands:
+  {clear,resolve,status}
+    clear               clear IPv6 ND requests/entries
+    resolve             perform IPv6 neighbor discovery
+    status              show status of generated ND requests
+
+
+
+ trex(service)>plugins IPv6ND  resolve -h
+ usage: IPv6ND resolve [-h] -p PORT -s SRC_IP [-m SRC_MAC] -d DST_IP [-v VLAN]
+                       [-f FMT] [-t TIMEOUT] [-T VERIFY_TIMEOUT] [-c COUNT]
+                       [-r RATE] [-R RETRIES] [-V]
+ 
+ perform IPv6 neighbor discovery
+ 
+ optional arguments:
+   -h, --help            show this help message and exit
+   -p PORT, --port PORT  trex port to use
+   -s SRC_IP, --src-ip SRC_IP
+                         src ip to use
+   -m SRC_MAC, --src-mac SRC_MAC
+                         src mac to use
+   -d DST_IP, --dst-ip DST_IP
+                         IPv6 dst ip to discover
+   -v VLAN, --vlan VLAN  vlan(s) to use (comma separated)
+   -f FMT, --format FMT  vlan encapsulation to use (QQ: qinq, DA: 802.1AD ->
+                         802.1q)
+   -t TIMEOUT, --timeout TIMEOUT
+                         timeout to wait for NA
+   -T VERIFY_TIMEOUT, --verify-timeout VERIFY_TIMEOUT
+                         timeout to wait for neighbor verification NS
+   -c COUNT, --count COUNT
+                         nr of nd to perform (auto-scale src-addr to test
+                         parallel NDs)
+   -r RATE, --rate RATE  rate limiter value to pass to services framework
+   -R RETRIES, --retries RETRIES
+                         number of retries in case no answer was received
+   -V, --verbose         verbose mode
+ 
+----
+
+Perform 3 parallel ND operations, where source IPv6 addresses are incremented automatically:
+
+
+[source,bash]
+----
+ 
+ trex(service)>plugins IPv6ND  resolve -c 3 -v 500,22 -p 0 -s 2001:db8:10:22::70 -d 2001:db8:10:22::1 -V --format QQ -T 6
+
+ performing ND for 3 addresses.
+ NA response timeout............: 2s
+ Neighbor verification timeout..: 6s
+ 
+ ND: TX NS: 2001:db8:10:22::70,74:a0:2f:b4:97:49 -> 2001:db8:10:22::1 (retry 0)
+ ND: TX NS: 2001:db8:10:22::71,74:a0:2f:b4:97:49 -> 2001:db8:10:22::1 (retry 0)
+ ND: TX NS: 2001:db8:10:22::72,74:a0:2f:b4:97:49 -> 2001:db8:10:22::1 (retry 0)
+ ND: RX NA: 2001:db8:10:22::70 <- 2001:db8:10:22::1, 00:05:73:a0:00:01
+ ND: RX NA: 2001:db8:10:22::72 <- 2001:db8:10:22::1, 00:05:73:a0:00:01
+ ND: timeout for 2001:db8:10:22::71,74:a0:2f:b4:97:49 <-- 2001:db8:10:22::1 (retry 0)
+ ND: TX NS: 2001:db8:10:22::71,74:a0:2f:b4:97:49 -> 2001:db8:10:22::1 (retry 1)
+ ND: RX NA: 2001:db8:10:22::71 <- 2001:db8:10:22::1, 00:05:73:a0:00:01
+ ND: RX NS: 2001:db8:10:22::70 <-- 2001:db8:10:22::d,00:de:fb:1d:83:c4
+ ND: TX NA: 2001:db8:10:22::70,74:a0:2f:b4:97:49 -> 2001:db8:10:22::d,00:de:fb:1d:83:c4
+ ND: RX NS: 2001:db8:10:22::70 <-- 2001:db8:10:22::c,00:de:fb:1d:84:c5
+ ND: TX NA: 2001:db8:10:22::70,74:a0:2f:b4:97:49 -> 2001:db8:10:22::c,00:de:fb:1d:84:c5
+ ND: RX NS: 2001:db8:10:22::71 <-- 2001:db8:10:22::c,00:de:fb:1d:84:c5
+ ND: TX NA: 2001:db8:10:22::71,74:a0:2f:b4:97:49 -> 2001:db8:10:22::c,00:de:fb:1d:84:c5
+ ND: RX NS: 2001:db8:10:22::71 <-- 2001:db8:10:22::d,00:de:fb:1d:83:c4
+ ND: TX NA: 2001:db8:10:22::71,74:a0:2f:b4:97:49 -> 2001:db8:10:22::d,00:de:fb:1d:83:c4
+ ND: RX NS: 2001:db8:10:22::72 <-- 2001:db8:10:22::d,00:de:fb:1d:83:c4
+ ND: TX NA: 2001:db8:10:22::72,74:a0:2f:b4:97:49 -> 2001:db8:10:22::d,00:de:fb:1d:83:c4
+ ND: RX NS: 2001:db8:10:22::72 <-- 2001:db8:10:22::c,00:de:fb:1d:84:c5
+ ND: TX NA: 2001:db8:10:22::72,74:a0:2f:b4:97:49 -> 2001:db8:10:22::c,00:de:fb:1d:84:c5
+
+ trex(service)>
+----
+
+Show status of local IPv6 neighborships:
+
+[source,bash]
+----
+
+ trex(service)>plugins IPv6ND  status
+ 
+ 
+ ND Status
+ ---------
+ 
+ used vlan(s)...................: [500, 22]
+ used encapsulation.............: QQ
+ number of IPv6 source addresses: 3
+ 
+ 
+     SRC MAC              SRC IPv6                 |       DST IPv6                     DST MAC       STATE        VERIFIED
+ --------------------------------------------------------------------------------------------------------------------------
+ 74:a0:2f:b4:97:49  2001:db8:10:22::70             | 2001:db8:10:22::1              00:05:73:a0:00:01 REACHABLE        2
+ 74:a0:2f:b4:97:49  2001:db8:10:22::71             | 2001:db8:10:22::1              00:05:73:a0:00:01 REACHABLE        2
+ 74:a0:2f:b4:97:49  2001:db8:10:22::72             | 2001:db8:10:22::1              00:05:73:a0:00:01 REACHABLE        2
+ 
+ resolved..: 3
+ unresolved: 0
+ verified..: 3
+ 
+ trex(service)>
+ 
+----
+
+Clear local IPv6 neighborships:
+
+[source,bash]
+----
+ trex(service)>plugins IPv6ND clear
+ trex(service)>plugins IPv6ND status
+ 
+ 
+ ND Status
+ ---------
+ 
+ used vlan(s)...................: [500, 22]
+ used encapsulation.............: QQ
+ number of IPv6 source addresses: 3
+ 
+ 
+     SRC MAC              SRC IPv6                 |       DST IPv6                     DST MAC       STATE      VERIFIED
+ ------------------------------------------------------------------------------------------------------------------------
+ 
+ resolved..: 0
+ unresolved: 0
+ verified..: 0
+ 
+ trex(service)>
+----
+

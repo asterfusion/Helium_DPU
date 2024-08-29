@@ -1,0 +1,11 @@
+- port_limit      : 2
+  version         : 2
+#List of interfaces. Change to suit your setup. Use ./dpdk_setup_ports.py -s to see available options
+  interfaces    : ["03:00.0","03:00.1"] 
+  port_info       :  # Port IPs. Change to suit your needs. In case of loopback, you can leave as is.
+          - ip         : 1.1.1.1
+            default_gw : 2.2.2.2
+          - ip         : 2.2.2.2
+            default_gw : 1.1.1.1
+  
+

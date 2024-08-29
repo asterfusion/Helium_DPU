@@ -1,0 +1,584 @@
+:author: hhaim 
+:email: <hhaim@cisco.com> 
+
+
+ifndef::backend-docbook[]
+++++++++++++++
+<div id="header-pic"   style="padding:50px;margin-top:0px;position:absolute;left:0px;width:100%;">
+    <img src="images/trex_logo.png" alt="Smiley face" height="80" width="270"/>
+</div>
+<br/><br/><br/><br/><br/><br/><br/><br/><br/><br/>
+++++++++++++++
+
+include::trex_ga.asciidoc[]
+
+:github_stl_path: https://github.com/cisco-system-traffic-generator/trex-core/tree/master/scripts/stl
+:github_stl_examples_path: https://github.com/cisco-system-traffic-generator/trex-core/tree/master/scripts/automation/trex_control_plane/interactive/trex/examples/stl
+
+
+== TRex release notes ==
+endif::backend-docbook[]
+
+ifdef::backend-docbook[]
+
+== TRex release notes  ==
+:numbered:
+
+endif::backend-docbook[]
+
+== Release 3.05 ==
+
+* Upgrade to DPDK 24.03 for new Cloud drivers 
+** add mana driver 
+
+
+== Release 3.04 ==
+
+* Upgrade to DPDK 23.03 for new Cloud drivers 
+** iavf works now for i40evf 
+
+
+== Release 3.03 ==
+
+* minor bug fixes 
+
+== Release 3.02 ==
+* minor change, build issue with 3.01 for mlx5 driver 
+
+== Release 3.01 ==
+
+* DPDK 
+** mlx5 upgrade to new ofed 
+** XL710 bonding fix 
+
+== Release 3.00 ==
+
+* EMU 
+** Crash in case of bad IGMPv3 packet
+** Update IPfix plugin 
+
+* DPDK : Some driver patch 
+
+== Release 2.99 ==
+
+* E810 add drop mode, latency stream filter does not work yet. 
+* i40evf another fix 
+* EMU add client mode for IPFIX plugin 
+
+== Release 2.98 ==
+
+* Upgrade to DPDK 22.03 
+** i40evf was removed by DPDK but due to an issue with the general driver (iavf) it was return
+** E810 - still not supported 
+* A new and faster way to capture traffic (to file)
+* ASTF
+** Get statistics per flow (in case of low number of active flows)
+* GTPU - minor bud fix 
+
+== Release 2.97 ==
+
+* ASTF 
+** Bug fixes TCP 
+** Add software LRU for better performance 
+** Bigger reassembly window with new tunable 
+* GTPU
+** Topology manager 
+** Add latency support 
+** Add mask per client/server 
+* E810 fix truncate packet issue
+* Add generic black list per MAC/IP in case of EMU usage 
+
+== Release 2.96 ==
+
+* ASTF
+** Upgrade TCP logic 
+*** Major change, TCP logic was upgrade to latest freebsd version (1/1/2022) by @jsmoon and includes SACK and new congestion control algorithms (cubic/newreno) 
+*** The new TCP logic has some effect on performance (usually slower, depends on the scenario)
+*** The behavior in case of drop scenario expected to be better (cubic)
+*** The pattern of packets for the same profile is not backward compatible (e.g. packets is larger due to more tcp options for example SACK), so old benchmark with the same profile might need to be tuned
+* STL 
+** Tagged Packet Group (TPG) -- add dynamic command to update mapping/clear specific tag API for debugging 
+
+== Release 2.95 ==
+
+* STL
+** Fix mlx5 driver in software mode to support TPG without spurious drop packet
+* EMU upgrade to latest version 
+
+== Release 2.94 ==
+
+* STL 
+** Add Tagged Packet Group (TPG) feature. It works in software mode and it is much more advanced than flow-stats (can support multicast counting). For more detail see Stateless manual. 
+
+* ASTF
+** fix default mss value for eflow profiles
+
+* General 
+** fix link:https://github.com/cisco-system-traffic-generator/trex-core/issues/746[746]
+** fix link:https://github.com/cisco-system-traffic-generator/trex-core/issues/640[640] 
+** fix link:https://github.com/cisco-system-traffic-generator/trex-core/issues/789[789] 
+** fix link:https://github.com/cisco-system-traffic-generator/trex-core/issues/779[779] 
+** fix EMU ZMQ channel starvation 
+
+== Release 2.93 ==
+
+* ASTF 
+** GTPU hardening - see in manual for more info 
+*** More than 2 ports support
+*** Support loopback mode for testing 
+*** Support only software mode (HW RSS is not longer supported)
+*** src port is part of the GTPU tunnel, need to configure in RPC 
+
+* DPDK 
+** mlx5 add timestamp format support to DevX
+
+== Release 2.92 ==
+
+* EMU
+** Add DHCP server plugin
+** Add DNS client/server plugin 
+** Add AppSim for simulating L7 application similar to ASTF block 
+** Add PPPoE plugin (experimental) 
+* ASTF 
+** fix GTPU drop in the server side 
+
+== Release 2.91 ==
+
+* EMU
+** Add `query_amount` to mDNS replay 
+* Upgrade ZMQ proxy to support EMU. Add a way to control EMU using complex objects 
+* fixes 
+** fix link:https://github.com/cisco-system-traffic-generator/trex-core/pull/678[678]
+** fix get_async_event to batch number of events 
+
+== Release 2.90 ==
+
+* EMU 
+** Add generic DHCPv4/DHCPv6 options
+** Add mDNS plugin
+** Add CDP plugin
+** Add LLDP plugin
+** Add Cisco TDL plugin (not finished)
+** Bug fixes
+
+* ASTF 
+** GTPU refactor/cleaup and bug fixes 
+** TSO was disabled by mistake, enable it
+
+* STL 
+** bug fixes 
+** FlowStats was broken in v2.89, fixed it in this version
+** Add accurate latency measurement (sub 1usec) for NIC with hardware IEEE 1588 support (compilation flag) 
+
+* DPDK drivers 
+** memif driver fix 
+** add bonding driver 
+
+== Release 2.89 ==
+
+* Fix mlx5 20MPPS limit -- see link:https://github.com/cisco-system-traffic-generator/trex-core/pull/675[675]. There is a need to upgrade the odef to 5.3.01  
+* Add netvsc interface for Azure. It is a simplified relative to failsafe
+* A few minor bug fixes 
+
+
+== Release 2.88 ==
+
+* Major ZMQ protocol change, there is a need to upgrade the client side version see link:https://github.com/cisco-system-traffic-generator/trex-core/issues/636[636]
+** This affect both STL and ASTF
+** STL GUI might not work until a fix 
+* DPDK 21.02 
+** mlx5 driver 
+*** Need to upgrade to OFED 5.2/CentOS 7.9 see Appendix for more info 
+*** Mellanox CX-4 some performance issues only CX-5 works 
+*** STL CX-5: link:https://github.com/cisco-system-traffic-generator/trex-core/issues/633[633]
+*** STL CX-5: link:https://github.com/cisco-system-traffic-generator/trex-core/issues/632[632]
+** Intel E810 
+*** Software mode only 
+** Cisco VIC
+*** Software mode only - remove the hardware support
+* ASTF GTPU support - in experimental, still missing some features. see ASTF manual for more info 
+
+== Release 2.87 ==
+
+* ASTF
+** Add software distribution. AWS, Azure, KVM and driver without hardware RSS can support ASTF with multi-core
+** Fix various bugs in manual instructions. 
+** Improve scale of flows, timer wheel is more generic with 4 levels. 
+* EMU 
+** Fix counters API for client based plugins (e.g. DHCP).
+* STL 
+** load_pcap fix. 
+
+== Release 2.86 ==
+
+* STL
+** Fix the GUI interface to new scapy 
+** Minor fix to flow-stats ipv6 with hardware support 
+* ASTF minor fixes in tunables 
+
+== Release 2.85 ==
+
+* ASTF 
+** Improve maximum ack timeout for high active-flows use-cases 
+** multi-profiles 
+*** topo is supported for 
+*** Clients instance is shared
+*** Stats is correct in corner cases 
+* ASTF/STL 
+** Ability to set the scheduler stretch time, (see set_global_cfg/get_global_cfg) API
+* trex_daemon: fix the case of killing parent process, continue to work
+* BIRD 2.0.7 
+* EMU IPfix support timer for template 
+
+== Release 2.84 ==
+
+* DPDK fixes 
+** Fix vfio on new kernel crash 
+** Maximum number of ports is 32
+** Fix ixgbe link issues 
+** New memory saving in case of dual socket 
+* EMU 
+** Add support for tap interface
+** Console supports only EMU (for tap)
+** DHCPv4 support broadcast offer 
+** Fix crash of server in case of corrupted profile 
+* STL 
+** Average latency is now fixed 
+
+== Release 2.83 ==
+
+* dpdk_setup_port script is less restrict in choosing drivers 
+* Update Scapy v2.4.3 for both Python3/2
+* EMU
+** Add support for IGMPv3/MLd (g,s) filter (INCLUDE) 
+** Add ipfix plugin (netflow v9/v10) for simulating routers
+
+== Release 2.82 ==
+
+* Workaround for Cisco X710 firmware 7.0.x 
+* ASTF minor bugs 
+* STL,FE add ICMPv6 fix checksum instruction 
+
+== Release 2.81 ==
+
+* Bug fixes 
+* ASTF 
+** Add profile features udp_mtu to reduce pcap mtu and delay command
+** Add a plugin to build ASTFTopo base on EMU 
+* fox DPDK 20.02 ixgbe link issue 
+
+== Release 2.80 ==
+
+* DPDK 20.02 - the performance is lower for i40e and higher for Mellanox (mlx5)
+* Update igb_uio kernel share object. Remove the old compiled objects. Suggest to remove the old igb_uio using `sudo rmmod igb_uio` and load the server again. 
+* Azure and ENA were not verified  
+
+== Release 2.79 ==
+
+* EMU 
+** Better performance using ZMQ IPC
+** Add ping for ipv6 
+* ASTF
+** Split the tcp.no_delay flag into two flags no_nagle, force_push
+
+== Release 2.78 ==
+
+* EMU server/Python API 
+** Add dot1x support 
+** Add utility like ping 
+** Better API documentation  link:cp_emu_docs/index.html[emu-sdk] 
+* ASTF fix #435/#436 
+
+== Release 2.77 ==
+
+* minor version, fix EMU documentation and minor things 
+
+== Release 2.76 ==
+
+trex-emu server support. link:https://github.com/cisco-system-traffic-generator/trex-emu[trex-emu]
+
+* Fast client creation/teardown. ~3K/sec for one thread.
+* Number of active client/namespace is limited only by the memory on the server.
+* Packet per second (PPS) in the range of 3-5 MPPS.
+* Python 2.7/3.0 Client API exposed through JSON-RPC.
+* Interactive support - Integrated with the TRex console.
+* Modular design. Each plugin is self contained and can be tested on its own.
+* TRex-EMU supports the following protocols:
+
+[options="header",cols="1,2",width="60%"]
+|=================
+| Plug-in | Description
+| ARP     | RFC 826
+| ICMP    | RFC 777
+| DHCPv4  | RFC 2131 client side
+| IGMP    | IGMP v3/v2/v1 RFC3376
+| IPv6    | IPv6 ND, RFC 4443, RFC 4861, RFC 4862 and MLD and MLDv2 RFC 3810
+| DHCPv6  | RFC 8415 client side
+|=================
+
+see link:trex_emu.html[trex_emu]
+
+* bug fixes 
+** Astf mbuf leakage in a corner case. 
+** memif support loopback 
+** Napatech driver 
+
+== Release 2.75 ==
+
+* Fix wireless simulation for latest eWLC 
+* TCP port sharing link:https://github.com/cisco-system-traffic-generator/trex-core/issues/429[github-429]
+* Minor fix in NDR scripts  
+
+== Release 2.74 ==
+
+* ASTF improvement 
+** Delay ack every x packets, see link:https://github.com/cisco-system-traffic-generator/trex-core/issues/417[github-417].
+** Keepable timer is 16 bits and could be up to 65,000 sec see link:https://github.com/cisco-system-traffic-generator/trex-core/issues/425[github-425].
+** New EMU instruction to create eFlow that terminated by timeout instead of total bytes
+
+* NDR benchmark script see link:cp_ndr_docs/index.html[sdk] link:trex_ndr_bench_doc.html[ndr]
+
+* New PMD support 
+** Broadcom NICs
+*** BCM5730X NetXtreme-C
+*** BCM574XX/BCM575XX NetXtreme-Broadcom 
+*** BCM588XX Stingray Family of SmartNIC Adapters
+*** StrataGX BCM5871X 
+** memif PMD share memory interface (does not support loopback)
+
+== Release 2.73 ==
+
+* Support DDP firmware upgrade for XL710/X710 family  to solve #384 (27MPPS limit) 
+
+== Release 2.72 ==
+
+* Add low_end_core option to platform YAML. More info in link:trex_manual.html#_low_end_machines[manual]
+* Fix crash in case of a BPF filter (adding BIRD node)
+* STF add DHCP plugin 
+* ASTF 
+** Add support for tg_name in case of a pcap template 
+** Multi-profile support bug fix 
+
+
+== Release 2.71 ==
+
+* Fix yet another breakage 
+
+== Release 2.70 ==
+
+[NOTE]
+=====================================================================
+This version is broken. ASTF mode does not connect move to v2.71
+=====================================================================
+
+* Fix ASTF API breakage 
+* Support ASTF service mode filter mode 
+
+== Release 2.66 ==
+
+[NOTE]
+=====================================================================
+This version is broken. ASTF mode does not connect move to v2.71
+=====================================================================
+
+
+* BIRD integration see link:trex_stateless.html#bird[bird]. (first release)
+** Routing protocols support BGP/OSPF/RIP and more on top of IPv6/IPv4 using linux namespace with scale of millions of routes and automation API
+** Change in service mode see link:trex_stateless.html#service_mode[service_mode]. with `--software` mode and off mode packets will not forward to Rx.
+* Enhance linux namespace API to support share linux namespace with a few veth's (instead of 1:1) see link:trex_stateless.html#linux_network_namespace[linux_network_namespace]
+* STF:
+** Add optional flag to keep source TCP/UDP port (per template). link:trex_manual.html#_per_template_section[More info]
+* PF_PACKET PMD support adding dot1q to the receive packet (aligned with physical PMD behavior)
+* ASTF/STF supports more clients, up to 50M instead of 100k
+* ASTF 
+** Better support multi-profile (stability issues)
+** Fix UDP keepalive Python API 
+* improve STL ndr_bench.py utility 
+
+[NOTE]
+=====================================================================
+Breaking change: service mode has 3 states now instead of only off/on:
+
+1. *On* - all the packets are forwarded to RX core (as before).
+
+2. *Off* - default mode. +
+Before v2.66, non-TCP/UDP packets were forwarded to RX core in multi-core software mode (`--software`). +
+After v2.66 (including), in the mode above, those packets are dropped (for more flexibility).
+
+3. *Filter* - new mode. In this case, specific packets are forwarded to RX core. +
+For example, BGP packets for BIRD. It is relevant only for software mode. +
+Using this mode you would be able to run TCP/UDP traffic in high rate while keeping the routing protocols to function.
+=====================================================================
+
+
+== Release 2.65  ==
+
+* Fix minor Azure related issues
+
+== Release 2.64  ==
+
+* Azure DPDK/Failsafe PMD support see link:trex_appendix_azure.html[Azure DPDK support]
+
+== Release 2.63  ==
+
+* Minor bug fixes 
+
+== Release 2.62  ==
+
+* STF
+** Keep Multicast/Broadcast destination IPs upon sending
+** Keep zero source IP upon sending
+** Add multi_flow_enabled and flows_dirs per template options, see link:trex_manual.html#_per_template_section[documentation]
+** Changes to mac_override_by_ip option: (link:trex_manual.html#_alternating_mac_address_by_ip[more info])
+*** Add one more mode to change all MACs in all directions.
+*** Change the offset in MAC where the IP is written: +
+Older versions wrote to upper 4 bytes. +
+From this version on it writes to lower 4 bytes.
+
+== Release 2.61 ==
+
+Minor version 
+
+* ASTF keep-alive packet is with ACK bit on
+* STL 
+** fix Python exception in case of a huge latency packets drop 
+** Support Intel X722 NIC with new firmware 
+
+== Release 2.60 ==
+
+* STL
+** Push remote support for src/dst mac override 
+* ASTF
+** move topo to the API 
+** xstat counters per instance 
+** protection against endless loop 
+ 
+* A better output of traceback 
+
+== Release 2.59 ==
+
+* ASTF
+** Support ip.tos/ttl tunables. 
+** Support ipv6 tunable per template 
+
+
+== Release 2.58 ==
+
+* ASTF
+** Support multi profile - first version see link:trex_astf.html#_dynamic_multiple_profiles_support[dynamic multiple profiles support]
+* STL 
+** multi-rx: supports flow-stats on any type of packets not just IP/TCP/UDP for multi-rx platforms
+** hdrhistogram: experimental support for more accurate latency histogram link:http://hdrhistogram.org/[HDrHistogram]. Enable it by adding `--hdrh` in the server CLI
+* DMZ 
+** Add a new setup in DMZ for external testing with real hardware 
+
+=== Fixed issues: ===
+
+* STL Push pcap -r works now
+* Alignment issue, gcc 7/8 crash fix 
+* Ability to specify timeout to zmq client - to be more resilient to Firewall that drop the connection 
+* CPS is reported in ASTF mode  
+* Better more deterministic performance 
+
+== Release 2.57 ==
+
+* STL 
+** Dynamic add/remove multiple profiles feature see link:trex_stateless.html#dynamic_multiple_profiles[dynamic]
+** Support FlowState with value_list
+** Update API minor version 
+* Upgrade to DPDK v19.05
+** Breaking changes to Mellanox setups - need newer OFED (v4.6) see appendix for more detail 
+* ASTF 
+** fix throttle of new flows in case of congestion 
+** Support 64bit variables
+
+== Release 2.56 ==
+
+* fix basic crash with GUI due to multi profile support link:https://github.com/cisco-system-traffic-generator/trex-core/issues/221[github-221]
+
+== Release 2.55 ==
+
+Minor version
+
+=== Fixed issues: ===
+
+* fix support ```--unbind-unused-ports``` 
+* fix astf maximum number of flows link:https://github.com/cisco-system-traffic-generator/trex-core/issues/223[github-223]
+
+
+== Release 2.54 ==
+
+* STL 
+** Multi-Rx queue support flow stats/latency using software
+** Supporting dynamic add/remove multiple profiles (major change). It is the first phase contributed by Ericsson
+** Push API: add the ability to take the src/dst MAC from the pcap file
+* Napatech: Added support for new NICs 
+* Support 1GB huge page 
+* Add support ```--unbind-unused-ports``` to dpdk_setup_ports.py 
+
+=== Fixed issues: ===
+
+* Do not invalidate dest MAC in case of L2 mode (CSIT)
+* Fix Mellanox ASTF UDP drop see link:https://trex-tgn.cisco.com/youtrack/issue/trex-522[trex-522]
+* Virtual interfaces: Ability to fix TCP/UDP using software (default)
+* ZMQ move to v4.3.1 to fix heartbeat bug
+* mlx5: Support dot1q add/remove 
+* Packet captured twice in ASTF
+* Fix DHCP service example (REQ was sent with unicast)
+
+== Release 2.53 ==
+
+* Fix STL Console issue 
+
+== Release 2.52 ==
+
+* ASTF 
+** Add per template group counters see  link:trex_astf.html#_tutorial_template_group[template_group]
+* Update documentation for Topology module
+* Namespace: Fix multicast performance issue 
+
+== Release 2.51 ==
+
+* Minor fixes for namespaces feature 
+
+
+== Release 2.50 ==
+
+* STL/ASTF
+** L2 emulation (IPv4,IPv6,Dot1q,QinQ) API using Linux network namespace. This works for STL and ASTF see link:trex_stateless.html#linux_network_namespace[name space] for more info
+* Maximum of 24 ports (instead of 16)
+* STL, supports VxLAN hardware counters for XL710/X710
+** Stream config. +
+(Add flow stats "magic" to inner layers of VXLAN stream)
++
+----
+pkt = Ether()/IP()/UDP(dport=4789)/VXLAN()/Ether()/IP()/...
+stream = STLStream(
+        packet = STLPktBuilder(pkt = pkt),
+        flow_stats = STLFlowStats(pg_id = id, vxlan = True))
+----
+
+** TRex port config. +
+(TRex will look for flow stats magic in layers after VXLAN for one ore more given UDP ports)
++
+----
+trex> portattr --vxlan 4789 4777
+----
+
+** Use-cases. +
+(TRex &#8596; Network &#8596; TRex):
+
+*** Network strips VXLAN: +
+Need to configure stream (vxlan = True)
+
+*** Network adds VXLAN: +
+Need to configure TRex port (portattr --vxlan ...)
+
+*** Network replaces VXLAN (strips current and adds new): +
+Need to configure both stream and TRex port
+
+
+
+== Older release notes ==
+link:release_notes_old.html[link]
+

@@ -1,0 +1,398 @@
+TRex Stateless support
+======================
+:email: trex.tgen@gmail.com 
+:quotes.++:
+:numbered:
+:web_server_url: https://trex-tgn.cisco.com/trex
+:local_web_server_url: csi-wiki-01:8181/trex
+:toclevels: 6
+:tabledef-default.subs: normal,callouts
+:github_bench_path: https://github.com/cisco-system-traffic-generator/trex-core/blob/master/scripts/stl/bench.py
+:ndr_path: https://trex-tgn.cisco.com/trex/doc/trex_ndr_bench_doc.html
+:github_ndr_bench_fs_latency_path: https://github.com/cisco-system-traffic-generator/trex-core/blob/master/scripts/automation/trex_control_plane/interactive/trex/examples/stl/ndr_bench_fs_latency.py
+include::trex_ga.asciidoc[]
+
+// PDF version - image width variable
+ifdef::backend-docbook[]
+:p_width: 450
+endif::backend-docbook[]
+
+// HTML version - image width variable
+ifdef::backend-xhtml11[]
+:p_width: 800
+endif::backend-xhtml11[]
+
+
+== TRex stateless L2 benchmarks using XL710 40G NICs
+
+=== Setup details
+
+[cols="1,5"]
+|=================
+| Server: | UCSC-C240-M4SX
+| CPU:    | 2 x Intel(R) Xeon(R) CPU E5-2667 v3 @ 3.20GHz
+| RAM:    | 65536 @ 2133 MHz
+| NICs:   | 2 x Intel Corporation Ethernet Controller XL710 for 40GbE QSFP+ (rev 01)
+| QSFP:   | Cisco QSFP-H40G-AOC1M
+| OS:     | Fedora 18
+| Switch: | Cisco Nexus 3172 Chassis, System version: 6.0(2)U5(2).
+| TRex:   | v2.09 using 7 cores per dual interface.
+|=================
+
+=== Topology
+
+TRex port 1 &#8596; Switch port Eth1/50 (vlan 1005) &#8596; Switch port Eth1/52 (vlan 1005) &#8596; TRex port 2
+
+=== Results
+
+.Traffic Profile = Field Engine Cached 255
+[cols="2,2^,2^,2^,2^,2^,2^,2^,3", options="header"]
+|=================
+| Packet size | Line Utilization (%) | Total L1 (Gb/s) | Total L2 (Gb/s) | CPU Util (%) | Total MPPS | BW per core (Gb/s) <1> | MPPS per core <2> | Multiplier
+| Imix        | 100.04               | 80.03           | 76.03           | 2.7          | 25.03      | 89.74                  | 66.21             | 100%
+| 1514        | 100.12               | 80.1            | 79.05           | 1.33         | 6.53       | 430.18                 | 35.07             | 100%
+| 590         | 99.36                | 79.49           | 76.89           | 3.2          | 16.29      | 177.43                 | 36.36             | 99.5%
+| 128         | 99.56                | 79.65           | 68.89           | 15.4         | 67.27      | 36.94                  | 31.2              | 99.5%
+| 64          | 52.8                 | 42.3            | 32.23           | 14.1         | 62.95      | 21.43                  | 31.89             | 31.5mpps
+|=================
+
+.Traffic Profile = Field Engine with 1 variable
+[cols="2,2^,2^,2^,2^,2^,2^,2^,3", options="header"]
+|=================
+| Packet size | Line Utilization (%) | Total L1 (Gb/s) | Total L2 (Gb/s) | CPU Util (%) | Total MPPS | BW per core (Gb/s) <1> | MPPS per core <2> | Multiplier
+| Imix        | 100.04               | 80.03           | 76.03           | 12.6         | 25.03      | 45.37                  | 14.19             | 100%
+| 1514        | 100.12               | 80.1            | 79.05           | 2.6          | 6.53       | 220.05                 | 17.94             | 100%
+| 590         | 99.46                | 79.57           | 76.96           | 7.04         | 16.3       | 80.73                  | 16.53             | 99.5%
+| 128         | 99.56                | 79.65           | 68.89           | 33.1         | 67.27      | 17.19                  | 14.52             | 99.5%
+| 64          | 52.8                 | 42.3            | 32.23           | 31.3         | 63.06      | 9.65                   | 14.37             | 31.5mpps
+|=================
+
+<1> Extrapolated L1 bandwidth per 1 core @ 100% CPU utilization.
+<2> Extrapolated amount of MPPS per 1 core @ 100% CPU utilization.
+
+== Appendix
+
+=== Preparing setup and running the tests.
+
+==== Hardware preparations
+
+Order the UCS with HW described above.
+
+* There are several NICs with this chipset. +
+Bare Intel NICs don't work with Cisco QSFP+ optics, for such case you will need Silicom NICs.
+* Use NICs with 2x40G ports in each.
+* Put the NICs at different NUMAs (first on the left side, second on the right side).
+
+==== Software preparations
+
+* Install the OS (Bare metal Linux, *not* VM!)
+* Obtain the latest TRex package: wget https://trex-tgn.cisco.com/trex/release/latest
+* Untar the package: tar -xzf latest
+* Change dir to unzipped TRex
+* Create config file using command: sudo python dpdk_setup_ports.py -i
+** In case of Ubuntu 16 need python3
+** See paragraph link:trex_stateless_bench.html#_config_creation[config creation] for detailed step-by-step
+
+==== The tests
+
+* Run the TRex server: sudo ./t-rex-64 -i -c 7
+* In another shell run TRex console: trex-console
+** The console can be run from another computer with -s argument, --help for more info.
+** Other options for TRex client are automation or GUI
+* In the console, run "tui" command, and then send the traffic with commands like:
+** start -f stl/bench.py -m 50% --port 0 3 -t size=590,vm=var1
+** stop
+** clear
+** start -f stl/bench.py -m 30mpps --port 0 -t size=64,vm=cached
+** start -f stl/bench.py -m 100% -t size=1514,vm=random --force
+
+==== Config creation
+
+In our setup we will not use hyper-threading. +
+We will start with command: +
+sudo ./dpdk_setup_ports.py -i --no-ht +
+ +
+Printed table with interfaces info:
+
+[cols="4,6,9,19,33,9,10,10", options="header"]
+|=================
+^| ID ^| NUMA ^|   PCI   ^|        MAC        ^|              Name               ^| Driver  ^| Linux IF ^|  Active
+| 0  | 0    | 02:00.0 | 68:05:ca:32:15:b0 | Device 1583                     | i40e    | p1p1     |
+| 1  | 0    | 02:00.1 | 68:05:ca:32:15:b1 | Device 1583                     | i40e    | p1p2     |
+| 2  | 0    | 05:00.0 | 00:E0:ED:5D:82:D1 | Device 1583                     | igb_uio |          |
+| 3  | 0    | 05:00.1 | 00:E0:ED:5D:82:D2 | Device 1583                     | igb_uio |          |
+| 4  | 0    | 0a:00.0 | 04:62:73:5f:e8:a8 | I350 Gigabit Network Connection | igb     | p4p1     | \*Active*
+| 5  | 0    | 0a:00.1 | 04:62:73:5f:e8:a9 | I350 Gigabit Network Connection | igb     | p4p2     |
+| 6  | 1    | 84:00.0 | 68:05:CA:32:0C:38 | Device 1583                     | igb_uio |          |
+| 7  | 1    | 84:00.1 | 68:05:CA:32:0C:39 | Device 1583                     | igb_uio |          |
+|=================
+
+We will be asked to specify interfaces for TRex usage:
+
+==========================
+Please choose even number of interfaces either by ID or PCI or Linux IF (look at columns above). +
+Stateful will use order of interfaces: Client1 Server1 Client2 Server2 etc. for flows. +
+Stateless can be in any order. +
+Try to choose each pair of interfaces to be on same NUMA within the pair for performance. +
+Enter list of interfaces in line (for example: 1 3) : *2 3 6 7*
+==========================
+
+In our setup we have used 2, 3, 6, 7. +
+Next, we need to specify destination MAC addresses for given interfaces. +
+By default assumed loopback or L2 Switch with ports connection: 1^st^ port&#8596;2^nd^ port, 3^rd^ port&#8596;4^th^ port etc. +
+If you have router or L3 switch or some different connection, change the destination MACs accordingly. +
+In our case, ports are connected 2&#8596;7, 3&#8596;6. +
+We will give proper MACs as destination by clicking "y" and copy-paste MAC:
+
+==========================
+For interface 2, assuming loopback to it's dual interface 3. +
+Destination MAC is 00:E0:ED:5D:82:D2. Change it to MAC of DUT? (y/N).*y* +
+Please enter new destination MAC of interface 2: *68:05:CA:32:0C:39* +
+For interface 3, assuming loopback to it's dual interface 2. +
+Destination MAC is 00:E0:ED:5D:82:D1. Change it to MAC of DUT? (y/N).*y* +
+Please enter new destination MAC of interface 3: *68:05:CA:32:0C:38* +
+For interface 6, assuming loopback to it's dual interface 7. +
+Destination MAC is 68:05:CA:32:0C:39. Change it to MAC of DUT? (y/N).*y* +
+Please enter new destination MAC of interface 6: *00:E0:ED:5D:82:D2* +
+For interface 7, assuming loopback to it's dual interface 6. +
+Destination MAC is 68:05:CA:32:0C:38. Change it to MAC of DUT? (y/N).*y* +
+Please enter new destination MAC of interface 7: *00:E0:ED:5D:82:D1*
+==========================
+
+Finally, you can print generated config and save it to file:
+
+==========================
+Print preview of generated config? (Y/n) +
+++++
+<pre>### Config file generated by dpdk_setup_ports.py ###
+
+- port_limit: 4
+  version: 2
+  interfaces: ['05:00.0', '05:00.1', '84:00.0', '84:00.1']
+  port_info:
+      - dest_mac: [0x68, 0x05, 0xca, 0x32, 0x0c, 0x39]
+        src_mac:  [0x00, 0xe0, 0xed, 0x5d, 0x82, 0xd1]
+      - dest_mac: [0x68, 0x05, 0xca, 0x32, 0x0c, 0x38]
+        src_mac:  [0x00, 0xe0, 0xed, 0x5d, 0x82, 0xd2]
+
+      - dest_mac: [0x00, 0xe0, 0xed, 0x5d, 0x82, 0xd2]
+        src_mac:  [0x68, 0x05, 0xca, 0x32, 0x0c, 0x38]
+      - dest_mac: [0x00, 0xe0, 0xed, 0x5d, 0x82, 0xd1]
+        src_mac:  [0x68, 0x05, 0xca, 0x32, 0x0c, 0x39]
+
+  platform:
+      master_thread_id: 0
+      latency_thread_id: 15
+      dual_if:
+        - socket: 0
+          threads: [1,2,3,4,5,6,7] +
+
+        - socket: 1
+          threads: [8,9,10,11,12,13,14]
+
+</pre>
+++++
+Save the config to file? (Y/n) +
+Default filename is /etc/trex_cfg.yaml +
+Press ENTER to confirm or enter new file: +
+File /etc/trex_cfg.yaml already exist, overwrite? (y/N)*y* +
+Saved.
+==========================
+
+
+=== Some of screenshots of console with commands
+
+==== 64 bytes
+
+Utilization:
+
+image:images/64_util.png[title="64 bytes util",align="left",width={p_width}, link="images/64_util.png"]
+
+No drops:
+
+image:images/64_nodrop.png[title="64 bytes no drops",align="left",width={p_width}, link="images/64_nodrop.png"]
+
+==== 128 bytes
+
+Utilization:
+
+image:images/128_util.png[title="128 bytes util",align="left",width={p_width}, link="images/128_util.png"]
+
+No drops:
+
+image:images/128_nodrop.png[title="128 bytes no drops",align="left",width={p_width}, link="images/128_nodrop.png"]
+
+==== 590 bytes
+
+Utilization:
+
+image:images/590_util.png[title="128 bytes util",align="left",width={p_width}, link="images/590_util.png"]
+
+No drops:
+
+image:images/590_nodrop.png[title="590 bytes no drops",align="left",width={p_width}, link="images/590_nodrop.png"]
+
+==== 1514 bytes
+
+Utilization:
+
+image:images/1514_util.png[title="128 bytes util",align="left",width={p_width}, link="images/1514_util.png"]
+
+No drops:
+
+image:images/1514_nodrop.png[title="1514 bytes no drops",align="left",width={p_width}, link="images/1514_nodrop.png"]
+
+== TRex stateless updated L2 benchmarks using XL710 40G NICs
+
+=== Setup details
+
+[cols="1,5"]
+|=================
+| Server: | UCSC-C240-M4SX
+| CPU:    | 2 x Intel(R) Xeon(R) CPU E5-2667 v3 @ 3.20GHz
+| RAM:    | 65536 @ 2133 MHz
+| NICs:   | 2 x Intel Corporation Ethernet Controller XL710 for 40GbE QSFP+ (rev 01)
+| QSFP:   | Cisco QSFP-H40G-AOC1M
+| OS:     | CentOS 7.4
+| Router: | Loopback.
+| TRex:   | v2.86 using 7 cores per dual interface.
+|=================
+
+=== Topology
+
+TRex port 1 &#8596; TRex port 2
+
+=== Results
+==== Running TRex hardware assisted mode
+
+We ran TRex with the following command
+[source,bash]
+-------------------
+[bash]>sudo ./t-rex-64 -i -c 7
+-------------------
+TRex params:
+
+set driver name net_i40e
+
+driver capability : TCP_UDP_OFFLOAD TSO
+
+set dpdk queues mode to DROP_QUE_FILTER
+
+
+.Traffic Profile = Field Engine Cached 255
+[cols="2,2^,2^,2^,2^,2^,2^,2^,3", options="header"]
+|=================
+| Packet size | Line Utilization (%) | Total L1 (Gb/s) | Total L2 (Gb/s) | CPU Util (%) | Total MPPS | BW per core (Gb/s) <1> | MPPS per core <2> | Multiplier
+| imix        | 99.25                | 79.40           | 75.41           | 8.67         | 24.95      | 65.41                  | 20.55             | 100.0%
+| 1514        | 99.73                | 79.78           | 78.74           | 1.89         | 6.50       | 301.53                 | 24.57             | 100.0%
+| 590         | 99.38                | 79.51           | 76.90           | 5.02         | 16.29      | 113.13                 | 23.18             | 100.0%
+| 128         | 99.74                | 79.79           | 69.01           | 21.78        | 67.39      | 26.17                  | 22.10             | 100.0%
+| 64          | 53.76                | 43.01           | 32.77           | 22.37        | 64.00      | 13.73                  | 20.43             | 82.14%
+|=================
+
+.Traffic Profile = Field Engine with 1 variable
+[cols="2,2^,2^,2^,2^,2^,2^,2^,3", options="header"]
+|=================
+| Packet size | Line Utilization (%) | Total L1 (Gb/s) | Total L2 (Gb/s) | CPU Util (%) | Total MPPS | BW per core (Gb/s) <1> | MPPS per core <2> | Multiplier
+| imix        | 99.74                | 79.79           | 75.78           | 14.39        | 25.07      | 39.60                  | 12.44             | 100.0%
+| 1514        | 99.37                | 79.49           | 78.46           | 3.24         | 6.48       | 175.25                 | 14.28             | 100.0%
+| 590         | 99.77                | 79.81           | 77.20           | 8.59         | 16.36      | 66.37                  | 13.60             | 100.0%
+| 128         | 99.75                | 79.80           | 69.01           | 38.37        | 67.40      | 14.86                  | 12.55             | 100.0%
+| 64          | 54.13                | 43.31           | 33.00           | 36.71        | 64.44      | 8.43                   | 12.54             | 82.58%
+|=================
+
+.Traffic Profile = Field Engine Cached 255 with flow stats
+[cols="2,2^,2^,2^,2^,2^,2^,2^,3", options="header"]
+|=================
+| Packet size | Line Utilization (%) | Total L1 (Gb/s) | Total L2 (Gb/s) | CPU Util (%) | Total MPPS | BW per core (Gb/s) <1> | MPPS per core <2> | Multiplier
+| imix        | 99.63                | 79.71           | 75.70           | 9.76         | 25.04      | 58.33                  | 18.33             | 100.0%
+| 1514        | 99.61                | 79.69           | 78.65           | 1.96         | 6.49       | 290.42                 | 23.67             | 100.0%
+| 590         | 99.57                | 79.66           | 77.05           | 5.38         | 16.32      | 105.76                 | 21.67             | 100.0%
+| 128         | 96.40                | 77.12           | 66.70           | 38.70        | 65.14      | 14.23                  | 12.02             | 100.0%
+| 64          | 53.82                | 43.05           | 32.80           | 25.25        | 64.07      | 12.18                  | 18.12             | 79.87%
+|=================
+
+<1> Extrapolated L1 bandwidth per 1 core @ 100% CPU utilization.
+<2> Extrapolated amount of MPPS per 1 core @ 100% CPU utilization.
+
+==== Running TRex software assisted mode
+
+We ran TRex with the following command
+[source,bash]
+-------------------
+[bash]>sudo ./t-rex-64 -i -c 7 --software
+-------------------
+TRex params:
+
+set driver name net_i40e
+
+driver capability : TCP_UDP_OFFLOAD TSO
+
+set dpdk queues mode to MULTI_QUE
+
+
+.Traffic Profile = Field Engine Cached 255
+[cols="2,2^,2^,2^,2^,2^,2^,2^,3", options="header"]
+|=================
+| Packet size | Line Utilization (%) | Total L1 (Gb/s) | Total L2 (Gb/s) | CPU Util (%) | Total MPPS | BW per core (Gb/s) <1> | MPPS per core <2> | Multiplier
+| imix        | 99.51                | 79.61           | 75.60           | 18.75        | 25.01      | 30.33                  | 9.53              | 100.0%
+| 1514        | 99.73                | 79.78           | 78.74           | 3.92         | 6.50       | 145.37                 | 11.85             | 100.0%
+| 590         | 98.40                | 78.72           | 76.14           | 10.28        | 16.13      | 54.69                  | 11.21             | 99.36%
+| 128         | 38.31                | 30.65           | 26.51           | 19.71        | 25.89      | 11.11                  | 9.38              | 40.38%
+| 64          | 21.70                | 17.36           | 13.23           | 18.64        | 25.83      | 6.65                   | 9.90              | 35.82%
+|=================
+
+.Traffic Profile = Field Engine with 1 variable
+[cols="2,2^,2^,2^,2^,2^,2^,2^,3", options="header"]
+|=================
+| Packet size | Line Utilization (%) | Total L1 (Gb/s) | Total L2 (Gb/s) | CPU Util (%) | Total MPPS | BW per core (Gb/s) <1> | MPPS per core <2> | Multiplier
+| imix        | 99.76                | 79.81           | 75.79           | 24.33        | 25.07      | 23.43                  | 7.36              | 100.0%
+| 1514        | 99.69                | 79.75           | 78.71           | 5.40         | 6.50       | 105.49                 | 8.60              | 100.0%
+| 590         | 99.70                | 79.76           | 77.14           | 13.28        | 16.34      | 42.90                  | 8.79              | 100.0%
+| 128         | 39.90                | 31.92           | 27.61           | 28.80        | 26.96      | 7.92                   | 6.69              | 56.09%
+| 64          | 22.40                | 17.92           | 13.66           | 25.67        | 26.67      | 4.99                   | 7.42              | 51.02%
+|=================
+
+.Traffic Profile = Field Engine Cached 255 with flow stats
+[cols="2,2^,2^,2^,2^,2^,2^,2^,3", options="header"]
+|=================
+| Packet size | Line Utilization (%) | Total L1 (Gb/s) | Total L2 (Gb/s) | CPU Util (%) | Total MPPS | BW per core (Gb/s) <1> | MPPS per core <2> | Multiplier
+| imix        | 59.33                | 47.46           | 45.08           | 16.05        | 14.91      | 21.12                  | 6.64              | 72.92%
+| 1514        | 99.51                | 79.61           | 78.57           | 6.58         | 6.49       | 86.42                  | 7.04              | 100.0%
+| 590         | 75.99                | 60.79           | 58.80           | 14.06        | 12.46      | 30.88                  | 6.33              | 94.53%
+| 128         | 24.59                | 19.67           | 17.01           | 17.17        | 16.61      | 8.18                   | 6.91              | 47.17%
+| 64          | 16.37                | 13.10           | 9.98            | 18.56        | 19.49      | 5.04                   | 7.50              | 44.06%
+|=================
+
+<1> Extrapolated L1 bandwidth per 1 core @ 100% CPU utilization.
+<2> Extrapolated amount of MPPS per 1 core @ 100% CPU utilization.
+
+== Appendix
+
+=== Running the tests.
+
+* Run the TRex server with the desired mode.
+
+* After running TRex in one of the modes, we use the ndr_bench_fs_latency.py to create the tables.
+** This script make use of NDR, a tool that helps us to find the highest rate with no drop of certain profile.
+The profile we used is called bench.py .
+The NDR finds the highest rate using multiple runs with sophisticated binary search.
+You can read more about NDR, bench.py and ndr_bench_fs_latency.py here:
+link:{ndr_path}[NDR]
+link:{github_bench_path}[bench.py]
+link:{github_ndr_bench_fs_latency_path}[ndr_bench_fs_latency.py]
+* Run the ndr_bench_fs_latency.py using this command:
+[source,bash]
+-------------------
+[bash]>python ndr_bench_fs_latency.py --port 1 2
+-------------------
+* If you want to see the traffic, you can run trex console in another shell under read mode using the command:
+[source,bash]
+-------------------
+[bash]>sudo ./trex-console -r.
+-------------------
+In the console you can run the command:
+-------------------
+[trex]>tui
+-------------------
+and then navigate using Esc.

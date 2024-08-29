@@ -1,0 +1,130 @@
+TRex Documentation
+==================
+:quotes.++:
+:web_server_url: https://trex-tgn.cisco.com/trex
+:local_web_server_url: csi-wiki-01:8181/trex
+:toclevels: 4
+
+include::trex_ga.asciidoc[]
+
+
+== Presentations
+
+[options="header",cols="<4,a"]
+|=================
+| Description  |    Name 
+| image:images/clb.png[width=150,title=""]  | 
+Learning Session, 45min  link:https://www.youtube.com/watch?v=n0iovQO4d_w[DevNet youTube] 
+| Packetpushers - Heavy Networking 482: Test Your Limits With The TRex OSS Traffic Generator    | 
+link:https://packetpushers.net/podcast/heavy-networking-482-test-your-limits-with-the-trex-oss-traffic-generator/[Podcast]
+| Stateful     | 
+link:trex_preso.html[Stateful] 
+| Stateful DPDK    | 
+link:http://www.slideshare.net/harryvanhaaren/trex-traffig-gen-hanoch-haim[DPDK summit] 
+| Stateless support     | 
+http://www.slideshare.net/HanochHaim/trex-realistic-traffic-generator-stateless-support[Stateless support] link:https://www.youtube.com/watch?v=hoCJ9xyvaw0[short video]
+|=================
+
+
+== User Guides
+
+[options="header",cols="<4,a"]
+|=================
+| Description  |    Name 
+| Frequently Asked Questions     |  
+link:trex_faq.html[FAQ] 
+| Installation Guide     |  
+link:trex_manual.html#_download_and_installation[Installation] 
+| Release Notes     |  
+link:release_notes.html[Release_notes.html] 
+| Stateful  Manual and Getting Started     |  
+link:trex_manual.html[trex_manual.html] link:trex_book.pdf[trex_manual.pdf] 
+| Stateless Manual    | 
+link:trex_stateless.html[trex_stateless.html] link:trex_stateless.pdf[trex_stateless.pdf] 
+| Advanced Stateful Manual    | 
+link:trex_astf.html[trex_astf.html] link:trex_astf.pdf[trex_astf.pdf] link:trex_astf_vs_nginx.html[trex_astf_performance.html]
+// trex_emu.html is created by trem-emu git repo
+| Emulation Manual    | 
+link:trex_emu.html[trex_emu.html] 
+| Tutorial TRex on VirtualBox/Docker    | 
+link:trex_vm_manual.html[trex_vm_manual.html] link:trex_vm_manual.pdf[trex_vm_manual.pdf]
+| Cisco Devnet SandBox   | 
+link:https://devnetsandbox.cisco.com/RM/Diagram/Index/2ec5952d-8bc5-4096-b327-c294acd9512d?diagramType=Topology[Sandbox] link:https://developer.cisco.com/site/trex/[Devnet site& sandbox] 
+|=================
+
+== Python Automation API 
+
+[options="header",cols="<4,a"]
+|=================
+| Description  |    Name 
+| Python API Cookbook (beta)    | 
+link:trex_cookbook/index.html[TRex API Cookbook]
+| Stateless Python automation API    | 
+link:cp_stl_docs/index.html[stateless_sdk] 
+| Stateful  Python automation API    | 
+link:cp_docs/index.html[statelful_sdk] 
+| Advanced Stateful  Python automation API    | 
+link:cp_astf_docs/index.html[astf_sdk] 
+| Emulation Python Automation API    |
+link:cp_emu_docs/index.html[emu_sdk] 
+| NDR Python Automation API    | 
+link:cp_ndr_docs/index.html[ndr_sdk] 
+| Stateful API tutorial              | 
+link:trex_control_plane_peek.html[Stateful API]
+| Stateless API tutorial              | 
+See Stateless Manual
+|=================
+
+== Miscellaneous 
+
+[options="header",cols="<4,a"]
+|=================
+| Description  |    Name 
+| GitHub    | 
+link:https://github.com/cisco-system-traffic-generator/trex-core[GitHub]
+| Wiki    | 
+link:https://github.com/cisco-system-traffic-generator/trex-core/wiki[Wiki]
+| Issue Trackers    | 
+link:https://github.com/cisco-system-traffic-generator/trex-core/issues[GitHub], link:http://trex-tgn.cisco.com/youtrack/dashboard[youtrack]
+| Release pkgs    | 
+link:../release/[pkgs]
+| Windows Stateful GUI v0.6   | 
+link:../client_gui/[stateful GUI]
+| XL710 Statless performance    | 
+link:trex_stateless_bench.html[xl710_benchmark.html] 
+| WLC benchmark using plugins | 
+link:trex_stateless_wlc_bench.html[WLC benchmark]
+| TRex performance trend per platform/NIC  | 
+link:trex_analytics.html[trex_perf_trend.html] 
+| TRex performance SR_IOV  | 
+link:trex_vm_bench.html[sr_iov_bench]
+| TRex NDR benchmark script | 
+link:trex_ndr_bench_doc.html[ndr_bench]
+|=================
+
+== For Developers
+
+[options="header",cols="<4,a"]
+|=================
+| Description  |    Name 
+| Contributing | 
+link:https://github.com/cisco-system-traffic-generator/trex-core/blob/master/CONTRIBUTING.md[CONTRIBUTING] 
+| Stateless server RPC specification    | 
+link:trex_rpc_server_spec.html[stl_rpc_server.html] 
+| Scapy server RPC specification    | 
+link:trex_scapy_rpc_server.html[scapy_rpc_spec.html] 
+| How to build    | 
+link:https://github.com/cisco-system-traffic-generator/trex-core/wiki[Wiki]
+|=================
+
+== Support 
+
+[options="header",cols="<4,a"]
+|=================
+| Description  |    Name 
+| TRex community     | 
+link:https://groups.google.com/forum/#!forum/trex-tgn[Gmail TRex Forum] 
+| Cisco TRex Devnet community   | 
+link:https://communities.cisco.com/community/developer/trex[Jive]
+|=================
+

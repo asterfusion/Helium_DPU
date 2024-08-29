@@ -1,0 +1,17 @@
+#!/bin/bash
+
+INPUT_ARGS=$@
+
+source find_python.sh
+
+export PYTHONPATH=automation/trex_control_plane/interactive
+
+if [[ $@ =~ '--stl' ]]; then
+    INPUT_ARGS=${INPUT_ARGS//--stl/}
+    $PYTHON -m trex.examples.stl.stl_ndr_bench_tool  $INPUT_ARGS
+elif [[ $@ =~ '--astf' ]]; then
+    INPUT_ARGS=${INPUT_ARGS//--astf/}
+    $PYTHON -m trex.examples.astf.astf_ndr_bench_tool  $INPUT_ARGS
+else
+    echo "Please specify mode with --stl or --astf."
+fi

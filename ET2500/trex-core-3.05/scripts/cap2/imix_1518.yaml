@@ -1,0 +1,69 @@
+#
+# Simple IMIX test 1518B 
+#
+- duration : 3
+  generator :  
+          distribution : "seq"
+          clients_start : "16.0.0.1"
+          clients_end   : "16.0.0.255"
+          servers_start : "48.0.0.1"
+          servers_end   : "48.0.255.255"
+          clients_per_gb : 201
+          min_clients    : 101
+          dual_port_mask : "1.0.0.0" 
+          tcp_aging      : 0
+          udp_aging      : 0
+#
+# The templates are duplicated on purpose in order to utilize all DRAM bandwidth and get better performance
+# Should do this automaticlly in the future somehow. You should have at least 8 templates
+#
+  cap_info : 
+     - name: cap2/udp_1518B.pcap
+       cps   : 1000.0
+       ipg   : 10000
+       rtt   : 10000
+       w     : 1
+       limit : 200
+     - name: cap2/udp_1518B.pcap
+       cps   : 1000.0
+       ipg   : 10000
+       rtt   : 10000
+       w     : 1
+       limit : 200
+     - name: cap2/udp_1518B.pcap
+       cps   : 1000.0
+       ipg   : 10000
+       rtt   : 10000
+       w     : 1
+       limit : 200
+     - name: cap2/udp_1518B.pcap
+       cps   : 1000.0
+       ipg   : 10000
+       rtt   : 10000
+       w     : 1
+       limit : 200
+     - name: cap2/udp_1518B.pcap
+       cps   : 1000.0
+       ipg   : 10000
+       rtt   : 10000
+       w     : 1
+       limit : 200
+     - name: cap2/udp_1518B.pcap
+       cps   : 1000.0
+       ipg   : 10000
+       rtt   : 10000
+       w     : 1
+       limit : 200
+     - name: cap2/udp_1518B.pcap
+       cps   : 1000.0
+       ipg   : 10000
+       rtt   : 10000
+       w     : 1
+       limit : 200
+     - name: cap2/udp_1518B.pcap
+       cps   : 1000.0
+       ipg   : 10000
+       rtt   : 10000
+       w     : 1
+       limit : 200
+

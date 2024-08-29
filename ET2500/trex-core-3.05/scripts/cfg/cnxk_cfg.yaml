@@ -1,0 +1,9 @@
+- version       : 2 # version 2 of the configuration file
+  interfaces    : ["0002:02:00.0", "0002:03:00.0"]
+  port_limit      : 2 
+  port_info       :  # Port IPs. Change to suit your needs. In case of loopback, you can leave as is.
+          - ip         : 1.1.1.1
+            default_gw : 2.2.2.2
+          - ip         : 2.2.2.2
+            default_gw : 1.1.1.1
+

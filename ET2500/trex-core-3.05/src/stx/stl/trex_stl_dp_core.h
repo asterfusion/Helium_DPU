@@ -1,0 +1,442 @@
+/*
+ Itay Marom
+ Hanoch Haim
+ Cisco Systems, Inc.
+*/
+
+/*
+Copyright (c) 2015-2015 Cisco Systems, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+#ifndef __TREX_STL_DP_CORE_H__
+#define __TREX_STL_DP_CORE_H__
+
+#include <vector>
+
+#include "msg_manager.h"
+#include "pal_utl.h"
+#include "mbuf.h"
+
+#include "trex_dp_core.h"
+#include "dpdk_port_map.h"
+#include "trex_latency_counters.h"
+
+class TrexCpToDpMsgBase;
+class TrexStatelessDpStart;
+class CFlowGenListPerThread;
+class CGenNodeStateless;
+class TrexStreamsCompiledObj;
+class TrexStream;
+class CGenNodePCAP;
+class ServiceModeWrapper;
+class CFlowStatParser;
+class TPGDpMgrPerSide;
+
+class CDpOneStream  {
+public:
+    void Create(){
+    }
+
+    void Delete(CFlowGenListPerThread   * core);
+    void DeleteOnlyStream();
+
+    CGenNodeStateless * m_node;      // schedule node
+    TrexStream *        m_dp_stream; // stream info
+};
+
+class TrexStatelessDpPerPort;
+
+class PerPortProfile {
+
+public:
+        /* states */
+    enum state_e {
+        ppSTATE_IDLE,
+        ppSTATE_TRANSMITTING,
+        ppSTATE_PAUSE,
+    };
+
+public:
+    PerPortProfile(TrexStatelessDpPerPort *port);
+
+    bool pause_traffic(uint8_t port_id);
+    bool pause_streams(uint8_t port_id, stream_ids_t &stream_ids); // filter by stream IDs, slower
+
+    bool resume_traffic(uint8_t port_id);
+    bool resume_streams(uint8_t port_id, stream_ids_t &stream_ids); // filter by stream IDs, slower
+
+    bool update_traffic(uint8_t port_id, double factor);
+    bool update_streams(uint8_t port_id, stream_ipgs_map_t &ipg_per_stream); // filter by stream IDs, slower
+
+    bool stop_traffic(uint8_t port_id,
+                      bool stop_on_id,
+                      int event_id);
+
+    bool update_number_of_active_streams(uint32_t d);
+
+    state_e get_state() const {
+        return m_state;
+    }
+
+    bool is_active() const {
+        return (get_state() != ppSTATE_IDLE);
+    }
+
+    void set_event_id(int event_id) {
+        m_event_id = event_id;
+    }
+
+    int get_event_id() {
+        return m_event_id;
+    }
+
+public:
+
+    state_e                     m_state;
+
+    uint32_t                    m_active_streams; /* how many active streams on this profile  */
+    uint32_t                    m_paused_streams; /* how many paused streams on this profile  */
+
+    std::vector<CDpOneStream>   m_active_nodes;   /* holds the current active nodes */
+    TrexStatelessDpPerPort*     m_port;
+    int                         m_event_id;
+
+};
+
+
+class TrexStatelessDpPerPort {
+
+public:
+        /* states */
+    enum state_e {
+        ppSTATE_IDLE,
+        ppSTATE_TRANSMITTING,
+        ppSTATE_PAUSE,
+        ppSTATE_PCAP_TX,
+
+    };
+
+public:
+    TrexStatelessDpPerPort();
+
+    void create(CFlowGenListPerThread   *  core);
+
+    bool pause_traffic(uint8_t port_id, uint32_t profile_id);
+    bool pause_streams(uint8_t port_id, uint32_t profile_id, stream_ids_t &stream_ids); // filter by stream IDs, slower
+
+    bool resume_traffic(uint8_t port_id, uint32_t profile_id);
+    bool resume_streams(uint8_t port_id, uint32_t profile_id, stream_ids_t &stream_ids); // filter by stream IDs, slower
+
+    bool update_traffic(uint8_t port_id, uint32_t profile_id, double factor);
+    bool update_streams(uint8_t port_id, uint32_t profile_id, stream_ipgs_map_t &ipg_per_stream); // filter by stream IDs, slower
+
+    bool push_pcap(uint8_t port_id,
+                   const std::string &pcap_filename,
+                   double ipg_usec,
+                   double min_ipg_sec,
+                   double speedup,
+                   uint32_t count,
+                   bool is_dual);
+
+    bool stop_traffic(uint8_t port_id,
+                      uint32_t profile_id,
+                      bool stop_on_id,
+                      int event_id);
+
+    state_e get_state() const {
+        return m_state;
+    }
+
+    bool is_active() const {
+        return (get_state() != ppSTATE_IDLE);
+    }
+
+    void set_event_id(int event_id) {
+        m_event_id = event_id;
+    }
+
+    int get_event_id() {
+        return m_event_id;
+    }
+
+    PerPortProfile * lookup_profile(uint32_t profile_id);
+    PerPortProfile * create_profile(uint32_t profile_id);
+    void remove_profile(uint32_t profile_id);
+
+    void update_paused(int cnt);        /* update paused profiles counter and m_state */
+
+public:
+
+    state_e                     m_state;
+
+    uint32_t                    m_active_profiles; /* how many active profiles on this port */
+    uint32_t                    m_paused_profiles; /* how many paused profiles on this port */
+
+    std::unordered_map<uint32_t, PerPortProfile*>   m_profiles;
+    CGenNodePCAP*               m_active_pcap_node;
+    CFlowGenListPerThread*      m_core ;
+    int                         m_event_id;
+
+    CRxCoreErrCntrs             m_err_cntrs;
+    CRFC2544Info                m_rfc2544[MAX_FLOW_STATS_PAYLOAD];
+    RXLatency                   m_fs_latency;
+};
+
+
+class TrexStatelessDpCore : public TrexDpCore {
+
+public:
+
+    #define SCHD_OFFSET_DTIME  (100.0/1000000.0)
+    #define SCHD_OFFSET_DTIME_RX_ENABLED  (100000.0/1000000.0)
+
+    enum feature_t {
+        NO_FEATURES  = 0,
+        LATENCY      = 1,
+        CAPTURE      = 1 << 1,
+        TPG          = 1 << 2,  // Tagged Packet Grouping
+    };
+
+ 
+    TrexStatelessDpCore(uint8_t thread_id, CFlowGenListPerThread *core);
+
+    ~TrexStatelessDpCore();
+
+
+    /**
+     * dummy traffic creator
+     *
+     * @author imarom (27-Oct-15)
+     *
+     * @param pkt
+     * @param pkt_len
+     */
+    void start_traffic(TrexStreamsCompiledObj *obj,
+                       uint32_t profile_id,
+                       double duration,
+                       int event_id,
+                       double start_at_ts);
+
+
+    /* pause the streams, work only if all are continues  */
+    void pause_traffic(uint8_t port_id, uint32_t profile_id);
+    void pause_streams(uint8_t port_id, uint32_t profile_id, stream_ids_t &stream_ids);
+
+
+    void set_need_to_rx(bool enable);
+
+    void resume_traffic(uint8_t port_id, uint32_t profile_id);
+    void resume_streams(uint8_t port_id, uint32_t profile_id, stream_ids_t &stream_ids);
+
+
+    /**
+     * push a PCAP file on port
+     *
+     */
+    void push_pcap(uint8_t port_id,
+                   int event_id,
+                   const std::string &pcap_filename,
+                   double ipg_usec,
+                   double min_ipg_sec,
+                   double speedup,
+                   uint32_t count,
+                   double duration,
+                   bool   is_dual);
+
+
+    /**
+     * update current traffic rate
+     *
+     * @author imarom (25-Nov-15)
+     *
+     */
+    void update_traffic(uint8_t port_id, uint32_t profile_id, double factor);
+    void update_streams(uint8_t port_id, uint32_t profile_id, stream_ipgs_map_t &ipg_per_stream);
+
+    /**
+     *
+     * stop all traffic for this core
+     *
+     */
+    void stop_traffic(uint8_t port_id, uint32_t profile_id, bool stop_on_id, int event_id);
+
+    /* return if all ports are idle */
+    bool are_all_ports_idle();
+
+
+
+    bool set_stateless_next_node(CGenNodeStateless * cur_node,
+                                 CGenNodeStateless * next_node);
+
+
+    TrexStatelessDpPerPort * get_port_db(uint8_t port_id) {
+        assert((m_local_port_offset==port_id) ||(m_local_port_offset+1==port_id));
+        uint8_t local_port_id = port_id -m_local_port_offset;
+        assert(local_port_id<NUM_PORTS_PER_CORE);
+        return (&m_ports[local_port_id]);
+    }
+
+    bool is_port_active(uint8_t port_id) {
+        return get_port_db(port_id)->is_active();
+    }
+
+    /**
+     * enabled/disable service mode, if filtered is true enable filtered service mode according to mask.
+     */
+    void set_service_mode(uint8_t port_id, bool enabled, bool filtered, uint8_t mask);
+    void set_service_mode(uint8_t port_id, bool enabled); // wraps for backwards compatibility
+
+
+    void rx_handle_packet(int dir,
+                          rte_mbuf_t * m,
+                          bool is_idle,
+                          tvpid_t port_id);
+
+    virtual bool rx_for_idle(void);
+
+    virtual bool is_hot_state();
+
+    bool has_features_set() {
+        return (m_features != NO_FEATURES);
+    }
+
+    bool no_features_set() {
+        return (!has_features_set());
+    }
+
+    bool is_feature_set(feature_t feature) const {
+        return ( (m_features & feature) == feature );
+    }
+
+    inline void set_latency_feature()   { set_feature(LATENCY); }
+    inline void unset_latency_feature() { unset_feature(LATENCY); }
+    inline void set_capture_feature()   { set_feature(CAPTURE); }
+    inline void unset_capture_feature() { unset_feature(CAPTURE); }
+    inline void set_tpg_feature() { set_feature(TPG); }
+    inline void unset_tpg_feature() { unset_feature(TPG); }
+
+    /**
+     * Enable Tagged Packet Grouping.
+     *
+     * @param num_tpgids
+     *   The maximal number of Tagged Packet Group Identifiers.
+     *
+     * @param designated_core
+     *   Sequenced streams are sent only from one core. Designated is True iff TPG packets will be sent from this core.
+     *
+     * @return int
+     *   An TPGStateUpdate casted to int so it can pass easily through messages.
+     */
+    int enable_tpg(uint32_t num_tpgids, bool designated_core);
+
+    /**
+     * Disable Tagged Packet Grouping.
+     **/
+    void disable_tpg();
+
+    /**
+     * Get the Tagged Packet Group DP Manager.
+     *
+     * @param dir
+     *   Direction
+     *
+     * @return TPGDpMgrPerSide*
+     *   Pointer to the TaggedPacketGroup Dp Manager.
+     **/
+    inline TPGDpMgrPerSide* get_tpg_dp_mgr(uint8_t dir) { return m_tpg_mgr[dir]; }
+
+    /**
+     * Clear the Tagged Packet Group Tx stats for some tpgid.
+     *
+     * @param dir
+     *   Direction
+     *
+     * @param tpgid
+     *   Tagged Packet Group Identifier to clear stats.
+     **/
+    void clear_tpg_tx_stats(uint8_t dir, uint32_t tpgid);
+
+    void clear_fs_latency_stats(uint8_t dir);
+    void clear_fs_latency_stats_partial(uint8_t dir, int min, int max, TrexPlatformApi::driver_stat_cap_e type);
+    void rfc2544_stop_and_sample(int min, int max, bool reset, bool period_switch);
+    void rfc2544_reset(int min, int max);
+
+    inline RXLatency* get_fs_latency_object_ptr(uint8_t dir) { return &m_ports[dir].m_fs_latency; }
+    inline CRFC2544Info* get_rfc2544_object_ptr(uint8_t dir) { return m_ports[dir].m_rfc2544; }
+    inline CRxCoreErrCntrs* get_err_cntrs_object_ptr(uint8_t dir) { return &m_ports[dir].m_err_cntrs; }
+
+private:
+
+    void _rx_handle_packet(int dir,
+                           rte_mbuf_t * m,
+                           bool is_idle,
+                           bool &drop);
+
+
+    /**
+     * real job is done when scheduler is launched
+     *
+     */
+    void start_scheduler();
+
+
+    void add_port_duration(double duration,
+                           uint8_t port_id,
+                           uint32_t profile_id,
+                           int event_id);
+
+    void update_mac_addr(TrexStream * stream,
+                         CGenNodeStateless *node,
+                         uint8_t dir,
+                         char *raw_pkt);
+
+    void add_stream(PerPortProfile * profile,
+                    uint32_t profile_id,
+                    TrexStream * stream,
+                    TrexStreamsCompiledObj *comp,
+                    double start_at_ts = 0);
+
+
+    void replay_vm_into_cache(TrexStream * stream,
+                              CGenNodeStateless *node);
+
+    void clear_all_features() {
+        m_features = NO_FEATURES;
+    }
+
+    void set_feature(feature_t feature) {
+        m_features |= feature;
+    }
+
+    void unset_feature(feature_t feature) {
+        m_features &= (~feature);
+    }
+
+    bool check_service_filter(bool &drop);
+
+    uint8_t                    m_need_to_rx;
+    uint8_t                    m_local_port_offset;
+    TrexStatelessDpPerPort     m_ports[NUM_PORTS_PER_CORE];
+    double                     m_duration;
+    ServiceModeWrapper*        m_wrapper;
+    bool                       m_is_service_mode;
+    bool                       m_is_service_mode_filter;
+    uint8_t                    m_service_mask;
+    CFlowStatParser*           m_parser;
+    uint8_t                    m_features;
+    TPGDpMgrPerSide*           m_tpg_mgr[NUM_PORTS_PER_CORE];               // Tagged Packet Group Data Plane Manager
+};
+
+#endif /* __TREX_STL_DP_CORE_H__ */
+

@@ -1,0 +1,23 @@
+#!/bin/bash
+
+ARGS=()
+for var in "$@"; do
+    [[ "$var" != '--python2' && "$var" != '--python3' ]] && ARGS+=("$var")
+done
+
+
+source find_python.sh
+cd automation/regression
+
+# Python 3
+echo Python3 test
+$PYTHON trex_unit_test.py "${ARGS[@]}"
+if [ $? -eq 0 ]; then
+    printf "\n$PYTHON test succeeded\n\n"
+else
+    printf "\n*** $PYTHON test failed\n\n"
+    exit -1
+fi
+cd -
+
+

@@ -1,0 +1,369 @@
+TRex on Azure DPDK 
+==================
+:quotes.++:
+:numbered:
+:toclevels: 4
+
+include::trex_ga.asciidoc[]
+
+== Abstract
+
+TRex can run on Azure with DPDK support see link:https://docs.microsoft.com/en-us/azure/virtual-network/setup-dpdk[MS Azure]  +
+The main reason is to speedup the traffic rate at the cost of CPU pooling. +
+
+This is from the Azure website: +
+
+
+`Data Plane Development Kit (DPDK) on Azure offers a faster user-space packet processing framework for performance-intensive applications. This framework bypasses the virtual machine’s kernel network stack.`
+
+In high level there is a need to work with two network interfaces for each application high level interface (PMD) to support fail-safe. The PMD decides which flow to optimized and to redirect to the fast path (Mellanox VF) or slow path (TAP on top Linux NetVSC)
+
+Both DPDK TAP and DPDK MLX5 that used by the failsafe PMD are highly dependent on the kernel version and external library so it is not that simple to make it work. The dependency matrix is complex. Try to follow what worked for us. 
+
+To make it works you will need to compile TRex and DPDK from source on the Azure distro. 
+
+See here how to do it link:https://github.com/cisco-system-traffic-generator/trex-core/wiki/Build-For-Azure-Ubuntu-(mlx5)[azure compile from source]
+
+ 
+[IMPORTANT]
+=====================================
+This configuration is not tested in our regression so it could be broken in newer versions of TRex. We hope someone can help with that
+=====================================
+
+== Verifying DPDK support 
+
+.Look for Mellanox CX-5/4 NICs 
+[source,bash]
+----
+[bash]$ lspci | grep Mell
+0002:00:02.0 Ethernet controller: Mellanox Technologies MT27710 Family [ConnectX-4 Lx Virtual Function] (rev 80)
+0003:00:02.0 Ethernet controller: Mellanox Technologies MT27710 Family [ConnectX-4 Lx Virtual Function] (rev 80)
+----
+
+.Or Look for Mellanox CX-3 NICs 
+[source,bash]
+----
+[bash]$lspci | grep Mell
+0002:00:02.0 Ethernet controller: Mellanox Technologies MT27500/MT27520 Family [ConnectX-3/ConnectX-3 Pro Virtual Function]
+0003:00:02.0 Ethernet controller: Mellanox Technologies MT27500/MT27520 Family [ConnectX-3/ConnectX-3 Pro Virtual Function]
+----
+ 
+
+.Look for NetVSC interfaces 
+[source,bash]
+----
+
+[bash]$ifconfig -a
+
+eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500            
+        inet 10.90.52.101  netmask 255.255.255.0  broadcast 10.90.52.255
+        inet6 fe80::20d:3aff:fe55:626  prefixlen 64  scopeid 0x20<link>
+        ether 00:0d:3a:55:06:26  txqueuelen 1000  (Ethernet)
+        RX packets 1071836  bytes 643353805 (613.5 MiB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 1006784  bytes 279824718 (266.8 MiB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+eth1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 10.90.23.101  netmask 255.255.255.0  broadcast 10.90.23.255
+        inet6 fe80::f230:73e0:bbd5:5150  prefixlen 64  scopeid 0x20<link>
+        ether 00:0d:3a:55:08:d3  txqueuelen 1000  (Ethernet)
+        RX packets 14405974  bytes 1050416181 (1001.7 MiB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 24  bytes 1896 (1.8 KiB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+eth2: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 10.90.130.101  netmask 255.255.255.0  broadcast 10.90.130.255
+        inet6 fe80::f3a0:fdd:399d:aa0a  prefixlen 64  scopeid 0x20<link>
+        ether 00:0d:3a:14:49:d9  txqueuelen 1000  (Ethernet)
+        RX packets 74216776  bytes 4758076483 (4.4 GiB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 21  bytes 1686 (1.6 KiB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+eth3: flags=6211<UP,BROADCAST,RUNNING,SLAVE,MULTICAST>  mtu 9238
+        ether 00:0d:3a:55:08:d3  txqueuelen 1000  (Ethernet)
+        RX packets 0  bytes 0 (0.0 B)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 12  bytes 720 (720.0 B)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+eth4: flags=6211<UP,BROADCAST,RUNNING,SLAVE,MULTICAST>  mtu 9238
+        ether 00:0d:3a:14:49:d9  txqueuelen 1000  (Ethernet)
+        RX packets 0  bytes 0 (0.0 B)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 12  bytes 720 (720.0 B)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+        inet 127.0.0.1  netmask 255.0.0.0
+        inet6 ::1  prefixlen 128  scopeid 0x10<host>
+        loop  txqueuelen 1000  (Local Loopback)
+        RX packets 306775  bytes 70217233 (66.9 MiB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 306775  bytes 70217233 (66.9 MiB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+----
+
+
+*The ports in this example*:
+
+* *eth0*:  management port
+
+* *eth1*/*eth2* : NetVSC will be used throw TAP interfaces 
+
+* *eth3*/*eth4* : Mellanox VF interfaces (high speed)
+
+
+== TRex trex_cfg.yaml 
+
+For the aforementioned network configuration this would be the trex_cfg.yaml
+
+[source,bash]
+----
+- port_limit      : 2
+  version         : 2
+  interfaces  : ['0002:00:02.0', '0003:00:02.0'] # the PCI for Mellanox #<1>
+  ext_dpdk_opt: ['--vdev=net_vdev_netvsc0,iface=eth1', '--vdev=net_vdev_netvsc1,iface=eth2'] # ask DPDK for failsafe eth1,eth2 are the  NetVSC #<2>
+  interfaces_vdevs : ['net_failsafe_vsc0','net_failsafe_vsc1'] # use failsafe  #<3>
+  port_info       :  # Port IPs. Change to suit your needs. In case of loopback, you can leave as is.
+          - ip         : 10.90.23.101  #<4>
+            default_gw : 10.90.23.202
+          - ip         : 10.90.130.101
+            default_gw : 10.90.130.202
+  platform:
+      master_thread_id: 0
+      latency_thread_id: 1
+      dual_if:
+        - socket: 0
+          threads: [2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+----
+<1> The normal mlx5 PCI 
+<2> The NetVSC linux interface names (in this example eth1/eth2) - new option from v2.64
+<3> Ask DPDK to use the failsafe interfaces instead of Mellanox  - new option from v2.64
+<4> The IP and route should match your need 
+
+== Routes and Isolation 
+
+It is better to *isolate* the management and data-path networks else you could shoot yourself in the leg or shoot someone else in the public cloud. 
+
+In case you can't find a way to isolate the networks add a route so the traffic will be forward to the right location (the DUT VM)
+
+.Example for route configuration
+[source,bash]
+----
+[bash]$sudo route add -net 16.0.0.0 netmask 255.0.0.0 gw 10.90.130.202
+[bash]$$sudo route add -net 48.0.0.0 netmask 255.0.0.0 gw 10.90.23.202
+----
+
+* 10.90.130.202/10.90.23.202 is the DUT networks default gateway 16.0.0.0/48.0.0.0 for the TRex profile
+
+== TRex Logs 
+
+[IMPORTANT]
+=====================================
+`--no-ofed-check` should be added to the command to keep the default mellanox configuration 
+=====================================
+
+[source,bash]
+----
+[bash]$sudo ./t-rex-64 -i  -c 1 -v 7 --no-ofed-check
+----
+
+.Valid logs
+[source,bash]
+----
+PDK args 
+ xx  -d  libmlx5-64-debug.so  -d  libmlx4-64-debug.so  -c  0x7  -n  4  --log-level  8  --master-lcore  0  -w  0002:00:02.0  -w  0003:00:02.0  --legacy-mem  --vdev=tvsc0,iface=eth1  --vdev=net_vdev_netvsc1,iface=eth2  
+EAL: Detected 16 lcore(s)
+EAL: Detected 1 NUMA nodes
+EAL: Multi-process socket /var/run/dpdk/rte/mp_socket
+EAL: No available hugepages reported in hugepages-1048576kB
+ EAL: Probing VFIO support...
+EAL: WARNING: cpu flags constant_tsc=yes nonstop_tsc=no -> using unreliable clock cycles !
+EAL: PCI device 0002:00:02.0 on NUMA socket -1
+EAL:   Invalid NUMA socket, default to 0
+EAL:   probe driver: 15b3:1016 net_mlx5
+net_mlx5: mlx5.c:1244: mlx5_dev_spawn(): tunnel offloading disabled due to old OFED/rdma-core version
+net_mlx5: mlx5.c:1256: mlx5_dev_spawn(): MPLS over GRE/UDP tunnel offloading disabled due to old OFED/rdma-core version or firmware configuration
+EAL: PCI device 0003:00:02.0 on NUMA socket -1
+EAL:   Invalid NUMA socket, default to 0
+EAL:   probe driver: 15b3:1016 net_mlx5
+net_mlx5: mlx5.c:1244: mlx5_dev_spawn(): tunnel offloading disabled due to old OFED/rdma-core version
+net_mlx5: mlx5.c:1256: mlx5_dev_spawn(): MPLS over GRE/UDP tunnel offloading disabled due to old OFED/rdma-core version or firmware configuration
+*net_vdev_netvsc: probably using routed NetVSC interface "eth1" (index 3)*
+*net_vdev_netvsc: probably using routed NetVSC interface "eth2" (index 4)*
+                input : [0002:00:02.0, 0003:00:02.0]
+                 dpdk : [0002:00:02.0, 0003:00:02.0]
+             pci_scan : [0002:00:02.0, 0003:00:02.0]
+                  map : [ 0, 1]
+----
+
+.Not valid TAP issues 
+[source,bash]
+----
+
+net_failsafe: sub_device 1 probe failed (File exists)
+eth_dev_tap_create(): Unable to create TAP interface
+eth_dev_tap_create(): TAP Unable to initialize net_tap_vsc0
+EAL: Driver cannot attach the device (net_tap_vsc0)
+EAL: Failed to attach device on primary process
+----
+
+
+.MLX5 results
+[source,bash]
+----
+[bash]$sudo ./t-rex-64  -i -c 1  --no-ofed-check
+
+tui>start -f stl/bench_azure.py -t vm=cached
+,size=68 -m 2mpps --port 0 1 –force
+
+   port    |         0         |         1         |       total      
+ -----------+-------------------+-------------------+------------------
+owner      |         azureuser |         azureuser |                  
+link       |                UP |                UP |                  
+state      |      TRANSMITTING |      TRANSMITTING |                  
+speed      |           10 Gb/s |           10 Gb/s |                  
+CPU util.  |            24.39% |            24.39% |                  
+--         |                   |                   |                  
+Tx bps L2  |         1.08 Gbps |         1.08 Gbps |         2.15 Gbps
+Tx bps L1  |         1.39 Gbps |         1.39 Gbps |         2.78 Gbps
+Tx pps     |         1.98 Mpps |         1.98 Mpps |         3.95 Mpps
+Line Util. |           13.92 % |           13.92 % |                  
+---        |                   |                   |                  
+Rx bps     |         1.04 Gbps |         1.04 Gbps |         2.08 Gbps
+Rx pps     |          1.9 Mpps |         1.91 Mpps |         3.82 Mpps
+----       |                   |                   |                  
+opackets   |          23355483 |          23355889 |          46711372
+ipackets   |          22103441 |          22332199 |          44435640
+obytes     |        1588172844 |        1588201156 |        3176374000
+ibytes     |        1503033988 |        1518589532 |        3021623520
+tx-pkts    |       23.36 Mpkts |       23.36 Mpkts |       46.71 Mpkts
+rx-pkts    |        22.1 Mpkts |       22.33 Mpkts |       44.44 Mpkts
+tx-bytes   |           1.59 GB |           1.59 GB |           3.18 GB
+rx-bytes   |            1.5 GB |           1.52 GB |           3.02 GB
+ -----      |                   |                   |                  
+oerrors    |                 0 |                 0 |                 0
+ierrors    |            82,491 |            81,817 |           164,308
+----
+
+ 
+
+.MLX4 results
+[source,bash]
+----
+[bash]$sudo ./t-rex-64  -i -c 1  --no-ofed-check
+
+tui>start -f stl/bench_azure.py -t vm=cached,size=68 -m 2mpps --port 0 1 –force
+
+   port    |         0         |         1         |       total      
+-----------+-------------------+-------------------+------------------
+
+owner      |         azureuser |         azureuser |                  
+link       |                UP |                UP |                  
+state      |      TRANSMITTING |      TRANSMITTING |                  
+speed      |           40 Gb/s |           40 Gb/s |                  
+CPU util.  |            21.87% |            21.87% |                  
+--         |                   |                   |                  
+Tx bps L2  |         1.08 Gbps |         1.08 Gbps |         2.17 Gbps
+Tx bps L1  |          1.4 Gbps |          1.4 Gbps |         2.81 Gbps
+Tx pps     |         1.99 Mpps |         1.99 Mpps |         3.98 Mpps
+Line Util. |            3.51 % |            3.51 % |                  
+---        |                   |                   |                   
+Rx bps     |         1.05 Gbps |         1.05 Gbps |         2.09 Gbps
+Rx pps     |         1.92 Mpps |         1.92 Mpps |         3.84 Mpps
+----       |                   |                   |                  
+opackets   |         713574068 |         713578540 |        1427152608
+ipackets   |         687390998 |         687627116 |        1375018114
+obytes     |       48523036624 |       48523340720 |       97046377344
+ibytes     |       46742587864 |       46758643888 |       93501231752
+tx-pkts    |      713.57 Mpkts |      713.58 Mpkts |        1.43 Gpkts
+rx-pkts    |      687.39 Mpkts |      687.63 Mpkts |        1.38 Gpkts
+tx-bytes   |          48.52 GB |          48.52 GB |          97.05 GB
+rx-bytes   |          46.74 GB |          46.76 GB |           93.5 GB
+-----      |                   |                   |                  
+oerrors    |                 0 |                 0 |                 0
+ierrors    |                 0 |                 0 |                 0
+----
+ 
+
+You should see something like this in the log with ```ifconfig -a``` should shows *dtap0*/*dtap1* interfaces 
+
+== Performance optimization
+
+* TCP/UDP flows with the right checksum and bigger than 64B (e.g. *68 Bytes* and up UDP packets) will be sent to the optimized path (Mellanox). Adding checksum=0 to UDP header will make the UDP packets with the right checksum  `Ether(dst="ff:ff:ff:ff:ff:ff")/IP(src="0.0.0.0",dst="255.255.255.255")/UDP(sport=68,dport=67,chksum=0)` 
+
+* Disable gso, tso and gro on the NetVSC linux interface  (in above example it is eth1/eth2) 
+
+* Use MLX5 dpdk (as opposed to  mlx4) enabled Centos VM as DUT
+
+== Known issues (per v2.64 and up)
+
+* In case of very high rate of taffic without network seperation it was noticed that the management ports could lost (ZMQ/ssh) don't push it in this case. ` ZMQ unhandled error code 14`
+* Multi core (for example `-c 2`) does not work for some reason. 
+* There is no need to install the DPDK drivers (only Mellanox as specified above) - TRex has it own DPDK driver statically linked - you just need to update autoconf files for build
+* You should change the MTU manualy for both TAP and MLX (`--no-ofed-check` skip this step,TRex by default change the MTU to 9k but not in this case)
+* MLX5/MLX4 has different default/max MTU 
+
+== Counters Debug 
+
+How to debug the path taken by failsafe using counters 
+
+[source,bash]
+----
+
+[bash]$ sudo ethtool -S eth3 | grep vport_uni  #mellanox VF
+     rx_vport_unicast_packets: 12749447777
+     rx_vport_unicast_bytes: 1051709357511
+     tx_vport_unicast_packets: 16940152019
+     tx_vport_unicast_bytes: 1381023024927
+[bash]$ sudo ethtool -S eth4 | grep vport_uni #mellanox VF
+     rx_vport_unicast_packets: 12883845064
+     rx_vport_unicast_bytes: 1053057197008
+     tx_vport_unicast_packets: 16831794821
+     tx_vport_unicast_bytes: 1382705644149
+
+[bash]$ ifconfig dtap0
+dtap0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet6 fe80::20d:3aff:fe55:8d3  prefixlen 64  scopeid 0x20<link>
+        ether 00:0d:3a:55:08:d3  txqueuelen 1000  (Ethernet)
+        RX packets 0  bytes 0 (0.0 B)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 178467  bytes 13238484 (12.6 MiB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+[bash]$ ifconfig dtap1
+dtap1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet6 fe80::20d:3aff:fe14:49d9  prefixlen 64  scopeid 0x20<link>
+        ether 00:0d:3a:14:49:d9  txqueuelen 1000  (Ethernet)
+        RX packets 0  bytes 0 (0.0 B)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 861889  bytes 57731802 (55.0 MiB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+
+[bash]$ ifconfig eth1
+eth1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 10.90.23.101  netmask 255.255.255.0  broadcast 10.90.23.255
+        inet6 fe80::f230:73e0:bbd5:5150  prefixlen 64  scopeid 0x20<link>
+        ether 00:0d:3a:55:08:d3  txqueuelen 1000  (Ethernet)
+        RX packets 14934836  bytes 1202553104 (1.1 GiB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 24  bytes 1896 (1.8 KiB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+
+[bash]$ ifconfig eth2
+eth2: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 10.90.130.101  netmask 255.255.255.0  broadcast 10.90.130.255
+        inet6 fe80::f3a0:fdd:399d:aa0a  prefixlen 64  scopeid 0x20<link>
+        ether 00:0d:3a:14:49:d9  txqueuelen 1000  (Ethernet)
+        RX packets 75763987  bytes 4874688875 (4.5 GiB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 21  bytes 1686 (1.6 KiB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+----
+
+

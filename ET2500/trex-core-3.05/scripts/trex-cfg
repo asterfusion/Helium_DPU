@@ -1,0 +1,30 @@
+#! /bin/bash
+
+# exit code is Important should be
+# -1 : don't continue 
+# 0  : no errors - no need to load mlx share object
+# 32  : no errors - mlx share object should be loaded (returned by dpdk_setup_ports.py)
+
+SYS=`uname -r`
+if [ -f /etc/debian_version ]; then
+    OS=debian  
+elif [ -f /etc/redhat-release ]; then
+    OS=redhat
+    systemctl stop firewalld.service &> /dev/null
+else
+    OS=unknown
+fi    
+
+MACHINE_TYPE=`uname -m`
+if [ ${MACHINE_TYPE} != 'x86_64' -a ${MACHINE_TYPE} != 'aarch64' -a ${MACHINE_TYPE} != 'ppc64le' ]; then
+  echo "ERROR, only 64bit operating systems are supported, please reinstall a 64 bit OS"
+  exit -1
+fi
+
+
+# try to bind the ports from the configuration file (new DPDK)
+PARENT_ARGS="$0 $@"
+
+source find_python.sh --local
+$PYTHON ./dpdk_setup_ports.py --parent "$PARENT_ARGS"
+

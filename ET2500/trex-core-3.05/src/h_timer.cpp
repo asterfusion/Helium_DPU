@@ -1,0 +1,568 @@
+/*
+ Hanoh Haim
+ Cisco Systems, Inc.
+*/
+
+/*
+Copyright (c) 2015-2015 Cisco Systems, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+#include "h_timer.h"
+
+
+void CHTimerObj::Dump(FILE *fd){
+    fprintf(fd,"m_tick_left        :%lu \n", (ulong)m_ticks_left);
+}
+
+
+
+void detach_all(void *userdata,htw_on_tick_cb_t cb);
+
+
+RC_HTW_t CHTimerOneWheel::Create(uint32_t wheel_size){
+
+    CHTimerBucket *bucket;
+
+    if ( !utl_islog2(wheel_size) ){
+        return (RC_HTW_ERR_NO_LOG2);
+    }
+    m_wheel_mask = utl_mask_log2(wheel_size);
+    m_wheel_size  = wheel_size;
+
+    m_buckets = (CHTimerBucket *)malloc(wheel_size * sizeof(CHTimerBucket));
+    //printf(" bucket %x \n",);
+    if (m_buckets == 0) {
+        return (RC_HTW_ERR_NO_RESOURCES);
+    }
+    m_ticks=0;
+    m_bucket_index = 0;
+    m_tick_done=false;
+
+    bucket = &m_buckets[0];
+    m_active_bucket=bucket;
+    int i;
+    for (i = 0; i < wheel_size; i++) {
+        bucket->set_self();
+        bucket->reset_count();
+        bucket++;
+    }
+    return (RC_HTW_OK);
+}
+
+RC_HTW_t CHTimerOneWheel::Delete(){
+    if (m_buckets) {
+        free(m_buckets);
+        m_buckets=0;
+    }
+    m_ticks=0;
+    m_bucket_index = 0;
+    return (RC_HTW_OK );
+}
+
+
+
+uint32_t CHTimerOneWheel::detach_all(void *userdata,htw_on_tick_cb_t cb){
+
+    uint32_t m_total_events=0;
+    int i;
+    for (i = 0; i < m_wheel_size; i++) {
+        CHTimerWheelLink  * lp=&m_buckets[i];
+        CHTimerObj   * first;
+
+        while (!lp->is_self()) {
+            first = (CHTimerObj *)lp->m_next;
+            first->detach();
+            m_total_events++;
+            assert(cb);
+            cb(userdata,first);
+        }
+    }
+    return (m_total_events);
+}
+
+RC_HTW_t CHTimerOneWheel::timer_stop(CHTimerObj *tmr){
+    if ( tmr->is_running() ) {
+        tmr->detach();
+    }
+    return (RC_HTW_OK);
+}
+
+
+void  CHTimerOneWheel::dump_link_list(uint32_t bucket_index,
+                                      void *userdata,
+                                      htw_on_tick_cb_t cb,
+                                      FILE *fd){
+
+
+    CHTimerWheelLink  *bucket, *next;
+    CHTimerObj *tmr;
+    bucket = &m_buckets[bucket_index];
+
+    tmr = (CHTimerObj *)bucket->m_next;
+    bool found=false;
+    if ((CHTimerWheelLink *)tmr != bucket) {
+        fprintf(fd,"[%lu,\n",(ulong)bucket_index);
+        found=true;
+    }
+
+    while( (CHTimerWheelLink *)tmr != bucket) {
+
+        next = (CHTimerWheelLink *)tmr->m_next;
+
+        tmr->Dump(fd);
+        cb(userdata,tmr);
+
+        tmr = (CHTimerObj *)next;
+    }
+    if (found){
+        fprintf(fd,"]\n");
+    }
+}
+
+
+void CHTimerWheel::detach_all(void *userdata,htw_on_tick_cb_t cb){
+    #ifndef _DEBUG 
+    if (m_total_events==0) {
+        return;
+    }
+    #endif
+    int i;
+    uint32_t res=0;
+    for (i=0;i<m_num_wheels; i++) {
+        CHTimerOneWheel * lp=&m_timer_w[i];
+        res=lp->detach_all(userdata,cb);
+        assert(m_total_events>=res);
+        m_total_events -=res;
+    }
+    assert(m_total_events==0);
+}
+
+
+void CHTimerWheel::on_tick(void *userdata,htw_on_tick_cb_t cb){
+
+    int i;
+    for (i=0;i<m_num_wheels; i++) {
+        CHTimerOneWheel * lp=&m_timer_w[i];
+        CHTimerObj * event;
+
+        while (  true ) {
+            event = lp->pop_event();
+            if (!event) {
+                break;
+            }
+            m_total_events--;
+            if (event->m_ticks_left==0) {
+                cb(userdata,event);
+            }else{
+                timer_start(event,event->m_ticks_left); 
+            }
+        }
+        if (!lp->check_timer_tick_cycle()){
+            break;
+        }
+    }
+
+    /* tick all timers in one shoot */
+    for (i=0;i<m_num_wheels; i++) {
+        CHTimerOneWheel * lp=&m_timer_w[i];
+        if (!lp->timer_tick()){
+            break;
+        }
+    }
+    m_ticks++;
+}
+
+
+
+RC_HTW_t CHTimerWheel::timer_stop (CHTimerObj *tmr){
+    if ( tmr->is_running() ) {
+        assert(tmr->m_wheel<m_num_wheels);
+        m_timer_w[tmr->m_wheel].timer_stop(tmr);
+        m_total_events--;
+    }
+    return (RC_HTW_OK);
+}
+
+
+RC_HTW_t CHTimerWheel::timer_start_rest(CHTimerObj  *tmr, 
+                                        htw_ticks_t  ticks){
+    int i;
+    htw_ticks_t nticks  = ticks;
+    htw_ticks_t total_shift = 0;
+    htw_ticks_t residue_diff = m_timer_w[0].get_bucket_index();
+
+    for (i=1; i<m_num_wheels; i++) {
+        nticks = nticks>>m_wheel_shift;
+        total_shift += m_wheel_shift;
+
+        if (likely(nticks<m_wheel_size)) {
+            tmr->m_wheel=i;
+            tmr->m_ticks_left = ticks - ((nticks<<total_shift)-residue_diff) ;
+            m_timer_w[i].timer_start(tmr,nticks);
+            return(RC_HTW_OK);
+        }
+        residue_diff += (m_timer_w[i].get_bucket_index()<<total_shift);
+
+    }
+    tmr->m_wheel=i-1;
+    residue_diff -= (m_timer_w[i-1].get_bucket_index()<<total_shift);
+    tmr->m_ticks_left = ticks - ((m_wheel_mask<<total_shift)-residue_diff);
+    m_timer_w[i-1].timer_start(tmr,m_wheel_mask);
+    return (RC_HTW_OK);
+}
+
+
+void CHTimerWheel::reset(){
+    m_wheel_shift=0;
+    m_num_wheels=0;
+    m_ticks=0;
+    m_total_events=0;
+    m_wheel_size=0;
+    m_wheel_mask=0;
+}
+
+
+RC_HTW_t CHTimerWheel::Create(uint32_t wheel_size,
+                              uint32_t num_wheels){
+    RC_HTW_t res;
+    if (num_wheels>MAX_H_TIMER_WHEELS) {
+        return (RC_HTW_ERR_MAX_WHEELS);
+    }
+    m_num_wheels=num_wheels;
+    int i;
+    for (i=0; i<num_wheels; i++) {
+        res = m_timer_w[i].Create(wheel_size);
+        if ( res !=RC_HTW_OK ){
+            return (res);
+        }
+    }
+    m_ticks =0;
+    m_wheel_shift = utl_log2_shift(wheel_size);
+    if ( m_wheel_shift * num_wheels > (sizeof(htw_ticks_t)*8)) {
+        return(RC_HTW_ERR_NOT_ENOUGH_BITS);
+    }
+    m_wheel_mask  = utl_mask_log2(wheel_size);
+    m_wheel_size  = wheel_size;
+    return(RC_HTW_OK);
+}
+
+RC_HTW_t CHTimerWheel::Delete(){
+    int i;
+    for (i=0; i<m_num_wheels; i++) {
+        m_timer_w[i].Delete();
+    }
+    return(RC_HTW_OK);
+}
+
+////////////////////////////////////////////////////////
+
+
+
+void CNATimerWheel::detach_all(void *userdata,htw_on_tick_cb_t cb){
+    #ifndef _DEBUG 
+    if (m_total_events==0) {
+        reset_tick_level_inc(1);
+        return;
+    }
+    #endif
+    int i;
+    uint32_t res=0;
+    for (i=0;i<HNA_TIMER_LEVELS; i++) {
+        CHTimerOneWheel * lp=&m_timer_w[i];
+        res=lp->detach_all(userdata,cb);
+        assert(m_total_events>=res);
+        m_total_events -=res;
+    }
+    for (i=1;i<HNA_TIMER_LEVELS; i++) {
+        reset_tick_level_inc(i);
+    }
+
+    assert(m_total_events==0);
+}
+
+
+void CNATimerWheel::on_tick_level0(void *userdata,htw_on_tick_cb_t cb){
+
+    CHTimerOneWheel * lp=&m_timer_w[0];
+    CHTimerObj * event;
+
+    while (  true ) {
+        event = lp->pop_event();
+        if (!event) {
+            break;
+
+        }
+        m_total_events--;
+        cb(userdata,event);
+   }
+   lp->timer_tick();
+   m_ticks[0]++;
+}
+
+
+void CNATimerWheel::reset_tick_level_inc(int level){
+    CNATimerExData  *lpe=&m_exd_timer[level];               
+    if (m_cnt_div){
+        /* two level mode is enabled */
+        CHTimerOneWheel * lp=&m_timer_w[level];
+        lp->timer_tick();
+        m_ticks[level]++;
+        lpe->m_cnt_state=0;
+    }
+}
+
+
+
+void CNATimerWheel::on_tick_level_inc(int level){
+    CNATimerExData  *lpe=&m_exd_timer[level];               
+
+    lpe->m_cnt_state++;
+    CHTimerOneWheel * lp=&m_timer_w[level];
+    if (lpe->m_cnt_state == lpe->m_cnt_div) {
+        lp->timer_tick();
+        m_ticks[level]++;
+        lpe->m_cnt_state=0;
+    }
+}
+
+
+void CNATimerWheel::on_tick_level(void *userdata,
+                                  htw_on_tick_cb_t cb,
+                                  uint16_t min_events){
+    uint32_t left;
+
+    on_tick_level0(userdata,cb);
+    int i;
+    for (i=1; i<m_max_levels; i++){
+       on_tick_level_count(i,userdata,cb,min_events,left);
+    }
+}
+
+uint32_t CNATimerWheel::on_tick_level_count(int level,
+                                             void *userdata,
+                                             htw_on_tick_cb_t cb,
+                                             uint16_t min_events,
+                                             uint32_t & left){
+
+    CHTimerOneWheel * lp=&m_timer_w[level];
+    CNATimerExData  *lpe=&m_exd_timer[level];               
+
+    CHTimerObj * event;
+    uint32_t cnt=0; 
+    uint32_t old_state = lpe->m_cnt_state;
+
+    left=lp->get_bucket_total_events();
+    if (left==0) {
+        on_tick_level_inc(level);
+        return(old_state);
+    }
+
+    if (lpe->m_cnt_state == 0) {
+        /* calculate per sub-bucket */
+        lpe->m_cnt_per_iter = std::max((uint32_t)((left+lpe->m_cnt_div-1)/lpe->m_cnt_div),uint32_t(min_events)); /* at least min_events */
+    }
+
+    while (  true ) {
+        event = lp->pop_event();
+        if (!event) {
+            break;
+        }
+        if (event->m_ticks_left==0) {
+            m_total_events--;
+            cb(userdata,event);
+        }else{
+            timer_start_rest(event,event->m_ticks_left);
+        }
+        cnt++;
+        if ( cnt==lpe->m_cnt_per_iter)  {
+            on_tick_level_inc(level);
+            assert(left>=cnt);
+            left-=cnt;
+            return(old_state);
+        }
+   }
+   left=lp->get_bucket_total_events();
+   assert(left==0);
+   on_tick_level_inc(level);
+   return(old_state);
+}
+
+
+/* almost always we will have burst here */
+na_htw_state_num_t CNATimerWheel::on_tick_level1(void *userdata,htw_on_tick_cb_t cb){
+
+    CHTimerOneWheel * lp=&m_timer_w[1];
+    CHTimerObj * event;
+    uint32_t cnt=0;
+
+    while (  true ) {
+        event = lp->pop_event();
+        if (!event) {
+            break;
+        }
+        if (event->m_ticks_left==0) {
+            m_total_events--;
+            cb(userdata,event);
+        }else{
+            timer_start_rest(event,event->m_ticks_left);
+        }
+        cnt++;
+        if (cnt>HNA_MAX_LEVEL1_EVENTS) {
+            /* need another batch */
+            na_htw_state_num_t old_state;
+            old_state=m_state;
+            m_state=TW_NEXT_BATCH;
+            if (old_state ==TW_FIRST_FINISH){
+               return(TW_FIRST_BATCH);
+            }else{
+               return(TW_NEXT_BATCH);
+            }
+        }
+   }
+   lp->timer_tick();
+   m_ticks[1]++;
+   if (m_state==TW_FIRST_FINISH) {
+       if (cnt>0) {
+           return (TW_FIRST_FINISH_ANY);
+       }else{
+           return (TW_FIRST_FINISH);
+       }
+   }else{
+       assert(m_state==TW_NEXT_BATCH);
+       m_state=TW_FIRST_FINISH;
+       return(TW_END_BATCH);
+   }
+}
+
+
+
+RC_HTW_t CNATimerWheel::timer_stop (CHTimerObj *tmr){
+    if ( tmr->is_running() ) {
+        assert(tmr->m_wheel<HNA_TIMER_LEVELS);
+        m_timer_w[tmr->m_wheel].timer_stop(tmr);
+        m_total_events--;
+    }
+    return (RC_HTW_OK);
+}
+
+
+// could be optimized using MSB bit search --> similar to log2()
+RC_HTW_t CNATimerWheel::timer_start_rest(CHTimerObj  *tmr, 
+                                        htw_ticks_t  ticks){
+    int index=1;
+    uint32 level_err = (m_wheel_level1_err+1);
+    uint32 level_shift = m_wheel_level1_shift;
+    while ( index < m_max_levels ) {
+        htw_ticks_t nticks = (ticks+(level_err-1))>>level_shift; // ticks in the new level
+
+        if (nticks < m_wheel_size) {
+            // make it more accurate if 0.2% 
+            if ((m_cnt_div>0) && (nticks < 512) ){
+                auto residue = ticks - ((nticks-1)<<level_shift);
+                if (residue > 0) {
+                    auto add =(((residue * 0x7FFF) / level_err) > fastrand())?1:0;
+                    nticks += add;
+                }
+            }
+
+            if (nticks<2) {
+                nticks=2; /* not on the same bucket*/
+            }
+            tmr->m_ticks_left=0;
+            tmr->m_wheel=index;
+            m_timer_w[index].timer_start(tmr,nticks-1);
+            return (RC_HTW_OK);
+        }
+        index++;
+        level_err = level_err << m_wheel_level1_shift;
+        level_shift += m_wheel_level1_shift;
+    }
+
+    level_shift -= m_wheel_level1_shift;
+    tmr->m_ticks_left = ticks - ((m_wheel_size-1)<<level_shift);
+    tmr->m_wheel = m_max_levels-1;
+    m_timer_w[m_max_levels-1].timer_start(tmr,m_wheel_size-1);
+
+    return (RC_HTW_OK);
+}
+
+
+void CNATimerWheel::reset(){
+    m_wheel_shift=0;
+    m_total_events=0;
+    m_wheel_size=0;
+    m_wheel_mask=0;
+    m_wheel_level1_shift=0;
+    m_wheel_level1_err=0;
+    m_state=TW_FIRST_FINISH;
+    m_cnt_div=0;
+    m_rand_seed =13;
+    int i;
+    for (i=0; i<HNA_TIMER_LEVELS; i++) {
+        m_ticks[i]=0;
+        m_exd_timer[i].reset();
+    }
+}
+
+
+void CNATimerWheel::set_level1_cnt_div(){
+    int i;
+    m_cnt_div = (1<<m_wheel_level1_shift);
+    uint32_t level_shift = m_wheel_level1_shift;
+    for (i=1; i<HNA_TIMER_LEVELS; i++) {
+        m_exd_timer[i].m_cnt_div = (1<<level_shift);
+        level_shift += m_wheel_level1_shift;
+    }
+}
+
+
+RC_HTW_t CNATimerWheel::Create(uint32_t wheel_size,
+                               uint8_t level1_div,
+                               uint8_t max_levels){
+    RC_HTW_t res;
+    int i;
+    for (i=0; i<HNA_TIMER_LEVELS; i++) {
+        res = m_timer_w[i].Create(wheel_size);
+        if ( res !=RC_HTW_OK ){
+            return (res);
+        }
+        m_ticks[i]=0;
+    }
+    assert(utl_islog2(wheel_size));
+    assert(utl_islog2(level1_div));
+
+    m_wheel_shift = utl_log2_shift(wheel_size);
+    m_wheel_mask  = utl_mask_log2(wheel_size);
+    m_wheel_size  = wheel_size;
+    m_wheel_level1_shift = m_wheel_shift - utl_log2_shift((uint32_t)level1_div);
+    m_wheel_level1_err  = ((1<<(m_wheel_level1_shift))-1);
+    m_max_levels = max_levels;
+    assert(m_max_levels<=HNA_TIMER_LEVELS);
+    assert(m_max_levels>1);
+    assert(m_wheel_shift>utl_log2_shift((uint32_t)level1_div));
+
+    return(RC_HTW_OK);
+}
+
+RC_HTW_t CNATimerWheel::Delete(){
+    int i;
+    for (i=0; i<HNA_TIMER_LEVELS; i++) {
+        m_timer_w[i].Delete();
+    }
+    return(RC_HTW_OK);
+}
+
+
+
