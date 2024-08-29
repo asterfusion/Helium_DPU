@@ -9,6 +9,8 @@ Realistic and Stateful traffic generators are needed in order to:
 * Test and provide more realistic performance numbers
 * Design and architecture of SW and HW based on realistic use cases
 
+link:README.md[How to run in ET2500]
+
 === Current Challenges
 
 * *Cost*: Commercial State-full traffic generators are expensive
