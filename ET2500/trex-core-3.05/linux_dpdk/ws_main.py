@@ -2772,7 +2772,8 @@ class build_option:
 
         if self.isRelease ():
             flags += ['-Wno-error=dangling-pointer=',
-                      '-Wno-error=maybe-uninitialized'
+                      '-Wno-error=maybe-uninitialized',
+                      '-Wno-error=nonnull'
                       ]
         if self.is_clang():
             flags += clang_flags
