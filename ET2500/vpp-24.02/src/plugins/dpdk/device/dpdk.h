@@ -35,7 +35,7 @@
 
 #include <bus_driver.h>
 #include <bus_pci_driver.h>
-#include <dev_driver.h>
+#include <bus_vmbus_driver.h>
 #endif
 
 #include <vnet/devices/devices.h>

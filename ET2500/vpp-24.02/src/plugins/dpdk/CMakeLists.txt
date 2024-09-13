@@ -21,9 +21,6 @@ if(VPP_USE_SYSTEM_DPDK)
     message(WARNING "-- linking dpdk plugin against system libdpdk, version ${DPDK_VERSION}")
     set(DPDK_LINK_FLAGS ${DPDK_LDFLAGS})
     include_directories (${DPDK_INCLUDE_DIRS})
-    include_directories(/root/dpdk-23.11-SDK12.24.06/lib/eal/include/)
-    include_directories(/root/dpdk-23.11-SDK12.24.06/drivers/bus/pci/)
-    include_directories(/root/dpdk-23.11-SDK12.24.06/drivers/bus/vmbus/)
 else()
     ##############################################################################
     # Find lib and include files

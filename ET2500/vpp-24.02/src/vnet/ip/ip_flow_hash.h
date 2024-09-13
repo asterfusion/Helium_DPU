@@ -64,7 +64,7 @@ typedef enum flow_hash_config_t_
 extern u32 ip_flow_hash_router_id;
 
 int ip_flow_hash_set (ip_address_family_t af, u32 table_id,
-		      u32 flow_hash_config);
+		      flow_hash_config_t flow_hash_config);
 void ip_flow_hash_router_id_set (u32 router_id);
 
 #endif /* __IP_TYPES_H__ */
