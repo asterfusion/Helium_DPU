@@ -41,10 +41,12 @@ patch:
 	
 install:
 	echo -e "mgmt_net_path=$(OCTEONTX_HOST_ROOT)/drivers/mgmt_net/mgmt_net.ko\nocteon_drv_path=$(OCTEONTX_HOST_ROOT)/drivers/legacy/modules/driver/src/host/linux/kernel/drv/octeon_drv.ko\nvf_num=4\nocteon_drv_pre_path=$(OCTEONTX_HOST_ROOT)/drivers/octeon_drv_pre/octeon_drv_pre.ko\noctnic_path=$(OCTEONTX_HOST_ROOT)/drivers/legacy/modules/driver/bin/octnic.ko">/etc/helium_mod.conf
-	chmod +x ../mod-service/helium-mod-service/*.sh
-	cp ../mod-service/helium-mod-service/*.sh ${DIR}
-	cp ../mod-service/helium-mod-service/*.service /usr/lib/systemd/system/
-	cp ../mod-service/helium-mod-service/mrvl/mrvl* /${DIR}
+	chmod +x mod-service/helium-mod-service/*
+	chmod +x mod-service/helium-mod-service/mrvl_arm/*
+	chmod +x mod-service/helium-mod-service/mrvl_x86/*
+	cp mod-service/helium-mod-service/*.sh ${DIR}
+	cp mod-service/helium-mod-service/*.service /usr/lib/systemd/system/
+	cp mod-service/helium-mod-service/mrvl/mrvl* /${DIR}
 
 	systemctl daemon-reload
 	systemctl enable helium-mod.service

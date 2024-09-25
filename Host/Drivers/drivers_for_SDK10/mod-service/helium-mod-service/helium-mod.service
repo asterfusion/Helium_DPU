@@ -1,0 +1,13 @@
+[Unit]
+Description = helium mod
+
+
+[Service]
+RemainAfterExit=yes
+
+Type=oneshot
+
+ExecStop=/bin/bash /usr/bin/helium_rmmod.sh
+ExecStart=/bin/bash /usr/bin/helium_insmod.sh
+[Install]
+WantedBy=multi-user.target
