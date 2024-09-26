@@ -10,6 +10,7 @@ SUBDIRS=drivers/legacy/modules/driver/src
 SUBDIRS+=drivers/legacy/modules/driver/src/host/linux/kernel/drv/octnic
 SUBDIRS+=drivers/mgmt_net
 DIR=/usr/bin
+TYPE=$(shell uname -m)
 
 SUBDIRS+=drivers/octeon_drv_pre
 
@@ -17,6 +18,12 @@ PATCH_FILE=kernel.patch
 export  PATCH_FILE
 PATCHDIRS=patch_for_kernel
 export  PATCHDIRS
+
+ifeq ($(TYPE),x86_64)
+	MRVL_DIR=/helium-mod-service/mrvl_x86
+else
+	MRVL_DIR=/helium-mod-service/mrvl_arm
+endif
 
 path_files:=$(shell ls $(PATCHDIRS)/*.sh)
 
@@ -46,7 +53,7 @@ install:
 	chmod +x mod-service/helium-mod-service/mrvl_x86/*
 	cp mod-service/helium-mod-service/*.sh ${DIR}
 	cp mod-service/helium-mod-service/*.service /usr/lib/systemd/system/
-	cp mod-service/helium-mod-service/mrvl/mrvl* /${DIR}
+	cp mod-service/$(MRVL_DIR)/mrvl* /${DIR}
 
 	systemctl daemon-reload
 	systemctl enable helium-mod.service
