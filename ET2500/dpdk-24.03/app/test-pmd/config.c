@@ -357,6 +357,77 @@ nic_stats_display(portid_t port_id)
 	       nic_stats_border, nic_stats_border);
 }
 
+void nic_stats_display_short(portid_t port_id) {
+	static uint64_t prev_pkts_rx[RTE_MAX_ETHPORTS];
+	static uint64_t prev_pkts_tx[RTE_MAX_ETHPORTS];
+	static uint64_t prev_bytes_rx[RTE_MAX_ETHPORTS];
+	static uint64_t prev_bytes_tx[RTE_MAX_ETHPORTS];
+	static uint64_t prev_ns[RTE_MAX_ETHPORTS];
+
+	struct timespec cur_time;
+	uint64_t diff_pkts_rx, diff_pkts_tx, diff_bytes_rx, diff_bytes_tx, diff_ns;
+	uint64_t mpps_rx, mpps_tx, mbps_rx, mbps_tx;
+	struct rte_eth_stats stats;
+	int ret;
+
+	if (port_id_is_invalid(port_id, ENABLED_WARN)) {
+		print_valid_ports();
+		return;
+	}
+
+	ret = rte_eth_stats_get(port_id, &stats);
+	if (ret != 0) {
+		fprintf(stderr, "%s: Error: failed to get stats (port %u): %d\n",
+			__func__, port_id, ret);
+		return;
+	}
+
+	diff_ns = 0;
+	if (clock_gettime(CLOCK_TYPE_ID, &cur_time) == 0) {
+		uint64_t ns;
+
+		ns = cur_time.tv_sec * NS_PER_SEC;
+		ns += cur_time.tv_nsec;
+
+		if (prev_ns[port_id] != 0)
+			diff_ns = ns - prev_ns[port_id];
+		prev_ns[port_id] = ns;
+	}
+
+	diff_pkts_rx = (stats.ipackets > prev_pkts_rx[port_id]) ?
+		(stats.ipackets - prev_pkts_rx[port_id]) : 0;
+	diff_pkts_tx = (stats.opackets > prev_pkts_tx[port_id]) ?
+		(stats.opackets - prev_pkts_tx[port_id]) : 0;
+	prev_pkts_rx[port_id] = stats.ipackets;
+	prev_pkts_tx[port_id] = stats.opackets;
+	mpps_rx = diff_ns > 0 ?
+		(double)diff_pkts_rx / diff_ns * NS_PER_SEC : 0;
+	mpps_tx = diff_ns > 0 ?
+		(double)diff_pkts_tx / diff_ns * NS_PER_SEC : 0;
+
+	diff_bytes_rx = (stats.ibytes > prev_bytes_rx[port_id]) ?
+		(stats.ibytes - prev_bytes_rx[port_id]) : 0;
+	diff_bytes_tx = (stats.obytes > prev_bytes_tx[port_id]) ?
+		(stats.obytes - prev_bytes_tx[port_id]) : 0;
+	prev_bytes_rx[port_id] = stats.ibytes;
+	prev_bytes_tx[port_id] = stats.obytes;
+	mbps_rx = diff_ns > 0 ?
+		(double)diff_bytes_rx / diff_ns * NS_PER_SEC : 0;
+	mbps_tx = diff_ns > 0 ?
+		(double)diff_bytes_tx / diff_ns * NS_PER_SEC : 0;
+
+	printf("%-8d %-12" PRIu64 " %-10" PRIu64 " %-15" PRIu64 " %-10" PRIu64 " "
+		"%-10" PRIu64 " %-12" PRIu64 " %-10" PRIu64 " %-15" PRIu64 " "
+		"%-10" PRIu64 " %-10" PRIu64 " %-10" PRIu64 " %-10" PRIu64 "\n",
+		port_id, stats.ipackets, stats.imissed, stats.ibytes,
+		stats.ierrors, stats.rx_nombuf, stats.opackets,
+		stats.oerrors, stats.obytes, mpps_rx, mbps_rx * 8,
+		mpps_tx, mbps_tx * 8);
+
+	if (xstats_display_num > 0)
+		nic_xstats_display_periodic(port_id);
+}
+
 void
 nic_stats_clear(portid_t port_id)
 {

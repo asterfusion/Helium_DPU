@@ -59,6 +59,8 @@ enum {
 	TESTPMD_OPT_TX_FIRST_NUM,
 #define TESTPMD_OPT_STATS_PERIOD "stats-period"
 	TESTPMD_OPT_STATS_PERIOD_NUM,
+#define TESTPMD_OPT_SHORT_STATS_PERIOD "shortstats-period"
+	TESTPMD_OPT_SHORT_STATS_PERIOD_NUM,
 #define TESTPMD_OPT_DISPLAY_XSTATS "display-xstats"
 	TESTPMD_OPT_DISPLAY_XSTATS_NUM,
 #define TESTPMD_OPT_NB_CORES "nb-cores"
@@ -271,6 +273,7 @@ static const struct option long_options[] = {
 	REQUIRED_ARG(TESTPMD_OPT_ETH_PEER),
 	NO_ARG(TESTPMD_OPT_TX_FIRST),
 	REQUIRED_ARG(TESTPMD_OPT_STATS_PERIOD),
+	REQUIRED_ARG(TESTPMD_OPT_SHORT_STATS_PERIOD),
 	REQUIRED_ARG(TESTPMD_OPT_DISPLAY_XSTATS),
 	REQUIRED_ARG(TESTPMD_OPT_NB_CORES),
 	REQUIRED_ARG(TESTPMD_OPT_NB_PORTS),
@@ -972,6 +975,18 @@ launch_args_parse(int argc, char** argv)
 				rte_exit(EXIT_FAILURE, "Invalid stats-period value\n");
 
 			stats_period = n;
+			break;
+		}
+		case TESTPMD_OPT_SHORT_STATS_PERIOD_NUM: {
+			char* end = NULL;
+			unsigned int n;
+
+			n = strtoul(optarg, &end, 10);
+			if ((optarg[0] == '\0') || (end == NULL) ||
+				(*end != '\0'))
+				rte_exit(EXIT_FAILURE, "Invalid stats-period value\n");
+
+			short_stats_period = n;
 			break;
 		}
 		case TESTPMD_OPT_DISPLAY_XSTATS_NUM: {

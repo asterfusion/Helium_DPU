@@ -6897,6 +6897,13 @@ static void cmd_showportall_parsed(void *parsed_result,
 	else if (!strcmp(res->what, "stats"))
 		RTE_ETH_FOREACH_DEV(i)
 			nic_stats_display(i);
+	else if (!strcmp(res->what, "shortstats")) {
+		printf("%-8s %-12s %-10s %-15s %-10s %-10s %-12s %-10s %-15s %-10s %-10s %-10s %-10s\n",
+			"Port", "RX-packets", "RX-missed", "RX-bytes", "RX-errors", "RX-nombuf",
+			"TX-packets", "TX-errors", "TX-bytes", "RX-pps", "RX-bps", "TX-pps", "TX-bps");
+		RTE_ETH_FOREACH_DEV(i)
+			nic_stats_display_short(i);
+	}
 	else if (!strcmp(res->what, "xstats"))
 		RTE_ETH_FOREACH_DEV(i)
 			nic_xstats_display(i);
@@ -6917,14 +6924,14 @@ static cmdline_parse_token_string_t cmd_showportall_port =
 	TOKEN_STRING_INITIALIZER(struct cmd_showportall_result, port, "port");
 static cmdline_parse_token_string_t cmd_showportall_what =
 	TOKEN_STRING_INITIALIZER(struct cmd_showportall_result, what,
-				 "info#summary#stats#xstats#fdir#dcb_tc");
+				 "info#summary#stats#shortstats#xstats#fdir#dcb_tc");
 static cmdline_parse_token_string_t cmd_showportall_all =
 	TOKEN_STRING_INITIALIZER(struct cmd_showportall_result, all, "all");
 static cmdline_parse_inst_t cmd_showportall = {
 	.f = cmd_showportall_parsed,
 	.data = NULL,
 	.help_str = "show|clear port "
-		"info|summary|stats|xstats|fdir|dcb_tc all",
+		"info|summary|stats|shortstats|xstats|fdir|dcb_tc all",
 	.tokens = {
 		(void *)&cmd_showportall_show,
 		(void *)&cmd_showportall_port,

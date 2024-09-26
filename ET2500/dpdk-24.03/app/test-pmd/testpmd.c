@@ -222,6 +222,7 @@ uint16_t mbuf_data_size[MAX_SEGS_BUFFER_SPLIT] = {
 uint32_t param_total_num_mbufs = 0;  /**< number of mbufs in all pools - if
                                       * specified on command-line. */
 uint16_t stats_period; /**< Period to show statistics (disabled by default) */
+uint16_t short_stats_period;/**< Period to show short statistics (disabled by default) */
 
 /** Extended statistics to show. */
 struct rte_eth_xstat_name *xstats_display;
@@ -4518,6 +4519,24 @@ print_stats(void)
 }
 
 static void
+print_short_stats(void) {
+	uint8_t i;
+	const char clr[] = { 27, '[', '2', 'J', '\0' };
+	const char top_left[] = { 27, '[', '1', ';', '1', 'H', '\0' };
+
+	/* Clear screen and move to top left */
+	printf("%s%s", clr, top_left);
+
+	printf("%-8s %-12s %-10s %-15s %-10s %-10s %-12s %-10s %-15s %-10s %-10s %-10s %-10s\n",
+		"Port", "RX-packets", "RX-missed", "RX-bytes", "RX-errors", "RX-nombuf",
+		"TX-packets", "TX-errors", "TX-bytes", "RX-pps", "RX-bps", "TX-pps", "TX-bps");
+	for (i = 0; i < cur_fwd_config.nb_fwd_ports; i++)
+		nic_stats_display_short(fwd_ports_ids[i]);
+
+	fflush(stdout);
+}
+
+static void
 signal_handler(int signum __rte_unused)
 {
 	f_quit = 1;
@@ -4736,7 +4755,29 @@ main(int argc, char** argv)
 				prev_time = cur_time;
 				rte_delay_us_sleep(US_PER_S);
 			}
-		} else {
+		}
+		else if (short_stats_period != 0) {
+			uint64_t prev_time = 0, cur_time, diff_time = 0;
+			uint64_t timer_period;
+
+			/* Convert to number of cycles */
+			timer_period = short_stats_period * rte_get_timer_hz();
+
+			while (f_quit == 0) {
+				cur_time = rte_get_timer_cycles();
+				diff_time += cur_time - prev_time;
+
+				if (diff_time >= timer_period) {
+					print_short_stats();
+					/* Reset the timer */
+					diff_time = 0;
+				}
+				/* Sleep to avoid unnecessary checks */
+				prev_time = cur_time;
+				rte_delay_us_sleep(US_PER_S);
+			}
+		}
+		else {
 			char c;
 
 			printf("Press enter to exit\n");

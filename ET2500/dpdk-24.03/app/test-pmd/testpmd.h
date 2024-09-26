@@ -593,6 +593,7 @@ extern uint16_t mbuf_data_size[MAX_SEGS_BUFFER_SPLIT];
 extern uint32_t param_total_num_mbufs;
 
 extern uint16_t stats_period;
+extern uint16_t short_stats_period;
 
 extern struct rte_eth_xstat_name *xstats_display;
 extern unsigned int xstats_display_num;
@@ -920,6 +921,7 @@ int init_cmdline(void);
 void prompt(void);
 void prompt_exit(void);
 void nic_stats_display(portid_t port_id);
+void nic_stats_display_short(portid_t port_id);
 void nic_stats_clear(portid_t port_id);
 void nic_xstats_display(portid_t port_id);
 void nic_xstats_clear(portid_t port_id);
