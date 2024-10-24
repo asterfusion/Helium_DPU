@@ -429,6 +429,11 @@ cn9k_cpt_crypto_adapter_enqueue(uintptr_t base, struct rte_crypto_op *op)
 		return 0;
 	}
 
+	if (unlikely(!qp)) {
+		rte_errno = EINVAL;
+		return 0;
+	}
+	
 	if (unlikely(!qp->ca.enabled)) {
 		rte_errno = EINVAL;
 		return 0;
