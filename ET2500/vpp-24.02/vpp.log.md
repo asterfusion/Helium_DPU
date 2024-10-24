@@ -15,6 +15,11 @@
 # install vpp
 make pkg-deb
 dpkg -i build-root/*.deb
+# run vpp
+sysctl -w vm.nr_hugepages=26
+sudo sysctl kernel/perf_user_access=1
+dpdk-devbind.py -b vfio-pci 0002:02:00.0 0002:03:00.0 0002:04:00.0 0002:06:00.0 0002:07:00.0 0002:08:00.0 0002:09:00.0 0002:0a:00.0 0002:0b:00.0 0002:0c:00.0 0002:0d:00.0 0002:0e:00.0 0002:0f:00.0 0002:10:00.0 0002:11:00.0
+vpp -c /root/Helium_DPU/ET2500/vpp-24.02/src/plugins/onp/ET2500-startup.conf
 ```
 
 # Prepare
@@ -1720,20 +1725,64 @@ Setting up vpp (24.02-release-octeon10) ...
 
 # Run vpp
 
+**sysctl -w vm.nr_hugepages=26**
+
+**sudo sysctl kernel/perf_user_access=1**
+
+**dpdk-devbind.py -b vfio-pci 0002:02:00.0 0002:03:00.0 0002:04:00.0 0002:06:00.0 0002:07:00.0 0002:08:00.0 0002:09:00.0 0002:0a:00.0 0002:0b:00.0 0002:0c:00.0 0002:0d:00.0 0002:0e:00.0 0002:0f:00.0 0002:10:00.0 0002:11:00.0**
+
+**vpp -c /root/Helium_DPU/ET2500/vpp-24.02/src/plugins/onp/ET2500-startup.conf**
+
+> Ethernet0 serves as the management interface and is not bound to the DPDK driver in this example
+
+
 ```shell
 root@OCTEONTX:~/Helium_DPU/ET2500/vpp-24.02# cd 
-root@OCTEONTX:~# sysctl -w vm.nr_hugepages=10
-vm.nr_hugepages = 10
-root@OCTEONTX:~# vpp -c Helium_DPU/ET2500/vpp-24.02/build-root/build-vpp-native/vpp/startup.conf 
-perfmon            [warn  ]: skipping source 'arm' - arm_init: user access to perf counters is not enabled: run 'sudo sysctl kernel/perf_user_access=1'
-clib_socket_init: Active listener on '/run/vpp/api.sock'vl_api_clnt_process:303: socksvr_api_init failed, quitting...
-
-_______    _        _   _____  ___
-
+root@OCTEONTX:~# sysctl -w vm.nr_hugepages=26
+vm.nr_hugepages = 26
+root@OCTEONTX:~# sudo sysctl kernel/perf_user_access=1
+kernel.perf_user_access = 1
+root@OCTEONTX:~# dpdk-devbind.py -b vfio-pci 0002:02:00.0 0002:03:00.0 0002:04:00.0 0002:06:00.0 0002:07:00.0 0002:08:00.0 0002:09:00.0 0002:0a:00.0 0002:0b:00.0 0002:0c:00.0 0002:0d:00.0 0002:0e:00.0 0002:0f:00.0 0002:10:00.0 0002:11:00.0
+root@OCTEONTX:~# vpp -c Helium_DPU/ET2500/vpp-24.02/src/plugins/onp/ET2500-startup.conf 
+0: vlib_sort_init_exit_functions:200: init function 'pci_bus_init' not found (before 'idpf_init')
+    _______    _        _   _____  ___ 
  __/ __/ _ \  (_)__    | | / / _ \/ _ \
  _/ _// // / / / _ \   | |/ / ___/ ___/
  /_/ /____(_)_/\___/   |___/_/  /_/    
 
+vpp# set interface state Ethernet1 up
+vpp# set interface state Ethernet2 up
+vpp# set interface state Ethernet3 up
+vpp# set interface state Ethernet4 up
+vpp# set interface state Ethernet5 up
+vpp# set interface state Ethernet6 up
+vpp# set interface state Ethernet7 up
+vpp# set interface state Ethernet8 up
+vpp# set interface state Ethernet9 up
+vpp# set interface state Ethernet10 up
+vpp# set interface state Ethernet11 up
+vpp# set interface state Ethernet12 up
+vpp# set interface state Ethernet13 up
+vpp# set interface state Ethernet14 up
+vpp# set interface state Ethernet15 up
+vpp# show interface 
+              Name               Idx    State  MTU (L3/IP4/IP6/MPLS)     Counter          Count     
+Ethernet10                        11     up          9000/0/0/0     
+Ethernet11                        12     up          9000/0/0/0     
+Ethernet12                        13     up          9000/0/0/0     
+Ethernet13                        14     up          9000/0/0/0     
+Ethernet14                        15     up          9000/0/0/0     
+Ethernet15                        16     up          9000/0/0/0     
+Ethernet1                         2      up          9000/0/0/0     
+Ethernet2                         3      up          9000/0/0/0     
+Ethernet3                         4      up          9000/0/0/0     
+Ethernet4                         5      up          9000/0/0/0     
+Ethernet5                         6      up          9000/0/0/0     
+Ethernet6                         7      up          9000/0/0/0     
+Ethernet7                         8      up          9000/0/0/0     
+Ethernet8                         9      up          9000/0/0/0     
+Ethernet9                         10     up          9000/0/0/0     
+local0                            0     down          0/0/0/0       
 vpp# quit
 ```
 

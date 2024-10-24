@@ -1,0 +1,141 @@
+unix {
+  interactive
+  # log /root/Helium_DPU/ET2500/vpp-24.02/build-root/build-vpp-native/vpp/vpp.log
+  # full-coredump
+  cli-listen /var/run/vpp/cli.sock
+  # exec /root/Helium_DPU/ET2500/vpp-24.02/build-root/build-vpp-native/vpp/startup.vpp
+}
+
+api-trace {
+  on
+}
+
+memory {
+  main-heap-size 1G
+  main-heap-page-size default-hugepage
+}
+
+cpu {
+  main-core 1
+#   corelist-workers 2
+#   corelist-workers 2-3
+#   corelist-workers 2-5
+  corelist-workers 2-7
+}
+
+buffers {
+  buffers-per-numa 128000
+  page-size default-hugepage
+}
+
+plugins {
+    plugin dpdk_plugin.so { disable }
+    plugin onp_plugin.so { enable }
+    plugin linux_cp_plugin.so { enable }
+    plugin linux_nl_plugin.so { enable }
+    plugin ikev2_plugin.so { enable }
+    plugin idpf_plugin.so { enable }
+    plugin oddbuf_plugin.so { enable }
+}
+session
+{
+    event-queue-length 102400
+}
+onp {
+#   dev 0002:05:00.0 {
+#       name Ethernet0
+#       num-rx-queues 1
+#       num-tx-queues 1
+#   }
+  dev 0002:02:00.0 {
+      name Ethernet1
+      num-rx-queues 1
+      num-tx-queues 1
+  }
+  dev 0002:04:00.0 {
+      name Ethernet2
+      num-rx-queues 1
+      num-tx-queues 1
+  }
+  dev 0002:03:00.0 {
+      name Ethernet3
+      num-rx-queues 1
+      num-tx-queues 1
+  }
+  dev 0002:09:00.0 {
+      name Ethernet4
+      num-rx-queues 1
+      num-tx-queues 1
+  }
+  dev 0002:06:00.0 {
+      name Ethernet5
+      num-rx-queues 1
+      num-tx-queues 1
+  }
+  dev 0002:08:00.0 {
+      name Ethernet6
+      num-rx-queues 1
+      num-tx-queues 1
+  }
+  dev 0002:07:00.0 {
+      name Ethernet7
+      num-rx-queues 1
+      num-tx-queues 1
+  }
+  dev 0002:0d:00.0 {
+      name Ethernet8
+      num-rx-queues 1
+      num-tx-queues 1
+  }
+  dev 0002:0a:00.0 {
+      name Ethernet9
+      num-rx-queues 1
+      num-tx-queues 1
+  }
+  dev 0002:0c:00.0 {
+      name Ethernet10
+      num-rx-queues 1
+      num-tx-queues 1
+  }
+  dev 0002:0b:00.0 {
+      name Ethernet11
+      num-rx-queues 1
+      num-tx-queues 1
+  }
+  dev 0002:11:00.0 {
+      name Ethernet12
+      num-rx-queues 2
+      num-tx-queues 2
+  }
+  dev 0002:10:00.0 {
+      name Ethernet13
+      num-rx-queues 2
+      num-tx-queues 2
+  }
+  dev 0002:0f:00.0 {
+      name Ethernet14
+      num-rx-queues 2
+      num-tx-queues 2
+  }
+  dev 0002:0e:00.0 {
+      name Ethernet15
+      num-rx-queues 2
+      num-tx-queues 2 
+  }
+        num-pkt-buf 32768
+}
+
+# dpdk {
+#  no-pci
+#}
+
+statseg {
+  size 2G
+  page-size default-hugepage
+  # socket-name /root/Helium_DPU/ET2500/vpp-24.02/build-root/build-vpp-native/vpp/stats.sock
+}
+
+#logging {
+  # default-syslog-log-level debug
+  # class dpdk/cryptodev { rate-limit 100 level debug syslog-level error }
+#}

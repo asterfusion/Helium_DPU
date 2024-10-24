@@ -1078,7 +1078,8 @@ pool_count_aura_sz_get(uint32_t *nr_pools, uint8_t *aura_sz)
 {
 	uint32_t val;
 
-	val = roc_idev_npa_maxpools_get();
+	//val = roc_idev_npa_maxpools_get();
+	val = aura_size_to_u32(NPA_AURA_SZ_256);
 	if (val < aura_size_to_u32(NPA_AURA_SZ_128))
 		val = 128;
 	if (val > aura_size_to_u32(NPA_AURA_SZ_1M))
