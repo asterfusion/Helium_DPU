@@ -2,10 +2,10 @@
 
 - [Command](#Command)
 - [Prepare](#Prepare)
-- [Run Script](#Run Script)
-- [Build deb](#Build deb)
-- [Install deb](#Install deb)
-- [Run vpp](#Run vpp)
+- [Run Script](#Run-Script)
+- [Build deb](#Build-deb)
+- [Install deb](#Install-deb)
+- [Run vpp](#Run-vpp)
 
 # Command
 
