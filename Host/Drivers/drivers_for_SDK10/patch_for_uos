@@ -1,0 +1,39 @@
+diff --git a/Host/Drivers/drivers_for_SDK10/drivers/legacy/modules/driver/src/host/linux/kernel/drv/cvm_linux_types.h b/Host/Drivers/drivers_for_SDK10/drivers/legacy/modules/driver/src/host/linux/kernel/drv/cvm_linux_types.h
+index b0e271ae..2833a32c 100644
+--- a/Host/Drivers/drivers_for_SDK10/drivers/legacy/modules/driver/src/host/linux/kernel/drv/cvm_linux_types.h
++++ b/Host/Drivers/drivers_for_SDK10/drivers/legacy/modules/driver/src/host/linux/kernel/drv/cvm_linux_types.h
+@@ -125,13 +125,10 @@
+ #define   cavium_copy_in(dest, src, size)           copy_from_user((dest), (src), (size))
+ #define   cavium_copy_out(dest, src, size)          copy_to_user((dest), (src), (size))
+ 
+-#if LINUX_VERSION_CODE > KERNEL_VERSION(5,0,0) || defined(P_ACCESS_OK_PARAM_2)
+-#define   cavium_access_ok(flag, addr, size)        access_ok((addr), (size))
+-#elif LINUX_VERSION_CODE == KERNEL_VERSION(4,18,0) || defined(P_ACCESS_OK_PARAM_2)
++
+ #define   cavium_access_ok(flag, addr, size)        access_ok((addr), (size))
+-#else
+-#define   cavium_access_ok(flag, addr, size)        access_ok((flag), (addr), (size))
+-#endif
++
++
+ 
+ #define   cavium_get_random_bytes(ptr, len)         get_random_bytes((ptr), (len))
+ 
+diff --git a/Host/Drivers/drivers_for_SDK10/drivers/mgmt_net/host_ethdev.c b/Host/Drivers/drivers_for_SDK10/drivers/mgmt_net/host_ethdev.c
+index eb6872ee..8e382f1c 100644
+--- a/Host/Drivers/drivers_for_SDK10/drivers/mgmt_net/host_ethdev.c
++++ b/Host/Drivers/drivers_for_SDK10/drivers/mgmt_net/host_ethdev.c
+@@ -186,11 +186,9 @@ netdev_tx_t mgmt_tx(struct sk_buff *skb, struct net_device *dev)
+ 		return NETDEV_TX_OK;
+ 	}
+ 	bytes = skb->len;
+-#if LINUX_VERSION_CODE > KERNEL_VERSION(5, 0, 0) || defined(P_SKBUFF_XMIT_MORE_2)
++
+ 	xmit_more = 0;
+-#else
+-	xmit_more = skb->xmit_more;
+-#endif
++
+ 	cur_cons_idx = READ_ONCE(*tq->cons_idx_shadow);
+ 	cur_prod_idx = READ_ONCE(tq->local_prod_idx);
+ 	if (!otxmn_circq_space(cur_prod_idx, cur_cons_idx, tq->mask))
