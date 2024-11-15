@@ -356,6 +356,7 @@ cnxk_pktio_promisc_enable (vlib_main_t *vm, cnxk_pktio_t *dev)
   if (roc_nix_is_sdp (nix))
     return -1;
 
+  cnxk_pktio_err("###promisc enable\n");
   rv = roc_nix_npc_promisc_ena_dis (nix, 1);
   if (rv)
     {
@@ -367,6 +368,8 @@ cnxk_pktio_promisc_enable (vlib_main_t *vm, cnxk_pktio_t *dev)
   if (!roc_nix_is_pf (nix))
     return 0;
 
+#if 0
+
   rv = roc_nix_mac_promisc_mode_enable (nix, 1);
   if (rv)
     {
@@ -375,6 +378,7 @@ cnxk_pktio_promisc_enable (vlib_main_t *vm, cnxk_pktio_t *dev)
 	roc_error_msg_get (rv));
       return -1;
     }
+#endif
 
   return 0;
 }
@@ -388,6 +392,7 @@ cnxk_pktio_promisc_disable (vlib_main_t *vm, cnxk_pktio_t *dev)
   if (roc_nix_is_sdp (nix))
     return -1;
 
+  cnxk_pktio_err("###promisc disable\n");
   rv = roc_nix_npc_promisc_ena_dis (nix, 0);
   if (rv)
     {
@@ -399,6 +404,8 @@ cnxk_pktio_promisc_disable (vlib_main_t *vm, cnxk_pktio_t *dev)
   if (!roc_nix_is_pf (nix))
     return 0;
 
+
+#if 0 
   rv = roc_nix_mac_promisc_mode_enable (nix, 0);
   if (rv)
     {
@@ -407,6 +414,7 @@ cnxk_pktio_promisc_disable (vlib_main_t *vm, cnxk_pktio_t *dev)
 	roc_error_msg_get (rv));
       return -1;
     }
+#endif
 
   return 0;
 }
