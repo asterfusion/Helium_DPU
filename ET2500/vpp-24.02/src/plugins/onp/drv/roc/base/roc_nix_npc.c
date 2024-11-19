@@ -30,6 +30,46 @@ roc_nix_npc_promisc_ena_dis(struct roc_nix *roc_nix, int enable)
 	    if (dev_is_vf (&nix->dev) != 0)
 	      req->mode |= NIX_RX_MODE_USE_MCE;
 	  }
+	else
+	{
+    	    req->mode = NIX_RX_MODE_UCAST;	    
+	}
+
+	rc = mbox_process(mbox);
+exit:
+	mbox_put(mbox);
+	return rc;
+}
+
+int
+roc_nix_npc_multicast_ena_dis(struct roc_nix *roc_nix, int enable)
+{
+	struct nix *nix = roc_nix_to_nix_priv(roc_nix);
+	struct dev *dev = &nix->dev;
+	struct mbox *mbox = mbox_get(dev->mbox);
+	struct nix_rx_mode *req;
+	int rc = -ENOSPC;
+
+	if (roc_nix_is_sdp (roc_nix) || roc_nix_is_lbk (roc_nix))
+	  {
+	    rc = NIX_ERR_PARAM;
+	    goto exit;
+	  }
+
+	req = mbox_alloc_msg_nix_set_rx_mode(mbox);
+	if (req == NULL)
+		goto exit;
+
+	if (enable)
+	  {
+	    req->mode = NIX_RX_MODE_UCAST | NIX_RX_MODE_ALLMULTI;
+	    if (dev_is_vf (&nix->dev) != 0)
+	      req->mode |= NIX_RX_MODE_USE_MCE;
+	  }
+	else
+	{
+	    req->mode = NIX_RX_MODE_UCAST;
+	}
 
 	rc = mbox_process(mbox);
 exit:

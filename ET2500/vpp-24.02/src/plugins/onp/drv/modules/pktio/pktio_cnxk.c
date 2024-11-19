@@ -420,6 +420,46 @@ cnxk_pktio_promisc_disable (vlib_main_t *vm, cnxk_pktio_t *dev)
 }
 
 i32
+cnxk_pktio_multicast_enable (vlib_main_t *vm, cnxk_pktio_t *dev)
+{
+  struct roc_nix *nix = &dev->nix;
+  int rv;
+
+  if (roc_nix_is_sdp (nix))
+    return -1;
+
+  cnxk_pktio_err("###multicast enable\n");
+  rv = roc_nix_npc_multicast_ena_dis (nix, 1);
+  if (rv)
+  {
+      cnxk_pktio_err ("roc_nix_npc_multicast_ena_dis failed with '%s' error",
+		      roc_error_msg_get (rv));
+      return -1;
+  }
+  return 0;
+}
+
+i32
+cnxk_pktio_multicast_disable (vlib_main_t *vm, cnxk_pktio_t *dev)
+{
+  struct roc_nix *nix = &dev->nix;
+  int rv;
+
+  if (roc_nix_is_sdp (nix))
+    return -1;
+
+  cnxk_pktio_err("###multicast disable\n");
+  rv = roc_nix_npc_multicast_ena_dis (nix, 0);
+  if (rv)
+  {
+      cnxk_pktio_err ("roc_nix_npc_multicast_ena_dis failed with '%s' error",
+		      roc_error_msg_get (rv));
+      return -1;
+  }
+  return 0;
+}
+
+i32
 cnxk_pktio_mtu_set (vlib_main_t *vm, cnxk_pktio_t *dev, u32 mtu)
 {
   struct roc_nix *nix = &dev->nix;
@@ -898,6 +938,26 @@ cnxk_drv_pktio_promisc_disable (vlib_main_t *vm, u16 pktio_index)
   ASSERT (vm->thread_index == 0);
 
   return ops_map->fops.pktio_promisc_disable (vm, &ops_map->pktio);
+}
+
+i32
+cnxk_drv_pktio_multicast_enable (vlib_main_t *vm, u16 pktio_index)
+{
+  cnxk_pktio_ops_map_t *ops_map = cnxk_pktio_get_pktio_ops (pktio_index);
+
+  ASSERT (vm->thread_index == 0);
+
+  return ops_map->fops.pktio_multicast_enable (vm, &ops_map->pktio);
+}
+
+i32
+cnxk_drv_pktio_multicast_disable (vlib_main_t *vm, u16 pktio_index)
+{
+  cnxk_pktio_ops_map_t *ops_map = cnxk_pktio_get_pktio_ops (pktio_index);
+
+  ASSERT (vm->thread_index == 0);
+
+  return ops_map->fops.pktio_multicast_disable (vm, &ops_map->pktio);
 }
 
 i32

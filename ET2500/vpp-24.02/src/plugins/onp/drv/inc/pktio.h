@@ -277,6 +277,10 @@ i32 cnxk_drv_pktio_promisc_enable (vlib_main_t *vm, u16 pktio_idx);
 
 i32 cnxk_drv_pktio_promisc_disable (vlib_main_t *vm, u16 pktio_idx);
 
+i32 cnxk_drv_pktio_multicast_enable (vlib_main_t *vm, u16 pktio_idx);
+
+i32 cnxk_drv_pktio_multicast_disable (vlib_main_t *vm, u16 pktio_idx);
+
 i32 cnxk_drv_pktio_mac_addr_set (vlib_main_t *vm, u16 pktio_idx, char *addr);
 
 i32 cnxk_drv_pktio_mac_addr_get (vlib_main_t *vm, u16 pktio_idx, char *addr);

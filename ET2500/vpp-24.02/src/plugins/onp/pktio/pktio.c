@@ -75,10 +75,13 @@ onp_pktio_flag_change (vnet_main_t *vnm, vnet_hw_interface_t *hw, u32 flags)
     {
     case ETHERNET_INTERFACE_FLAG_DEFAULT_L3:
       od->pktio_flags &= ~ONP_DEVICE_F_PROMISC;
+      //add by marvin, support multicast recv
+      od->pktio_flags |= ONP_DEVICE_F_MULTICAST;
       break;
 
     case ETHERNET_INTERFACE_FLAG_ACCEPT_ALL:
       od->pktio_flags |= ONP_DEVICE_F_PROMISC;
+      //when accept all, not disable multicast
       break;
 
     default:
@@ -90,10 +93,20 @@ onp_pktio_flag_change (vnet_main_t *vnm, vnet_hw_interface_t *hw, u32 flags)
       if (od->pktio_flags & ONP_DEVICE_F_PROMISC)
 	rv = cnxk_drv_pktio_promisc_enable (vm, od->cnxk_pktio_index);
       else
-	rv = cnxk_drv_pktio_promisc_disable (vm, od->cnxk_pktio_index);
+      {
+	  //if no promisc, then check multicast
+	  if (od->pktio_flags & ONP_DEVICE_F_MULTICAST)
+	  {
+	      rv = cnxk_drv_pktio_multicast_enable(vm, od->cnxk_pktio_index);
+	  }
+	  else
+	  {
+	      rv = cnxk_drv_pktio_promisc_disable (vm, od->cnxk_pktio_index);
 
-      if (rv)
-	onp_pktio_warn ("promisc mode enable/disable not supported");
+	      if (rv)
+		  onp_pktio_warn ("promisc mode enable/disable not supported");
+	  }
+      }
     }
   return 0;
 }

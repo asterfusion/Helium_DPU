@@ -118,7 +118,8 @@
   _ (2, ADMIN_UP, "admin-up")                                                 \
   _ (3, LINK_UP, "link-up")                                                   \
   _ (4, ELOG, "elog")                                                         \
-  _ (5, PROMISC, "promisc")
+  _ (5, PROMISC, "promisc")						      \
+  _ (6, MULTICAST, "multicast")
 
 #define ONP_INTF_NAME_MAX_SIZE 32
 

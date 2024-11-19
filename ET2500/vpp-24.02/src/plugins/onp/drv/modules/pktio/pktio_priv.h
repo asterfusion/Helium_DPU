@@ -218,6 +218,10 @@ typedef struct cnxk_pktio_ops
 
   i32 (*pktio_promisc_disable) (vlib_main_t *vm, cnxk_pktio_t *dev);
 
+  i32 (*pktio_multicast_enable) (vlib_main_t *vm, cnxk_pktio_t *dev);
+
+  i32 (*pktio_multicast_disable) (vlib_main_t *vm, cnxk_pktio_t *dev);
+
   i32 (*pktio_mtu_set) (vlib_main_t *vm, cnxk_pktio_t *dev, u32 mtu);
   i32 (*pktio_link_info_get) (vlib_main_t *vm, cnxk_pktio_t *dev,
 			      cnxk_pktio_link_info_t *link_info);
@@ -369,6 +373,9 @@ i32 cnxk_pktio_rss_key_set (vlib_main_t *vm, cnxk_pktio_t *dev,
 i32 cnxk_pktio_promisc_enable (vlib_main_t *vm, cnxk_pktio_t *dev);
 
 i32 cnxk_pktio_promisc_disable (vlib_main_t *vm, cnxk_pktio_t *dev);
+i32 cnxk_pktio_multicast_enable (vlib_main_t *vm, cnxk_pktio_t *dev);
+
+i32 cnxk_pktio_multicast_disable (vlib_main_t *vm, cnxk_pktio_t *dev);
 i32 cnxk_pktio_mtu_set (vlib_main_t *vm, cnxk_pktio_t *dev, u32 mtu);
 i32 cnxk_pktio_mtu_get (vlib_main_t *vm, cnxk_pktio_t *dev, u32 *mtu);
 i32 cnxk_pktio_mac_addr_set (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr);

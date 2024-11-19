@@ -902,6 +902,8 @@ int __roc_api roc_nix_chan_bpid_set(struct roc_nix *roc_nix, uint16_t chan,
 /* NPC */
 int __roc_api roc_nix_npc_promisc_ena_dis(struct roc_nix *roc_nix, int enable);
 
+int __roc_api roc_nix_npc_multicast_ena_dis(struct roc_nix *roc_nix, int enable);
+
 int __roc_api roc_nix_npc_mac_addr_set(struct roc_nix *roc_nix, uint8_t addr[]);
 
 int __roc_api roc_nix_npc_mac_addr_get(struct roc_nix *roc_nix, uint8_t *addr);
