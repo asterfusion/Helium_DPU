@@ -765,7 +765,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 	   * Replies might need to be received by the host, so we
 	   * make a copy of them.
 	   */
-	  if (arp0->opcode == clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_reply))
+	  //if (arp0->opcode == clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_reply))
 	    {
 	      lcp_itf_pair_t *lip0 = 0;
 	      u32 lipi0;
@@ -797,7 +797,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 		    }
 		}
 	    }
-	  if (arp1->opcode == clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_reply))
+	  //if (arp1->opcode == clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_reply))
 	    {
 	      lcp_itf_pair_t *lip1 = 0;
 	      u32 lipi1;
@@ -834,11 +834,13 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 	    {
 	      lcp_arp_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
 	      t->rx_sw_if_index = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+	      t->arp_opcode = arp0->opcode;
 	    }
 	  if (PREDICT_FALSE ((b1->flags & VLIB_BUFFER_IS_TRACED)))
 	    {
 	      lcp_arp_trace_t *t = vlib_add_trace (vm, node, b1, sizeof (*t));
 	      t->rx_sw_if_index = vnet_buffer (b1)->sw_if_index[VLIB_RX];
+	      t->arp_opcode = arp1->opcode;
 	    }
 
 	  vlib_validate_buffer_enqueue_x2 (vm, node, next_index, to_next,
@@ -872,7 +874,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 	   */
 	  arp_opcode = clib_host_to_net_u16 (arp0->opcode);
 
-	  if (arp_opcode == ETHERNET_ARP_OPCODE_reply)
+	  //if (arp_opcode == ETHERNET_ARP_OPCODE_reply)
 	    {
 	      lcp_itf_pair_t *lip0 = 0;
 	      vlib_buffer_t *c0;
