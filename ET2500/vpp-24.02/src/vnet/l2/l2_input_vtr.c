@@ -85,6 +85,37 @@ typedef enum
   L2_INVTR_N_NEXT,
 } l2_invtr_next_t;
 
+u8 l2_check_pvlan (vlib_buffer_t * b0, vtr_config_t * config, u32 *p_next0)
+{
+  ethernet_max_header_t *m = vlib_buffer_get_current (b0);
+  ethernet_type_t type = clib_net_to_host_u16 (m->ethernet.type);
+
+  //only for PUSH_1
+  if (!(config->push_bytes == 4 && config->pop_bytes==0))
+  {
+      return 0;
+  }
+  if ((type == ETHERNET_TYPE_VLAN || type == ETHERNET_TYPE_DOT1AD
+       || type == ETHERNET_TYPE_DOT1AH) )
+  {
+      u32 v = clib_net_to_host_u16 (m->vlan[0].priority_cfi_and_id);
+      u32 v_config = clib_net_to_host_u16 (config->tags[1].priority_cfi_and_id);
+      if ( (v & 0x0fff) == (v_config & 0x0fff) )
+      {
+          return 1;
+      }
+      else
+      {
+          *p_next0 = L2_INVTR_NEXT_DROP;
+          return 2;//drop packet's vlan != pvlan
+      }
+  }
+  else
+  {
+      return 0;
+  }
+  return 0;
+}
 
 VLIB_NODE_FN (l2_invtr_node) (vlib_main_t * vm,
 			      vlib_node_runtime_t * node,
@@ -174,8 +205,12 @@ VLIB_NODE_FN (l2_invtr_node) (vlib_main_t * vm,
 	    {
 	      if (config0->output_vtr.push_and_pop_bytes)
 		{
+          if (l2_check_pvlan(b0, &config0->input_vtr, &next0))
+          {
+              //then do not push_1
+          }
 		  /* perform the tag rewrite on two packets */
-		  if (l2_vtr_process (b0, &config0->input_vtr))
+		  else if (l2_vtr_process (b0, &config0->input_vtr))
 		    {
 		      /* Drop packet */
 		      next0 = L2_INVTR_NEXT_DROP;
@@ -196,7 +231,11 @@ VLIB_NODE_FN (l2_invtr_node) (vlib_main_t * vm,
 	    {
 	      if (config1->output_vtr.push_and_pop_bytes)
 		{
-		  if (l2_vtr_process (b1, &config1->input_vtr))
+          if (l2_check_pvlan(b1, &config1->input_vtr, &next1))
+          {
+              //then do not push_1
+          }
+		  else if (l2_vtr_process (b1, &config1->input_vtr))
 		    {
 		      /* Drop packet */
 		      next1 = L2_INVTR_NEXT_DROP;
@@ -275,8 +314,13 @@ VLIB_NODE_FN (l2_invtr_node) (vlib_main_t * vm,
 	    {
 	      if (config0->output_vtr.push_and_pop_bytes)
 		{
+          /* add by marvin for support access port: packet's vlan = push's vlan 1 */
+          if (l2_check_pvlan(b0, &config0->input_vtr, &next0))
+          {
+              //then do not push_1
+          }
 		  /* perform the tag rewrite on one packet */
-		  if (l2_vtr_process (b0, &config0->input_vtr))
+		  else if (l2_vtr_process (b0, &config0->input_vtr))
 		    {
 		      /* Drop packet */
 		      next0 = L2_INVTR_NEXT_DROP;
