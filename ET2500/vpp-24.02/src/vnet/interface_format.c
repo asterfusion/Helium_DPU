@@ -119,17 +119,19 @@ u8 *
 format_vnet_hw_interface_link_speed (u8 * s, va_list * args)
 {
   u32 link_speed = va_arg (*args, u32);
-
+  char formatted_speed[64];
   if (link_speed == 0 || link_speed == UINT32_MAX)
     return format (s, "unknown");
 
   if (link_speed >= 1000000)
-    return format (s, "%f Gbps", (f64) link_speed / 1000000);
+    snprintf(formatted_speed, sizeof(formatted_speed), "%g Gbps", (f64)link_speed / 1000000);
 
-  if (link_speed >= 1000)
-    return format (s, "%f Mbps", (f64) link_speed / 1000);
+  else if (link_speed >= 1000)
+    snprintf(formatted_speed, sizeof(formatted_speed), "%g Mbps", (f64)link_speed / 1000);
 
-  return format (s, "%u Kbps", link_speed);
+  else
+    snprintf(formatted_speed, sizeof(formatted_speed), "%u Kbps", link_speed);
+  return format(s, "%s", formatted_speed);
 }
 
 u8 *
