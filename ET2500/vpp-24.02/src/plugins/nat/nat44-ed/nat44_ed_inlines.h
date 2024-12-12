@@ -401,6 +401,7 @@ nat_ed_session_alloc (snat_main_t *sm, u32 thread_index, f64 now, u8 proto)
 #if CLIB_ASSERT_ENABLE
   s->thread_index = thread_index;
 #endif
+  s->create_status = 1;
   return s;
 }
 

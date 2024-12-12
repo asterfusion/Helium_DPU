@@ -337,6 +337,9 @@ typedef CLIB_PACKED(struct
   u32 per_vrf_sessions_index;
 
   u32 thread_index;
+
+  /* add for api to get create status */
+  u8 create_status;
 }) snat_session_t;
 
 typedef struct
