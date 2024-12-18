@@ -309,6 +309,22 @@ lcp_itf_pair_add (u32 host_sw_if_index, u32 phy_sw_if_index, u8 *host_name,
   vnet_feature_enable_disable("ip6-multicast", "linux-cp-ospfv3-phy",
           lip->lip_phy_sw_if_index, 1, NULL, 0);
 
+  /* enable dhcp/dhcpv6 punt for interfaces */
+  vnet_feature_enable_disable("ip4-unicast", "linux-cp-dhcp-phy",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable("ip4-multicast", "linux-cp-dhcp-phy",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable("ip6-unicast", "linux-cp-dhcpv6-phy",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable("ip6-multicast", "linux-cp-dhcpv6-phy",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+
+  /* enable icmpv6-ndp nd punt for interfaces */
+  vnet_feature_enable_disable("ip6-unicast", "linux-cp-ndp-phy",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable("ip6-multicast", "linux-cp-ndp-phy",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+
   /* enable ARP feature node for broadcast interfaces */
   if (lip->lip_host_type != LCP_ITF_HOST_TUN)
     {

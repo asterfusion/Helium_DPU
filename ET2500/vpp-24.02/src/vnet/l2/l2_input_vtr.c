@@ -85,7 +85,7 @@ typedef enum
   L2_INVTR_N_NEXT,
 } l2_invtr_next_t;
 
-u8 l2_check_pvlan (vlib_buffer_t * b0, vtr_config_t * config, u32 *p_next0)
+static u8 l2_check_pvlan (vlib_buffer_t * b0, vtr_config_t * config, u32 *p_next0)
 {
   ethernet_max_header_t *m = vlib_buffer_get_current (b0);
   ethernet_type_t type = clib_net_to_host_u16 (m->ethernet.type);
