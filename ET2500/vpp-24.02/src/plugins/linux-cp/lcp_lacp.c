@@ -1,5 +1,5 @@
 /*
- * lcp_lldp.c - lldp packet punt handling node definitions
+ * lcp_lacp.c - lacp packet punt handling node definitions
  *
  * Copyright 2024-2027 Asterfusion Network
  *
@@ -33,7 +33,6 @@ typedef enum
 typedef struct lcp_lacp_trace_t_
 {
   u32 sw_if_index;
-//   u8 is_ipv6;
 } lcp_lacp_trace_t;
 
 /* packet trace format function */
