@@ -55,6 +55,7 @@ add_vpp_plugin(linux_cp
   lcp_node.c
   lcp_ospf.c
   lcp_lldp.c
+  lcp_lacp.c
 
   API_FILES
   lcp.api
