@@ -2030,7 +2030,9 @@ classify_filter_command_fn (vlib_main_t * vm,
 				      0 /* advance */ ,
 				      0 /* action */ ,
 				      0 /* metadata */ ,
-				      1 /* is_add */ );
+				      1 /* is_add */, 
+				      ~0 /* acl index */, 
+				      0 /* rule count*/);
 
   vec_free (match_vector);
 
@@ -2783,11 +2785,57 @@ unformat_classify_match (unformat_input_t * input, va_list * args)
   return 0;
 }
 
+static inline void
+acl_classify_counter_lock (vnet_classify_main_t * cm)
+{
+  if (cm->acl_counter_lock)
+    while (clib_atomic_test_and_set (cm->acl_counter_lock))
+      /* zzzz */ ;
+}
+
+static inline void
+acl_classify_counter_unlock (vnet_classify_main_t * cm)
+{
+  if (cm->acl_counter_lock)
+    clib_atomic_release (cm->acl_counter_lock);
+}
+
+
+static void
+validate_and_reset_classify_counters (vnet_classify_main_t* cm, u32 acl_index, u32 rule_count)
+{
+  int i;
+  /* counters are set as vectors [acl#] pointing to vectors of [acl rule] */
+  acl_classify_counter_lock (cm);
+
+  int old_len = vec_len (cm->combined_acl_counters);
+
+  vec_validate (cm->combined_acl_counters, acl_index);
+
+  for (i = old_len; i < vec_len (cm->combined_acl_counters); i++)
+    {
+      cm->combined_acl_counters[i].name = 0;
+      /* filled in once only */
+      cm->combined_acl_counters[i].stat_segment_name = (void *)
+	format (0, "/l2acl/%d/matches%c", i, 0);
+      /* Validate one extra so we always have at least one counter for an ACL */
+      vlib_validate_combined_counter (&cm->combined_acl_counters[i],
+				      rule_count);
+      vlib_clear_combined_counters (&cm->combined_acl_counters[i]);
+    }
+
+  /* Validate one extra so we always have at least one counter for an ACL */
+  vlib_validate_combined_counter (&cm->combined_acl_counters[acl_index],
+				  rule_count);
+  vlib_clear_combined_counters (&cm->combined_acl_counters[acl_index]);
+  acl_classify_counter_unlock (cm);
+}
+
 int
 vnet_classify_add_del_session (vnet_classify_main_t *cm, u32 table_index,
 			       const u8 *match, u16 hit_next_index,
 			       u32 opaque_index, i32 advance, u8 action,
-			       u32 metadata, int is_add)
+			       u32 metadata, int is_add, u32 macip_acl_index, u32 rule_count)
 {
   vnet_classify_table_t *t;
   vnet_classify_entry_5_t _max_e __attribute__ ((aligned (16)));
@@ -2807,6 +2855,7 @@ vnet_classify_add_del_session (vnet_classify_main_t *cm, u32 table_index,
   e->last_heard = 0;
   e->flags = 0;
   e->action = action;
+  e->acl_index = macip_acl_index;
   if (e->action == CLASSIFY_ACTION_SET_IP4_FIB_INDEX)
     e->metadata = fib_table_find_or_create_and_lock (FIB_PROTOCOL_IP4,
 						     metadata,
@@ -2826,7 +2875,9 @@ vnet_classify_add_del_session (vnet_classify_main_t *cm, u32 table_index,
 
   /* Clear don't-care bits; likely when dynamically creating sessions */
   for (i = 0; i < t->match_n_vectors; i++)
+  {
     e->key[i] &= t->mask[i];
+  }
 
   rv = vnet_classify_add_del (t, e, is_add);
 
@@ -2834,6 +2885,12 @@ vnet_classify_add_del_session (vnet_classify_main_t *cm, u32 table_index,
 
   if (rv)
     return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  if (macip_acl_index != ~0)
+  {
+      validate_and_reset_classify_counters(cm, macip_acl_index, rule_count);
+  }
+
   return 0;
 }
 
@@ -2915,7 +2972,7 @@ classify_session_command_fn (vlib_main_t * vm,
   rv = vnet_classify_add_del_session (cm, table_index, match,
 				      hit_next_index,
 				      opaque_index, advance,
-				      action, metadata, is_add);
+				      action, metadata, is_add, ~0, 0);
 
   switch (rv)
     {
@@ -3188,7 +3245,7 @@ test_classify_churn (test_classify_main_t * tm)
 					  0 /* advance */ ,
 					  0 /* action */ ,
 					  0 /* metadata */ ,
-					  1 /* is_add */ );
+					  1 /* is_add */, ~0, 0 );
 
       if (rv != 0)
 	clib_warning ("add: returned %d", rv);
@@ -3227,7 +3284,7 @@ test_classify_churn (test_classify_main_t * tm)
 					  0 /* advance */ ,
 					  0 /* action */ ,
 					  0 /* metadata */ ,
-					  is_add);
+					  is_add, ~0, 0);
       if (rv != 0)
 	vlib_cli_output (vm,
 			 "%s[%d]: %U returned %d", is_add ? "add" : "del",
@@ -3270,7 +3327,7 @@ test_classify_churn (test_classify_main_t * tm)
 	 tm->table_index,
 	 key_minus_skip, IP_LOOKUP_NEXT_DROP, i /* opaque_index */ ,
 	 0 /* advance */ , 0, 0,
-	 0 /* is_add */ );
+	 0 /* is_add */ , ~0, 0);
 
       if (rv != 0)
 	clib_warning ("del: returned %d", rv);

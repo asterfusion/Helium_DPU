@@ -60,7 +60,7 @@ ip_session_redirect_stack (ip_session_redirect_t *ipr)
     &vnet_classify_main, ipr->table_index, ipr->match_and_table_index,
     ipr->dpo.dpoi_next_node /* hit_next_index */, ipr->opaque_index,
     0 /* advance */, CLASSIFY_ACTION_SET_METADATA,
-    ipr->dpo.dpoi_index /* metadata */, 1 /* is_add */);
+    ipr->dpo.dpoi_index /* metadata */, 1 /* is_add */, ~0, 0);
 }
 
 static ip_session_redirect_t *
@@ -153,7 +153,7 @@ ip_session_redirect_del (vlib_main_t *vm, u32 table_index, const u8 *match)
   rv = vnet_classify_add_del_session (
     cm, ipr->table_index, ipr->match_and_table_index, 0 /* hit_next_index */,
     0 /* opaque_index */, 0 /* advance */, 0 /* action */, 0 /* metadata */,
-    0 /* is_add */);
+    0 /* is_add */, ~0, 0);
   if (rv)
     return rv;
 
