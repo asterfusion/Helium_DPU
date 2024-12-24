@@ -495,7 +495,11 @@ typedef struct
     };
   } nat;
 
+  union {
+  u32 l2_rx_sw_if_index; /* store the orignal if index when bvi */
+
   u32 unused[8];
+  };
 } vnet_buffer_opaque2_t;
 
 #define vnet_buffer2(b) ((vnet_buffer_opaque2_t *) (b)->opaque2)

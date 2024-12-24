@@ -273,6 +273,45 @@ vl_api_lcp_itf_pair_replace_end_t_handler (
   REPLY_MACRO (VL_API_LCP_ITF_PAIR_REPLACE_END_REPLY);
 }
 
+static void
+vl_api_lcp_set_interface_punt_feature_t_handler (
+  vl_api_lcp_set_interface_punt_feature_t *mp)
+{
+  vl_api_lcp_set_interface_punt_feature_reply_t *rmp;
+  int rv = 0;
+  u32 sw_if_index = ntohl (mp->sw_if_index);
+  u8 punt_on = mp->punt_on ? 1 : 0;
+
+  VALIDATE_SW_IF_INDEX (mp);
+
+  /* ospf punt for phy interfaces */
+  vnet_feature_enable_disable("ip4-multicast", "linux-cp-ospfv2-phy",
+          sw_if_index, punt_on, NULL, 0);
+  vnet_feature_enable_disable("ip6-multicast", "linux-cp-ospfv3-phy",
+          sw_if_index, punt_on, NULL, 0);
+
+  /* dhcp/dhcpv6 punt for interfaces */
+  vnet_feature_enable_disable("ip4-unicast", "linux-cp-dhcp-phy",
+          sw_if_index, punt_on, NULL, 0);
+  vnet_feature_enable_disable("ip4-multicast", "linux-cp-dhcp-phy",
+          sw_if_index, punt_on, NULL, 0);
+  vnet_feature_enable_disable("ip6-unicast", "linux-cp-dhcpv6-phy",
+          sw_if_index, punt_on, NULL, 0);
+  vnet_feature_enable_disable("ip6-multicast", "linux-cp-dhcpv6-phy",
+          sw_if_index, punt_on, NULL, 0);
+
+  /* icmpv6-ndp nd punt for interfaces */
+  vnet_feature_enable_disable("ip6-unicast", "linux-cp-ndp-phy",
+          sw_if_index, punt_on, NULL, 0);
+  vnet_feature_enable_disable("ip6-multicast", "linux-cp-ndp-phy",
+          sw_if_index, punt_on, NULL, 0);
+  vnet_feature_enable_disable ("arp", "linux-cp-arp-phy",
+		  sw_if_index, punt_on, NULL, 0);
+
+  BAD_SW_IF_INDEX_LABEL;
+  REPLY_MACRO (VL_API_LCP_SET_INTERFACE_PUNT_FEATURE_REPLY);
+}
+
 /*
  * Set up the API message handling tables
  */

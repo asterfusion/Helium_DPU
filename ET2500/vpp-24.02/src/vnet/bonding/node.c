@@ -104,6 +104,7 @@ bond_sw_if_idx_rewrite (vlib_main_t * vm, vlib_node_runtime_t * node,
 			&& !packet_is_cdp (eth)
 			&& (ethertype != htons (ETHERNET_TYPE_802_1_LLDP))))
 	{
+	  vnet_buffer2 (b)->l2_rx_sw_if_index = vnet_buffer(b)->sw_if_index[VLIB_RX];
 	  /* Change the physical interface to bond interface */
 	  vnet_buffer (b)->sw_if_index[VLIB_RX] = bond_sw_if_index;
 	  return;
@@ -124,6 +125,7 @@ bond_sw_if_idx_rewrite (vlib_main_t * vm, vlib_node_runtime_t * node,
 			&& (ethertype != htons (ETHERNET_TYPE_CDP))
 			&& (ethertype != htons (ETHERNET_TYPE_802_1_LLDP))))
 	{
+	  vnet_buffer2 (b)->l2_rx_sw_if_index = vnet_buffer(b)->sw_if_index[VLIB_RX];
 	  /* Change the physical interface to bond interface */
 	  vnet_buffer (b)->sw_if_index[VLIB_RX] = bond_sw_if_index;
 	  return;

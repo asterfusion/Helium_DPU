@@ -93,6 +93,9 @@ l2_to_bvi (vlib_main_t * vlib_main,
   u8 *l3h = vlib_buffer_get_current (b0);
   u16 ethertype = clib_net_to_host_u16 (*(u16 *) (l3h - 2));
 
+  /* store the orignal sw_if_index */
+  vnet_buffer2 (b0)->l2_rx_sw_if_index = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+
   /* Set the input interface to be the BVI interface */
   vnet_buffer (b0)->sw_if_index[VLIB_RX] = bvi_sw_if_index;
   vnet_buffer (b0)->sw_if_index[VLIB_TX] = ~0;

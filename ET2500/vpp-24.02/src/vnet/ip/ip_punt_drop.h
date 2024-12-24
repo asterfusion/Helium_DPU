@@ -346,6 +346,21 @@ ip_punt_redirect (vlib_main_t * vm,
 	  else if (vec_len (redirects) >= 1)
 	    rrxi0 = redirects[0];
 
+      /**
+       * add by asterfusion for support bvi punt
+       */
+      if (PREDICT_FALSE(INDEX_INVALID == rrxi0 && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0))
+      {
+          u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
+          if (vec_len (redirects) > l2_rx_sw_if_index0)
+          {
+              rrxi0 = redirects[l2_rx_sw_if_index0];
+              if (INDEX_INVALID == rrxi0)
+                  rrxi0 = redirects[0];
+          }
+          vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
+      }
+
 	  if (PREDICT_TRUE (INDEX_INVALID != rrxi0))
 	    {
 	      /* prevent ttl decrement on forward */
