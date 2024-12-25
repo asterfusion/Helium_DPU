@@ -275,22 +275,23 @@ roc_nix_mac_link_info_set(struct roc_nix *roc_nix,
 	struct dev *dev = &nix->dev;
 	struct mbox *mbox = mbox_get(dev->mbox);
 	struct cgx_set_link_mode_req *req;
-	int rc;
-
-	rc = roc_nix_mac_link_state_set(roc_nix, link_info->status);
-	if (rc)
-		goto exit;
+	struct cgx_set_link_mode_rsp *rsp;
+	uint64_t advertising = 0;
+	int rc = -ENOSPC;
 
 	req = mbox_alloc_msg_cgx_set_link_mode(mbox);
 	if (req == NULL) {
 		rc =  -ENOSPC;
 		goto exit;
 	}
-	req->args.speed = link_info->speed;
-	req->args.duplex = link_info->full_duplex;
-	req->args.an = link_info->autoneg;
 
-	rc = mbox_process(mbox);
+	if (10000 == link_info->speed)
+		advertising = 0x10;
+	else if (1000 == link_info->speed)
+		advertising = 0x2;
+
+	req->args.mode = advertising;
+	rc = mbox_process_msg(mbox, (void**)(&rsp));
 exit:
 	mbox_put(mbox);
 	return rc;

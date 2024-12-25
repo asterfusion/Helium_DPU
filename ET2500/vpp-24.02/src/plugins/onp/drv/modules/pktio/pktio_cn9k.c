@@ -471,6 +471,7 @@ cnxk_pktio_ops_t eth_9k_ops = {
   .pktio_queue_stats_get = cnxk_pktio_queue_stats_get,
   .pktio_promisc_enable = cnxk_pktio_promisc_enable,
   .pktio_link_info_get = cnxk_pktio_link_info_get,
+  .pktio_link_info_set = cnxk_pktio_link_info_set,
   .pktio_mac_addr_set = cnxk_pktio_mac_addr_set,
   .pktio_mac_addr_get = cnxk_pktio_mac_addr_get,
   .pktio_mac_addr_add = cnxk_pktio_mac_addr_add,

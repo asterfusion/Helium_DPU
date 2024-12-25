@@ -541,6 +541,7 @@ cnxk_pktio_ops_t eth_10k_ops = {
   .pktio_multicast_enable = cnxk_pktio_multicast_enable,
   .pktio_multicast_disable  = cnxk_pktio_multicast_disable,
   .pktio_link_info_get = cnxk_pktio_link_info_get,
+  .pktio_link_info_set = cnxk_pktio_link_info_set,
   .pktio_mac_addr_set = cnxk_pktio_mac_addr_set,
   .pktio_mac_addr_get = cnxk_pktio_mac_addr_get,
   .pktio_mac_addr_add = cnxk_pktio_mac_addr_add,
