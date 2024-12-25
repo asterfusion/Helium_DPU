@@ -310,6 +310,43 @@ VLIB_CLI_COMMAND (onp_show_version_command, static) = {
   .function = onp_show_version,
 };
 
+static clib_error_t*
+set_interface_speed(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  u32 speed = 0;
+  onp_pktio_t* pktio;
+  onp_main_t* om = onp_get_main();
+  vnet_main_t* vnm = vnet_get_main();
+
+  if (!unformat(input, "%d %U", &speed,
+    unformat_vnet_hw_interface, vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify a speed and interface.");
+  }
+
+  for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios) ? __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
+    if (pktio->hw_if_index == hw_if_index) {
+      break;
+    }
+  }
+
+  cnxk_pktio_link_info_t link_info = {0};
+  cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
+  if (link_info.speed != speed) {
+    link_info.speed = speed;
+    cnxk_drv_pktio_link_info_set(vm, pktio->cnxk_pktio_index, &link_info);
+  }
+
+  return error;
+}
+
+/* CLI command registration */
+VLIB_CLI_COMMAND(set_interface_speed_command, static) = {
+  .path = "set interface speed",
+  .short_help = "set interface speed <speed> <interface>",
+  .function = set_interface_speed,
+};
+
 /*
  * fd.io coding-style-patch-verification: ON
  *
