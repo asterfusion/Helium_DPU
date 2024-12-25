@@ -141,6 +141,24 @@ vl_api_onp_show_counters_reply_t_handler (vl_api_onp_show_counters_reply_t *mp)
   vam->result_ready = 1;
 }
 
+static int
+api_onp_set_port_speed(vat_main_t* vam) {
+  vl_api_onp_set_port_speed_t* mp;
+  u32 msg_size = sizeof(*mp);
+  int ret;
+
+  vam->result_ready = 0;
+  mp = vl_msg_api_alloc_as_if_client(msg_size);
+
+  M(ONP_SET_PORT_SPEED, mp);
+
+  /* send it... */
+  S(mp);
+
+  /* Wait for a reply... */
+  W(ret);
+  return ret;
+}
 #include <onp/api/onp.api_test.c>
 
 /*
