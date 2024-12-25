@@ -1,0 +1,8 @@
+#
+# SPDX-License-Identifier:           GPL-2.0
+# https://spdx.org/licenses
+# Copyright (C) 2023 Marvell International Ltd.
+#
+# commit id of base tag for this branch
+c68173b2012b8eba332cf9832f0ad23427d795b5 (tag: v5.15.72) Linux 5.15.72
+

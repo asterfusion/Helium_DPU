@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (C) 2021 Marvell International Ltd.
+ *
+ * Device tree for the CN9130-CRB-C board.
+ */
+
+#include "cn9130-crb.dtsi"
+#include "cn913x-ep.dtsi"
+
+/ {
+	model = "Marvell Armada CN9130-CRB-C";
+};
+

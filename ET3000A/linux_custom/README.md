@@ -1,0 +1,2 @@
+# Base SDK12.24.06
+# ONLY FOR SDK10

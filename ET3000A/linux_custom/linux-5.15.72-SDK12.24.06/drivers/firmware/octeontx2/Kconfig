@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Marvell Utility Bus for firmware
+#
+
+menuconfig MARVELL_UB
+	bool "Marvell Utility Bus"
+	default n
+	depends on ARM64 && SYSFS
+	help
+	  Marvell Utility Bus provides set of drivers allowing communication
+	  with various services provided by firmware for OcteonTX2
+	  based platforms.
+	  These drivers are useful only for Marvell CN9X and CN10X SoCs.
+	  If unsure, say N here.
+
+if MARVELL_UB
+
+config MARVELL_UB_GEN_DRIVER
+	tristate "Generic driver for OcteonTX2 & CN10K platforms"
+	default y
+	depends on MARVELL_UB && HAVE_ARM_SMCCC
+	help
+	  The generic driver provides a generic implementation of
+	  platform detection and firmware services.
+	  By default the drvier handles CN9X and CN10X platforms.
+	  If unsure, say Y here.
+
+config MARVELL_CN10K_MAC_MGMT
+	tristate "CN10K MAC management interface"
+	default n
+	depends on HAVE_ARM_SMCCC
+	select MARVELL_UB_GEN_DRIVER
+	help
+	  The module provides an interface to change MAC addresses assigned
+	  to the network devices.
+	  Driver is supported only for CN10K platform.
+	  If unsure, say N here.
+
+config MARVELL_SFP_INFO
+	bool "Marvell SFP info sysfs interface"
+	depends on HAVE_ARM_SMCCC
+	select MARVELL_UB_GEN_DRIVER
+	default n
+	help
+	  Enable support for sysfs entries to dump SFP module information
+	  in similar way as the 'ethtool -m <etxX>' command.
+	  The driver handles both t9x and cn10k platforms.
+	  If unsure, say N here.
+
+config MARVELL_RETIMER_MGMT
+	bool "Marvell Retimer mgmt interface"
+	depends on HAVE_ARM_SMCCC
+	select MARVELL_UB_GEN_DRIVER
+	default n
+	help
+	  Enable sysfs interface providing basic control
+	  over Retimer device for cnf10kb platform.
+	  Each of the four devices will expose simple
+	  interface for setting GSERM index that is to be
+	  routed through the MUX and the ethernet mode -
+	  - both effective from the next boot.
+	  Currently, works only with cn10k platforms
+	  If unsure, say N here.
+
+config MARVELL_PORTM_BOOT_CFG
+	bool "Marvell PORTM boot mode configuration interface"
+	depends on HAVE_ARM_SMCCC
+	select MARVELL_UB_GEN_DRIVER
+	default n
+	help
+	  Enable sysfs interface for PORTM mode configuration
+	  that will be effective from the next boot.
+	  Currently, only cn10k platforms are supported.
+	  If unsure, say N here.
+
+config MARVELL_LED_BLINK_RATE
+	bool "Marvell direct connect GPIO network activity LED blink rate"
+	depends on HAVE_ARM_SMCCC
+	select MARVELL_UB_GEN_DRIVER
+	default n
+	help
+	  Enable sysfs interface for configuring the network activity
+	  blink rate for LEDs that are directly connected to the
+	  Octeon processor.  Currently, only cn10k platforms are supported.
+	  If unsure, say N here.
+
+config MARVELL_CN10K_RPRAM
+	tristate "Octeontx RPRAM configuration interface"
+	depends on HAVE_ARM_SMCCC
+	select MARVELL_UB_GEN_DRIVER
+	default n
+	help
+	  The module enables configuration interface for the persistent data
+	  memory region. The interface allows to control the size of the region.
+	  The new value is used after platform reboot.
+	  Only Octeon 10x platform are supported by this module.
+	  If unsure, say N here.
+
+config MARVELL_MEMTEST
+	tristate "Memory POST configuration utility"
+	depends on HAVE_ARM_SMCCC
+	select MARVELL_UB_GEN_DRIVER
+	default n
+	help
+	  This option enables a module that provides sysfs entries to manipulate
+	  configuration of the power-on self test for memory executed
+	  at warm and cold boot.
+	  If unsure, say N here.
+
+config MARVELL_AVS_RESET
+	tristate "AVS bus reset support"
+	depends on HAVE_ARM_SMCCC
+	select MARVELL_UB_GEN_DRIVER
+	default n
+	help
+	  This module enable control over AVS bus reset from Linux userspace.
+	  Userspace process can signalize upcoming platform warm boot to AVS
+	  devices. Operation allows for clean shutdown for the AVS devices.
+	  The module supports only CN9X platforms.
+	  If unsure, say N here.
+
+endif # MARVELL_UB
