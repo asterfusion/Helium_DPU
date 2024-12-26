@@ -289,6 +289,10 @@ roc_nix_mac_link_info_set(struct roc_nix *roc_nix,
 		advertising = 0x10;
 	else if (1000 == link_info->speed)
 		advertising = 0x2;
+	else {
+		rc = -EINVAL;
+		goto exit;
+	}
 
 	req->args.mode = advertising;
 	rc = mbox_process_msg(mbox, (void**)(&rsp));
