@@ -87,7 +87,7 @@ define onp_show_counters
  * @param[in] client_index      - opaque cookie to identify the sender
  * @param[in] context           - sender context, to match reply w/ request
  * @param[in] sw_if_index       - index of the interface to set port speed on
- * @param[in] port_speed        - port_speed (kbps)
+ * @param[in] port_speed        - port_speed (Mbps)
  */
 autoreply define onp_set_port_speed
 {

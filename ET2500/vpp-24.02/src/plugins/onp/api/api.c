@@ -252,6 +252,8 @@ vl_api_onp_set_port_speed_t_handler(vl_api_onp_set_port_speed_t* mp) {
   onp_pktio_t* pktio;
   int rv = 1;
 
+  VALIDATE_SW_IF_INDEX(mp);
+
   for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios) ? __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
     if (pktio->sw_if_index == sw_if_index)
     {
@@ -266,6 +268,8 @@ vl_api_onp_set_port_speed_t_handler(vl_api_onp_set_port_speed_t* mp) {
     link_info.speed = port_speed;
     cnxk_drv_pktio_link_info_set(vm, pktio->cnxk_pktio_index, &link_info);
   }
+
+  BAD_SW_IF_INDEX_LABEL;
 
   ONP_REPLY_MACRO(VL_API_ONP_SET_PORT_SPEED_REPLY, onp_set_port_speed,);
 }

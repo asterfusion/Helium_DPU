@@ -835,6 +835,8 @@ int __roc_api roc_nix_mac_promisc_mode_enable(struct roc_nix *roc_nix,
 int __roc_api roc_nix_mac_link_state_set(struct roc_nix *roc_nix, uint8_t up);
 int __roc_api roc_nix_mac_link_info_set(struct roc_nix *roc_nix,
 					struct roc_nix_link_info *link_info);
+int __roc_api roc_nix_mac_link_advertise_set(struct roc_nix* roc_nix,
+					struct roc_nix_link_info* link_info);
 int __roc_api roc_nix_mac_link_info_get(struct roc_nix *roc_nix,
 					struct roc_nix_link_info *link_info);
 int __roc_api roc_nix_mac_mtu_set(struct roc_nix *roc_nix, uint16_t mtu);

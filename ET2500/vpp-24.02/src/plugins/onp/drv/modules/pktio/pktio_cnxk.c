@@ -736,10 +736,10 @@ cnxk_pktio_link_info_set(vlib_main_t* vm, cnxk_pktio_t* dev,
   nix_info.full_duplex = link_info->is_full_duplex;
   nix_info.speed = link_info->speed;
 
-  rv = roc_nix_mac_link_info_set(nix, &nix_info);
+  rv = roc_nix_mac_link_advertise_set(nix, &nix_info);
   if (rv) {
     cnxk_pktio_err(
-      "roc_nix_mac_link_info_set failed with '%s' error on dev %d",
+      "roc_nix_mac_link_advertise_set failed with '%s' error on dev %d",
       roc_error_msg_get(rv), dev->pktio_index, rv);
     return -1;
   }

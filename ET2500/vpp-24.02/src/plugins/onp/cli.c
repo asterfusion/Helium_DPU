@@ -311,7 +311,7 @@ VLIB_CLI_COMMAND (onp_show_version_command, static) = {
 };
 
 static clib_error_t*
-set_interface_speed(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
+set_onp_interface_speed(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
   clib_error_t* error = 0;
   u32 hw_if_index;
   u32 speed = 0;
@@ -341,10 +341,10 @@ set_interface_speed(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t
 }
 
 /* CLI command registration */
-VLIB_CLI_COMMAND(set_interface_speed_command, static) = {
-  .path = "set interface speed",
-  .short_help = "set interface speed <speed> <interface>",
-  .function = set_interface_speed,
+VLIB_CLI_COMMAND(set_onp_interface_speed_command, static) = {
+  .path = "set onp interface speed",
+  .short_help = "set onp interface speed <speed> <interface>",
+  .function = set_onp_interface_speed,
 };
 
 /*
