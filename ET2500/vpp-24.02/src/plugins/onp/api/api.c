@@ -243,6 +243,37 @@ vl_api_onp_show_counters_t_handler (vl_api_onp_show_counters_t *mp)
   vec_free (pool_stat);
 }
 
+static void
+vl_api_onp_set_port_speed_t_handler(vl_api_onp_set_port_speed_t* mp) {
+  onp_main_t* om = onp_get_main();
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+  u32 port_speed = ntohl(mp->port_speed);
+  vlib_main_t* vm = vlib_get_main();
+  onp_pktio_t* pktio;
+  int rv = 1;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios) ? __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
+    if (pktio->sw_if_index == sw_if_index)
+    {
+      rv = 0;
+      break;
+    }
+  }
+
+  cnxk_pktio_link_info_t link_info = {};
+  cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
+  if (link_info.speed != port_speed) {
+    link_info.speed = port_speed;
+    cnxk_drv_pktio_link_info_set(vm, pktio->cnxk_pktio_index, &link_info);
+  }
+
+  BAD_SW_IF_INDEX_LABEL;
+
+  ONP_REPLY_MACRO(VL_API_ONP_SET_PORT_SPEED_REPLY, onp_set_port_speed,);
+}
+
 #include <onp/api/onp.api.c>
 
 static clib_error_t *

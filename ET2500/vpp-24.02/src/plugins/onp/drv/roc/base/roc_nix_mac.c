@@ -4,6 +4,11 @@
 
 #include "roc_api.h"
 #include "roc_priv.h"
+#define ETH_SPEED_NUM_10G 10000
+#define ETH_SPEED_NUM_1G 1000
+
+#define ETH_SPEED_ADVERTISE_10G 0x10
+#define ETH_SPEED_ADVERTISE_1G 0x2
 
 int
 roc_nix_mac_rxtx_start_stop(struct roc_nix *roc_nix, bool start)
@@ -291,6 +296,41 @@ roc_nix_mac_link_info_set(struct roc_nix *roc_nix,
 	req->args.an = link_info->autoneg;
 
 	rc = mbox_process(mbox);
+exit:
+	mbox_put(mbox);
+	return rc;
+
+}
+
+int
+roc_nix_mac_link_advertise_set(struct roc_nix *roc_nix,
+			  struct roc_nix_link_info *link_info)
+{
+	struct nix *nix = roc_nix_to_nix_priv(roc_nix);
+	struct dev *dev = &nix->dev;
+	struct mbox *mbox = mbox_get(dev->mbox);
+	struct cgx_set_link_mode_req *req;
+	struct cgx_set_link_mode_rsp *rsp;
+	uint64_t advertising = 0;
+	int rc = -ENOSPC;
+
+	req = mbox_alloc_msg_cgx_set_link_mode(mbox);
+	if (req == NULL) {
+		rc =  -ENOSPC;
+		goto exit;
+	}
+
+	if (ETH_SPEED_NUM_10G == link_info->speed)
+		advertising = ETH_SPEED_ADVERTISE_10G;
+	else if (ETH_SPEED_NUM_1G == link_info->speed)
+		advertising = ETH_SPEED_ADVERTISE_1G;
+	else {
+		rc = -EINVAL;
+		goto exit;
+	}
+
+	req->args.mode = advertising;
+	rc = mbox_process_msg(mbox, (void**)(&rsp));
 exit:
 	mbox_put(mbox);
 	return rc;
