@@ -558,6 +558,13 @@ eth_identify_subint (vnet_hw_interface_t * hi,
   *new_sw_if_index = ~0;
   *error0 = ETHERNET_ERROR_UNKNOWN_VLAN;
   *is_l2 = 0;
+
+  //asterfusion for tap port
+  if(strncmp((const char*)hi->name, "tap", 3)==0)
+  {
+	  *error0 = ETHERNET_ERROR_NONE;
+	  *new_sw_if_index = hi->sw_if_index;
+  }
   return 0;
 
 matched:

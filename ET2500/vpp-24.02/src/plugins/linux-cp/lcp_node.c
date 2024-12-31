@@ -107,8 +107,13 @@ VLIB_NODE_FN (lip_punt_node)
 	  {
 	      if (vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
 	      {
-		      lipi0 = lcp_itf_pair_find_by_phy (
-				      vnet_buffer2 (b0)->l2_rx_sw_if_index);
+              u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
+
+              vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
+              if( si0 && si0->type == VNET_SW_INTERFACE_TYPE_SUB ) {
+                  l2_rx_sw_if_index0 = si0->sup_sw_if_index;
+              }
+		      lipi0 = lcp_itf_pair_find_by_phy (l2_rx_sw_if_index0);
 		      vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
 	      }
 	      if (lipi0 == INDEX_INVALID)
@@ -350,6 +355,7 @@ lcp_xc_inline (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame,
 	  u32 next0, bi0, lipi, ai;
 	  vlib_buffer_t *b0;
 	  const ip_adjacency_t *adj;
+	  u8 len0;
 
 	  bi0 = to_next[0] = from[0];
 
@@ -365,7 +371,29 @@ lcp_xc_inline (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame,
 	  lip = lcp_itf_pair_get (lipi);
 
 	  vnet_buffer (b0)->sw_if_index[VLIB_TX] = lip->lip_phy_sw_if_index;
-	  vlib_buffer_advance (b0, -lip->lip_rewrite_len);
+
+	  //add by asterfusion for tap trunk port, when use tun/p2p/pipe maybe need to fix it
+	  if (PREDICT_TRUE (lip->lip_host_type == LCP_ITF_HOST_TAP))
+      {
+          /*
+           * rewind to ethernet header
+           */
+          len0 = ((u8 *) vlib_buffer_get_current (b0) -
+                  (u8 *) ethernet_buffer_get_header (b0));
+      }
+      else
+      {
+          len0 = lip->lip_rewrite_len;
+      }
+
+	  if (len0 != lip->lip_rewrite_len)
+	  {
+		  vlib_buffer_advance (b0, -len0);
+	  }
+	  else
+	  {
+		  vlib_buffer_advance (b0, -lip->lip_rewrite_len);
+	  }
 	  eth = vlib_buffer_get_current (b0);
 
 	  ai = ADJ_INDEX_INVALID;
@@ -787,8 +815,14 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 
 	      if (lip0 == NULL && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
 	      {
+              u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
+              vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
+              if( si0 && si0->type == VNET_SW_INTERFACE_TYPE_SUB ) {
+                  l2_rx_sw_if_index0 = si0->sup_sw_if_index;
+              }
+
 		      lipi0 = lcp_itf_pair_find_by_phy (
-				      vnet_buffer2 (b0)->l2_rx_sw_if_index);
+				          l2_rx_sw_if_index0);
 		      lip0 = lcp_itf_pair_get (lipi0);
 		      vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
 	      }
@@ -827,8 +861,14 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 
 	      if (lip1 == NULL && vnet_buffer2(b1)->l2_rx_sw_if_index != ~0)
 	      {
+              u32 l2_rx_sw_if_index1 = vnet_buffer2(b1)->l2_rx_sw_if_index;
+              vnet_sw_interface_t *si1 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index1);
+              if( si1 && si1->type == VNET_SW_INTERFACE_TYPE_SUB ) {
+                  l2_rx_sw_if_index1 = si1->sup_sw_if_index;
+              }
+
 		      lipi1 = lcp_itf_pair_find_by_phy (
-				      vnet_buffer2 (b1)->l2_rx_sw_if_index);
+				         l2_rx_sw_if_index1);
 		      lip1 = lcp_itf_pair_get (lipi1);
 		      vnet_buffer2(b1)->l2_rx_sw_if_index = ~0;
 	      }
@@ -911,8 +951,14 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 
 	      if (lip0 == NULL && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
 	      {
+              u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
+              vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
+              if( si0 && si0->type == VNET_SW_INTERFACE_TYPE_SUB ) {
+                  l2_rx_sw_if_index0 = si0->sup_sw_if_index;
+              }
+
 		      lipi0 = lcp_itf_pair_find_by_phy (
-				      vnet_buffer2 (b0)->l2_rx_sw_if_index);
+				        l2_rx_sw_if_index0);
 		      lip0 = lcp_itf_pair_get (lipi0);
 		      vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
 	      }

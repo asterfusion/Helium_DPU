@@ -352,6 +352,10 @@ ip_punt_redirect (vlib_main_t * vm,
       if (PREDICT_FALSE(INDEX_INVALID == rrxi0 && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0))
       {
           u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
+          vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
+          if( si0 && si0->type == VNET_SW_INTERFACE_TYPE_SUB ) {
+              l2_rx_sw_if_index0 = si0->sup_sw_if_index;
+          }
           if (vec_len (redirects) > l2_rx_sw_if_index0)
           {
               rrxi0 = redirects[l2_rx_sw_if_index0];
