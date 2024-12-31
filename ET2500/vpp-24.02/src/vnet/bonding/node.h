@@ -106,6 +106,17 @@ typedef struct
 
 typedef struct
 {
+  /* member's sw_if_index */
+  u32 member;
+
+  u8 is_active;
+
+  int rv;
+  clib_error_t *error;
+} bond_set_member_state_args_t;
+
+typedef struct
+{
   u32 member;
   /* return */
   int rv;
@@ -425,6 +436,7 @@ void bond_create_if (vlib_main_t * vm, bond_create_if_args_t * args);
 int bond_delete_if (vlib_main_t * vm, u32 sw_if_index);
 void bond_add_member (vlib_main_t * vm, bond_add_member_args_t * args);
 void bond_detach_member (vlib_main_t * vm, bond_detach_member_args_t * args);
+void bond_set_member_state (vlib_main_t * vm, bond_set_member_state_args_t * args);
 int bond_dump_ifs (bond_interface_details_t ** out_bondids);
 int bond_dump_member_ifs (member_interface_details_t ** out_memberids,
 			  u32 bond_sw_if_index);
