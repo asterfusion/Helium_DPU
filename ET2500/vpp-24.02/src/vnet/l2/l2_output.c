@@ -131,6 +131,49 @@ split_horizon_violation (vlib_node_runtime_t * node, u8 shg,
   b->error = node->errors[L2OUTPUT_ERROR_SHG_DROP];
 }
 
+
+
+/** 
+ * add by asterfusion to check TRANSLATE_1_2
+ * return 1 when packets outer vlan and inner vlan do not match config
+ */
+static u8 l2_check_translate (vlib_buffer_t * b0, vtr_config_t * config)
+{
+  ethernet_max_header_t *m = vlib_buffer_get_current (b0);
+  ethernet_type_t type = clib_net_to_host_u16 (m->ethernet.type);
+
+  // ret 0 means go to l2_vtr_process
+  // ret 1 means drop
+  if (!(config->push_bytes == 4 && config->pop_bytes==8))
+  {
+      //only for TRANSLATE_1_2
+      return 0;
+  }
+  if ((type == ETHERNET_TYPE_VLAN || type == ETHERNET_TYPE_DOT1AD
+       || type == ETHERNET_TYPE_DOT1AH) )
+  {
+      u32 v0 = clib_net_to_host_u16 (m->vlan[0].priority_cfi_and_id);
+      u32 v1 = clib_net_to_host_u16 (m->vlan[1].priority_cfi_and_id);
+      u32 v_config0 = clib_net_to_host_u16 (config->tags[0].priority_cfi_and_id);
+      u32 v_config1 = clib_net_to_host_u16 (config->tags[1].priority_cfi_and_id);
+      if (((v0 & 0x0fff) == (v_config0 & 0x0fff)) && ((v1 & 0x0fff) == (v_config1 & 0x0fff)))
+      {
+          return 0;
+      }
+      else
+      {
+          //If the inner and outer VLAN of the packet do not match the VLAN configuration for tag rewriting, drop this packet.
+          return 1;
+      }
+  }
+  else
+  {
+      // If the packet does not contain VLAN tag, drop this packet.
+      return 1;
+  }
+  return 0;
+}
+
 static_always_inline void
 l2output_process_batch_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
 			       l2_output_config_t * config,
@@ -169,7 +212,15 @@ l2output_process_batch_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
 	    {
 	      u32 failed1 = l2_efp &&
 		l2_efp_filter_process (b[i], &(config->input_vtr));
-	      u32 failed2 = l2_vtr_process (b[i], &(config->output_vtr));
+	      u32 failed2 = 0;
+          if(l2_check_translate(b[i], &config->output_vtr) == 0)
+          {
+              failed2 = l2_vtr_process (b[i], &(config->output_vtr));
+          }
+          else
+          {
+              failed2 = 1;
+          }
 	      if (PREDICT_FALSE (failed1 | failed2))
 		{
 		  next[i] = L2OUTPUT_NEXT_DROP;
@@ -215,7 +266,15 @@ l2output_process_batch_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
 	{
 	  u32 failed1 = l2_efp &&
 	    l2_efp_filter_process (b[0], &(config->input_vtr));
-	  u32 failed2 = l2_vtr_process (b[0], &(config->output_vtr));
+	  u32 failed2 = 0;
+      if(l2_check_translate(b[0], &config->output_vtr) == 0)
+      {
+          failed2 = l2_vtr_process (b[0], &(config->output_vtr));
+      }
+      else
+      {
+          failed2 = 1;
+      }
 	  if (PREDICT_FALSE (failed1 | failed2))
 	    {
 	      *next = L2OUTPUT_NEXT_DROP;
