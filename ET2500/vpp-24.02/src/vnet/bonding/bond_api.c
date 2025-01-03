@@ -186,6 +186,30 @@ static void
 }
 
 static void
+  vl_api_sw_interface_set_bond_member_state_t_handler
+  (vl_api_sw_interface_set_bond_member_state_t * mp)
+{
+  vlib_main_t *vm = vlib_get_main ();
+  bond_set_member_state_args_t _a, *ap = &_a;
+  vl_api_sw_interface_set_bond_member_state_reply_t *rmp;
+  int rv = 0;
+
+  VALIDATE_SW_IF_INDEX (mp);
+
+  clib_memset (ap, 0, sizeof (*ap));
+
+  ap->member = ntohl (mp->sw_if_index);
+  ap->is_active = ntohl (mp->is_active);
+
+  bond_set_member_state (vm, ap);
+  rv = ap->rv;
+
+  BAD_SW_IF_INDEX_LABEL;
+  
+  REPLY_MACRO (VL_API_SW_INTERFACE_SET_BOND_MEMBER_STATE_REPLY);
+}
+
+static void
 vl_api_bond_detach_slave_t_handler (vl_api_bond_detach_slave_t * mp)
 {
   vlib_main_t *vm = vlib_get_main ();

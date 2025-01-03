@@ -1106,6 +1106,89 @@ VLIB_CLI_COMMAND(set_interface_bond_cmd, static) = {
 };
 /* *INDENT-ON* */
 
+
+void
+bond_set_member_state (vlib_main_t * vm, bond_set_member_state_args_t * args)
+{
+
+  member_if_t *mif;
+  u8 is_active;
+
+  mif = bond_get_member_by_sw_if_index (args->member);
+   if (!mif)
+    {
+      args->rv = VNET_API_ERROR_INVALID_INTERFACE;
+      args->error = clib_error_return (0, "interface was not a member");
+      return;
+    }
+  is_active = args->is_active;
+  if(is_active){
+
+    bond_enable_collecting_distributing (vm, mif);
+  }
+  else{
+
+  bond_disable_collecting_distributing (vm, mif);
+  }
+}
+
+static clib_error_t *
+set_member_state_command_fn (vlib_main_t * vm, unformat_input_t * input,
+				 vlib_cli_command_t * cmd)
+{
+  bond_set_member_state_args_t args = { 0 };
+  unformat_input_t _line_input, *line_input = &_line_input;
+  vnet_main_t *vnm = vnet_get_main ();
+
+  /* Get a line of input. */
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return clib_error_return (0, "Missing required arguments.");
+
+  args.member = ~0;
+
+  args.is_active = ~0;
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (line_input, "%U",
+		    unformat_vnet_sw_interface, vnm, &args.member))
+	;
+      else if (unformat (line_input, "active"))
+	args.is_active = 1;
+      else if (unformat (line_input, "inactive"))
+	args.is_active = 0;
+      else
+	{
+	  args.error = clib_error_return (0, "unknown input `%U'",
+					  format_unformat_error, input);
+	  break;
+	}
+    }
+  unformat_free (line_input);
+
+  if (args.error)
+    return args.error;
+ 
+  if (args.member == ~0)
+    return clib_error_return (0,
+			      "please specify valid member interface name");
+  if (args.is_active == ~0)
+    return clib_error_return (0,
+			      "Missing state");    
+
+  bond_set_member_state (vm, &args);
+
+  return args.error;
+}
+
+/* *INDENT-OFF* */
+VLIB_CLI_COMMAND (set_member_state_command, static) = {
+  .path = "set bond member state ",
+  .short_help = "set bond member state <member-interface> <active | inactive>"
+                ,
+  .function = set_member_state_command_fn,
+};
+/* *INDENT-ON* */
+
 clib_error_t *
 bond_cli_init (vlib_main_t * vm)
 {
