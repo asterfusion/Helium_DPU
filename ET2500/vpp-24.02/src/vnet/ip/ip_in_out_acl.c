@@ -131,6 +131,8 @@ ip_in_out_acl_inline_trace (
   u32 table_index[4];
   vnet_classify_table_t *t[4] = { 0, 0 };
   u32 hash[4];
+  const in_out_acl_main_t *am = &in_out_acl_main;
+  vnet_classify_main_t *vcm = am->vnet_classify_main;
 
   /* calculate hashes for b[0] & b[1] */
   if (n_left >= 2)
@@ -296,6 +298,14 @@ ip_in_out_acl_inline_trace (
 	    vnet_classify_find_entry_inline (t[0], (u8 *) h[0], hash[0], now);
 	  if (e[0])
 	    {
+	      if (e[0]->acl_index != ~0)
+              {
+                  vlib_increment_combined_counter (vcm->combined_acl_counters +
+				   e[0]->acl_index,
+				   vm->thread_index,
+				   e[0]->opaque_index,
+				   1, b[0]->current_length);
+              }
 	      vnet_buffer (b[0])->l2_classify.opaque_index
 		= e[0]->opaque_index;
 	      vlib_buffer_advance (b[0], e[0]->advance);
@@ -361,6 +371,14 @@ ip_in_out_acl_inline_trace (
 						     hash[0], now);
 		  if (e[0])
 		    {
+		      if (e[0]->acl_index != ~0)
+	              {
+	                  vlib_increment_combined_counter (vcm->combined_acl_counters +
+    				   e[0]->acl_index,
+    				   vm->thread_index,
+    				   e[0]->opaque_index,
+    				   1, b[0]->current_length);
+	              }
 		      vnet_buffer (b[0])->l2_classify.opaque_index
 			= e[0]->opaque_index;
 		      vlib_buffer_advance (b[0], e[0]->advance);
@@ -404,6 +422,14 @@ ip_in_out_acl_inline_trace (
 	    vnet_classify_find_entry_inline (t[1], (u8 *) h[1], hash[1], now);
 	  if (e[1])
 	    {
+	      if (e[1]->acl_index != ~0)
+              {
+                  vlib_increment_combined_counter (vcm->combined_acl_counters +
+    				   e[1]->acl_index,
+    				   vm->thread_index,
+    				   e[1]->opaque_index,
+    				   1, b[1]->current_length);
+              }
 	      vnet_buffer (b[1])->l2_classify.opaque_index
 		= e[1]->opaque_index;
 	      vlib_buffer_advance (b[1], e[1]->advance);
@@ -469,6 +495,14 @@ ip_in_out_acl_inline_trace (
 						     hash[1], now);
 		  if (e[1])
 		    {
+		      if (e[1]->acl_index != ~0)
+	              {
+	                  vlib_increment_combined_counter (vcm->combined_acl_counters +
+    				   e[1]->acl_index,
+    				   vm->thread_index,
+    				   e[1]->opaque_index,
+    				   1, b[1]->current_length);
+	              }
 		      vnet_buffer (b[1])->l2_classify.opaque_index
 			= e[1]->opaque_index;
 		      vlib_buffer_advance (b[1], e[1]->advance);
@@ -609,6 +643,14 @@ ip_in_out_acl_inline_trace (
 	  e0 = vnet_classify_find_entry_inline (t0, (u8 *) h0, hash0, now);
 	  if (e0)
 	    {
+	      if (e0->acl_index != ~0)
+              {
+                  vlib_increment_combined_counter (vcm->combined_acl_counters +
+				   e0->acl_index,
+				   vm->thread_index,
+				   e0->opaque_index,
+				   1, b[0]->current_length);
+              }
 	      vnet_buffer (b[0])->l2_classify.opaque_index = e0->opaque_index;
 	      vlib_buffer_advance (b[0], e0->advance);
 
@@ -670,6 +712,14 @@ ip_in_out_acl_inline_trace (
 		    (t0, (u8 *) h0, hash0, now);
 		  if (e0)
 		    {
+		      if (e0->acl_index != ~0)
+	              {
+	                  vlib_increment_combined_counter (vcm->combined_acl_counters +
+				       e0->acl_index,
+				       vm->thread_index,
+				       e0->opaque_index,
+				       1, b[0]->current_length);
+	              }
 		      vnet_buffer (b[0])->l2_classify.opaque_index
 			= e0->opaque_index;
 		      vlib_buffer_advance (b[0], e0->advance);

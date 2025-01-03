@@ -1329,7 +1329,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
 	  /* add session to table mvec[match_type_index].table_index; */
 	  vnet_classify_add_del_session (cm, tag_table,
 					 mask, a->rules[i].is_permit ? ~0 : 0,
-					 i, 0, action, metadata, 1);
+					 i, 0, action, metadata, 1, macip_acl_index, a->count);
 	  clib_memset (&mask[12], 0, sizeof (mask) - 12);
 	}
 
@@ -1375,7 +1375,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
 		      4);
 	      vnet_classify_add_del_session (cm, tag_table, mask,
 					     a->rules[i].is_permit ? ~0 : 0,
-					     i, 0, action, metadata, 1);
+					     i, 0, action, metadata, 1, macip_acl_index, a->count);
 	    }
 	}
       if (macip_permit_also_egress (a->rules[i].is_permit))
@@ -1428,7 +1428,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
 	      vnet_classify_add_del_session (cm, tag_table,
 					     mask,
 					     a->rules[i].is_permit ? ~0 : 0,
-					     i, 0, action, metadata, 1);
+					     i, 0, action, metadata, 1, macip_acl_index, a->count);
 	      // clib_memset (&mask[12], 0, sizeof (mask) - 12);
 	    }
 
@@ -1470,7 +1470,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
 						 mask,
 						 a->rules[i].
 						 is_permit ? ~0 : 0, i, 0,
-						 action, metadata, 1);
+						 action, metadata, 1, macip_acl_index, a->count);
 		}
 	    }
 	}

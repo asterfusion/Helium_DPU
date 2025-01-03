@@ -337,6 +337,14 @@ l2_in_out_acl_node_fn (vlib_main_t * vm,
 	      e0 = vnet_classify_find_entry (t0, (u8 *) h0, hash0, now);
 	      if (e0)
 		{
+		  if (e0->acl_index != ~0)
+	          {
+	              vlib_increment_combined_counter (vcm->combined_acl_counters +
+				   e0->acl_index,
+				   vm->thread_index,
+				   e0->opaque_index,
+				   1, b0->current_length);
+	          }
 		  vnet_buffer (b0)->l2_classify.opaque_index
 		    = e0->opaque_index;
 		  vlib_buffer_advance (b0, e0->advance);
@@ -394,6 +402,14 @@ l2_in_out_acl_node_fn (vlib_main_t * vm,
 			(t0, (u8 *) h0, hash0, now);
 		      if (e0)
 			{
+			  if (e0->acl_index != ~0)
+		          {
+		              vlib_increment_combined_counter (vcm->combined_acl_counters +
+					   e0->acl_index,
+					   vm->thread_index,
+					   e0->opaque_index,
+					   1, b0->current_length);
+		          }
 			  vlib_buffer_advance (b0, e0->advance);
 			  next0 = (e0->next_index < ACL_NEXT_INDEX_N_NEXT) ?
 			    e0->next_index : next0;

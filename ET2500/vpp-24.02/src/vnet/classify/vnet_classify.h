@@ -74,7 +74,8 @@ typedef struct _vnet_classify_entry
   {
     struct
     {
-      u32 opaque_index;
+      u16 opaque_index;
+      u16 acl_index;
       /* advance on hit, note it's a signed quantity... */
       i32 advance;
     };
@@ -237,6 +238,9 @@ struct _vnet_classify_main
   /* convenience variables */
   vlib_main_t *vlib_main;
   vnet_main_t *vnet_main;
+
+  volatile u32 *acl_counter_lock;
+  vlib_combined_counter_main_t *combined_acl_counters;
 };
 
 extern vnet_classify_main_t vnet_classify_main;
@@ -590,7 +594,7 @@ vnet_classify_table_t *vnet_classify_new_table (vnet_classify_main_t *cm,
 int vnet_classify_add_del_session (vnet_classify_main_t *cm, u32 table_index,
 				   const u8 *match, u16 hit_next_index,
 				   u32 opaque_index, i32 advance, u8 action,
-				   u32 metadata, int is_add);
+				   u32 metadata, int is_add, u32 macip_acl_index, u32 rule_count);
 
 int vnet_classify_add_del_table (vnet_classify_main_t *cm, const u8 *mask,
 				 u32 nbuckets, u32 memory_size, u32 skip,
