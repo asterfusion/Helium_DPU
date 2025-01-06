@@ -434,7 +434,7 @@ static void vl_api_classify_add_del_session_t_handler
 
   rv = vnet_classify_add_del_session
     (cm, table_index, mp->match, hit_next_index, opaque_index,
-     advance, action, metadata, mp->is_add);
+     advance, action, metadata, mp->is_add, ~0, 0);
 
 out:
   REPLY_MACRO (VL_API_CLASSIFY_ADD_DEL_SESSION_REPLY);
