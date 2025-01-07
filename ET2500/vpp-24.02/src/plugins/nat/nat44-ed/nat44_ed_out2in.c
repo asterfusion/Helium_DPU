@@ -796,6 +796,12 @@ nat44_ed_out2in_fast_path_node_fn_inline (vlib_main_t * vm,
 
       lookup.fib_index = rx_fib_index0;
 
+      if (b0->no_nat)
+      {
+          b0->no_nat = 0;
+          goto trace0;
+      }
+
       if (PREDICT_FALSE (ip0->ttl == 1))
 	{
 	  vnet_buffer (b0)->sw_if_index[VLIB_TX] = (u32) ~ 0;
@@ -1082,6 +1088,12 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
       sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
       rx_fib_index0 =
 	fib_table_get_index_for_sw_if_index (FIB_PROTOCOL_IP4, sw_if_index0);
+
+      if (b0->no_nat)
+      {
+          b0->no_nat = 0;
+          goto trace0;
+      }
 
       if (PREDICT_FALSE (ip0->ttl == 1))
 	{

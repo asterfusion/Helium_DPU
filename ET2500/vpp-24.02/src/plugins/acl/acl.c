@@ -1328,7 +1328,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
 
 	  /* add session to table mvec[match_type_index].table_index; */
 	  vnet_classify_add_del_session (cm, tag_table,
-					 mask, a->rules[i].is_permit ? ~0 : 0,
+					 mask, a->rules[i].is_permit ? (a->rules[i].is_permit == 4 ? (~0 - 1) : ~0) : 0,
 					 i, 0, action, metadata, 1, macip_acl_index, a->count);
 	  clib_memset (&mask[12], 0, sizeof (mask) - 12);
 	}
@@ -1374,7 +1374,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
 	      memcpy (&mask[l3_src_offs + 14], &a->rules[i].src_ip_addr.ip4,
 		      4);
 	      vnet_classify_add_del_session (cm, tag_table, mask,
-					     a->rules[i].is_permit ? ~0 : 0,
+					     a->rules[i].is_permit ? (a->rules[i].is_permit == 4 ? (~0 - 1) : ~0) : 0,
 					     i, 0, action, metadata, 1, macip_acl_index, a->count);
 	    }
 	}
@@ -1427,7 +1427,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
 	      /* add session to table mvec[match_type_index].table_index; */
 	      vnet_classify_add_del_session (cm, tag_table,
 					     mask,
-					     a->rules[i].is_permit ? ~0 : 0,
+					     a->rules[i].is_permit ? (a->rules[i].is_permit == 4 ? (~0 - 1) : ~0) : 0,
 					     i, 0, action, metadata, 1, macip_acl_index, a->count);
 	      // clib_memset (&mask[12], 0, sizeof (mask) - 12);
 	    }
@@ -1469,7 +1469,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
 		  vnet_classify_add_del_session (cm, tag_table,
 						 mask,
 						 a->rules[i].
-						 is_permit ? ~0 : 0, i, 0,
+						 is_permit ? (a->rules[i].is_permit == 4 ? (~0 - 1) : ~0) : 0, i, 0,
 						 action, metadata, 1, macip_acl_index, a->count);
 		}
 	    }
