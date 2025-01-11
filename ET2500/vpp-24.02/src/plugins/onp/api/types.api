@@ -19,6 +19,129 @@ typedef onp_thread_data
   u8 thread_name[64];
 };
 
+/**
+ * @brief ONP xstats counter
+
+ * @param[out] stats[0]  tx_ucast;
+ * @param[out] stats[1]  tx_bcast;
+ * @param[out] stats[2]  tx_mcast;
+ * @param[out] stats[3]  tx_drop;
+ * @param[out] stats[4]  tx_octs;
+
+ * @param[out] stats[5]  rx_octs;
+ * @param[out] stats[6]  rx_ucast;
+ * @param[out] stats[7]  rx_bcast;
+ * @param[out] stats[8]  rx_mcast;
+ * @param[out] stats[9]  rx_drop;
+ * @param[out] stats[10] rx_drop_octs;
+ * @param[out] stats[11] rx_fcs;
+ * @param[out] stats[12] rx_err;
+ * @param[out] stats[13] rx_drp_bcast;
+ * @param[out] stats[14] rx_drp_mcast;
+ * @param[out] stats[15] rx_drp_l3bcast;
+ * @param[out] stats[16] rx_drp_l3mcast;
+
+ * @param[out] stats[17] rq_op_re_pkts;
+
+ * @param[out] stats[18] rx_gc_octs_pass;
+ * @param[out] stats[19] rx_gc_pkts_pass;
+ * @param[out] stats[20] rx_yc_octs_pass;
+ * @param[out] stats[21] rx_yc_pkts_pass;
+ * @param[out] stats[22] rx_rc_octs_pass;
+ * @param[out] stats[23] rx_rc_pkts_pass;
+ * @param[out] stats[24] rx_gc_octs_drop;
+ * @param[out] stats[25] rx_gc_pkts_drop;
+ * @param[out] stats[26] rx_yc_octs_drop;
+ * @param[out] stats[27] rx_yc_pkts_drop;
+ * @param[out] stats[28] rx_rc_octs_drop;
+ * @param[out] stats[29] rx_rc_pkts_drop;
+ * @param[out] stats[30] rx_cpt_pkts_drop;
+ * @param[out] stats[31] rx_ipsecd_pkts_drop;
+
+ * @param[out] stats[32] rpm_rx_etherStatsOctets;
+ * @param[out] stats[33] rpm_rx_OctetsReceivedOK;
+ * @param[out] stats[34] rpm_rx_aAlignmentErrors;
+ * @param[out] stats[35] rpm_rx_aPAUSEMACCtrlFramesReceived;
+ * @param[out] stats[36] rpm_rx_aFrameTooLongErrors;
+ * @param[out] stats[37] rpm_rx_aInRangeLengthErrors;
+ * @param[out] stats[38] rpm_rx_aFramesReceivedOK;
+ * @param[out] stats[39] rpm_rx_aFrameCheckSequenceErrors;
+ * @param[out] stats[40] rpm_rx_VLANReceivedOK;
+ * @param[out] stats[41] rpm_rx_ifInErrors;
+ * @param[out] stats[42] rpm_rx_ifInUcastPkts;
+ * @param[out] stats[43] rpm_rx_ifInMulticastPkts;
+ * @param[out] stats[44] rpm_rx_ifInBroadcastPkts;
+ * @param[out] stats[45] rpm_rx_etherStatsDropEvents;
+ * @param[out] stats[46] rpm_rx_etherStatsPkts;
+ * @param[out] stats[47] rpm_rx_etherStatsUndersizePkts;
+ * @param[out] stats[48] rpm_rx_etherStatsPkts64Octets;
+ * @param[out] stats[49] rpm_rx_etherStatsPkts65to127Octets;
+ * @param[out] stats[50] rpm_rx_etherStatsPkts128to255Octets;
+ * @param[out] stats[51] rpm_rx_etherStatsPkts256to511Octets;
+ * @param[out] stats[52] rpm_rx_etherStatsPkts512to1023Octets;
+ * @param[out] stats[53] rpm_rx_etherStatsPkts1024to1518Octets;
+ * @param[out] stats[54] rpm_rx_etherStatsPkts1519toMaxOctets;
+ * @param[out] stats[55] rpm_rx_etherStatsOversizePkts;
+ * @param[out] stats[56] rpm_rx_etherStatsJabbers;
+ * @param[out] stats[57] rpm_rx_etherStatsFragments;
+ * @param[out] stats[58] rpm_rx_CBFC_pause_frames_class_0;
+ * @param[out] stats[59] rpm_rx_CBFC_pause_frames_class_1;
+ * @param[out] stats[60] rpm_rx_CBFC_pause_frames_class_2;
+ * @param[out] stats[61] rpm_rx_CBFC_pause_frames_class_3;
+ * @param[out] stats[62] rpm_rx_CBFC_pause_frames_class_4;
+ * @param[out] stats[63] rpm_rx_CBFC_pause_frames_class_5;
+ * @param[out] stats[64] rpm_rx_CBFC_pause_frames_class_6;
+ * @param[out] stats[65] rpm_rx_CBFC_pause_frames_class_7;
+ * @param[out] stats[66] rpm_rx_CBFC_pause_frames_class_8;
+ * @param[out] stats[67] rpm_rx_CBFC_pause_frames_class_9;
+ * @param[out] stats[68] rpm_rx_CBFC_pause_frames_class_10;
+ * @param[out] stats[69] rpm_rx_CBFC_pause_frames_class_11;
+ * @param[out] stats[70] rpm_rx_CBFC_pause_frames_class_12;
+ * @param[out] stats[71] rpm_rx_CBFC_pause_frames_class_13;
+ * @param[out] stats[72] rpm_rx_CBFC_pause_frames_class_14;
+ * @param[out] stats[73] rpm_rx_CBFC_pause_frames_class_15;
+ * @param[out] stats[74] rpm_rx_aMACControlFramesReceived;
+
+ * @param[out] stats[75] rpm_tx_etherStatsOctets;
+ * @param[out] stats[76] rpm_tx_OctetsTransmittedOK;
+ * @param[out] stats[77] rpm_tx_aPAUSEMACCtrlFramesTransmitted;
+ * @param[out] stats[78] rpm_tx_aFramesTransmittedOK;
+ * @param[out] stats[79] rpm_tx_VLANTransmittedOK;
+ * @param[out] stats[80] rpm_tx_ifOutErrors;
+ * @param[out] stats[81] rpm_tx_ifOutUcastPkts;
+ * @param[out] stats[82] rpm_tx_ifOutMulticastPkts;
+ * @param[out] stats[83] rpm_tx_ifOutBroadcastPkts;
+ * @param[out] stats[84] rpm_tx_etherStatsPkts64Octets;
+ * @param[out] stats[85] rpm_tx_etherStatsPkts65to127Octets;
+ * @param[out] stats[86] rpm_tx_etherStatsPkts128to255Octets;
+ * @param[out] stats[87] rpm_tx_etherStatsPkts256to511Octets;
+ * @param[out] stats[88] rpm_tx_etherStatsPkts512to1023Octets;
+ * @param[out] stats[89] rpm_tx_etherStatsPkts1024to1518Octets;
+ * @param[out] stats[90] rpm_tx_etherStatsPkts1519toMaxOctets;
+ * @param[out] stats[91] rpm_tx_CBFC_pause_frames_class_0;
+ * @param[out] stats[92] rpm_tx_CBFC_pause_frames_class_1;
+ * @param[out] stats[93] rpm_tx_CBFC_pause_frames_class_2;
+ * @param[out] stats[94] rpm_tx_CBFC_pause_frames_class_3;
+ * @param[out] stats[95] rpm_tx_CBFC_pause_frames_class_4;
+ * @param[out] stats[96] rpm_tx_CBFC_pause_frames_class_5;
+ * @param[out] stats[97] rpm_tx_CBFC_pause_frames_class_6;
+ * @param[out] stats[98] rpm_tx_CBFC_pause_frames_class_7;
+ * @param[out] stats[99] rpm_tx_CBFC_pause_frames_class_8;
+ * @param[out] stats[100] rpm_tx_CBFC_pause_frames_class_9;
+ * @param[out] stats[101] rpm_tx_CBFC_pause_frames_class_10;
+ * @param[out] stats[102] rpm_tx_CBFC_pause_frames_class_11;
+ * @param[out] stats[103] rpm_tx_CBFC_pause_frames_class_12;
+ * @param[out] stats[104] rpm_tx_CBFC_pause_frames_class_13;
+ * @param[out] stats[105] rpm_tx_CBFC_pause_frames_class_14;
+ * @param[out] stats[106] rpm_tx_CBFC_pause_frames_class_15;
+ * @param[out] stats[107] rpm_tx_aMACControlFramesTransmitted;
+ * @param[out] stats[108] rpm_tx_etherStatsPkts;
+ */
+typedef onp_xstats
+{
+  u64 stats[256];
+};
+
 /*
  * Local Variables:
  * eval: (c-set-style "gnu")

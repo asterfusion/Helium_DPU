@@ -159,6 +159,34 @@ api_onp_set_port_speed(vat_main_t* vam) {
   W(ret);
   return ret;
 }
+static int
+api_onp_interface_stats (vat_main_t *vam)
+{
+  vl_api_onp_interface_stats_t *mp;
+  u32 msg_size = sizeof (*mp);
+  int ret;
+
+  vam->result_ready = 0;
+  mp = vl_msg_api_alloc_as_if_client (msg_size);
+
+  M (ONP_INTERFACE_STATS, mp);
+
+  /* send it... */
+  S (mp);
+
+  /* Wait for a reply... */
+  W (ret);
+  return ret;
+}
+
+static void
+vl_api_onp_interface_stats_reply_t_handler(vl_api_onp_interface_stats_reply_t* mp) {
+  vat_main_t* vam = onp_test_main.vat_main;
+  for (int i = 0;i < sizeof(mp->onp_xstats.stats) / sizeof(mp->onp_xstats.stats[0]);++i) {
+    print(vam->ofp, "%u ", clib_net_to_host_u32(mp->onp_xstats.stats[i]));
+  }
+  vam->result_ready = 1;
+}
 #include <onp/api/onp.api_test.c>
 
 /*

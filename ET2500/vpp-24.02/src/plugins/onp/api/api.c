@@ -274,6 +274,30 @@ vl_api_onp_set_port_speed_t_handler(vl_api_onp_set_port_speed_t* mp) {
   ONP_REPLY_MACRO(VL_API_ONP_SET_PORT_SPEED_REPLY, onp_set_port_speed,);
 }
 
+static void
+vl_api_onp_interface_stats_t_handler(vl_api_onp_interface_stats_t* mp) {
+  u64 xstats[CNXK_PKTIO_MAX_XSTATS_COUNT] = { 0 };
+  u32 hw_if_index = ntohl(mp->sw_if_index);
+  vnet_main_t* vnm = vnet_get_main();
+  vlib_main_t* vm = vlib_get_main();
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  onp_main_t* om = onp_get_main();
+  onp_pktio_t* op;
+  u32 xstats_count;
+  u16 cpi;
+  int rv;
+
+  op = pool_elt_at_index(om->onp_pktios, hi->dev_instance);
+  cpi = op->cnxk_pktio_index;
+  xstats_count = op->xstats_count;
+
+  ONP_REPLY_MACRO(VL_API_ONP_INTERFACE_STATS_REPLY, onp_interface_stats, ({
+	clib_memset (&xstats, 0, sizeof (xstats));
+	rv = cnxk_drv_pktio_xstats_get(vm, cpi, xstats, xstats_count);
+	for(int i = 0; i < xstats_count; i++)
+		reply->onp_xstats.stats[i] = htonl(xstats[i]);
+    }));
+}
 #include <onp/api/onp.api.c>
 
 static clib_error_t *
