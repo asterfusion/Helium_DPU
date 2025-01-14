@@ -370,6 +370,35 @@ exit:
 }
 
 int
+roc_nix_mac_min_rx_len_set(struct roc_nix *roc_nix, uint16_t minlen)
+{
+	struct nix *nix = roc_nix_to_nix_priv(roc_nix);
+	struct dev *dev = &nix->dev;
+	struct mbox *mbox = mbox_get(dev->mbox);
+	struct nix_frs_cfg *req;
+	bool sdp_link = false;
+	bool update_minlen = true;
+	uint16_t maxlen = roc_nix_max_pkt_len (roc_nix);
+	int rc = -ENOSPC;
+
+	if (roc_nix_is_sdp(roc_nix))
+		sdp_link = true;
+
+	req = mbox_alloc_msg_nix_set_hw_frs(mbox);
+	if (req == NULL)
+		goto exit;
+	req->update_minlen = update_minlen;
+	req->minlen = minlen;
+	req->sdp_link = sdp_link;
+	req->maxlen = maxlen;
+
+	rc = mbox_process(mbox);
+exit:
+	mbox_put(mbox);
+	return rc;
+}
+
+int
 roc_nix_mac_max_rx_len_set(struct roc_nix *roc_nix, uint16_t maxlen)
 {
 	struct nix *nix = roc_nix_to_nix_priv(roc_nix);

@@ -842,6 +842,8 @@ int __roc_api roc_nix_mac_link_info_get(struct roc_nix *roc_nix,
 int __roc_api roc_nix_mac_mtu_set(struct roc_nix *roc_nix, uint16_t mtu);
 int __roc_api roc_nix_mac_max_rx_len_set(struct roc_nix *roc_nix,
 					 uint16_t maxlen);
+int __roc_api roc_nix_mac_min_rx_len_set(struct roc_nix *roc_nix,
+					 uint16_t minlen);
 int __roc_api roc_nix_mac_link_cb_register(struct roc_nix *roc_nix,
 					   link_status_t link_update);
 void __roc_api roc_nix_mac_link_cb_unregister(struct roc_nix *roc_nix);
