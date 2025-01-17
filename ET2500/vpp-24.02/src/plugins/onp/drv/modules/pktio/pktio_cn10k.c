@@ -164,7 +164,7 @@ cn10k_pktio_config (vlib_main_t *vm, cnxk_pktio_t *dev,
       return -1;
     }
 
-  rv = roc_nix_mac_min_rx_len_set (nix, NIX_MIN_HW_FRS);
+  rv = roc_nix_mac_min_rx_len_set (nix, NIX_MIN_PKG_FRS);
   if (rv)
     {
       cnxk_pktio_err ("roc_nix_mac_min_rx_len_set failed with '%s' error",
