@@ -152,11 +152,9 @@ static u8 l2_check_translate (vlib_buffer_t * b0, vtr_config_t * config)
   if ((type == ETHERNET_TYPE_VLAN || type == ETHERNET_TYPE_DOT1AD
        || type == ETHERNET_TYPE_DOT1AH) )
   {
-      u32 v0 = clib_net_to_host_u16 (m->vlan[0].priority_cfi_and_id);
       u32 v1 = clib_net_to_host_u16 (m->vlan[1].priority_cfi_and_id);
-      u32 v_config0 = clib_net_to_host_u16 (config->tags[0].priority_cfi_and_id);
       u32 v_config1 = clib_net_to_host_u16 (config->tags[1].priority_cfi_and_id);
-      if (((v0 & 0x0fff) == (v_config0 & 0x0fff)) && ((v1 & 0x0fff) == (v_config1 & 0x0fff)))
+      if ((v1 & 0x0fff) == (v_config1 & 0x0fff))
       {
           return 0;
       }
