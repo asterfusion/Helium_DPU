@@ -280,18 +280,19 @@ vl_api_onp_interface_stats_t_handler(vl_api_onp_interface_stats_t* mp) {
   u32 sw_if_index = ntohl(mp->sw_if_index);
   int rv;
 
-  if (!vnet_sw_if_index_is_api_valid(sw_if_index)) {
-    rv = VNET_API_ERROR_INVALID_SW_IF_INDEX;
-    goto bad_sw_if_index;
-  }
-
   vnet_main_t* vnm = vnet_get_main();
   vlib_main_t* vm = vlib_get_main();
+  if (!vnet_sw_interface_is_api_valid(vnm,sw_if_index))
+    goto bad_sw_if_index;
+
   vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, sw_if_index);
   onp_main_t* om = onp_get_main();
   onp_pktio_t* op;
   u32 xstats_count;
   u16 cpi;
+
+  if (pool_is_free_index(om->onp_pktios, hi->dev_instance))
+    goto bad_sw_if_index;
 
   op = pool_elt_at_index(om->onp_pktios, hi->dev_instance);
   cpi = op->cnxk_pktio_index;
@@ -306,7 +307,9 @@ vl_api_onp_interface_stats_t_handler(vl_api_onp_interface_stats_t* mp) {
   return;
 
   BAD_SW_IF_INDEX_LABEL;
-  ONP_REPLY_MACRO(VL_API_ONP_INTERFACE_STATS_REPLY, onp_interface_stats, );
+  ONP_REPLY_MACRO(VL_API_ONP_INTERFACE_STATS_REPLY, onp_interface_stats, ({
+        rv = VNET_API_ERROR_INVALID_SW_IF_INDEX;
+    }));
   return;
 }
 #include <onp/api/onp.api.c>
