@@ -784,8 +784,10 @@ ip_neighbor_update (vnet_main_t * vnm, adj_index_t ai)
 void
 ip_neighbor_learn (const ip_neighbor_learn_t * l)
 {
-  ip_neighbor_add (&l->ip, &l->mac, l->sw_if_index,
-		   IP_NEIGHBOR_FLAG_DYNAMIC, NULL);
+#ifndef ARP_LEARN_DISABLE
+   ip_neighbor_add (&l->ip, &l->mac, l->sw_if_index,
+		  IP_NEIGHBOR_FLAG_DYNAMIC, NULL);
+#endif
 }
 
 static clib_error_t *

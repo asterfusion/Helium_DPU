@@ -73,6 +73,7 @@ fi
 
 # Set environment variable
 export VPP_PLATFORM=octeon10
+export ASROUTER_NAME=$2
 
 # Run the appropriate build command
 echo "Running $BUILD_CMD..."
