@@ -317,9 +317,13 @@ vl_api_onp_interface_stats_t_handler(vl_api_onp_interface_stats_t* mp) {
 static clib_error_t *
 onp_api_init (vlib_main_t *vm)
 {
+  api_main_t *am = vlibapi_get_main ();
+
   /* Add our API messages to the global name_crc hash table */
   onp_base_msg_id = setup_message_id_table ();
 
+  vl_api_set_msg_thread_safe(am, onp_base_msg_id + VL_API_ONP_INTERFACE_STATS_REPLY, 1);
+  vl_api_set_msg_thread_safe(am, onp_base_msg_id + VL_API_ONP_INTERFACE_STATS_REPLY, 1);
   return NULL;
 }
 
