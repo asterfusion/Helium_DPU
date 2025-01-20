@@ -340,6 +340,7 @@ mark_as_advanced(CLEAR
 ##############################################################################
 message(STATUS "Configuration:")
 pr("VPP platform" ${VPP_PLATFORM_NAME})
+pr("ASROUTER platform" ${ASROUTER_NAME})
 pr("VPP version" ${VPP_VERSION})
 pr("VPP library version" ${VPP_LIB_VERSION})
 pr("GIT toplevel dir" ${VPP_GIT_TOPLEVEL_DIR})

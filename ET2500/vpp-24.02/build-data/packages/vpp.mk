@@ -33,6 +33,9 @@ endif
 ifneq ($(VPP_PLATFORM),)
 vpp_cmake_args += -DVPP_PLATFORM="$(VPP_PLATFORM)"
 endif
+ifneq ($(ASROUTER_NAME),)
+vpp_cmake_args += -DASROUTER_NAME="$(ASROUTER_NAME)"
+endif
 ifneq ($(VPP_EXCLUDED_PLUGINS),)
 vpp_cmake_args += -DVPP_EXCLUDED_PLUGINS="$(VPP_EXCLUDED_PLUGINS)"
 endif
