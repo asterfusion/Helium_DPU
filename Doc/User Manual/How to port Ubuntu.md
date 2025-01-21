@@ -48,6 +48,9 @@
 4. Save and exit `vi` by pressing `Esc`, then typing `:wq`, and pressing `Enter`.
 
 - **Port the System Package:**
+
+    Please ensure that all operations are performed on the ET2500 device. If you are using another device, use scp or similar methods to copy the relevant files from the corresponding folders on the ET2500 device to the target system.
+
     ```shell
     sudo mkdir /tmp/rootfs/lib/modules /tmp/rootfs/lib/firmware
     sudo cp -rp /boot/Image /tmp/rootfs/boot/
