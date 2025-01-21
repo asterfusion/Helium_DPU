@@ -5,7 +5,7 @@
 ```
 ## build dpdk
 ```shell
-   cd dpdk
+   cd dpdk-24.03
    meson build -Dmax_lcores=8
    ninja -C build
 ```
