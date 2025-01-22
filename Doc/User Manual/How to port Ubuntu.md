@@ -47,19 +47,16 @@
 
 4. Save and exit `vi` by pressing `Esc`, then typing `:wq`, and pressing `Enter`.
 
-- **Port the SDK compilation contents:**
-1. Decompress the SDK BusyBox root file system:
-    ```shell
-    mkdir -p /tmp/rootfs-busybox-original
-    sudo tar -xvf sdk_busybox_rootfs.tar -C /tmp/rootfs-busybox-original
-    ```
-2. Copy SDK plugins to the specified location:
+- **Port the System Package:**
+
+    Please ensure that all operations are performed on the ET2500 device. If you are using another device, use scp or similar methods to copy the relevant files from the corresponding folders on the ET2500 device to the target system.
+
     ```shell
     sudo mkdir /tmp/rootfs/lib/modules /tmp/rootfs/lib/firmware
-    sudo cp -rp /tmp/rootfs-busybox-original/boot/Image /tmp/rootfs/boot/
-    sudo cp -rp /tmp/rootfs-busybox-original/lib/firmware/* /tmp/rootfs/lib/firmware/
-    sudo cp -rp /tmp/rootfs-busybox-original/lib/modules/* /tmp/rootfs/lib/modules/
-    sudo cp -rp /tmp/rootfs-busybox-original/lib/modules/* /tmp/rootfs/lib/modules-load.d/
+    sudo cp -rp /boot/Image /tmp/rootfs/boot/
+    sudo cp -rp /lib/firmware/* /tmp/rootfs/lib/firmware/
+    sudo cp -rp /lib/modules/* /tmp/rootfs/lib/modules/
+    sudo cp -rp /lib/modules/* /tmp/rootfs/lib/modules-load.d/
     ```
 - **Compress the organized root file system:**
   ```shell
