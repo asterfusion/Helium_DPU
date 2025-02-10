@@ -80,48 +80,49 @@ VNET_FEATURE_INIT (nat_pre_in2out, static) = {
   .arc_name = "ip4-unicast",
   .node_name = "nat-pre-in2out",
   .runs_after = VNET_FEATURES ("acl-plugin-in-ip4-fa",
-			       "ip4-sv-reassembly-feature"),
+			       "ip4-sv-reassembly-feature",
+			       "ip4-inacl"),
 };
 VNET_FEATURE_INIT (nat_pre_out2in, static) = {
   .arc_name = "ip4-unicast",
   .node_name = "nat-pre-out2in",
   .runs_after = VNET_FEATURES ("acl-plugin-in-ip4-fa",
                                "ip4-dhcp-client-detect",
-			       "ip4-sv-reassembly-feature"),
+			       "ip4-sv-reassembly-feature", "ip4-inacl"),
 };
 VNET_FEATURE_INIT (ip4_nat44_ed_classify, static) = {
   .arc_name = "ip4-unicast",
   .node_name = "nat44-ed-classify",
   .runs_after = VNET_FEATURES ("acl-plugin-in-ip4-fa",
-			       "ip4-sv-reassembly-feature"),
+			       "ip4-sv-reassembly-feature", "ip4-inacl"),
 };
 VNET_FEATURE_INIT (ip4_nat_handoff_classify, static) = {
   .arc_name = "ip4-unicast",
   .node_name = "nat44-handoff-classify",
   .runs_after = VNET_FEATURES ("acl-plugin-in-ip4-fa",
-			       "ip4-sv-reassembly-feature"),
+			       "ip4-sv-reassembly-feature", "ip4-inacl"),
 };
 VNET_FEATURE_INIT (snat_in2out_worker_handoff, static) = {
   .arc_name = "ip4-unicast",
   .node_name = "nat44-in2out-worker-handoff",
-  .runs_after = VNET_FEATURES ("acl-plugin-in-ip4-fa"),
+  .runs_after = VNET_FEATURES ("acl-plugin-in-ip4-fa", "ip4-inacl"),
 };
 VNET_FEATURE_INIT (snat_out2in_worker_handoff, static) = {
   .arc_name = "ip4-unicast",
   .node_name = "nat44-out2in-worker-handoff",
   .runs_after = VNET_FEATURES ("acl-plugin-in-ip4-fa",
-                               "ip4-dhcp-client-detect"),
+                               "ip4-dhcp-client-detect", "ip4-inacl"),
 };
 VNET_FEATURE_INIT (ip4_nat44_ed_in2out, static) = {
   .arc_name = "ip4-unicast",
   .node_name = "nat44-ed-in2out",
-  .runs_after = VNET_FEATURES ("acl-plugin-in-ip4-fa","ip4-sv-reassembly-feature"),
+  .runs_after = VNET_FEATURES ("acl-plugin-in-ip4-fa","ip4-sv-reassembly-feature", "ip4-inacl"),
 };
 VNET_FEATURE_INIT (ip4_nat44_ed_out2in, static) = {
   .arc_name = "ip4-unicast",
   .node_name = "nat44-ed-out2in",
   .runs_after = VNET_FEATURES ("acl-plugin-in-ip4-fa","ip4-sv-reassembly-feature",
-                               "ip4-dhcp-client-detect"),
+                               "ip4-dhcp-client-detect", "ip4-inacl"),
 };
 VNET_FEATURE_INIT (nat_pre_in2out_output, static) = {
   .arc_name = "ip4-output",
