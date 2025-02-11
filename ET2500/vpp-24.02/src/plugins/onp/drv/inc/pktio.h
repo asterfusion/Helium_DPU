@@ -104,6 +104,21 @@ typedef enum
 #undef _
 } cnxk_pktio_rq_poll_algo_t;
 
+enum LMAC_TYPE {
+	LMAC_MODE_SGMII		= 0,
+	LMAC_MODE_XAUI		= 1,
+	LMAC_MODE_RXAUI		= 2,
+	LMAC_MODE_10G_R		= 3,
+	LMAC_MODE_40G_R		= 4,
+	LMAC_MODE_QSGMII	= 6,
+	LMAC_MODE_25G_R		= 7,
+	LMAC_MODE_50G_R		= 8,
+	LMAC_MODE_100G_R	= 9,
+	LMAC_MODE_USXGMII	= 10,
+	LMAC_MODE_USGMII	= 11,
+	LMAC_MODE_MAX,
+};
+
 typedef i32 (*cnxk_drv_pktio_rxq_recv_func_t) (vlib_main_t *vm,
 					       vlib_node_runtime_t *node,
 					       u32 rxqid, u16 req_pkts,
@@ -240,6 +255,7 @@ typedef struct
   u32 is_up : 1;
   u32 is_full_duplex : 1;
   u32 speed : 20;
+  u64 lmac_type_id;
 } cnxk_pktio_link_info_t;
 
 i32 cnxk_drv_pktio_pkts_recv (vlib_main_t *vm, vlib_node_runtime_t *node,
@@ -347,6 +363,8 @@ u32 cnxk_drv_pktio_flow_query (vlib_main_t *, u32, uword, cnxk_flow_stats_t *);
 u32 cnxk_drv_pktio_flow_dump (vlib_main_t *, u32);
 
 u8 cnxk_drv_pktio_is_inl_dev (vlib_main_t *, u16 pktio_idx);
+
+u32 cnxk_drv_pktio_get_lmac_speed(enum LMAC_TYPE lmac_type);
 
 #endif /* included_onp_drv_inc_pktio_h */
 

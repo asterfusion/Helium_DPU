@@ -774,6 +774,7 @@ cnxk_pktio_link_info_get (vlib_main_t *vm, cnxk_pktio_t *dev,
       link_info->is_up = nix_info.status;
       link_info->is_full_duplex = nix_info.full_duplex;
       link_info->speed = nix_info.speed;
+      link_info->lmac_type_id = nix_info.lmac_type_id;
     }
   return 0;
 }
@@ -1222,6 +1223,25 @@ cnxk_drv_pktio_flow_dump (vlib_main_t *vm, u32 pktio_index)
   cnxk_pktio_ops_map_t *ops_map = cnxk_pktio_get_pktio_ops (pktio_index);
 
   return ops_map->fops.pktio_flow_dump (vm, &ops_map->pktio);
+}
+
+u32
+cnxk_drv_pktio_get_lmac_speed(enum LMAC_TYPE lmac_type)
+{
+      switch (lmac_type) {
+        case LMAC_MODE_SGMII:   return 1000;    // 1 Gbps
+        case LMAC_MODE_XAUI:    return 10000;   // 10 Gbps
+        case LMAC_MODE_RXAUI:   return 10000;   // 10 Gbps
+        case LMAC_MODE_10G_R:   return 10000;   // 10 Gbps
+        case LMAC_MODE_40G_R:   return 40000;   // 40 Gbps
+        case LMAC_MODE_QSGMII:  return 1000;    // 1 Gbps
+        case LMAC_MODE_25G_R:   return 25000;   // 25 Gbps
+        case LMAC_MODE_50G_R:   return 50000;   // 50 Gbps
+        case LMAC_MODE_100G_R:  return 100000;  // 100 Gbps
+        case LMAC_MODE_USXGMII: return 2500;    // 2.5 Gbps
+        case LMAC_MODE_USGMII:  return 1000;    // 1 Gbps
+        default: return 0;
+    }
 }
 
 VLIB_REGISTER_LOG_CLASS (cnxk_pktio_log) = {
