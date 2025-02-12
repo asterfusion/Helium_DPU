@@ -332,7 +332,7 @@ set_onp_interface_speed(vlib_main_t* vm, unformat_input_t* input, vlib_cli_comma
 
   cnxk_pktio_link_info_t link_info = {0};
   cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
-  if (cnxk_drv_pktio_get_lmac_speed(link_info.lmac_type_id) != speed) {
+  if (!link_info.is_autoneg && cnxk_drv_pktio_get_lmac_speed(link_info.lmac_type_id) != speed) {
     link_info.speed = speed;
     cnxk_drv_pktio_link_info_set(vm, pktio->cnxk_pktio_index, &link_info);
   }

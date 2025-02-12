@@ -773,6 +773,7 @@ cnxk_pktio_link_info_get (vlib_main_t *vm, cnxk_pktio_t *dev,
 
       link_info->is_up = nix_info.status;
       link_info->is_full_duplex = nix_info.full_duplex;
+      link_info->is_autoneg = nix_info.autoneg;
       link_info->speed = nix_info.speed;
       link_info->lmac_type_id = nix_info.lmac_type_id;
     }

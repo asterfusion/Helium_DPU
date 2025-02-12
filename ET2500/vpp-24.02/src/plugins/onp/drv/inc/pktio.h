@@ -254,6 +254,7 @@ typedef struct
 {
   u32 is_up : 1;
   u32 is_full_duplex : 1;
+  u32 is_autoneg : 1;
   u32 speed : 20;
   u64 lmac_type_id;
 } cnxk_pktio_link_info_t;
