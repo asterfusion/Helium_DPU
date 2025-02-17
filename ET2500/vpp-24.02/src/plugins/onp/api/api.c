@@ -264,7 +264,7 @@ vl_api_onp_set_port_speed_t_handler(vl_api_onp_set_port_speed_t* mp) {
 
   cnxk_pktio_link_info_t link_info = {};
   cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
-  if (link_info.speed != port_speed) {
+  if (!link_info.is_autoneg && cnxk_drv_pktio_get_lmac_speed(link_info.lmac_type_id) != port_speed) {
     link_info.speed = port_speed;
     cnxk_drv_pktio_link_info_set(vm, pktio->cnxk_pktio_index, &link_info);
   }
