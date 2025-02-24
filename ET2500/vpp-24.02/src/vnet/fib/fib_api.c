@@ -190,7 +190,8 @@ fib_api_path_decode (vl_api_fib_path_t *in,
         break;
     case FIB_API_PATH_TYPE_DROP:
         out->frp_flags |= FIB_ROUTE_PATH_DROP;
-        break;
+        out->frp_sw_if_index = ~0;
+	break;
     case FIB_API_PATH_TYPE_LOCAL:
         out->frp_flags |= FIB_ROUTE_PATH_LOCAL;
         out->frp_sw_if_index = ntohl(in->sw_if_index);
