@@ -559,6 +559,11 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 	    vnet_feature_next_u16 (&next[0], b[0]);
 	    /* if the action is not deny - then use that next */
 	    next[0] = action ? next[0] : 0;
+
+            if (4 == action)
+            {
+                b[0]->no_nat = 1;
+            }
 	  }
 
 	  if (node_trace_on)	// PREDICT_FALSE (node->flags & VLIB_NODE_FLAG_TRACE))
