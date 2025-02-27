@@ -58,9 +58,12 @@ add_vpp_plugin(linux_cp
   lcp_lacp.c
   lcp_dhcp.c
   lcp_ndp.c
+  lcp_pppoe.c
+  lcp_pppoe_api.c
 
   API_FILES
   lcp.api
+  lcp_pppoe.api
 
   LINK_LIBRARIES
   lcp
