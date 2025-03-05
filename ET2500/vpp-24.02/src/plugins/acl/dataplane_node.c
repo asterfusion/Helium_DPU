@@ -560,7 +560,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 	    /* if the action is not deny - then use that next */
 	    next[0] = action ? next[0] : 0;
 
-            if (4 == action)
+            if (ACL_ACTION_NO_NAT == action)
             {
                 b[0]->no_nat = 1;
             }

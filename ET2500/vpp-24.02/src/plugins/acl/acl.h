@@ -62,6 +62,15 @@ enum acl_timeout_e {
   ACL_N_TIMEOUTS
 };
 
+enum acl_action_e {
+  ACL_ACTION_DENY = 0,
+  ACL_ACTION_PERMIT,
+  ACL_ACTION_PERMIT_REFLECT,
+  ACL_ACTION_PERMIT_ALSO_EGRESS,
+  ACL_ACTION_NO_NAT,
+  ACL_N_ACTIONS
+};
+
 typedef struct
 {
   u8 is_permit;
