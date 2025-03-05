@@ -304,7 +304,7 @@ ip_in_out_acl_inline_trace (
 				   e[0]->acl_index,
 				   vm->thread_index,
 				   e[0]->opaque_index,
-				   1, b[0]->current_length);
+				   1, b[0]->current_length + ethernet_buffer_header_size(b[0]));
               }
 	      vnet_buffer (b[0])->l2_classify.opaque_index
 		= e[0]->opaque_index;
@@ -381,7 +381,7 @@ ip_in_out_acl_inline_trace (
     				   e[0]->acl_index,
     				   vm->thread_index,
     				   e[0]->opaque_index,
-    				   1, b[0]->current_length);
+    				   1, b[0]->current_length + ethernet_buffer_header_size(b[0]));
 	              }
 		      vnet_buffer (b[0])->l2_classify.opaque_index
 			= e[0]->opaque_index;
@@ -436,7 +436,7 @@ ip_in_out_acl_inline_trace (
     				   e[1]->acl_index,
     				   vm->thread_index,
     				   e[1]->opaque_index,
-    				   1, b[1]->current_length);
+    				   1, b[1]->current_length + ethernet_buffer_header_size(b[1]));
               }
 	      vnet_buffer (b[1])->l2_classify.opaque_index
 		= e[1]->opaque_index;
@@ -513,7 +513,7 @@ ip_in_out_acl_inline_trace (
     				   e[1]->acl_index,
     				   vm->thread_index,
     				   e[1]->opaque_index,
-    				   1, b[1]->current_length);
+    				   1, b[1]->current_length + ethernet_buffer_header_size(b[1]));
 	              }
 		      vnet_buffer (b[1])->l2_classify.opaque_index
 			= e[1]->opaque_index;
@@ -665,7 +665,7 @@ ip_in_out_acl_inline_trace (
 				   e0->acl_index,
 				   vm->thread_index,
 				   e0->opaque_index,
-				   1, b[0]->current_length);
+				   1, b[0]->current_length + ethernet_buffer_header_size(b[0]));
               }
 	      vnet_buffer (b[0])->l2_classify.opaque_index = e0->opaque_index;
 	      vlib_buffer_advance (b[0], e0->advance);
@@ -738,7 +738,7 @@ ip_in_out_acl_inline_trace (
 				       e0->acl_index,
 				       vm->thread_index,
 				       e0->opaque_index,
-				       1, b[0]->current_length);
+				       1, b[0]->current_length + ethernet_buffer_header_size(b[0]));
 	              }
 		      vnet_buffer (b[0])->l2_classify.opaque_index
 			= e0->opaque_index;
