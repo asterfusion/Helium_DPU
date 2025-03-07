@@ -33,6 +33,7 @@ typedef struct
   u16 dst_port_or_code_last;
   u8 tcp_flags_value;
   u8 tcp_flags_mask;
+  u16 rule_id;
 } acl_rule_t;
 
 

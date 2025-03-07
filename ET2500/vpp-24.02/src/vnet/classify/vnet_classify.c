@@ -2802,7 +2802,8 @@ acl_classify_counter_unlock (vnet_classify_main_t * cm)
 
 
 static void
-validate_and_reset_classify_counters (vnet_classify_main_t* cm, u32 acl_index, u32 rule_count)
+validate_and_reset_classify_counters (vnet_classify_main_t* cm, u32 acl_index, u32 rule_count,
+                                      int old_rule_len, int new_rule_len, int flag, int place)
 {
   int i;
   /* counters are set as vectors [acl#] pointing to vectors of [acl rule] */
@@ -2827,7 +2828,17 @@ validate_and_reset_classify_counters (vnet_classify_main_t* cm, u32 acl_index, u
   /* Validate one extra so we always have at least one counter for an ACL */
   vlib_validate_combined_counter (&cm->combined_acl_counters[acl_index],
 				  rule_count);
-  vlib_clear_combined_counters (&cm->combined_acl_counters[acl_index]);
+  //vlib_clear_combined_counters (&cm->combined_acl_counters[acl_index]);
+  if (flag == ACL_ADD_LIST)
+  {
+      vlib_clear_combined_counters (&cm->combined_acl_counters[acl_index]);
+  }
+
+  else
+  {
+      vlib_set_combined_counters (&cm->combined_acl_counters[acl_index],
+            flag, place, old_rule_len, new_rule_len);
+  }
   acl_classify_counter_unlock (cm);
 }
 
@@ -2886,12 +2897,18 @@ vnet_classify_add_del_session (vnet_classify_main_t *cm, u32 table_index,
   if (rv)
     return VNET_API_ERROR_NO_SUCH_ENTRY;
 
-  if (macip_acl_index != ~0)
-  {
-      validate_and_reset_classify_counters(cm, macip_acl_index, rule_count);
-  }
-
   return 0;
+}
+
+int vnet_classify_handle_counter(vnet_classify_main_t *cm, u32 macip_acl_index,
+               u32 rule_count, int old_len, int new_len, int flag, int place)
+{
+    if (macip_acl_index != ~0)
+    {
+        validate_and_reset_classify_counters(cm, macip_acl_index, rule_count, old_len, new_len, flag, place);
+    }
+
+    return 0;
 }
 
 static clib_error_t *

@@ -79,6 +79,7 @@ typedef struct
   u8 src_mac_mask[6];
   ip46_address_t src_ip_addr;
   u8 src_prefixlen;
+  u16 rule_id;
 } macip_acl_rule_t;
 
 /*
