@@ -1188,7 +1188,6 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index,
   u8 mask[5 * 16];
   vnet_classify_main_t *cm = &vnet_classify_main;
 
-  clib_warning("aaaaaaaaaaaaaaaaaaaaaaaaa\n");
   /* Count the number of different types of rules */
   for (i = 0; i < a->count; i++)
     {
