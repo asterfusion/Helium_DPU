@@ -75,6 +75,129 @@ vlib_clear_combined_counters (vlib_combined_counter_main_t * cm)
     }
 }
 
+void vlib_acl_del_set_counters(vlib_combined_counter_main_t * cm, int place, int old_len, int new_len, int step)
+{
+    int i = 0;
+    int j = 0;
+    vlib_counter_t *my_counters;
+
+    for (i = 0; i < vec_len (cm->counters); i++)
+    {
+        my_counters = cm->counters[i];
+
+        for (j = place; j < new_len; j++)
+        {
+            my_counters[j].packets = my_counters[j + step].packets;
+            my_counters[j].bytes = my_counters[j + step].bytes;
+        }
+    }
+}
+
+void vlib_acl_add_set_counters(vlib_combined_counter_main_t * cm, int place, int old_len, int new_len, int step)
+{
+    int i = 0;
+    int j = 0;
+    vlib_counter_t *my_counters;
+
+    for (i = 0; i < vec_len (cm->counters); i++)
+    {
+        my_counters = cm->counters[i];
+        if (place == old_len)
+        {
+            my_counters[place].packets = 0;
+            my_counters[place].bytes = 0;
+        }
+
+        else
+        {
+            for (j = old_len - 1; j >= place; j--)
+            {
+                my_counters[j + step].packets = my_counters[j].packets;
+                my_counters[j + step].bytes = my_counters[j].bytes;
+            }
+
+            for (j = place; j < place + step; j++)
+            {
+                my_counters[j].packets = 0;
+                my_counters[j].bytes = 0;
+            }
+        }
+    }
+}
+
+void vlib_set_combined_counters (vlib_combined_counter_main_t * cm, int flag, int place, int old_len, int new_len)
+{
+    vlib_counter_t *my_counters;
+    uword j;
+
+    if (flag == ACL_DEL_RULE_ONE)
+    {
+        vlib_acl_del_set_counters(cm, place, old_len, new_len, 1);
+    }
+
+    else if (flag == ACL_DEL_RULE_TWO)
+    {
+        vlib_acl_del_set_counters(cm, place, old_len, new_len, 2);
+    }
+
+    else if (flag == ACL_DEL_RULE_ONE_REP_ONE)
+    {
+        for (j = 0; j < vec_len (cm->counters); j++)
+        {
+            my_counters = cm->counters[j];
+            my_counters[place].packets = 0;
+            my_counters[place].bytes = 0;
+        }
+
+        vlib_acl_del_set_counters(cm, place + 1, old_len, new_len, 1);
+    }
+
+    else if (flag == ACL_ADD_RULE_ONE)
+    {
+        vlib_acl_add_set_counters(cm, place, old_len, new_len, 1);
+    }
+
+    else if (flag == ACL_ADD_RULE_TWO)
+    {
+        vlib_acl_add_set_counters(cm, place, old_len, new_len, 2);
+    }
+
+    else if (flag == ACL_ADD_RULE_ONE_REP_ONE)
+    {
+        vlib_acl_add_set_counters(cm, place + 1, old_len, new_len, 1);
+        for (j = 0; j < vec_len (cm->counters); j++)
+        {
+            my_counters = cm->counters[j];
+            my_counters[place].packets = 0;
+            my_counters[place].bytes = 0;
+        }
+    }
+
+    else if (flag == ACL_REPLACE_RULE_ONE)
+    {
+        for (j = 0; j < vec_len (cm->counters); j++)
+        {
+            my_counters = cm->counters[j];
+            my_counters[place].packets = 0;
+            my_counters[place].bytes = 0;
+        }
+    }
+
+    else if (flag == ACL_REPLACE_RULE_TWO)
+    {
+        for (j = 0; j < vec_len (cm->counters); j++)
+        {
+            my_counters = cm->counters[j];
+            my_counters[place].packets = 0;
+            my_counters[place].bytes = 0;
+
+            my_counters[place + 1].packets = 0;
+            my_counters[place + 1].bytes = 0;
+        }
+    }
+
+}
+
 void
 vlib_validate_simple_counter (vlib_simple_counter_main_t * cm, u32 index)
 {

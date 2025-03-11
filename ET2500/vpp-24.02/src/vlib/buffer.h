@@ -189,7 +189,8 @@ typedef union
 
     /** Only valid for first buffer in chain. Current length plus total length
       * given here give total number of bytes in buffer chain. */
-    u32 total_length_not_including_first_buffer;
+    u16 total_length_not_including_first_buffer;
+    u16 no_nat;
 
     /**< More opaque data, see ../vnet/vnet/buffer.h */
     u32 opaque2[14];

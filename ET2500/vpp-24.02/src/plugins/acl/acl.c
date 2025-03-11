@@ -48,7 +48,9 @@ acl_main_t acl_main;
 /*
  * The code for the bihash, used by the session management.
  */
+#include <vppinfra/bihash_32_8.h>
 #include <vppinfra/bihash_40_8.h>
+#include <vppinfra/bihash_48_8.h>
 #include <vppinfra/bihash_template.h>
 #include <vppinfra/bihash_template.c>
 
@@ -271,11 +273,173 @@ policy_notify_acl_change (acl_main_t * am, u32 acl_num)
   try_increment_acl_policy_epoch (am, acl_num, 1);
 }
 
+static void determine_macip_replace_or_del(macip_acl_rule_t *acl_old_rules, macip_acl_rule_t *acl_new_rules,
+                                                 int *add_replace_del_flag, int *replace_del_place)
+{
+    int old_len = 0;
+    int new_len = 0;
+    int i = 0;
+
+    old_len = vec_len(acl_old_rules);
+    new_len = vec_len(acl_new_rules);
+
+    if (old_len > new_len)
+    {
+        *add_replace_del_flag = ACL_DEL_RULE_ONE;
+
+        for (i = 0; i < new_len; i++)
+        {
+            if (acl_old_rules[i].rule_id != acl_new_rules[i].rule_id)
+            {
+                *replace_del_place = i;
+                break;
+            }
+        }
+
+        if (*replace_del_place == 0 && i == new_len)
+        {
+            *replace_del_place = new_len;
+        }
+    }
+
+    else if (old_len == new_len)
+    {
+        *add_replace_del_flag = ACL_REPLACE_RULE_NONE;
+        for (i = 0; i < new_len; i++)
+        {
+            const clib_bihash_kv_32_8_t *old_key = (clib_bihash_kv_32_8_t *)(&(acl_old_rules[i]));
+            const clib_bihash_kv_32_8_t *new_key = (clib_bihash_kv_32_8_t *)(&(acl_new_rules[i]));
+            u64 hash_old = clib_bihash_hash_32_8(old_key);
+            u64 hash_new = clib_bihash_hash_32_8(new_key);
+            if (hash_old != hash_new)
+            {
+                *replace_del_place = i;
+                *add_replace_del_flag = ACL_REPLACE_RULE_ONE;
+
+                break;
+            }
+        }
+    }
+
+    else
+    {
+        *add_replace_del_flag = ACL_ADD_RULE_ONE;
+
+        for (i = 0; i < old_len; i++)
+        {
+            if (acl_old_rules[i].rule_id != acl_new_rules[i].rule_id)
+            {
+                *replace_del_place = i;
+
+                break;
+            }
+        }
+
+        if (*replace_del_place == 0 && i == old_len)
+        {
+            *replace_del_place = old_len;
+        }
+    }
+
+    return;
+}
+
+static void determine_replace_or_del(acl_rule_t *acl_old_rules, acl_rule_t *acl_new_rules, 
+                                                 int *add_replace_del_flag, int *replace_del_place)
+{
+    int i = 0;
+    int old_len = 0;
+    int new_len = 0;
+
+    old_len = vec_len(acl_old_rules);
+    new_len = vec_len(acl_new_rules);
+
+    if (old_len > new_len)
+    {
+        *add_replace_del_flag = ACL_DEL_RULE_ONE;
+        if ((old_len - new_len) == 2)
+        {
+            *add_replace_del_flag = ACL_DEL_RULE_TWO;
+        }
+        for (i = 0; i < new_len; i++)
+        {
+            if (acl_old_rules[i].rule_id != acl_new_rules[i].rule_id)
+            {
+                *replace_del_place = i;
+                if (i > 0 && acl_old_rules[i-1].rule_id == acl_old_rules[i].rule_id)
+                {
+                    *add_replace_del_flag = ACL_DEL_RULE_ONE_REP_ONE;
+                    *replace_del_place = i - 1;
+                }
+                break;
+            }
+        }
+
+        if (*replace_del_place == 0 && i == new_len)
+        {
+            *replace_del_place = new_len;
+        }
+    }
+
+    else if (old_len == new_len)
+    {
+        *add_replace_del_flag = ACL_REPLACE_RULE_NONE;
+        for (i = 0; i < new_len; i++)
+        {
+            const clib_bihash_kv_48_8_t *old_key = (clib_bihash_kv_48_8_t *)(&(acl_old_rules[i]));
+            const clib_bihash_kv_48_8_t *new_key = (clib_bihash_kv_48_8_t *)(&(acl_new_rules[i]));
+            u64 hash_old = clib_bihash_hash_48_8(old_key);
+            u64 hash_new = clib_bihash_hash_48_8(new_key);
+            if (hash_old != hash_new)
+            {
+                *add_replace_del_flag = ACL_REPLACE_RULE_ONE;
+                *replace_del_place = i;
+                if (i < new_len - 1 && acl_old_rules[i].rule_id == acl_old_rules[i + 1].rule_id)
+                {
+                    *add_replace_del_flag = ACL_REPLACE_RULE_TWO;
+                }
+
+                break;
+            }
+        }
+    }
+
+    else
+    {
+        *add_replace_del_flag = ACL_ADD_RULE_ONE;
+        if ((new_len - old_len) == 2)
+        {
+            *add_replace_del_flag = ACL_ADD_RULE_TWO;
+        }
+        for (i = 0; i < old_len; i++)
+        {
+            if (acl_old_rules[i].rule_id != acl_new_rules[i].rule_id)
+            {
+                *replace_del_place = i;
+                if (i > 0 && acl_new_rules[i - 1].rule_id == acl_new_rules[i].rule_id)
+                {
+                    *add_replace_del_flag = ACL_ADD_RULE_ONE_REP_ONE;
+                    *replace_del_place = i - 1;
+                }
+                break;
+            }
+        }
+
+        if (*replace_del_place == 0 && i == old_len)
+        {
+            *replace_del_place = old_len;
+        }
+    }
+
+    return;
+}
 
 static void
-validate_and_reset_acl_counters (acl_main_t * am, u32 acl_index)
+validate_and_reset_acl_counters (acl_main_t * am, u32 acl_index, 
+        int old_rule_len, int new_rule_len, int add_replace_del_flag, int replace_del_place)
 {
   int i;
+
   /* counters are set as vectors [acl#] pointing to vectors of [acl rule] */
   acl_plugin_counter_lock (am);
 
@@ -301,7 +465,17 @@ validate_and_reset_acl_counters (acl_main_t * am, u32 acl_index)
   /* Validate one extra so we always have at least one counter for an ACL */
   vlib_validate_combined_counter (&am->combined_acl_counters[acl_index],
 				  rule_count);
-  vlib_clear_combined_counters (&am->combined_acl_counters[acl_index]);
+  if (add_replace_del_flag == ACL_ADD_LIST)
+  {
+      vlib_clear_combined_counters (&am->combined_acl_counters[acl_index]);
+  }
+
+  else
+  {
+      vlib_set_combined_counters (&am->combined_acl_counters[acl_index], 
+                       add_replace_del_flag, replace_del_place, old_rule_len, new_rule_len);
+  }
+
   acl_plugin_counter_unlock (am);
 }
 
@@ -322,8 +496,11 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
   acl_list_t *a;
   acl_rule_t *r;
   acl_rule_t *acl_new_rules = 0;
+  acl_rule_t *acl_old_rules = NULL;
   size_t tag_len;
   int i;
+  int add_replace_del_flag = 0;
+  int replace_del_place = 0;
 
   tag_len = clib_strnlen ((const char *) tag, sizeof (a->tag));
   if (tag_len == sizeof (a->tag))
@@ -390,6 +567,7 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       r->dst_port_or_code_last = ntohs (rules[i].dstport_or_icmpcode_last);
       r->tcp_flags_value = rules[i].tcp_flags_value;
       r->tcp_flags_mask = rules[i].tcp_flags_mask;
+      r->rule_id = rules[i].rule_id;
     }
 
   if (~0 == *acl_list_index)
@@ -399,13 +577,25 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       clib_memset (a, 0, sizeof (*a));
       /* Will return the newly allocated ACL index */
       *acl_list_index = a - am->acls;
+      add_replace_del_flag = ACL_ADD_LIST;
     }
   else
     {
       a = am->acls + *acl_list_index;
       /* Get rid of the old rules */
       if (a->rules)
-	vec_free (a->rules);
+      {
+          acl_old_rules = a->rules;
+          if (0 == acl_old_rules[0].rule_id)
+          {
+              add_replace_del_flag = ACL_ADD_LIST;
+          }
+      }
+
+      else
+      {
+          add_replace_del_flag = ACL_ADD_LIST;
+      }
     }
   a->rules = acl_new_rules;
   memcpy (a->tag, tag, tag_len + 1);
@@ -416,7 +606,16 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       /* a change in an ACLs if they are applied may mean a new policy epoch */
       policy_notify_acl_change (am, *acl_list_index);
     }
-  validate_and_reset_acl_counters (am, *acl_list_index);
+  if (add_replace_del_flag == 0)
+  {
+      determine_replace_or_del(acl_old_rules, acl_new_rules, &add_replace_del_flag, &replace_del_place);
+  }
+  validate_and_reset_acl_counters(am, *acl_list_index, vec_len(acl_old_rules), vec_len(acl_new_rules), 
+                                     add_replace_del_flag, replace_del_place);
+  if (acl_old_rules)
+  {
+      vec_free (acl_old_rules);
+  }
   acl_plugin_lookup_context_notify_acl_change (*acl_list_index);
   return 0;
 }
@@ -975,7 +1174,9 @@ macip_permit_also_egress (u8 is_permit)
 }
 
 static int
-macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
+macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index,
+                              int old_len, int new_len,
+                              int add_replace_del_flag, int replace_del_place)
 {
   macip_match_type_t *mvec = NULL;
   macip_match_type_t *mt;
@@ -1328,8 +1529,9 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
 
 	  /* add session to table mvec[match_type_index].table_index; */
 	  vnet_classify_add_del_session (cm, tag_table,
-					 mask, a->rules[i].is_permit ? ~0 : 0,
+					 mask, a->rules[i].is_permit ? (a->rules[i].is_permit == ACL_ACTION_NO_NAT ? (~0 - 1) : ~0) : 0,
 					 i, 0, action, metadata, 1, macip_acl_index, a->count);
+
 	  clib_memset (&mask[12], 0, sizeof (mask) - 12);
 	}
 
@@ -1374,7 +1576,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
 	      memcpy (&mask[l3_src_offs + 14], &a->rules[i].src_ip_addr.ip4,
 		      4);
 	      vnet_classify_add_del_session (cm, tag_table, mask,
-					     a->rules[i].is_permit ? ~0 : 0,
+					     a->rules[i].is_permit ? (a->rules[i].is_permit == ACL_ACTION_NO_NAT ? (~0 - 1) : ~0) : 0,
 					     i, 0, action, metadata, 1, macip_acl_index, a->count);
 	    }
 	}
@@ -1427,7 +1629,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
 	      /* add session to table mvec[match_type_index].table_index; */
 	      vnet_classify_add_del_session (cm, tag_table,
 					     mask,
-					     a->rules[i].is_permit ? ~0 : 0,
+					     a->rules[i].is_permit ? (a->rules[i].is_permit == ACL_ACTION_NO_NAT ? (~0 - 1) : ~0) : 0,
 					     i, 0, action, metadata, 1, macip_acl_index, a->count);
 	      // clib_memset (&mask[12], 0, sizeof (mask) - 12);
 	    }
@@ -1469,12 +1671,14 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index)
 		  vnet_classify_add_del_session (cm, tag_table,
 						 mask,
 						 a->rules[i].
-						 is_permit ? ~0 : 0, i, 0,
+						 is_permit ? (a->rules[i].is_permit == ACL_ACTION_NO_NAT ? (~0 - 1) : ~0) : 0, i, 0,
 						 action, metadata, 1, macip_acl_index, a->count);
 		}
 	    }
 	}
     }
+
+  vnet_classify_handle_counter(cm, macip_acl_index, a->count, old_len, new_len, add_replace_del_flag, replace_del_place);
   return 0;
 }
 
@@ -1557,9 +1761,12 @@ macip_acl_add_list (u32 count, vl_api_macip_acl_rule_t rules[],
   macip_acl_list_t *a;
   macip_acl_rule_t *r;
   macip_acl_rule_t *acl_new_rules = 0;
+  macip_acl_rule_t *acl_old_rules = NULL;
   size_t tag_len;
   int i;
   int rv = 0;
+  int add_replace_del_flag = 0;
+  int replace_del_place = 0;
 
   tag_len = clib_strnlen ((const char *) tag, sizeof (a->tag));
   if (tag_len == sizeof (a->tag))
@@ -1601,6 +1808,7 @@ macip_acl_add_list (u32 count, vl_api_macip_acl_rule_t rules[],
 			  (mac_address_t *) & r->src_mac_mask);
       ip_address_decode (&rules[i].src_prefix.address, &r->src_ip_addr);
       r->src_prefixlen = rules[i].src_prefix.len;
+      r->rule_id = rules[i].rule_id;
     }
 
   if (~0 == *acl_list_index)
@@ -1610,14 +1818,24 @@ macip_acl_add_list (u32 count, vl_api_macip_acl_rule_t rules[],
       clib_memset (a, 0, sizeof (*a));
       /* Will return the newly allocated ACL index */
       *acl_list_index = a - am->macip_acls;
+      add_replace_del_flag = ACL_ADD_LIST;
     }
   else
     {
       a = pool_elt_at_index (am->macip_acls, *acl_list_index);
       if (a->rules)
-	{
-	  vec_free (a->rules);
-	}
+      {
+          acl_old_rules = a->rules;
+          if (0 == acl_old_rules[0].rule_id)
+          {
+              add_replace_del_flag = ACL_ADD_LIST;
+          }
+      }
+
+      else
+      {
+          add_replace_del_flag = ACL_ADD_LIST;
+      }
       macip_destroy_classify_tables (am, *acl_list_index);
     }
 
@@ -1625,8 +1843,20 @@ macip_acl_add_list (u32 count, vl_api_macip_acl_rule_t rules[],
   a->count = count;
   memcpy (a->tag, tag, tag_len + 1);
 
+  if (add_replace_del_flag == 0)
+  {
+      determine_macip_replace_or_del(acl_old_rules, acl_new_rules, &add_replace_del_flag, &replace_del_place);
+  }
+
   /* Create and populate the classifier tables */
-  macip_create_classify_tables (am, *acl_list_index);
+  macip_create_classify_tables (am, *acl_list_index, vec_len(acl_old_rules), vec_len(acl_new_rules), 
+                                     add_replace_del_flag, replace_del_place);
+
+  if (acl_old_rules)
+  {
+      vec_free (acl_old_rules);
+  }
+
   /* If the ACL was already applied somewhere, reapply the newly created tables */
   rv = rv
     || macip_maybe_apply_unapply_classifier_tables (am, *acl_list_index, 1);

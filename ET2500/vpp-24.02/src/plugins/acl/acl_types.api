@@ -69,6 +69,7 @@ typedef acl_rule
  */
   u8 tcp_flags_mask;
   u8 tcp_flags_value;
+  u16 rule_id;
 };
 
 
@@ -94,4 +95,5 @@ typedef macip_acl_rule
   vl_api_mac_address_t src_mac;
   vl_api_mac_address_t src_mac_mask;
   vl_api_prefix_t src_prefix;
+  u16 rule_id;
 };

@@ -304,7 +304,7 @@ ip_in_out_acl_inline_trace (
 				   e[0]->acl_index,
 				   vm->thread_index,
 				   e[0]->opaque_index,
-				   1, b[0]->current_length);
+				   1, b[0]->current_length + ethernet_buffer_header_size(b[0]));
               }
 	      vnet_buffer (b[0])->l2_classify.opaque_index
 		= e[0]->opaque_index;
@@ -314,6 +314,10 @@ ip_in_out_acl_inline_trace (
 		e[0]->next_index : _next[0];
 
 	      hits++;
+	      if (e[0]->next_index == ((~0 - 1) & 0xFFFF))
+	      {
+	          b[0]->no_nat = 1;
+	      }
 
 	      b[0]->error =
 		(_next[0] == ACL_NEXT_INDEX_DENY) ? error_deny : error_none;
@@ -377,7 +381,7 @@ ip_in_out_acl_inline_trace (
     				   e[0]->acl_index,
     				   vm->thread_index,
     				   e[0]->opaque_index,
-    				   1, b[0]->current_length);
+    				   1, b[0]->current_length + ethernet_buffer_header_size(b[0]));
 	              }
 		      vnet_buffer (b[0])->l2_classify.opaque_index
 			= e[0]->opaque_index;
@@ -387,6 +391,10 @@ ip_in_out_acl_inline_trace (
 		      hits++;
 		      chain_hits++;
 
+		      if (e[0]->next_index == ((~0 - 1) & 0xFFFF))
+		      {
+		          b[0]->no_nat = 1;
+		      }
 		      b[0]->error = (_next[0] == ACL_NEXT_INDEX_DENY) ?
 				      error_deny :
 				      error_none;
@@ -428,7 +436,7 @@ ip_in_out_acl_inline_trace (
     				   e[1]->acl_index,
     				   vm->thread_index,
     				   e[1]->opaque_index,
-    				   1, b[1]->current_length);
+    				   1, b[1]->current_length + ethernet_buffer_header_size(b[1]));
               }
 	      vnet_buffer (b[1])->l2_classify.opaque_index
 		= e[1]->opaque_index;
@@ -438,6 +446,10 @@ ip_in_out_acl_inline_trace (
 		e[1]->next_index : _next[1];
 
 	      hits++;
+	      if (e[1]->next_index == ((~0 - 1) & 0xFFFF))
+	      {
+	          b[1]->no_nat = 1;
+	      }
 
 	      b[1]->error =
 		(_next[1] == ACL_NEXT_INDEX_DENY) ? error_deny : error_none;
@@ -501,7 +513,7 @@ ip_in_out_acl_inline_trace (
     				   e[1]->acl_index,
     				   vm->thread_index,
     				   e[1]->opaque_index,
-    				   1, b[1]->current_length);
+    				   1, b[1]->current_length + ethernet_buffer_header_size(b[1]));
 	              }
 		      vnet_buffer (b[1])->l2_classify.opaque_index
 			= e[1]->opaque_index;
@@ -511,6 +523,10 @@ ip_in_out_acl_inline_trace (
 		      hits++;
 		      chain_hits++;
 
+		      if (e[1]->next_index == ((~0 - 1) & 0xFFFF))
+		      {
+		          b[1]->no_nat = 1;
+		      }
 		      b[1]->error = (_next[1] == ACL_NEXT_INDEX_DENY) ?
 				      error_deny :
 				      error_none;
@@ -649,7 +665,7 @@ ip_in_out_acl_inline_trace (
 				   e0->acl_index,
 				   vm->thread_index,
 				   e0->opaque_index,
-				   1, b[0]->current_length);
+				   1, b[0]->current_length + ethernet_buffer_header_size(b[0]));
               }
 	      vnet_buffer (b[0])->l2_classify.opaque_index = e0->opaque_index;
 	      vlib_buffer_advance (b[0], e0->advance);
@@ -658,6 +674,10 @@ ip_in_out_acl_inline_trace (
 		e0->next_index : next0;
 
 	      hits++;
+	      if (e0->next_index == ((~0 - 1) & 0xFFFF))
+	      {
+	          b[0]->no_nat = 1;
+	      }
 
 	      b[0]->error =
 		(next0 == ACL_NEXT_INDEX_DENY) ? error_deny : error_none;
@@ -718,7 +738,7 @@ ip_in_out_acl_inline_trace (
 				       e0->acl_index,
 				       vm->thread_index,
 				       e0->opaque_index,
-				       1, b[0]->current_length);
+				       1, b[0]->current_length + ethernet_buffer_header_size(b[0]));
 	              }
 		      vnet_buffer (b[0])->l2_classify.opaque_index
 			= e0->opaque_index;
@@ -726,6 +746,10 @@ ip_in_out_acl_inline_trace (
 		      next0 = (e0->next_index < n_next_nodes) ?
 			e0->next_index : next0;
 		      hits++;
+		      if (e0->next_index == ((~0 - 1) & 0xFFFF))
+		      {
+		          b[0]->no_nat = 1;
+		      }
 
 		      b[0]->error = (next0 == ACL_NEXT_INDEX_DENY) ?
 				      error_deny :

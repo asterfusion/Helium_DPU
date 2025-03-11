@@ -54,6 +54,22 @@
 
 /** A collection of simple counters */
 
+#define ACL_DEL_RULE_ONE           0
+#define ACL_DEL_RULE_TWO           1
+#define ACL_DEL_RULE_ONE_REP_ONE   2
+
+
+#define ACL_REPLACE_RULE_ONE       3
+#define ACL_REPLACE_RULE_TWO       4
+#define ACL_REPLACE_RULE_NONE      5
+
+
+#define ACL_ADD_RULE_ONE           6
+#define ACL_ADD_RULE_TWO           7
+#define ACL_ADD_RULE_ONE_REP_ONE   8
+
+#define ACL_ADD_LIST               9
+
 typedef struct
 {
   counter_t **counters;	 /**< Per-thread u64 non-atomic counters */
@@ -244,6 +260,8 @@ void vlib_clear_combined_counters (vlib_combined_counter_main_t * cm);
     @param packet_increment - (u64) number of packets to add to the counter
     @param byte_increment - (u64) number of bytes to add to the counter
 */
+
+void vlib_set_combined_counters (vlib_combined_counter_main_t * cm, int flag, int place, int old_len, int new_len);
 
 always_inline void
 vlib_increment_combined_counter (vlib_combined_counter_main_t * cm,

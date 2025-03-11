@@ -605,6 +605,9 @@ int vnet_classify_add_del_table (vnet_classify_main_t *cm, const u8 *mask,
 void vnet_classify_delete_table_index (vnet_classify_main_t *cm,
 				       u32 table_index, int del_chain);
 
+int vnet_classify_handle_counter(vnet_classify_main_t *cm, u32 macip_acl_index,
+               u32 rule_count, int old_len, int new_len, int flag, int place);
+
 unformat_function_t unformat_ip4_mask;
 unformat_function_t unformat_ip6_mask;
 unformat_function_t unformat_l3_mask;

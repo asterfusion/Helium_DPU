@@ -493,6 +493,10 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 		  saved_matched_ace_index = match_rule_index;
 		  saved_packet_count = 1;
 		  saved_byte_count = buf_len;
+		  if (!is_l2_path)
+		  {
+			saved_byte_count += ethernet_buffer_header_size(b[0]);
+		  }
 		  /* prefetch the counter that we are going to increment */
 		  vlib_prefetch_combined_counter (am->combined_acl_counters +
 						  saved_matched_acl_index,
@@ -559,6 +563,11 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 	    vnet_feature_next_u16 (&next[0], b[0]);
 	    /* if the action is not deny - then use that next */
 	    next[0] = action ? next[0] : 0;
+
+            if (ACL_ACTION_NO_NAT == action)
+            {
+                b[0]->no_nat = 1;
+            }
 	  }
 
 	  if (node_trace_on)	// PREDICT_FALSE (node->flags & VLIB_NODE_FLAG_TRACE))
