@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 #include <vnet/ip/ip.h>
+#include <vnet/ethernet/ethernet.h>
 #include <vnet/classify/vnet_classify.h>
 #include <vnet/classify/in_out_acl.h>
 
