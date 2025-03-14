@@ -21,7 +21,7 @@
 #include <vlib/vlib.h>
 #include <vnet/ethernet/ethernet.h>
 #include <vppinfra/sparse_vec.h>
-
+#include <vnet/bonding/node.h>
 #include <vnet/l2/l2_input.h>
 
 #define TO_BVI_ERR_OK        0
@@ -47,6 +47,31 @@ l2_to_bvi_dmac_check (vnet_hw_interface_t * hi, u8 * dmac,
     }
 
   return TO_BVI_ERR_BAD_MAC;
+}
+
+static u32 get_parent_sw_if_index(u32 sw_if_index) {
+    vnet_sw_interface_t *sw = vnet_get_sw_interface(vnet_get_main(), sw_if_index);
+    if (sw && sw->type == VNET_SW_INTERFACE_TYPE_SUB) {
+        return sw->sup_sw_if_index;
+    }
+    return ~0;
+}
+
+static bool find_bond_by_sw_if_index(u32 sw_if_index) {
+    bond_main_t *bm = &bond_main;
+    uword *p = hash_get(bm->bond_by_sw_if_index, sw_if_index);
+    if (p != NULL) {
+      return true;
+    }
+
+    u32 parent_sw_if_index = get_parent_sw_if_index(sw_if_index);
+    if (parent_sw_if_index != ~0) {
+        p = hash_get(bm->bond_by_sw_if_index, parent_sw_if_index);
+        if (p != NULL) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -94,7 +119,10 @@ l2_to_bvi (vlib_main_t * vlib_main,
   u16 ethertype = clib_net_to_host_u16 (*(u16 *) (l3h - 2));
 
   /* store the orignal sw_if_index */
-  vnet_buffer2 (b0)->l2_rx_sw_if_index = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+  if(!find_bond_by_sw_if_index(vnet_buffer (b0)->sw_if_index[VLIB_RX]))
+  {
+    vnet_buffer2 (b0)->l2_rx_sw_if_index = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+  }
 
   /* Set the input interface to be the BVI interface */
   vnet_buffer (b0)->sw_if_index[VLIB_RX] = bvi_sw_if_index;
