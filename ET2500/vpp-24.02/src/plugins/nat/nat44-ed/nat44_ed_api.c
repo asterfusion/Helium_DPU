@@ -273,7 +273,63 @@ static void
     {
       if (is_add)
 	{
-	  rv = nat44_ed_add_address (&this_addr, vrf_id, twice_nat);
+	  rv = nat44_ed_add_address (&this_addr, vrf_id, twice_nat, ~0);
+	}
+      else
+	{
+	  rv = nat44_ed_del_address (this_addr, twice_nat);
+	}
+
+      if (rv)
+	goto send_reply;
+
+      increment_v4_address (&this_addr);
+    }
+
+send_reply:
+  REPLY_MACRO (VL_API_NAT44_ADD_DEL_ADDRESS_RANGE_REPLY);
+}
+
+static void
+  vl_api_nat44_add_del_address_v2_range_t_handler
+  (vl_api_nat44_add_del_address_v2_range_t * mp)
+{
+  snat_main_t *sm = &snat_main;
+  vl_api_nat44_add_del_address_v2_range_reply_t *rmp;
+  ip4_address_t this_addr;
+  u8 is_add, twice_nat;
+  u32 start_host_order, end_host_order;
+  u32 vrf_id;
+  int i, count;
+  int rv = 0;
+  u32 *tmp;
+  u32 acl_index = ~0;
+
+  is_add = mp->is_add;
+  twice_nat = mp->flags & NAT_API_IS_TWICE_NAT;
+
+  tmp = (u32 *) mp->first_ip_address;
+  start_host_order = clib_host_to_net_u32 (tmp[0]);
+  tmp = (u32 *) mp->last_ip_address;
+  end_host_order = clib_host_to_net_u32 (tmp[0]);
+
+  count = (end_host_order - start_host_order) + 1;
+
+  vrf_id = clib_host_to_net_u32 (mp->vrf_id);
+  acl_index = clib_host_to_net_u32(mp->acl_index);
+
+  if (count > 1024)
+    nat_log_info ("%U - %U, %d addresses...",
+		  format_ip4_address, mp->first_ip_address,
+		  format_ip4_address, mp->last_ip_address, count);
+
+  memcpy (&this_addr.as_u8, mp->first_ip_address, 4);
+
+  for (i = 0; i < count; i++)
+    {
+      if (is_add)
+	{
+	  rv = nat44_ed_add_address (&this_addr, vrf_id, twice_nat, acl_index);
 	}
       else
 	{

@@ -400,6 +400,28 @@ autoreply define nat44_add_del_address_range {
   vl_api_nat_config_flags_t flags;
 };
 
+/** \brief Add/del NAT44 address range
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param first_ip_address - first IPv4 address
+    @param last_ip_address - last IPv4 address
+    @param vrf_id - VRF id of tenant, ~0 means independent of VRF
+    @param acl_index - acl index binded
+    @param is_add - true if add, false if delete
+    @param flags - flag NAT_IS_TWICE_NAT if NAT address range for external hosts
+
+*/
+autoreply define nat44_add_del_address_v2_range {
+  u32 client_index;
+  u32 context;
+  vl_api_ip4_address_t first_ip_address;
+  vl_api_ip4_address_t last_ip_address;
+  u32 vrf_id;
+  u32 acl_index;
+  bool is_add;
+  vl_api_nat_config_flags_t flags;
+};
+
 /** \brief Dump NAT44 addresses
     @param client_index - opaque cookie to identify the sender
     @param context - sender context, to match reply w/ request

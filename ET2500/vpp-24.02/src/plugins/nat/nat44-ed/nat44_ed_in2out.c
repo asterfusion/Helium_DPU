@@ -151,10 +151,131 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
 			    u32 thread_index, ip4_address_t s_addr,
 			    ip4_address_t d_addr, u32 snat_thread_index,
 			    snat_session_t *s, ip4_address_t *outside_addr,
-			    u16 *outside_port)
+			    u16 *outside_port, vlib_buffer_t *b)
 {
-  if (vec_len (sm->addresses) > 0)
+    //find address with packets acl_index
+    if(b->acl_index && vec_len(sm->addresses) > 0)
     {
+        int i;
+        snat_address_t *a, *ja = 0, *ra = 0, *ba = 0;
+
+        if (tx_sw_if_index != ~0)
+        {
+            for (i = 0; i < vec_len (sm->addresses); ++i)
+            {
+                a = sm->addresses + i;
+                if (a->acl_index == b->acl_index)
+                {
+                    if (a->fib_index == rx_fib_index)
+                    {
+                        if (a->sw_if_index == tx_sw_if_index)
+                        {
+                            if ((a->addr_len != ~0) &&
+                                    (a->net.as_u32 ==
+                                     (d_addr.as_u32 & ip4_main.fib_masks[a->addr_len])))
+
+                            {
+                                return nat_ed_alloc_addr_and_port_with_snat_address (
+                                        sm, nat_proto, thread_index, a,
+                                        sm->port_per_thread, snat_thread_index, s,
+                                        outside_addr, outside_port);
+                            }
+                            ra = a;
+                        }
+			ja = a;
+                    }
+                    else if (a->fib_index == ~0) {
+                        ba = a;
+                    }
+                }
+		else if (a->acl_index == ~0)
+		{
+                    if (a->fib_index == rx_fib_index)
+                    {
+                        if (a->sw_if_index == tx_sw_if_index)
+                        {
+                            if ((a->addr_len != ~0) &&
+                                    (a->net.as_u32 ==
+                                     (d_addr.as_u32 & ip4_main.fib_masks[a->addr_len])))
+
+                            {
+			    }
+                            ra = a;
+			}
+			ja = a;
+		    }
+                    else if (a->fib_index == ~0) {
+                        ba = a;
+                    }
+		}
+            }
+            if (ra)
+            {
+                return nat_ed_alloc_addr_and_port_with_snat_address (
+                        sm, nat_proto, thread_index, ra, sm->port_per_thread,
+                        snat_thread_index, s, outside_addr, outside_port);
+            }
+        }
+        else
+        {
+            for (i = 0; i < vec_len (sm->addresses); ++i)
+            {
+                a = sm->addresses + i;
+                if (a->acl_index == b->acl_index)
+                {
+                    if (a->fib_index == rx_fib_index)
+                    {
+                        if ((a->addr_len != ~0) &&
+                                (a->net.as_u32 ==
+                                 (d_addr.as_u32 & ip4_main.fib_masks[a->addr_len])))
+
+                        {
+                            return nat_ed_alloc_addr_and_port_with_snat_address (
+                                    sm, nat_proto, thread_index, a,
+                                    sm->port_per_thread, snat_thread_index, s,
+                                    outside_addr, outside_port);
+                        }
+                        ja = a;
+                    }
+                    else if (a->fib_index == ~0) {
+                        ba = a;
+                    }
+                }
+		else if (a->acl_index == ~0)
+		{
+                    if (a->fib_index == rx_fib_index)
+                    {
+			    if ((a->addr_len != ~0) &&
+					    (a->net.as_u32 ==
+					     (d_addr.as_u32 & ip4_main.fib_masks[a->addr_len])))
+
+			    {
+				    return nat_ed_alloc_addr_and_port_with_snat_address (
+						    sm, nat_proto, thread_index, a,
+						    sm->port_per_thread, snat_thread_index, s,
+						    outside_addr, outside_port);
+			    }
+			ja = a;
+		    }
+                    else if (a->fib_index == ~0) {
+                        ba = a;
+                    }
+		}
+            }
+        }
+
+	if (ja || ba)
+	{
+		a = ja ? ja : ba;
+		return nat_ed_alloc_addr_and_port_with_snat_address (
+				sm, nat_proto, thread_index, a, sm->port_per_thread,
+				snat_thread_index, s, outside_addr, outside_port);
+	}
+    }
+    //no acl index match packets
+    else if (vec_len (sm->addresses) > 0)
+    {
+
       u32 s_addr_offset = (s_addr.as_u32 + (s_addr.as_u32 >> 8) +
 			   (s_addr.as_u32 >> 16) + (s_addr.as_u32 >> 24)) %
 			  vec_len (sm->addresses);
@@ -167,6 +288,9 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
 	  for (i = s_addr_offset; i < vec_len (sm->addresses); ++i)
 	    {
 	      a = sm->addresses + i;
+	      //if have bind acl, must match acl
+	      if (a->acl_index != ~0) continue;
+
 	      if (a->fib_index == rx_fib_index)
 		{
 		  if (a->sw_if_index == tx_sw_if_index)
@@ -193,6 +317,9 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
 	  for (i = 0; i < s_addr_offset; ++i)
 	    {
 	      a = sm->addresses + i;
+	      //if have bind acl, must match acl
+	      if (a->acl_index != ~0) continue;
+
 	      if (a->fib_index == rx_fib_index)
 		{
 		  if (a->sw_if_index == tx_sw_if_index)
@@ -229,6 +356,8 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
 	  for (i = s_addr_offset; i < vec_len (sm->addresses); ++i)
 	    {
 	      a = sm->addresses + i;
+	      //if have bind acl, must match acl
+	      if (a->acl_index != ~0) continue;
 	      if (a->fib_index == rx_fib_index)
 		{
 		  if ((a->addr_len != ~0) &&
@@ -249,6 +378,8 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
 	  for (i = 0; i < s_addr_offset; ++i)
 	    {
 	      a = sm->addresses + i;
+	      //if have bind acl, must match acl
+	      if (a->acl_index != ~0) continue;
 	      if (a->fib_index == rx_fib_index)
 		{
 		  if ((a->addr_len != ~0) &&
@@ -526,7 +657,7 @@ slow_path_ed (vlib_main_t *vm, snat_main_t *sm, vlib_buffer_t *b,
 
       if (nat_ed_alloc_addr_and_port (
 	    sm, rx_fib_index, tx_sw_if_index, proto, thread_index, l_addr,
-	    r_addr, tsm->snat_thread_index, s, &outside_addr, &outside_port))
+	    r_addr, tsm->snat_thread_index, s, &outside_addr, &outside_port, b))
 	{
 	  nat_elog_notice (sm, "addresses exhausted");
 	  b->error = node->errors[NAT_IN2OUT_ED_ERROR_OUT_OF_PORTS];

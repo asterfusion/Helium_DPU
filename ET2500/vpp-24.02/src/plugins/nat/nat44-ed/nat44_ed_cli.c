@@ -395,7 +395,7 @@ add_address_command_fn (vlib_main_t * vm,
     {
       if (is_add)
 	{
-	  rv = nat44_ed_add_address (&this_addr, vrf_id, twice_nat);
+	  rv = nat44_ed_add_address (&this_addr, vrf_id, twice_nat, ~0);
 	}
       else
 	{
@@ -623,6 +623,8 @@ nat44_show_addresses_command_fn (vlib_main_t * vm, unformat_input_t * input,
 	  fib_table_get (ap->fib_index, FIB_PROTOCOL_IP4)->ft_table_id);
       else
         vlib_cli_output (vm, "  tenant VRF independent");
+      if (ap->acl_index != ~0)
+          vlib_cli_output(vm, "  bind acl_index: %u", ap->acl_index);
 
       if (ap->addr_len != ~0)
 	vlib_cli_output (vm, "  synced with interface address");

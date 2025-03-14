@@ -319,6 +319,7 @@ ip_in_out_acl_inline_trace (
 	      {
 	          b[0]->no_nat = 1;
 	      }
+          b[0]->acl_index = e[0]->acl_index;
 
 	      b[0]->error =
 		(_next[0] == ACL_NEXT_INDEX_DENY) ? error_deny : error_none;
@@ -396,6 +397,7 @@ ip_in_out_acl_inline_trace (
 		      {
 		          b[0]->no_nat = 1;
 		      }
+              b[0]->acl_index = e[0]->acl_index;
 		      b[0]->error = (_next[0] == ACL_NEXT_INDEX_DENY) ?
 				      error_deny :
 				      error_none;
@@ -450,7 +452,8 @@ ip_in_out_acl_inline_trace (
 	      if (e[1]->next_index == ((~0 - 1) & 0xFFFF))
 	      {
 	          b[1]->no_nat = 1;
-	      }
+	      } 
+          b[1]->acl_index = e[1]->acl_index;
 
 	      b[1]->error =
 		(_next[1] == ACL_NEXT_INDEX_DENY) ? error_deny : error_none;
@@ -528,6 +531,7 @@ ip_in_out_acl_inline_trace (
 		      {
 		          b[1]->no_nat = 1;
 		      }
+              b[1]->acl_index = e[1]->acl_index;
 		      b[1]->error = (_next[1] == ACL_NEXT_INDEX_DENY) ?
 				      error_deny :
 				      error_none;
@@ -679,6 +683,7 @@ ip_in_out_acl_inline_trace (
 	      {
 	          b[0]->no_nat = 1;
 	      }
+          b[0]->acl_index = e0->acl_index;
 
 	      b[0]->error =
 		(next0 == ACL_NEXT_INDEX_DENY) ? error_deny : error_none;
@@ -751,6 +756,7 @@ ip_in_out_acl_inline_trace (
 		      {
 		          b[0]->no_nat = 1;
 		      }
+              b[0]->acl_index = e0->acl_index;
 
 		      b[0]->error = (next0 == ACL_NEXT_INDEX_DENY) ?
 				      error_deny :

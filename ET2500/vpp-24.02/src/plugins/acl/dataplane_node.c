@@ -568,6 +568,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
             {
                 b[0]->no_nat = 1;
             }
+            b[0]->acl_index = match_acl_in_index;
 	  }
 
 	  if (node_trace_on)	// PREDICT_FALSE (node->flags & VLIB_NODE_FLAG_TRACE))

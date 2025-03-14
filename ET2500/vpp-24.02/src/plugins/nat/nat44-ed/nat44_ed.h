@@ -349,6 +349,7 @@ typedef struct
   u32 sw_if_index;
   u32 fib_index;
   u32 addr_len;
+  u32 acl_index;
 } snat_address_t;
 
 typedef struct
@@ -844,7 +845,7 @@ int nat44_ed_del_interface (u32 sw_if_index, u8 is_inside);
 int nat44_ed_add_output_interface (u32 sw_if_index);
 int nat44_ed_del_output_interface (u32 sw_if_index);
 
-int nat44_ed_add_address (ip4_address_t *addr, u32 vrf_id, u8 twice_nat);
+int nat44_ed_add_address (ip4_address_t *addr, u32 vrf_id, u8 twice_nat, u32 acl_index);
 int nat44_ed_del_address (ip4_address_t addr, u8 twice_nat);
 int nat44_ed_add_interface_address (u32 sw_if_index, u8 twice_nat);
 int nat44_ed_del_interface_address (u32 sw_if_index, u8 twice_nat);
