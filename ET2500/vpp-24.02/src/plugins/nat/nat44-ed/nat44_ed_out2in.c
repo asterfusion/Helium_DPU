@@ -802,6 +802,9 @@ nat44_ed_out2in_fast_path_node_fn_inline (vlib_main_t * vm,
           goto trace0;
       }
 
+      //skip bgp ttl=1 check
+      if (vnet_buffer(b0)->ip.reass.l4_src_port != IP_PORT_BGP && vnet_buffer(b0)->ip.reass.l4_dst_port != IP_PORT_BGP)
+      {
       if (PREDICT_FALSE (ip0->ttl == 1))
 	{
 	  vnet_buffer (b0)->sw_if_index[VLIB_TX] = (u32) ~ 0;
@@ -811,6 +814,7 @@ nat44_ed_out2in_fast_path_node_fn_inline (vlib_main_t * vm,
 	  next[0] = NAT_NEXT_ICMP_ERROR;
 	  goto trace0;
 	}
+      }
 
       proto0 = ip0->protocol;
 
@@ -1095,6 +1099,9 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
           goto trace0;
       }
 
+      //skip bgp ttl=1 check
+      if (vnet_buffer(b0)->ip.reass.l4_src_port != IP_PORT_BGP && vnet_buffer(b0)->ip.reass.l4_dst_port != IP_PORT_BGP)
+      {
       if (PREDICT_FALSE (ip0->ttl == 1))
 	{
 	  vnet_buffer (b0)->sw_if_index[VLIB_TX] = (u32) ~ 0;
@@ -1104,6 +1111,7 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
 	  next[0] = NAT_NEXT_ICMP_ERROR;
 	  goto trace0;
 	}
+      }
 
       udp0 = ip4_next_header (ip0);
       icmp0 = (icmp46_header_t *) udp0;
