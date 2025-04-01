@@ -288,8 +288,6 @@ vl_api_isolation_group_set_source_port_t_handler(vl_api_isolation_group_set_sour
       }
     }
 
-    find_isolation_group(group_id);
-
     REPLY_MACRO(VL_API_ISOLATION_GROUP_SET_SOURCE_PORT_REPLY);
 }
 
