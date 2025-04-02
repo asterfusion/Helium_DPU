@@ -78,6 +78,7 @@ isolation_group_inline (vlib_main_t * vm,
   u32 n_left_from, *from;
   vlib_buffer_t *bufs[VLIB_FRAME_SIZE], **b;
   u16 nexts[VLIB_FRAME_SIZE], *next;
+  bool find = false;
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
@@ -86,122 +87,31 @@ isolation_group_inline (vlib_main_t * vm,
   b = bufs;
   next = nexts;
 
-  while (n_left_from >= 4)
-    {
-      /* Prefetch next iteration. */
-      if (PREDICT_TRUE (n_left_from >= 8))
-    {
-      vlib_prefetch_buffer_header (b[4], STORE);
-      vlib_prefetch_buffer_header (b[5], STORE);
-      vlib_prefetch_buffer_header (b[6], STORE);
-      vlib_prefetch_buffer_header (b[7], STORE);
-          CLIB_PREFETCH (b[4]->data, CLIB_CACHE_LINE_BYTES, STORE);
-          CLIB_PREFETCH (b[5]->data, CLIB_CACHE_LINE_BYTES, STORE);
-          CLIB_PREFETCH (b[6]->data, CLIB_CACHE_LINE_BYTES, STORE);
-          CLIB_PREFETCH (b[7]->data, CLIB_CACHE_LINE_BYTES, STORE);
-    }
-
-      u32 rx_sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_RX];
-      u32 tx_sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_TX];
-      clib_warning("isolation group rx_sw_if_index: %d, tx_sw_if_index: %d", rx_sw_if_index, tx_sw_if_index);
-
-      int mapping_index = find_source_port_mapping(rx_sw_if_index);
-      if (mapping_index != -1) {
-          clib_warning("find isolation group map success, mapping_index is %d", mapping_index);
-          u32 group_id = source_port_group_mappings[mapping_index].group_id;
-          int group_index = find_isolation_group(group_id);
-          if (group_index != -1) {
-              for (int i = 0; i < isolation_groups[group_index].num_destinations; i++) {
-                  clib_warning("isolation group Checking destination_sw_if_indices[%d]: %d", i, isolation_groups[group_index].destination_sw_if_indices[i]);
-                  if (isolation_groups[group_index].destination_sw_if_indices[i] == tx_sw_if_index) {
-                      clib_warning("destination_sw_if_indices[%d] match tx_sw_if_index", i);
-                      next[0] = ISOLATION_GROUP_NEXT_DROP;
-                      break;
-                  }
-              }
-              clib_warning("can't find destination_sw_if_indices");
-          }
-          else
-          {
-            clib_warning("can't find isolation group");
-          }
-      }
-      else
-      {
-        clib_warning("can't find isolation group map");
-      }
-
-      next[1] = 0;
-      next[2] = 0;
-      next[3] = 0;
-
-      if (is_trace)
-    {
-      if (b[0]->flags & VLIB_BUFFER_IS_TRACED)
-        {
-          isolation_group_trace_t *t = 
-                   vlib_add_trace (vm, node, b[0], sizeof (*t));
-          t->next_index = next[0];
-              t->sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_RX];
-        }
-      if (b[1]->flags & VLIB_BUFFER_IS_TRACED)
-        {
-          isolation_group_trace_t *t = 
-                    vlib_add_trace (vm, node, b[1], sizeof (*t));
-          t->next_index = next[1];
-              t->sw_if_index = vnet_buffer(b[1])->sw_if_index[VLIB_RX];
-        }
-      if (b[2]->flags & VLIB_BUFFER_IS_TRACED)
-        {
-          isolation_group_trace_t *t = 
-                    vlib_add_trace (vm, node, b[2], sizeof (*t));
-          t->next_index = next[2];
-              t->sw_if_index = vnet_buffer(b[2])->sw_if_index[VLIB_RX];
-        }
-      if (b[3]->flags & VLIB_BUFFER_IS_TRACED)
-        {
-          isolation_group_trace_t *t = 
-                    vlib_add_trace (vm, node, b[3], sizeof (*t));
-          t->next_index = next[3];
-              t->sw_if_index = vnet_buffer(b[3])->sw_if_index[VLIB_RX];
-        }
-    }
-
-      b += 4;
-      next += 4;
-      n_left_from -= 4;
-    }
-
   while (n_left_from > 0)
     {
       u32 rx_sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_RX];
       u32 tx_sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_TX];
-      clib_warning("isolation group rx_sw_if_index: %d, tx_sw_if_index: %d", rx_sw_if_index, tx_sw_if_index);
 
       int mapping_index = find_source_port_mapping(rx_sw_if_index);
       if (mapping_index != -1) {
-          clib_warning("find isolation group map success, mapping_index is %d", mapping_index);
           u32 group_id = source_port_group_mappings[mapping_index].group_id;
           int group_index = find_isolation_group(group_id);
           if (group_index != -1) {
               for (int i = 0; i < isolation_groups[group_index].num_destinations; i++) {
                   clib_warning("isolation group Checking destination_sw_if_indices[%d]: %d", i, isolation_groups[group_index].destination_sw_if_indices[i]);
                   if (isolation_groups[group_index].destination_sw_if_indices[i] == tx_sw_if_index) {
-                      clib_warning("destination_sw_if_indices[%d] match tx_sw_if_index", i);
                       next[0] = ISOLATION_GROUP_NEXT_DROP;
+                      find = true;
                       break;
                   }
               }
-              clib_warning("can't find destination_sw_if_indices");
           }
-          else
-          {
-            clib_warning("can't find isolation group");
-          }
+    
       }
-      else
+
+      if(!find)
       {
-        clib_warning("can't find isolation group map");
+        vnet_feature_next_u16 (&next[0], b[0]);
       }
 
       if (is_trace)
