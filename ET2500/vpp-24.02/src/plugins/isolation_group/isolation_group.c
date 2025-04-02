@@ -247,6 +247,7 @@ vl_api_isolation_group_t_handler (vl_api_isolation_group_t * mp)
         if(rv == 0)
         {
           vec_add1(isolation_groups[idx].destination_sw_if_indices, sw_if_index);
+          isolation_groups[idx].num_destinations++;
         } 
       }
     }
@@ -257,6 +258,7 @@ vl_api_isolation_group_t_handler (vl_api_isolation_group_t * mp)
         for (int i = 0; i < isolation_groups[idx].num_destinations; i++) {
           if (isolation_groups[idx].destination_sw_if_indices[i] == sw_if_index) {
               vec_del1(isolation_groups[idx].destination_sw_if_indices, i);
+              isolation_groups[idx].num_destinations--;
               break; 
           }
         }
