@@ -1001,8 +1001,8 @@ eth_input_process_frame (vlib_main_t * vm, vlib_node_runtime_t * node,
       else if (main_is_l3 && etype[0] == et_mpls)
 	next[0] = next_mpls;
       else if (main_is_l3 == 0 &&
-	       etype[0] != et_vlan && etype[0] != et_dot1ad)
-	next[0] = next_l2;
+        etype[0] != et_vlan && etype[0] != et_dot1ad && clib_host_to_net_u16 (etype[0])>=0x600)
+        next[0] = next_l2;
       else
 	{
 	  next[0] = 0;
@@ -1058,6 +1058,10 @@ eth_input_process_frame (vlib_main_t * vm, vlib_node_runtime_t * node,
 		  last_unknown_etype = etype;
 		  etype = clib_host_to_net_u16 (etype);
 		  last_unknown_next = eth_input_next_by_type (etype);
+      if (last_unknown_next == ETHERNET_INPUT_NEXT_LLC && !main_is_l3){
+        vlib_buffer_t *b = vlib_get_buffer (vm, buffer_indices[i]);       
+        vlib_buffer_advance (b, sizeof (ethernet_header_t));
+      }
 		}
 	      if (dmac_check && main_is_l3 && dmacs_bad[i])
 		{
