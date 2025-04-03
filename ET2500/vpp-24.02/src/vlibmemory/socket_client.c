@@ -227,7 +227,7 @@ vl_socket_client_write2 (socket_client_main_t * scm)
 void *
 vl_socket_client_msg_alloc2 (socket_client_main_t * scm, int nbytes)
 {
-  vec_set_len (scm->socket_tx_buffer, nbytes);
+  vec_validate (scm->socket_tx_buffer, nbytes);
   return ((void *) scm->socket_tx_buffer);
 }
 
