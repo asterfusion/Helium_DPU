@@ -29,11 +29,6 @@ typedef struct {
     /* API message ID base */
     u16 msg_id_base;
 
-    /* on/off switch for the periodic function */
-    u8 periodic_timer_enabled;
-    /* Node index, non-zero if the periodic process has been created */
-    u32 periodic_node_index;
-
     /* convenience */
     vlib_main_t * vlib_main;
     vnet_main_t * vnet_main;
@@ -62,20 +57,12 @@ extern source_port_group_mapping_t *source_port_group_mappings;
 extern isolation_group_main_t isolation_group_main;
 
 extern vlib_node_registration_t isolation_group_node;
-extern vlib_node_registration_t isolation_group_periodic_node;
 
 int find_isolation_group (u32 group_id);
 int find_source_port_mapping(u32 source_sw_if_index);
 int add_destination_port_to_group(u32 group_id, u32 destination_sw_if_index);
 int set_source_port_group_mapping(u32 source_sw_if_index, u32 group_id);
 int delete_source_port_group_mapping(u32 source_sw_if_index);
-
-/* Periodic function events */
-#define ISOLATION_GROUP_EVENT1 1
-#define ISOLATION_GROUP_EVENT2 2
-#define ISOLATION_GROUP_EVENT_PERIODIC_ENABLE_DISABLE 3
-
-void isolation_group_create_periodic_process (isolation_group_main_t *);
 
 #endif /* __included_isolation_group_h__ */
 
