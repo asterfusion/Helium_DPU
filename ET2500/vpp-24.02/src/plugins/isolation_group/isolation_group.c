@@ -1,7 +1,7 @@
 /*
  * isolation_group.c - skeleton vpp engine plug-in
  *
- * Copyright (c) <current-year> <your-organization>
+ * Copyright 2024-2027 Asterfusion Network
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at:
@@ -81,8 +81,6 @@ int set_source_port_group_mapping(u32 source_sw_if_index, u32 group_id)
            .group_id = group_id
         };
         vec_add1(source_port_group_mappings, mapping);
-        clib_warning ("source sw if index is %d, group id is %d", source_sw_if_index, group_id);
-
     }
     return 0;
 }
@@ -115,16 +113,9 @@ int isolation_group_enable_disable (isolation_group_main_t * imp, u32 sw_if_inde
   if (sw->type != VNET_SW_INTERFACE_TYPE_HARDWARE)
     return VNET_API_ERROR_INVALID_SW_IF_INDEX;
 
-  isolation_group_create_periodic_process (imp);
-
   vnet_feature_enable_disable ("interface-output", "isolation_group",
                                sw_if_index, enable_disable, 0, 0);
 
-  /* Send an event to enable/disable the periodic scanner process */
-  vlib_process_signal_event (imp->vlib_main,
-                             imp->periodic_node_index,
-                             ISOLATION_GROUP_EVENT_PERIODIC_ENABLE_DISABLE,
-                            (uword)enable_disable);
   return rv;
 }
 
@@ -209,9 +200,7 @@ vl_api_isolation_group_t_handler (vl_api_isolation_group_t * mp)
     u32 group_id = ntohl (mp->group_id);
     u32 sw_if_index = ntohl (mp->sw_if_index);
     bool is_add = (mp->is_add);
-    clib_warning("isolation group passed group id is %d, swifindex is %d", group_id, sw_if_index);
     if (sw_if_index == ~0 && is_add == true) {
-      clib_warning("add isolation group");
       isolation_group_t ig;
       ig.group_id = group_id;
       ig.num_destinations = 0;
@@ -220,7 +209,6 @@ vl_api_isolation_group_t_handler (vl_api_isolation_group_t * mp)
       
     }
     else if (sw_if_index == ~0 && is_add == false) {
-      clib_warning("delete isolation group");
       int idx = find_isolation_group(group_id);
       if (idx != -1) {
           vec_free(isolation_groups[idx].destination_sw_if_indices);
@@ -235,7 +223,6 @@ vl_api_isolation_group_t_handler (vl_api_isolation_group_t * mp)
       }
     }
     else if (sw_if_index != ~0 && is_add == true) {
-      clib_warning("add isolation group member");
       int idx = find_isolation_group(group_id);
       if (idx != -1) {
         for (int i = 0; i < isolation_groups[idx].num_destinations; i++) {
@@ -252,7 +239,6 @@ vl_api_isolation_group_t_handler (vl_api_isolation_group_t * mp)
       }
     }
     else if (sw_if_index != ~0 && is_add == false) {
-      clib_warning("delete isolation group member");
       int idx = find_isolation_group(group_id);
       if (idx != -1) {
         for (int i = 0; i < isolation_groups[idx].num_destinations; i++) {

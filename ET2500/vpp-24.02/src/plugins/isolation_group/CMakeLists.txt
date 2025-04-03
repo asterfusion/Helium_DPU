@@ -1,5 +1,5 @@
 
-# Copyright (c) <current-year> <your-organization>
+# Copyright 2024-2027 Asterfusion Network
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at:
@@ -16,7 +16,6 @@ add_vpp_plugin(isolation_group
   SOURCES
   isolation_group.c
   node.c
-  isolation_group_periodic.c
   isolation_group.h
 
   MULTIARCH_SOURCES
