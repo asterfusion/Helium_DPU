@@ -70,6 +70,14 @@ typedef enum
   ISOLATION_GROUP_N_NEXT,
 } isolation_group_next_t;
 
+static u32 get_parent_sw_if_index(u32 sw_if_index) {
+    vnet_sw_interface_t *sw = vnet_get_sw_interface(vnet_get_main(), sw_if_index);
+    if (sw && sw->type == VNET_SW_INTERFACE_TYPE_SUB) {
+        return sw->sup_sw_if_index;
+    }
+    return ~0;
+}
+
 always_inline uword
 isolation_group_inline (vlib_main_t * vm,
               vlib_node_runtime_t * node, vlib_frame_t * frame,
@@ -92,6 +100,9 @@ isolation_group_inline (vlib_main_t * vm,
       u32 rx_sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_RX];
       u32 tx_sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_TX];
 
+      rx_sw_if_index = get_parent_sw_if_index(rx_sw_if_index);
+      tx_sw_if_index = get_parent_sw_if_index(tx_sw_if_index);
+      
       int mapping_index = find_source_port_mapping(rx_sw_if_index);
       if (mapping_index != -1) {
           u32 group_id = source_port_group_mappings[mapping_index].group_id;
