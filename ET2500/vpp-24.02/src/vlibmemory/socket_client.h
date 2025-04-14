@@ -22,6 +22,8 @@
 #include <vppinfra/time.h>
 #include <vlibapi/memory_shared.h>
 
+#define  SOCKET_CLIENT_MAX_BUFFER_SIZE_4M  4194304
+
 typedef struct
 {
   int socket_fd;

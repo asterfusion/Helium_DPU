@@ -227,7 +227,17 @@ vl_socket_client_write2 (socket_client_main_t * scm)
 void *
 vl_socket_client_msg_alloc2 (socket_client_main_t * scm, int nbytes)
 {
-  vec_validate (scm->socket_tx_buffer, nbytes);
+  if (nbytes < SOCKET_CLIENT_MAX_BUFFER_SIZE_4M)
+  {
+      vec_validate (scm->socket_tx_buffer, nbytes);
+  }
+
+  else
+  {
+      clib_warning("Alloc memory(%d) failed, don't support alloc heap memory that more than 4M", nbytes);
+      os_panic ();
+  }
+
   return ((void *) scm->socket_tx_buffer);
 }
 
