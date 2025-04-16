@@ -17,6 +17,10 @@ else()
     return ()
 endif()
 
+if (${ASROUTER_NAME} MATCHES "octeon10")
+  add_compile_definitions(VPP_PLATFORM_ET2500)
+endif()
+
 include_directories (${CMAKE_CURRENT_SOURCE_DIR}/drv/roc/base/)
 include_directories (${CMAKE_CURRENT_SOURCE_DIR}/drv/roc/)
 
