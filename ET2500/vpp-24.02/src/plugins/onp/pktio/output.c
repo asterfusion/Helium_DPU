@@ -139,10 +139,6 @@ onp_pktio_intf_admin_up_down (vnet_main_t *vnm, u32 hw_if_index, u32 flags)
   if (od->pktio_flags & ONP_DEVICE_F_ERROR)
     return clib_error_return (0, "Invalid (error) device state");
 
-#ifdef VPP_PLATFORM_ET2500
-      onp_pktio_intf_link_up_down(hw_if_index, is_up);
-#endif
-
   if (is_up)
     {
       vnet_hw_interface_set_flags (vnm, od->hw_if_index,
@@ -158,6 +154,10 @@ onp_pktio_intf_admin_up_down (vnet_main_t *vnm, u32 hw_if_index, u32 flags)
       vnet_hw_interface_set_flags (vnm, od->hw_if_index, 0);
       od->pktio_flags &= ~ONP_DEVICE_F_ADMIN_UP;
     }
+
+#ifdef VPP_PLATFORM_ET2500
+      onp_pktio_intf_link_up_down(hw_if_index, is_up);
+#endif
   return 0;
 }
 
