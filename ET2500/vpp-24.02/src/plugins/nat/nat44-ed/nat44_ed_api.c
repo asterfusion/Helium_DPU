@@ -1812,6 +1812,12 @@ send_nat44_user_session_v4_details (snat_session_t *s,
     s->create_status = 2;//for timeout status
   }
 
+  if (rmp->create_status == 2)
+  {
+      vl_msg_api_free(rmp);
+      return;
+  }
+
   vl_api_send_msg (reg, (u8 *) rmp);
 }
 

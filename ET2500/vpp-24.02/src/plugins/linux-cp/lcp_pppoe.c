@@ -1522,7 +1522,7 @@ trace00:
 }
 
 VLIB_REGISTER_NODE (pppoe_input_node) = {
-  .name = "pppoe-input",
+  .name = "lcp-pppoe-input",
   /* Takes a vector of packets. */
   .vector_size = sizeof (u32),
 
@@ -1543,7 +1543,7 @@ VLIB_REGISTER_NODE (pppoe_input_node) = {
 VNET_FEATURE_INIT (pppoe_input_node, static) =
 {
   .arc_name = "device-input",
-  .node_name = "pppoe-input",
+  .node_name = "lcp-pppoe-input",
   .runs_before = VNET_FEATURES ("ethernet-input"),
 };
 

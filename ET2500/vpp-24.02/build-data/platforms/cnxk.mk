@@ -21,7 +21,7 @@ VPP_EXTRA_CMAKE_ARGS           +=-DCMAKE_C_FLAGS="${cnxk_c_flags}"
 
 ifeq ($(OCTEON_VERSION), cn10k)
 VPP_EXTRA_CMAKE_ARGS           +=-DVPP_PLATFORM=octeon10
-else ($(OCTEON_VERSION), cn9k)
+elif ($(OCTEON_VERSION), cn9k)
 VPP_EXTRA_CMAKE_ARGS           +=-DVPP_PLATFORM=octeon9
 endif
 
