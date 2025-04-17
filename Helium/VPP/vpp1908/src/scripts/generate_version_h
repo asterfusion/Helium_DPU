@@ -1,0 +1,33 @@
+#!/bin/bash
+: ${VPP_BUILD_USER:=$(whoami)}
+: ${VPP_BUILD_HOST:=$(hostname)}
+DATE_FMT="+%Y-%m-%dT%H:%M:%S"
+SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(date +%s)}"
+VPP_BUILD_DATE=$(date -u -d "@$SOURCE_DATE_EPOCH" "$DATE_FMT" 2>/dev/null || date -u -r "$SOURCE_DATE_EPOCH" "$DATE_FMT" 2>/dev/null || date -u "$DATE_FMT")
+
+cat > ${1} << __EOF__
+/*
+ * Copyright (c) 2018 Cisco and/or its affiliates.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef included_vpp_app_version_h
+#define included_vpp_app_version_h
+
+#define VPP_BUILD_DATE "$VPP_BUILD_DATE"
+#define VPP_BUILD_USER "$VPP_BUILD_USER"
+#define VPP_BUILD_HOST "$VPP_BUILD_HOST"
+#define VPP_BUILD_TOPDIR "$(git rev-parse --show-toplevel 2> /dev/null)"
+#define VPP_BUILD_VER "$(scripts/version)"
+#endif
+__EOF__

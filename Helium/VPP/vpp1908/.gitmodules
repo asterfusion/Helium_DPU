@@ -1,0 +1,6 @@
+[submodule "build/external/downloads/dpdk-marvell-v8"]
+	path = build/external/downloads/dpdk-marvell-v8
+	url = ssh://git@git.asterfusion.com:7999/fus/dpdk-marvell-v8.git
+[submodule "build/external/downloads/dpdk-marvell-v10"]
+	path = build/external/downloads/dpdk-marvell-v10
+	url = ssh://git@git.asterfusion.com:7999/fus/dpdk-marvell-v10.git

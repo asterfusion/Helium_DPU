@@ -1,0 +1,12 @@
+#!/bin/sh -e
+
+# try to set the required values now. This may or may not work.
+if [ -z "${VPP_INSTALL_SKIP}" ]; then
+    sysctl --system
+else
+    echo "Not exec sysctl..."
+fi
+
+#DEBHELPER#
+
+exit 0

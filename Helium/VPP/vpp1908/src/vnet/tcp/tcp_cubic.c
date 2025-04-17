@@ -1,0 +1,263 @@
+/*
+ * Copyright (c) 2018-2019 Cisco and/or its affiliates.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include <vnet/tcp/tcp.h>
+#include <math.h>
+
+#define beta_cubic 	0.7
+#define cubic_c		0.4
+#define west_const 	(3 * (1 - beta_cubic) / (1 + beta_cubic))
+
+typedef struct cubic_cfg_
+{
+  u8 fast_convergence;
+  u32 ssthresh;
+} cubic_cfg_t;
+
+static cubic_cfg_t cubic_cfg = {
+  .fast_convergence = 1,
+  .ssthresh = 0x7FFFFFFFU,
+};
+
+typedef struct cubic_data_
+{
+  /** time period (in seconds) needed to increase the current window
+   *  size to W_max if there are no further congestion events */
+  f64 K;
+
+  /** time (in sec) since the start of current congestion avoidance */
+  f64 t_start;
+
+  /** Inflection point of the cubic function (in snd_mss segments) */
+  u32 w_max;
+
+} __clib_packed cubic_data_t;
+
+STATIC_ASSERT (sizeof (cubic_data_t) <= TCP_CC_DATA_SZ, "cubic data len");
+
+static inline f64
+cubic_time (u32 thread_index)
+{
+  return transport_time_now (thread_index);
+}
+
+/**
+ * RFC 8312 Eq. 1
+ *
+ * CUBIC window increase function. Time and K need to be provided in seconds.
+ */
+static inline u64
+W_cubic (cubic_data_t * cd, f64 t)
+{
+  f64 diff = t - cd->K;
+
+  /* W_cubic(t) = C*(t-K)^3 + W_max */
+  return cubic_c * diff * diff * diff + cd->w_max;
+}
+
+/**
+ * RFC 8312 Eq. 2
+ */
+static inline f64
+K_cubic (cubic_data_t * cd, u32 wnd)
+{
+  /* K = cubic_root(W_max*(1-beta_cubic)/C)
+   * Because the current window may be less than W_max * beta_cubic because
+   * of fast convergence, we pass it as parameter */
+  return pow ((f64) (cd->w_max - wnd) / cubic_c, 1 / 3.0);
+}
+
+/**
+ * RFC 8312 Eq. 4
+ *
+ * Estimates the window size of AIMD(alpha_aimd, beta_aimd) for
+ * alpha_aimd=3*(1-beta_cubic)/(1+beta_cubic) and beta_aimd=beta_cubic.
+ * Time (t) and rtt should be provided in seconds
+ */
+static inline u32
+W_est (cubic_data_t * cd, f64 t, f64 rtt)
+{
+  /* W_est(t) = W_max*beta_cubic+[3*(1-beta_cubic)/(1+beta_cubic)]*(t/RTT) */
+  return cd->w_max * beta_cubic + west_const * (t / rtt);
+}
+
+static void
+cubic_congestion (tcp_connection_t * tc)
+{
+  cubic_data_t *cd = (cubic_data_t *) tcp_cc_data (tc);
+  u32 w_max;
+
+  w_max = tc->cwnd / tc->snd_mss;
+  if (cubic_cfg.fast_convergence && w_max < cd->w_max)
+    w_max = w_max * ((1.0 + beta_cubic) / 2.0);
+
+  cd->w_max = w_max;
+  tc->ssthresh = clib_max (tc->cwnd * beta_cubic, 2 * tc->snd_mss);
+  tc->cwnd = tc->ssthresh;
+}
+
+static void
+cubic_loss (tcp_connection_t * tc)
+{
+  cubic_data_t *cd = (cubic_data_t *) tcp_cc_data (tc);
+
+  tc->cwnd = tcp_loss_wnd (tc);
+  cd->t_start = cubic_time (tc->c_thread_index);
+  cd->K = 0;
+  cd->w_max = tc->cwnd / tc->snd_mss;
+}
+
+static void
+cubic_recovered (tcp_connection_t * tc)
+{
+  cubic_data_t *cd = (cubic_data_t *) tcp_cc_data (tc);
+  cd->t_start = cubic_time (tc->c_thread_index);
+  tc->cwnd = tc->ssthresh;
+  cd->K = K_cubic (cd, tc->cwnd / tc->snd_mss);
+}
+
+static void
+cubic_cwnd_accumulate (tcp_connection_t * tc, u32 thresh, u32 bytes_acked)
+{
+  /* We just updated the threshold and don't know how large the previous
+   * one was. Still, optimistically increase cwnd by one segment and
+   * clear the accumulated bytes. */
+  if (tc->cwnd_acc_bytes > thresh)
+    {
+      tc->cwnd += tc->snd_mss;
+      tc->cwnd_acc_bytes = 0;
+    }
+
+  tcp_cwnd_accumulate (tc, thresh, tc->bytes_acked);
+}
+
+static void
+cubic_rcv_ack (tcp_connection_t * tc, tcp_rate_sample_t * rs)
+{
+  cubic_data_t *cd = (cubic_data_t *) tcp_cc_data (tc);
+  u64 w_cubic, w_aimd;
+  f64 t, rtt_sec;
+  u32 thresh;
+
+  /* Constrained by tx fifo, can't grow further */
+  if (tc->cwnd >= tc->tx_fifo_size)
+    return;
+
+  if (tcp_in_slowstart (tc))
+    {
+      tc->cwnd += tc->bytes_acked;
+      return;
+    }
+
+  t = cubic_time (tc->c_thread_index) - cd->t_start;
+  rtt_sec = clib_min (tc->mrtt_us, (f64) tc->srtt * TCP_TICK);
+
+  w_cubic = W_cubic (cd, t + rtt_sec) * tc->snd_mss;
+  w_aimd = (u64) W_est (cd, t, rtt_sec) * tc->snd_mss;
+  if (w_cubic < w_aimd)
+    {
+      cubic_cwnd_accumulate (tc, tc->cwnd, tc->bytes_acked);
+    }
+  else
+    {
+      if (w_cubic > tc->cwnd)
+	{
+	  /* For NewReno and slow start, we increment cwnd based on the
+	   * number of bytes acked, not the number of acks received. In
+	   * particular, for NewReno we increment the cwnd by 1 snd_mss
+	   * only after we accumulate 1 cwnd of acked bytes (RFC 3465).
+	   *
+	   * For Cubic, as per RFC 8312 we should increment cwnd by
+	   * (w_cubic - cwnd)/cwnd for each ack. Instead of using that,
+	   * we compute the number of packets that need to be acked
+	   * before adding snd_mss to cwnd and compute the threshold
+	   */
+	  thresh = (tc->snd_mss * tc->cwnd) / (w_cubic - tc->cwnd);
+
+	  /* Make sure we don't increase cwnd more often than every segment */
+	  thresh = clib_max (thresh, tc->snd_mss);
+	}
+      else
+	{
+	  /* Practically we can't increment so just inflate threshold */
+	  thresh = 50 * tc->cwnd;
+	}
+      cubic_cwnd_accumulate (tc, thresh, tc->bytes_acked);
+    }
+}
+
+static void
+cubic_conn_init (tcp_connection_t * tc)
+{
+  cubic_data_t *cd = (cubic_data_t *) tcp_cc_data (tc);
+  tc->ssthresh = cubic_cfg.ssthresh;
+  tc->cwnd = tcp_initial_cwnd (tc);
+  cd->w_max = 0;
+  cd->K = 0;
+  cd->t_start = cubic_time (tc->c_thread_index);
+}
+
+static uword
+cubic_unformat_config (unformat_input_t * input)
+{
+  u32 ssthresh = 0x7FFFFFFFU;
+
+  if (!input)
+    return 0;
+
+  unformat_skip_white_space (input);
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "no-fast-convergence"))
+	cubic_cfg.fast_convergence = 0;
+      else if (unformat (input, "ssthresh %u", &ssthresh))
+	cubic_cfg.ssthresh = ssthresh;
+      else
+	return 0;
+    }
+  return 1;
+}
+
+const static tcp_cc_algorithm_t tcp_cubic = {
+  .name = "cubic",
+  .unformat_cfg = cubic_unformat_config,
+  .congestion = cubic_congestion,
+  .loss = cubic_loss,
+  .recovered = cubic_recovered,
+  .rcv_ack = cubic_rcv_ack,
+  .rcv_cong_ack = newreno_rcv_cong_ack,
+  .init = cubic_conn_init,
+};
+
+clib_error_t *
+cubic_init (vlib_main_t * vm)
+{
+  clib_error_t *error = 0;
+
+  tcp_cc_algo_register (TCP_CC_CUBIC, &tcp_cubic);
+
+  return error;
+}
+
+VLIB_INIT_FUNCTION (cubic_init);
+
+/*
+ * fd.io coding-style-patch-verification: ON
+ *
+ * Local Variables:
+ * eval: (c-set-style "gnu")
+ * End:
+ */

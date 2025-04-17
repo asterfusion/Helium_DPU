@@ -1,0 +1,217 @@
+/*
+ * Copyright (c) 2015-2016 Cisco and/or its affiliates.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+option version = "1.1.0";
+import "vnet/fib/fib_types.api";
+import "vnet/ip/ip_types.api";
+
+/** \brief Bind/Unbind an MPLS local label to an IP prefix. i.e. create
+           a per-prefix label entry.
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param mb_mpls_table_id - The MPLS table-id the MPLS entry will be added in
+    @param mb_label - The MPLS label value to bind
+    @param mb_ip_table_id - The IP table-id of the IP prefix to bind to.
+    @param mb_is_bind - Bind or unbind
+    @param mb_is_ip4 - The prefix to bind to is IPv4
+    @param mb_prefix - IP prefix
+*/
+autoreply define mpls_ip_bind_unbind
+{
+  u32 client_index;
+  u32 context;
+  u32 mb_mpls_table_id;
+  u32 mb_label;
+  u32 mb_ip_table_id;
+  u8 mb_is_bind;
+  vl_api_prefix_t mb_prefix;
+};
+
+typeonly define mpls_tunnel
+{
+  u32 mt_sw_if_index;
+  u32 mt_tunnel_index;
+  u8 mt_l2_only;
+  u8 mt_is_multicast;
+  u8 mt_n_paths;
+  vl_api_fib_path_t mt_paths[mt_n_paths];
+};
+define mpls_tunnel_add_del
+{
+  u32 client_index;
+  u32 context;
+  u8 mt_is_add;
+  vl_api_mpls_tunnel_t mt_tunnel;
+};
+
+/** \brief Reply for MPLS tunnel add / del request
+    @param context - returned sender context, to match reply w/ request
+    @param retval - return code
+    @param sw_if_index - SW interface index of the tunnel created
+*/
+define mpls_tunnel_add_del_reply
+{
+  u32 context;
+  i32 retval;
+  u32 sw_if_index;
+  u32 tunnel_index;
+};
+
+/** \brief Dump mpls eth tunnel table
+    @param client_index - opaque cookie to identify the sender
+    @param sw_if_index - sw_if_index of the MPLS tunnel
+                         (as returned from the create)
+*/
+define mpls_tunnel_dump
+{
+  u32 client_index;
+  u32 context;
+  u32 sw_if_index;
+};
+
+/** \brief mpls tunnel details
+*/
+manual_endian manual_print define mpls_tunnel_details
+{
+  u32 context;
+  vl_api_mpls_tunnel_t mt_tunnel;
+};
+
+/** \brief MPLS Route Add / del route
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param mt_table_id - The MPLS table-id the route is added in
+    @param mt_is_add - Is this a route add or delete
+    @param mt_name - A client provided name/tag for the table. If this
+                     is not set by the client, then VPP will generate
+		     something meaningfull.
+*/
+typeonly define mpls_table
+{
+  u32 mt_table_id;
+  u8  mt_name[64];
+};
+autoreply define mpls_table_add_del
+{
+  u32 client_index;
+  u32 context;
+  u8  mt_is_add;
+  vl_api_mpls_table_t mt_table;
+};
+
+/** \brief Dump MPLS fib table
+    @param client_index - opaque cookie to identify the sender
+*/
+define mpls_table_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+define mpls_table_details
+{
+  u32 context;
+  vl_api_mpls_table_t mt_table;
+};
+
+/** \brief MPLS Route
+    @param mr_label - The MPLS label value
+    @param mr_eos - The End of stack bit
+    @param mr_eos_proto - If EOS then this is the DPO packect's proto post pop
+    @param mr_table_id - The MPLS table-id the route is added in
+    @param mr_is_add - Is this a route add or delete
+    @param mr_is_multicast - Is this a multicast route
+    @param mr_n_paths - The number of paths
+    @param mr_paths - The paths
+*/
+typeonly define mpls_route
+{
+  u32 mr_table_id;
+  u32 mr_label;
+  u8 mr_eos;
+  u8 mr_eos_proto;
+  u8 mr_is_multicast;
+  u8 mr_n_paths;
+  vl_api_fib_path_t mr_paths[mr_n_paths];
+};
+
+/** \brief MPLS Route Add / del route
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param mr_table_id - The MPLS table-id the route is added in
+    @param mr_is_add - Is this a route add or delete
+    @param mr_is_multipath - Is this route update a multipath - i.e. is this
+                             a path addition to an existing route
+    @param mr_route - The Route
+*/
+define mpls_route_add_del
+{
+  u32 client_index;
+  u32 context;
+  u8 mr_is_add;
+  u8 mr_is_multipath;
+  vl_api_mpls_route_t mr_route;
+};
+
+define mpls_route_add_del_reply
+{
+  u32 context;
+  i32 retval;
+  u32 stats_index;
+};
+
+/** \brief Dump MPLS fib table
+    @param client_index - opaque cookie to identify the sender
+*/
+define mpls_route_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_mpls_table_t table;
+};
+
+/** \brief mpls FIB table response
+    @param table_id - MPLS fib table id
+    @param s_bit - End-of-stack bit
+    @param label - MPLS label value
+    @param count - the number of fib_path in path
+    @param path  - array of of fib_path structures
+*/
+manual_endian manual_print define mpls_route_details
+{
+  u32 context;
+  vl_api_mpls_route_t mr_route;
+};
+
+/** \brief Enable or Disable MPLS on and interface
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - index of the interface
+    @param enable - if non-zero enable, else disable
+*/
+autoreply define sw_interface_set_mpls_enable
+{
+  u32 client_index;
+  u32 context;
+  u32 sw_if_index;
+  u8 enable;
+};
+
+/*
+ * Local Variables:
+ * eval: (c-set-style "gnu")
+ * End:
+ */
+ 

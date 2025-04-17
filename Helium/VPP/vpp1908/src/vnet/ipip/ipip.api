@@ -1,0 +1,145 @@
+/*
+ * Copyright (c) 2018 Cisco and/or its affiliates.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * The IPIP module implements IP{v4,v6} over IP{v4,v6} tunnelling as
+ * described in RFC2473 and to some extent the largely historical
+ * RFC1853.  The module also supports an IPv4 over IPv6 automatic
+ * tunnelling mechanism called 6RD (RFC5969).
+ *
+ * The IPIP API module supports a CRD model for adding, deleting and
+ * listing tunnels. A tunnel is represented as an interface in
+ * VPP. The "handle" representing a tunnel is the sw_if_index.  As any
+ * interface, the user must configure an IPv4 and/or IPv6 address on
+ * the interface. This is the inner or payload protocol.
+ *
+ * Tunnel MTU: The tunnel MTU (the payload MTU) is configurable per
+ * protocol. If a tunnel MTU is larger than the path MTU, the outer
+ * packet will be fragmented. Fragmentation support is configurable,
+ * as it can have severe performance issues, and might be used as an
+ * attack vector (the remote side must reassemble.)
+ *
+ * Traffic class / TOS field can either be configured to a fixed
+ * value, or can be copied from the inner to the outer header.
+ * (For now we have stolen ~0 to indicate copy).
+ *
+ * Note:
+ *
+ * - The Tunnel encapsulation limit described in RFC2473 is not
+ *   implemented.
+ *
+ * - ICMP proxying, as in a tunnel head-end receiving ICMP erors on
+ *   the outer packet is currently not relayed to the original source
+ *   of the packet.
+ *
+ * - PMTUD / MTU probing and tunnel keepalives are not yet implemented.
+ *
+ */
+
+option version = "1.2.0";
+import "vnet/interface_types.api";
+import "vnet/ip/ip_types.api";
+
+/**
+ * An IP{v4,v6} over IP{v4,v6} tunnel.
+ */
+typedef ipip_tunnel
+{
+  u32 instance; /* If non-~0, specifies a custom dev instance */
+  vl_api_address_t src;
+  vl_api_address_t dst;
+  vl_api_interface_index_t sw_if_index; /* ignored on create, set in
+					   details/dump */
+  u32 table_id;
+  u8 tc_tos; /* If ~0, the TOS/TC value is copied from
+                inner packet, otherwise set to value */
+};
+
+/**
+ * Create an IP{v4,v6} over IP{v4,v6} tunnel.
+ */
+define ipip_add_tunnel
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ipip_tunnel_t tunnel;
+};
+
+define ipip_add_tunnel_reply
+{
+  u32 context;
+  i32 retval;
+  vl_api_interface_index_t sw_if_index;
+};
+
+/**
+ * Delete an IP{v4,v6} over IP{v4,v6} tunnel.
+ */
+autoreply define ipip_del_tunnel
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+};
+
+/**
+ * Create an IPv4 over IPv6 automatic tunnel (6RD)
+ */
+define ipip_6rd_add_tunnel
+{
+  u32 client_index;
+  u32 context;
+  u32 ip6_table_id;
+  u32 ip4_table_id;
+  vl_api_ip6_prefix_t ip6_prefix;
+  vl_api_ip4_prefix_t ip4_prefix;
+  vl_api_ip4_address_t ip4_src;
+  bool security_check;
+  u8 tc_tos; /* If ~0, the TOS/TC value is copied from
+                inner packet, otherwise set to value */
+};
+
+define ipip_6rd_add_tunnel_reply
+{
+  u32 context;
+  i32 retval;
+  vl_api_interface_index_t sw_if_index;
+};
+
+/**
+ * Delete an IPv4 over IPv6 automatic tunnel (6RD)
+ */
+autoreply define ipip_6rd_del_tunnel
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+};
+
+/**
+ * List all IPIP tunnels
+ */
+define ipip_tunnel_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+};
+
+define ipip_tunnel_details
+{
+  u32 context;
+  vl_api_ipip_tunnel_t tunnel;
+};
