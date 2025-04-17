@@ -29,7 +29,6 @@ typedef enum
     LCP_VRRP_N_NEXT,
 } lcp_vrrp_next_t;
 
-#define VRRP_PROTOCOL  112
 typedef struct lcp_vrrp_trace_t_
 {
   u32 sw_if_index;
@@ -95,7 +94,7 @@ VLIB_NODE_FN (lcp_vrrp_node) (vlib_main_t * vm,
           ip40 = vlib_buffer_get_current (b0);
           ip41 = vlib_buffer_get_current (b1);
 
-          if(VRRP_PROTOCOL == ip40->protocol)
+          if(IP_PROTOCOL_VRRP == ip40->protocol)
           {
               len0 = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
               vlib_buffer_advance (b0, -len0);
@@ -107,7 +106,7 @@ VLIB_NODE_FN (lcp_vrrp_node) (vlib_main_t * vm,
               }
           }
 
-          if (VRRP_PROTOCOL == ip41->protocol)
+          if (IP_PROTOCOL_VRRP == ip41->protocol)
           {
               len1 = ((u8 *) vlib_buffer_get_current (b1) - (u8 *) ethernet_buffer_get_header (b1));
               vlib_buffer_advance (b1, -len1);
@@ -168,7 +167,7 @@ VLIB_NODE_FN (lcp_vrrp_node) (vlib_main_t * vm,
 
           ip4 = vlib_buffer_get_current (b0);
 
-          if (VRRP_PROTOCOL == ip4->protocol)
+          if (IP_PROTOCOL_VRRP == ip4->protocol)
           {
               len = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
               vlib_buffer_advance (b0, -len);
@@ -258,7 +257,7 @@ VLIB_NODE_FN (lcp_vrrp6_node) (vlib_main_t * vm,
           ip60 = vlib_buffer_get_current (b0);
           ip61 = vlib_buffer_get_current (b1);
 
-          if(VRRP_PROTOCOL == ip60->protocol)
+          if(IP_PROTOCOL_VRRP == ip60->protocol)
           {
               len0 = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
               vlib_buffer_advance (b0, -len0);
@@ -270,7 +269,7 @@ VLIB_NODE_FN (lcp_vrrp6_node) (vlib_main_t * vm,
               }
           }
 
-          if (VRRP_PROTOCOL == ip61->protocol)
+          if (IP_PROTOCOL_VRRP == ip61->protocol)
           {
               len1 = ((u8 *) vlib_buffer_get_current (b1) - (u8 *) ethernet_buffer_get_header (b1));
               vlib_buffer_advance (b1, -len1);
@@ -331,7 +330,7 @@ VLIB_NODE_FN (lcp_vrrp6_node) (vlib_main_t * vm,
 
           ip6 = vlib_buffer_get_current (b0);
 
-          if (VRRP_PROTOCOL == ip6->protocol)
+          if (IP_PROTOCOL_VRRP == ip6->protocol)
           {
               len = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
               vlib_buffer_advance (b0, -len);
@@ -412,13 +411,6 @@ VLIB_REGISTER_NODE (lcp_vrrp6_node) =
 VNET_FEATURE_INIT (lcp_vrrp_mc, static) =
 {
   .arc_name = "ip4-multicast",
-  .node_name = "linux-cp-vrrp",
-  .runs_before = VNET_FEATURES ("ip4-not-enabled"),
-};
-
-VNET_FEATURE_INIT (lcp_vrrp_uc, static) =
-{
-  .arc_name = "ip4-unicast",
   .node_name = "linux-cp-vrrp",
   .runs_before = VNET_FEATURES ("ip4-not-enabled"),
 };
