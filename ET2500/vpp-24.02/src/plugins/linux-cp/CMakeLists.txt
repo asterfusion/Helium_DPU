@@ -62,6 +62,8 @@ add_vpp_plugin(linux_cp
   lcp_pppoe_api.c
   lcp_bfd.c
   lcp_bpdu.c
+  lcp_vrrp.c
+
   API_FILES
   lcp.api
   lcp_pppoe.api
