@@ -267,6 +267,8 @@ lcp_lldp_init (vlib_main_t *vm)
   /* register lldp punt node */
   ethernet_register_input_type (vm, ETHERNET_TYPE_802_1_LLDP /* LLDP */ ,
 				lcp_lldp_punt_node.index);
+  ethernet_register_input_type (vm, ETHERNET_TYPE_802_1X_AUTHENTICATION/* dot1x */ ,
+				lcp_lldp_punt_node.index);
   return NULL;
 }
 
