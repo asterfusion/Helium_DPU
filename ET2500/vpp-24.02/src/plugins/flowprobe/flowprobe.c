@@ -36,6 +36,11 @@
 #include <flowprobe/flowprobe.api_enum.h>
 #include <flowprobe/flowprobe.api_types.h>
 
+static vlib_log_class_t flowprobe_logger __attribute__((unused));
+#define FLOWPROBE_INFO(...)                              \
+    vlib_log_notice (flowprobe_logger, __VA_ARGS__);
+
+
 flowprobe_main_t flowprobe_main;
 static vlib_node_registration_t flowprobe_timer_node;
 uword flowprobe_walker_process (vlib_main_t * vm, vlib_node_runtime_t * rt,
@@ -241,13 +246,15 @@ flowprobe_template_rewrite_inline (ipfix_exporter_t *exp, flow_report_t *fr,
   u8 *rewrite = 0;
   ip4_ipfix_template_packet_t *tp;
   u32 field_count = 0;
-  flow_report_stream_t *stream;
+  
   flowprobe_main_t *fm = &flowprobe_main;
   flowprobe_record_t flags = fr->opaque.as_uword;
   bool collect_ip4 = false, collect_ip6 = false;
   bool collect_l4 = false;
-
+#ifndef ET2500_IPFIX
+  flow_report_stream_t *stream;
   stream = &exp->streams[fr->stream_index];
+#endif  
 
   if (flags & FLOW_RECORD_L3)
     {
@@ -292,14 +299,19 @@ flowprobe_template_rewrite_inline (ipfix_exporter_t *exp, flow_report_t *fr,
   ip->protocol = IP_PROTOCOL_UDP;
   ip->src_address.as_u32 = exp->src_address.ip.ip4.as_u32;
   ip->dst_address.as_u32 = exp->ipfix_collector.ip.ip4.as_u32;
-  udp->src_port = clib_host_to_net_u16 (stream->src_port);
+ 
   udp->dst_port = clib_host_to_net_u16 (collector_port);
   udp->length = clib_host_to_net_u16 (vec_len (rewrite) - sizeof (*ip));
 
   /* FIXUP: message header export_time */
   /* FIXUP: message header sequence_number */
+  #ifdef ET2500_IPFIX
+  udp->src_port = clib_host_to_net_u16 (exp->src_port);
+  h->domain_id = clib_host_to_net_u32 (exp->domain_id);
+  #else
+  udp->src_port = clib_host_to_net_u16 (stream->src_port);
   h->domain_id = clib_host_to_net_u32 (stream->domain_id);
-
+#endif
   /* Add TLVs to the template */
   f = flowprobe_template_common_fields (f);
 

@@ -605,8 +605,14 @@ flowprobe_export_send (vlib_main_t * vm, vlib_buffer_t * b0,
   h->export_time =
     (u32) (((f64) frm->unix_time_0) + (vlib_time_now (vm) - frm->vlib_time_0));
   h->export_time = clib_host_to_net_u32 (h->export_time);
+ 
+  #ifdef ET2500_IPFIX
+  h->domain_id = clib_host_to_net_u32 (exp->domain_id);
+  udp->src_port = clib_host_to_net_u16 (exp->src_port);
+  #else
   h->domain_id = clib_host_to_net_u32 (stream->domain_id);
-
+  udp->src_port = clib_host_to_net_u16 (stream->src_port);
+  #endif
   /* FIXUP: message header sequence_number */
   h->sequence_number = stream->sequence_number++;
   h->sequence_number = clib_host_to_net_u32 (h->sequence_number);

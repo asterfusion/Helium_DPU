@@ -183,6 +183,10 @@ typedef struct ipfix_exporter
    * L3 and L4 protocols in use.
    */
   u32 all_headers_size;
+#ifdef ET2500_IPFIX
+  u16 src_port;
+  u32 domain_id;
+#endif
 } ipfix_exporter_t;
 
 typedef struct flow_report_main
