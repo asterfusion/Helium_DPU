@@ -493,7 +493,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 		  saved_matched_ace_index = match_rule_index;
 		  saved_packet_count = 1;
 		  saved_byte_count = buf_len;
-		  if (!is_l2_path)
+		  if (!is_l2_path && is_input)
 		  {
 			saved_byte_count += ethernet_buffer_header_size(b[0]);
 		  }
