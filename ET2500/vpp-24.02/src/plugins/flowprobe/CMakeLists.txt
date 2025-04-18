@@ -11,6 +11,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+if (${ASROUTER_NAME} MATCHES "octeon10")
+  add_compile_definitions(ET2500_IPFIX)
+endif()
+
 add_vpp_plugin(flowprobe
   SOURCES
   flowprobe.c

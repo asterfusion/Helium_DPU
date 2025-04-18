@@ -27,6 +27,8 @@ import "vnet/ip/ip_types.api";
     @param path_mtu - Path MTU between exporter and collector
     @param template_interval - number of seconds after which to resend template
     @param udp_checksum - UDP checksum calculation enable flag
+    @param src_port - UDP src_port
+    @param domain_id - domain_id
 */
 autoreply define set_ipfix_exporter
 {
@@ -39,6 +41,8 @@ autoreply define set_ipfix_exporter
   u32 path_mtu;
   u32 template_interval;
   bool udp_checksum;
+  u16 src_port;
+  u32 domain_id;
 };
 
 /** \brief IPFIX exporter dump request
@@ -91,6 +95,8 @@ define ipfix_exporter_details
     @param path_mtu - Path MTU between exporter and collector
     @param template_interval - number of seconds after which to resend template
     @param udp_checksum - UDP checksum calculation enable flag
+    @param src_port - UDP src_port
+    @param domain_id - domain_id
 */
 
 define ipfix_exporter_create_delete {
@@ -104,6 +110,8 @@ define ipfix_exporter_create_delete {
   u32 path_mtu;
   u32 template_interval;
   bool udp_checksum;
+  u16 src_port;
+  u32 domain_id;
 };
 
 define ipfix_exporter_create_delete_reply {
