@@ -19,6 +19,14 @@
 #include <linux-cp/lcp.api_enum.h>
 #include <linux-cp/lcp.api_types.h>
 
+extern u16 bpdu_drop[MAX_SW_INDEX];
+
+static vlib_log_class_t lcp_logger __attribute__((unused));
+#define LCP_INFO(...)                              \
+    vlib_log_notice (lcp_logger, __VA_ARGS__);
+
+
+
 static u16 lcp_msg_id_base;
 #define REPLY_MSG_ID_BASE lcp_msg_id_base
 #include <vlibapi/api_helper_macros.h>
@@ -315,6 +323,24 @@ vl_api_lcp_set_interface_punt_feature_t_handler (
 
   BAD_SW_IF_INDEX_LABEL;
   REPLY_MACRO (VL_API_LCP_SET_INTERFACE_PUNT_FEATURE_REPLY);
+}
+
+
+
+static void
+vl_api_lcp_set_interface_bpdu_drop_t_handler (
+  vl_api_lcp_set_interface_bpdu_drop_t *mp)
+{
+  vl_api_lcp_set_interface_bpdu_drop_reply_t *rmp;
+  int rv = 0;
+  u32 sw_if_index = ntohl (mp->sw_if_index);
+  u8 is_drop = mp->is_drop ? 1 : 0;
+
+  bpdu_drop[sw_if_index] = is_drop;
+
+  LCP_INFO("sw_if_index =%d,is_drop=%d",sw_if_index,is_drop);
+  
+  REPLY_MACRO (VL_API_LCP_SET_INTERFACE_BPDU_DROP_REPLY);
 }
 
 /*

@@ -237,6 +237,20 @@ autoreply define lcp_set_interface_punt_feature
   bool punt_on;
 };
 
+/** \brief set interface bpdu drop
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - index of the interface to set flags on
+    @param bpdu_drop - bpdu drop is on ?
+*/
+autoreply define lcp_set_interface_bpdu_drop
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool is_drop;
+};
+
 /*
  * Local Variables:
  * eval: (c-set-style "gnu")
