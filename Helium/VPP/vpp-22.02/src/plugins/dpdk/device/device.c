@@ -24,6 +24,8 @@
 #include <vppinfra/error.h>
 #include <vlib/unix/unix.h>
 
+extern u16 intf_vlan[12];
+
 #define foreach_dpdk_tx_func_error			\
   _(BAD_RETVAL, "DPDK tx function returned an error")	\
   _(PKT_DROP, "Tx packet drops (dpdk tx failure)")
@@ -385,6 +387,8 @@ dpdk_device_output (vlib_main_t *vm, vlib_node_runtime_t *node,
   struct rte_mbuf **mb;
   vlib_buffer_t *b[4];
   int has_subintf = 0;
+  u8 *pkt_start = NULL;
+  u16 *pkt_start_tmp = NULL;
 
   ASSERT (n_packets <= VLIB_FRAME_SIZE);
 
@@ -416,6 +420,67 @@ dpdk_device_output (vlib_main_t *vm, vlib_node_runtime_t *node,
       b[2] = vlib_buffer_from_rte_mbuf (mb[2]);
       b[3] = vlib_buffer_from_rte_mbuf (mb[3]);
 
+      if(has_subintf)
+      {
+        mb[0]->ol_flags |= PKT_TX_VLAN_PKT;
+        mb[1]->ol_flags |= PKT_TX_VLAN_PKT;
+        mb[2]->ol_flags |= PKT_TX_VLAN_PKT;
+        mb[3]->ol_flags |= PKT_TX_VLAN_PKT;
+
+        mb[0]->vlan_tci = vnet_buffer(b[0])->sw_if_index[VLIB_TX] - 4 + 1;
+        mb[1]->vlan_tci = vnet_buffer(b[1])->sw_if_index[VLIB_TX] - 4 + 1;
+        mb[2]->vlan_tci = vnet_buffer(b[2])->sw_if_index[VLIB_TX] - 4 + 1;
+        mb[3]->vlan_tci = vnet_buffer(b[3])->sw_if_index[VLIB_TX] - 4 + 1;
+
+	if (mb[0]->vlan_tci <= 12 && 0 != intf_vlan[mb[0]->vlan_tci - 1])
+        {
+                vlib_buffer_advance(b[0], -4);
+                pkt_start = vlib_buffer_get_current (b[0]);
+                memcpy(pkt_start, pkt_start + 4, 12);
+                *(pkt_start + 12) = 0x81;
+                *(pkt_start + 13) = 0x00;
+                pkt_start_tmp = (u16 *)(pkt_start + 14);
+                *pkt_start_tmp = htons(intf_vlan[mb[0]->vlan_tci - 1]);
+
+        }
+
+	if (mb[1]->vlan_tci <= 12 && 0 != intf_vlan[mb[1]->vlan_tci - 1])
+        {
+                vlib_buffer_advance(b[1], -4);
+                pkt_start = vlib_buffer_get_current (b[1]);
+                memcpy(pkt_start, pkt_start + 4, 12);
+                *(pkt_start + 12) = 0x81;
+                *(pkt_start + 13) = 0x00;
+                pkt_start_tmp = (u16 *)(pkt_start + 14);
+                *pkt_start_tmp = htons(intf_vlan[mb[1]->vlan_tci - 1]);
+
+        }
+
+	if (mb[2]->vlan_tci <= 12 && 0 != intf_vlan[mb[2]->vlan_tci - 1])
+        {
+                vlib_buffer_advance(b[2], -4);
+                pkt_start = vlib_buffer_get_current (b[2]);
+                memcpy(pkt_start, pkt_start + 4, 12);
+                *(pkt_start + 12) = 0x81;
+                *(pkt_start + 13) = 0x00;
+                pkt_start_tmp = (u16 *)(pkt_start + 14);
+                *pkt_start_tmp = htons(intf_vlan[mb[2]->vlan_tci - 1]);
+
+        }
+
+        if (mb[3]->vlan_tci <= 12 && 0 != intf_vlan[mb[3]->vlan_tci - 1])
+        {
+                vlib_buffer_advance(b[3], -4);
+                pkt_start = vlib_buffer_get_current (b[3]);
+                memcpy(pkt_start, pkt_start + 4, 12);
+                *(pkt_start + 12) = 0x81;
+                *(pkt_start + 13) = 0x00;
+                pkt_start_tmp = (u16 *)(pkt_start + 14);
+                *pkt_start_tmp = htons(intf_vlan[mb[3]->vlan_tci - 1]);
+
+        }
+      }
+
       or_flags = b[0]->flags | b[1]->flags | b[2]->flags | b[3]->flags;
 
       if (or_flags & VLIB_BUFFER_NEXT_PRESENT)
@@ -432,19 +497,6 @@ dpdk_device_output (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  dpdk_validate_rte_mbuf (vm, b[2], 0, mempool_deplete_enable, ptd);
 	  dpdk_validate_rte_mbuf (vm, b[3], 0, mempool_deplete_enable, ptd);
 	}
-
-	  if(has_subintf)
-      {
-        mb[0]->ol_flags |= PKT_TX_VLAN_PKT;
-        mb[1]->ol_flags |= PKT_TX_VLAN_PKT;
-        mb[2]->ol_flags |= PKT_TX_VLAN_PKT;
-        mb[3]->ol_flags |= PKT_TX_VLAN_PKT;
-    
-        mb[0]->vlan_tci = vnet_buffer(b[0])->sw_if_index[VLIB_TX] - 4 + 1;
-        mb[1]->vlan_tci = vnet_buffer(b[1])->sw_if_index[VLIB_TX] - 4 + 1;
-        mb[2]->vlan_tci = vnet_buffer(b[2])->sw_if_index[VLIB_TX] - 4 + 1;
-        mb[3]->vlan_tci = vnet_buffer(b[3])->sw_if_index[VLIB_TX] - 4 + 1;
-      }
 
       if (PREDICT_FALSE ((xd->flags & DPDK_DEVICE_FLAG_TX_OFFLOAD) &&
 			 (or_flags & VNET_BUFFER_F_OFFLOAD)))
@@ -486,6 +538,39 @@ dpdk_device_output (vlib_main_t *vm, vlib_node_runtime_t *node,
       b[0] = vlib_buffer_from_rte_mbuf (mb[0]);
       b[1] = vlib_buffer_from_rte_mbuf (mb[1]);
 
+      if(has_subintf)
+      {
+        mb[0]->ol_flags |= PKT_TX_VLAN_PKT;
+        mb[1]->ol_flags |= PKT_TX_VLAN_PKT;
+
+        mb[0]->vlan_tci = vnet_buffer(b[0])->sw_if_index[VLIB_TX] - 4 + 1;
+        mb[1]->vlan_tci = vnet_buffer(b[1])->sw_if_index[VLIB_TX] - 4 + 1;
+
+	if (mb[0]->vlan_tci <= 12 && 0 != intf_vlan[mb[0]->vlan_tci - 1])
+        {
+                vlib_buffer_advance(b[0], -4);
+                pkt_start = vlib_buffer_get_current (b[0]);
+                memcpy(pkt_start, pkt_start + 4, 12);
+                *(pkt_start + 12) = 0x81;
+                *(pkt_start + 13) = 0x00;
+                pkt_start_tmp = (u16 *)(pkt_start + 14);
+                *pkt_start_tmp = htons(intf_vlan[mb[0]->vlan_tci - 1]);
+
+        }
+
+        if (mb[1]->vlan_tci <= 12 && 0 != intf_vlan[mb[1]->vlan_tci - 1])
+        {
+                vlib_buffer_advance(b[1], -4);
+                pkt_start = vlib_buffer_get_current (b[1]);
+                memcpy(pkt_start, pkt_start + 4, 12);
+                *(pkt_start + 12) = 0x81;
+                *(pkt_start + 13) = 0x00;
+                pkt_start_tmp = (u16 *)(pkt_start + 14);
+                *pkt_start_tmp = htons(intf_vlan[mb[1]->vlan_tci - 1]);
+
+        }
+      }
+
       or_flags = b[0]->flags | b[1]->flags;
 
       if (or_flags & VLIB_BUFFER_NEXT_PRESENT)
@@ -498,15 +583,6 @@ dpdk_device_output (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  dpdk_validate_rte_mbuf (vm, b[0], 0, mempool_deplete_enable, ptd);
 	  dpdk_validate_rte_mbuf (vm, b[1], 0, mempool_deplete_enable, ptd);
 	}
-
-	  if(has_subintf)
-      {
-        mb[0]->ol_flags |= PKT_TX_VLAN_PKT;
-        mb[1]->ol_flags |= PKT_TX_VLAN_PKT;
-    
-        mb[0]->vlan_tci = vnet_buffer(b[0])->sw_if_index[VLIB_TX] - 4 + 1;
-        mb[1]->vlan_tci = vnet_buffer(b[1])->sw_if_index[VLIB_TX] - 4 + 1;
-      }
 
       if (PREDICT_FALSE ((xd->flags & DPDK_DEVICE_FLAG_TX_OFFLOAD) &&
 			 (or_flags & VNET_BUFFER_F_OFFLOAD)))
@@ -532,14 +608,25 @@ dpdk_device_output (vlib_main_t *vm, vlib_node_runtime_t *node,
     {
       b[0] = vlib_buffer_from_rte_mbuf (mb[0]);
 
-      dpdk_validate_rte_mbuf (vm, b[0], 1, mempool_deplete_enable, ptd);
-      dpdk_buffer_tx_offload (xd, b[0], mb[0]);
-
-	  if(has_subintf)
+      if(has_subintf)
       {
         mb[0]->ol_flags |= PKT_TX_VLAN_PKT;
         mb[0]->vlan_tci = vnet_buffer(b[0])->sw_if_index[VLIB_TX] - 4 + 1;
+	if (mb[0]->vlan_tci <= 12 && 0 != intf_vlan[mb[0]->vlan_tci - 1])
+	{
+		vlib_buffer_advance(b[0], -4);
+		pkt_start = vlib_buffer_get_current (b[0]);
+		memcpy(pkt_start, pkt_start + 4, 12);
+		*(pkt_start + 12) = 0x81;
+		*(pkt_start + 13) = 0x00;
+		pkt_start_tmp = (u16 *)(pkt_start + 14);
+	        *pkt_start_tmp = htons(intf_vlan[mb[0]->vlan_tci - 1]);
+
+	}
       }
+
+      dpdk_validate_rte_mbuf (vm, b[0], 1, mempool_deplete_enable, ptd);
+      dpdk_buffer_tx_offload (xd, b[0], mb[0]);
 
       if (PREDICT_FALSE (node->flags & VLIB_NODE_FLAG_TRACE))
 	if (b[0]->flags & VLIB_BUFFER_IS_TRACED)
