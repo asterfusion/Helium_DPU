@@ -39,7 +39,8 @@
  * Abstraction Layer and pcap Tx Trace.
  */
 
-u16 intf_vlan[12] = {0};
+u16 intf_outer_vlan[12] = {0};
+u16 intf_inner_vlan[12] = {0};
 
 static clib_error_t *
 show_dpdk_buffer (vlib_main_t * vm, unformat_input_t * input,
@@ -382,7 +383,8 @@ set_dpdk_if_vlan (vlib_main_t * vm, unformat_input_t * input,
 		  vlib_cli_command_t * cmd)
 {
     unformat_input_t _line_input, *line_input = &_line_input;
-    u16 nb_vlan_id = (u16) ~ 0;
+    u16 outer_vlan_id = (u16) ~ 0;
+    u16 inner_vlan_id = 0;
     clib_error_t *error = NULL;
     u32 intf_index = (u16) ~ 0;
 
@@ -395,7 +397,9 @@ set_dpdk_if_vlan (vlib_main_t * vm, unformat_input_t * input,
     {
         if (unformat (line_input, "intf_id %d", &intf_index))
             ;
-        else if (unformat (line_input, "vlan_id %d", &nb_vlan_id))
+        else if (unformat (line_input, "outer_vlan %d", &outer_vlan_id))
+            ;
+        else if (unformat (line_input, "inner_vlan %d", &inner_vlan_id))
             ;
         else
         {
@@ -405,9 +409,9 @@ set_dpdk_if_vlan (vlib_main_t * vm, unformat_input_t * input,
         }
     }
 
-    if (intf_index == (u16) ~ 0 || nb_vlan_id == (u16) ~ 0)
+    if (intf_index == (u16) ~ 0 || outer_vlan_id == (u16) ~ 0)
     {
-        error = clib_error_return (0, "please specify valid interface index and vlan id");
+        error = clib_error_return (0, "please specify valid interface index and outer vlan id");
         goto done;
     }
 
@@ -417,17 +421,19 @@ set_dpdk_if_vlan (vlib_main_t * vm, unformat_input_t * input,
         goto done;
     }
 
-    intf_vlan[intf_index - 1] = nb_vlan_id;
+    intf_outer_vlan[intf_index - 1] = outer_vlan_id;
+    intf_inner_vlan[intf_index - 1] = inner_vlan_id;
 
 done:
   unformat_free (line_input);
+  //unformat_free (intf);
 
   return error;
 }
 
 VLIB_CLI_COMMAND (cmd_set_dpdk_if_vlan,static) = {
     .path = "set dpdk interface vlan",
-    .short_help = "set dpdk interface vlan intf_id <interface index> vlan_id <vlan id>",
+    .short_help = "set dpdk interface vlan intf_id <interface index> outer_vlan <vlan id> [inner_vlan <vlan id>]",
     .function = set_dpdk_if_vlan,
 };
 
