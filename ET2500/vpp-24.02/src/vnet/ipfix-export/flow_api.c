@@ -35,6 +35,10 @@
 
 #define REPLY_MSG_ID_BASE frm->msg_id_base
 #include <vlibapi/api_helper_macros.h>
+static vlib_log_class_t ipfix_logger __attribute__((unused));
+#define IPFIX_INFO(...)                              \
+    vlib_log_notice (ipfix_logger, __VA_ARGS__);
+
 
 ipfix_exporter_t *
 vnet_ipfix_exporter_lookup (const ip_address_t *ipfix_collector)
@@ -58,13 +62,21 @@ vnet_ipfix_exporter_lookup (const ip_address_t *ipfix_collector)
  */
 #define USE_INDEX_0   true
 #define USE_ANY_INDEX false
-
+#ifdef ET2500_IPFIX
+static int
+vl_api_set_ipfix_exporter_t_internal (
+  u32 client_index, vl_api_address_t *mp_collector_address,
+  u16 mp_collector_port, vl_api_address_t *mp_src_address, u32 mp_vrf_id,
+  u32 mp_path_mtu, u32 mp_template_interval, bool mp_udp_checksum,
+  bool use_index_0, bool is_create,u16 src_port,u32 domain_id)
+#else
 static int
 vl_api_set_ipfix_exporter_t_internal (
   u32 client_index, vl_api_address_t *mp_collector_address,
   u16 mp_collector_port, vl_api_address_t *mp_src_address, u32 mp_vrf_id,
   u32 mp_path_mtu, u32 mp_template_interval, bool mp_udp_checksum,
   bool use_index_0, bool is_create)
+#endif
 {
   vlib_main_t *vm = vlib_get_main ();
   flow_report_main_t *frm = &flow_report_main;
@@ -78,7 +90,10 @@ vl_api_set_ipfix_exporter_t_internal (
   u32 fib_id;
   u32 fib_index = ~0;
   u32 ip_header_size;
-
+  #ifdef ET2500_IPFIX
+  u16 srcport;
+  u32 domainid =1;
+#endif
   reg = vl_api_client_index_to_registration (client_index);
   if (!reg)
     return VNET_API_ERROR_UNIMPLEMENTED;
@@ -178,6 +193,16 @@ vl_api_set_ipfix_exporter_t_internal (
       exp->collector_port != collector_port)
     vnet_flow_reports_reset (exp);
 
+  #ifdef ET2500_IPFIX
+  srcport = ntohs (src_port);
+  if (srcport == (u16) ~ 0)
+    {srcport = UDP_DST_PORT_ipfix;}
+  domainid = ntohl (domain_id);
+  if (domainid == (u32) ~ 0)
+    {domainid = 1;}
+    exp->src_port = srcport;
+    exp->domain_id = domainid;
+  #endif
   exp->ipfix_collector = collector;
   exp->collector_port = collector_port;
   exp->src_address = src;
@@ -185,23 +210,38 @@ vl_api_set_ipfix_exporter_t_internal (
   exp->path_mtu = path_mtu;
   exp->template_interval = template_interval;
   exp->udp_checksum = udp_checksum;
-
+  #ifdef ET2500_IPFIX
+  u8 *sip_str = format(0, "sip_str Address: %U", format_ip4_address, &src.ip);
+  u8 *dip_str = format(0, "dip_str Address: %U", format_ip4_address, &collector.ip);
+         
+  IPFIX_INFO(" exp->collector_port =%d, exp->src_port = %d, exp->domain_id = %d,path_mtu=%d,template_interval=%d,src Address: %s dst Address: %s\n",
+    exp->collector_port, exp->src_port, exp->domain_id, exp->path_mtu,exp->template_interval,sip_str,dip_str );
+  #endif
   /* Turn on the flow reporting process */
   vlib_process_signal_event (vm, flow_report_process_node.index, 1, 0);
 
   return 0;
 }
 
+
+
 static void
 vl_api_set_ipfix_exporter_t_handler (vl_api_set_ipfix_exporter_t *mp)
 {
   vl_api_set_ipfix_exporter_reply_t *rmp;
   flow_report_main_t *frm = &flow_report_main;
+  
+  #ifdef ET2500_IPFIX
+  int rv = vl_api_set_ipfix_exporter_t_internal (
+    mp->client_index, &mp->collector_address, mp->collector_port,
+    &mp->src_address, mp->vrf_id, mp->path_mtu, mp->template_interval,
+    mp->udp_checksum, USE_INDEX_0, 0,mp->src_port,mp->domain_id);
+  #else
   int rv = vl_api_set_ipfix_exporter_t_internal (
     mp->client_index, &mp->collector_address, mp->collector_port,
     &mp->src_address, mp->vrf_id, mp->path_mtu, mp->template_interval,
     mp->udp_checksum, USE_INDEX_0, 0);
-
+  #endif
   REPLY_MACRO (VL_API_SET_IPFIX_EXPORTER_REPLY);
 }
 
@@ -211,10 +251,19 @@ vl_api_ipfix_exporter_create_delete_t_handler (
 {
   vl_api_ipfix_exporter_create_delete_reply_t *rmp;
   flow_report_main_t *frm = &flow_report_main;
+
+  #ifdef ET2500_IPFIX
+  int rv = vl_api_set_ipfix_exporter_t_internal (
+    mp->client_index, &mp->collector_address, mp->collector_port,
+    &mp->src_address, mp->vrf_id, mp->path_mtu, mp->template_interval,
+    mp->udp_checksum, USE_ANY_INDEX, mp->is_create,mp->src_port,mp->domain_id);
+  #else
   int rv = vl_api_set_ipfix_exporter_t_internal (
     mp->client_index, &mp->collector_address, mp->collector_port,
     &mp->src_address, mp->vrf_id, mp->path_mtu, mp->template_interval,
     mp->udp_checksum, USE_ANY_INDEX, mp->is_create);
+  #endif
+
 
   REPLY_MACRO (VL_API_IPFIX_EXPORTER_CREATE_DELETE_REPLY);
 }

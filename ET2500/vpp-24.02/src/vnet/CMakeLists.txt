@@ -1490,5 +1490,6 @@ add_vpp_test_library(vnet
 
 if (${ASROUTER_NAME} MATCHES "octeon10")
   add_compile_definitions(ARP_LEARN_DISABLE)
+  add_compile_definitions(ET2500_IPFIX)
 endif()
 
