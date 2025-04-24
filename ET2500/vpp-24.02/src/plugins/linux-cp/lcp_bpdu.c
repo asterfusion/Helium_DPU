@@ -20,7 +20,9 @@
 #include <plugins/linux-cp/lcp_interface.h>
 
 
-u16 bpdu_drop[MAX_SW_INDEX] = {0};
+u16 *bpdu_drop = NULL;
+
+
 
 #define foreach_lcp_bpdu                                                     \
   _ (DROP, "error-drop")                                                      \
@@ -81,8 +83,7 @@ VLIB_NODE_FN (lcp_bpdu_punt_node) (vlib_main_t * vm,
           u32 is_host0 = 0;
           u32 is_host1 = 0;
       u8 len0, len1;
-          u32 interface_index0;
-          u32 interface_index1;
+  
           bi0 = from[0];
           bi1 = from[1];
 
@@ -189,12 +190,26 @@ VLIB_NODE_FN (lcp_bpdu_punt_node) (vlib_main_t * vm,
             interface_index1 = sw_if_index1;
           
           }
-            
-          if(bpdu_drop[interface_index0])
-             next0 = LCP_BPDU_NEXT_DROP;
+                        
+          u64 value0 = 0;
+          u64 value1 = 0;
+
+          if (interface_index0 < vec_len(bpdu_drop)) {
+              value0 = bpdu_drop[interface_index0];
+       
+          }
   
-          if(bpdu_drop[interface_index1])
+          if(value0)
+             next0 = LCP_BPDU_NEXT_DROP;
+       
+          if (interface_index1 < vec_len(bpdu_drop)) {
+              value1 = bpdu_drop[interface_index1];
+       
+          }
+  
+          if(value1)
              next1 = LCP_BPDU_NEXT_DROP;
+  
 
           vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
                   to_next, n_left_to_next,
@@ -273,7 +288,13 @@ VLIB_NODE_FN (lcp_bpdu_punt_node) (vlib_main_t * vm,
           
           }
             
-          if(bpdu_drop[interface_index])
+          u64 value = 0;
+          if (interface_index < vec_len(bpdu_drop)) {
+              value = bpdu_drop[interface_index];
+       
+          }
+  
+          if(value)
              next0 = LCP_BPDU_NEXT_DROP;
 
           vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
@@ -321,3 +342,4 @@ lcp_bpdu_init (vlib_main_t *vm)
 VLIB_INIT_FUNCTION (lcp_bpdu_init) = {
   .runs_after = VLIB_INITS ("lcp_interface_init"),
 };
+

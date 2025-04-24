@@ -19,11 +19,8 @@
 #include <linux-cp/lcp.api_enum.h>
 #include <linux-cp/lcp.api_types.h>
 
-extern u16 bpdu_drop[MAX_SW_INDEX];
+extern u16 *bpdu_drop;
 
-static vlib_log_class_t lcp_logger __attribute__((unused));
-#define LCP_INFO(...)                              \
-    vlib_log_notice (lcp_logger, __VA_ARGS__);
 
 
 
@@ -336,10 +333,14 @@ vl_api_lcp_set_interface_bpdu_drop_t_handler (
   u32 sw_if_index = ntohl (mp->sw_if_index);
   u8 is_drop = mp->is_drop ? 1 : 0;
 
+  VALIDATE_SW_IF_INDEX (mp);
+
+  vec_validate(bpdu_drop, sw_if_index);
+
   bpdu_drop[sw_if_index] = is_drop;
 
-  LCP_INFO("sw_if_index =%d,is_drop=%d",sw_if_index,is_drop);
   
+  BAD_SW_IF_INDEX_LABEL;
   REPLY_MACRO (VL_API_LCP_SET_INTERFACE_BPDU_DROP_REPLY);
 }
 
@@ -373,3 +374,4 @@ VLIB_PLUGIN_REGISTER () = {
  * eval: (c-set-style "gnu")
  * End:
  */
+
