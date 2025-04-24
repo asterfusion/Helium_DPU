@@ -75,7 +75,7 @@ static u32 get_parent_sw_if_index(u32 sw_if_index) {
     if (sw && sw->type == VNET_SW_INTERFACE_TYPE_SUB) {
         return sw->sup_sw_if_index;
     }
-    return ~0;
+    return sw_if_index;
 }
 
 always_inline uword
@@ -97,6 +97,7 @@ isolation_group_inline (vlib_main_t * vm,
 
   while (n_left_from > 0)
     {
+      find = false;
       u32 rx_sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_RX];
       u32 tx_sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_TX];
 
