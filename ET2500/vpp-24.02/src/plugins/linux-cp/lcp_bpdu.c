@@ -19,6 +19,11 @@
 #include <linux-cp/lcp.api_enum.h>
 #include <plugins/linux-cp/lcp_interface.h>
 
+
+u16 *bpdu_drop = NULL;
+
+
+
 #define foreach_lcp_bpdu                                                     \
   _ (DROP, "error-drop")                                                      \
   _ (IO, "interface-output")
@@ -78,7 +83,7 @@ VLIB_NODE_FN (lcp_bpdu_punt_node) (vlib_main_t * vm,
           u32 is_host0 = 0;
           u32 is_host1 = 0;
       u8 len0, len1;
-
+  
           bi0 = from[0];
           bi1 = from[1];
 
@@ -163,6 +168,49 @@ VLIB_NODE_FN (lcp_bpdu_punt_node) (vlib_main_t * vm,
           to_next += 2;
           n_left_to_next -= 2;
 
+          if(is_host0){
+           
+            interface_index0 = vnet_buffer (b0)->sw_if_index[VLIB_TX];
+           
+          }
+           
+          else {
+           
+            interface_index0 = sw_if_index0;
+          
+          }
+          if(is_host1){
+           
+            interface_index1 = vnet_buffer (b1)->sw_if_index[VLIB_TX];
+           
+          }
+           
+          else {
+           
+            interface_index1 = sw_if_index1;
+          
+          }
+                        
+          u64 value0 = 0;
+          u64 value1 = 0;
+
+          if (interface_index0 < vec_len(bpdu_drop)) {
+              value0 = bpdu_drop[interface_index0];
+       
+          }
+  
+          if(value0)
+             next0 = LCP_BPDU_NEXT_DROP;
+       
+          if (interface_index1 < vec_len(bpdu_drop)) {
+              value1 = bpdu_drop[interface_index1];
+       
+          }
+  
+          if(value1)
+             next1 = LCP_BPDU_NEXT_DROP;
+  
+
           vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
                   to_next, n_left_to_next,
                   bi0, bi1, next0, next1);
@@ -178,6 +226,7 @@ VLIB_NODE_FN (lcp_bpdu_punt_node) (vlib_main_t * vm,
           u32 lipi0 = 0;
           u32 is_host0 = 0;
       u8 len0;
+      u32   interface_index;
 
           bi0 = from[0];
           to_next[0] = bi0;
@@ -201,7 +250,7 @@ VLIB_NODE_FN (lcp_bpdu_punt_node) (vlib_main_t * vm,
               }
           }
           lip0 = lcp_itf_pair_get (lipi0);
-
+      
           if (lip0)
           {
               next0 = LCP_BPDU_NEXT_IO;
@@ -213,8 +262,7 @@ VLIB_NODE_FN (lcp_bpdu_punt_node) (vlib_main_t * vm,
                       (u8 *) ethernet_buffer_get_header (b0));
               vlib_buffer_advance (b0, -len0);
           }
-
-
+        
           if (b0->flags & VLIB_BUFFER_IS_TRACED)
           {
               lcp_bpdu_trace_t *t =
@@ -227,6 +275,27 @@ VLIB_NODE_FN (lcp_bpdu_punt_node) (vlib_main_t * vm,
           n_left_from -= 1;
           to_next += 1;
           n_left_to_next -= 1;
+          
+          if(is_host0){
+           
+            interface_index = vnet_buffer (b0)->sw_if_index[VLIB_TX];
+           
+          }
+           
+          else {
+           
+            interface_index = sw_if_index0;
+          
+          }
+            
+          u64 value = 0;
+          if (interface_index < vec_len(bpdu_drop)) {
+              value = bpdu_drop[interface_index];
+       
+          }
+  
+          if(value)
+             next0 = LCP_BPDU_NEXT_DROP;
 
           vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
                   to_next, n_left_to_next,
@@ -273,3 +342,4 @@ lcp_bpdu_init (vlib_main_t *vm)
 VLIB_INIT_FUNCTION (lcp_bpdu_init) = {
   .runs_after = VLIB_INITS ("lcp_interface_init"),
 };
+
