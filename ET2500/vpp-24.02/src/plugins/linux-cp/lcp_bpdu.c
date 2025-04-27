@@ -83,6 +83,8 @@ VLIB_NODE_FN (lcp_bpdu_punt_node) (vlib_main_t * vm,
           u32 is_host0 = 0;
           u32 is_host1 = 0;
       u8 len0, len1;
+	  u32 interface_index0;
+	  u32 interface_index1;
   
           bi0 = from[0];
           bi1 = from[1];
