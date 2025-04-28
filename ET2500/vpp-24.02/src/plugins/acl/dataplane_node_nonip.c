@@ -251,6 +251,7 @@ VLIB_REGISTER_NODE (acl_in_nonip_node) =
   .next_nodes =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
+    [ACL_FA_PUNT] = "linux-cp-punt",
   }
 };
 
@@ -273,6 +274,7 @@ VLIB_REGISTER_NODE (acl_out_nonip_node) =
   .next_nodes =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
+    [ACL_FA_PUNT] = "linux-cp-punt",
   }
 };
 

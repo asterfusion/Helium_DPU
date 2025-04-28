@@ -3990,6 +3990,13 @@ acl_init (vlib_main_t * vm)
   if (error)
     return error;
 
+  vlib_node_t *lcp_node = vlib_get_node_by_name (vm, (u8 *) "linux-cp-punt");
+  if(lcp_node == NULL )
+  {
+      error = clib_error_return (0, "linux_cp_plugin.so is not loaded");
+      return error;
+  }
+
   am->hash_lookup_hash_buckets = ACL_PLUGIN_HASH_LOOKUP_HASH_BUCKETS;
   am->hash_lookup_hash_memory = ACL_PLUGIN_HASH_LOOKUP_HASH_MEMORY;
 

@@ -68,6 +68,7 @@ enum acl_action_e {
   ACL_ACTION_PERMIT_REFLECT,
   ACL_ACTION_PERMIT_ALSO_EGRESS,
   ACL_ACTION_NO_NAT,
+  ACL_ACTION_PUNT, //add for punt to cpu/tap port
   ACL_N_ACTIONS
 };
 

@@ -564,6 +564,11 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 	    /* if the action is not deny - then use that next */
 	    next[0] = action ? next[0] : 0;
 
+        if (ACL_ACTION_PUNT == action)
+        {
+            next[0] = ACL_FA_PUNT;
+        }
+
             if (ACL_ACTION_NO_NAT == action)
             {
                 b[0]->no_nat = 1;
@@ -816,6 +821,7 @@ VLIB_REGISTER_NODE (acl_in_l2_ip6_node) =
   .next_nodes =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
+    [ACL_FA_PUNT] = "linux-cp-punt",
   }
 };
 
@@ -838,6 +844,7 @@ VLIB_REGISTER_NODE (acl_in_l2_ip4_node) =
   .next_nodes =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
+    [ACL_FA_PUNT] = "linux-cp-punt",
   }
 };
 
@@ -861,6 +868,7 @@ VLIB_REGISTER_NODE (acl_out_l2_ip6_node) =
   .next_nodes =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
+    [ACL_FA_PUNT] = "linux-cp-punt",
   }
 };
 
@@ -884,6 +892,7 @@ VLIB_REGISTER_NODE (acl_out_l2_ip4_node) =
   .next_nodes =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
+    [ACL_FA_PUNT] = "linux-cp-punt",
   }
 };
 
@@ -907,6 +916,7 @@ VLIB_REGISTER_NODE (acl_in_fa_ip6_node) =
   .next_nodes =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
+    [ACL_FA_PUNT] = "linux-cp-punt",
   }
 };
 
@@ -929,6 +939,7 @@ VLIB_REGISTER_NODE (acl_in_fa_ip4_node) =
   .next_nodes =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
+    [ACL_FA_PUNT] = "linux-cp-punt",
   }
 };
 
@@ -952,6 +963,7 @@ VLIB_REGISTER_NODE (acl_out_fa_ip6_node) =
   .next_nodes =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
+    [ACL_FA_PUNT] = "linux-cp-punt",
   }
 };
 
@@ -974,6 +986,7 @@ VLIB_REGISTER_NODE (acl_out_fa_ip4_node) =
   .next_nodes =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
+    [ACL_FA_PUNT] = "linux-cp-punt",
   }
 };
 
