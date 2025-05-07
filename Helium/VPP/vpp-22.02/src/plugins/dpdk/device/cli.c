@@ -39,6 +39,8 @@
  * Abstraction Layer and pcap Tx Trace.
  */
 
+u16 intf_outer_vlan[12] = {0};
+u16 intf_inner_vlan[12] = {0};
 
 static clib_error_t *
 show_dpdk_buffer (vlib_main_t * vm, unformat_input_t * input,
@@ -375,6 +377,66 @@ VLIB_CLI_COMMAND (show_vpe_version_command, static) = {
   .function = show_dpdk_version_command_fn,
 };
 /* *INDENT-ON* */
+
+static clib_error_t *
+set_dpdk_if_vlan (vlib_main_t * vm, unformat_input_t * input,
+		  vlib_cli_command_t * cmd)
+{
+    unformat_input_t _line_input, *line_input = &_line_input;
+    u16 outer_vlan_id = (u16) ~ 0;
+    u16 inner_vlan_id = 0;
+    clib_error_t *error = NULL;
+    u32 intf_index = (u16) ~ 0;
+
+    if (!unformat_user (input, unformat_line_input, line_input))
+    {
+        return 0;
+    }
+
+    while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+        if (unformat (line_input, "intf_id %d", &intf_index))
+            ;
+        else if (unformat (line_input, "outer_vlan %d", &outer_vlan_id))
+            ;
+        else if (unformat (line_input, "inner_vlan %d", &inner_vlan_id))
+            ;
+        else
+        {
+            error = clib_error_return (0, "parse error: '%U'",
+                                     format_unformat_error, line_input);
+            goto done;
+        }
+    }
+
+    if (intf_index == (u16) ~ 0 || outer_vlan_id == (u16) ~ 0)
+    {
+        error = clib_error_return (0, "please specify valid interface index and outer vlan id");
+        goto done;
+    }
+
+    if (intf_index > 12)
+    {
+        error = clib_error_return (0, "please specify valid interface index");
+        goto done;
+    }
+
+    intf_outer_vlan[intf_index - 1] = outer_vlan_id;
+    intf_inner_vlan[intf_index - 1] = inner_vlan_id;
+
+done:
+  unformat_free (line_input);
+  //unformat_free (intf);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND (cmd_set_dpdk_if_vlan,static) = {
+    .path = "set dpdk interface vlan",
+    .short_help = "set dpdk interface vlan intf_id <interface index> outer_vlan <vlan id> [inner_vlan <vlan id>]",
+    .function = set_dpdk_if_vlan,
+};
+
 
 /* Dummy function to get us linked in. */
 void
