@@ -299,7 +299,7 @@ ip_in_out_acl_inline_trace (
 	    vnet_classify_find_entry_inline (t[0], (u8 *) h[0], hash[0], now);
 	  if (e[0])
 	    {
-	      if (e[0]->acl_index != ~0)
+	      if (e[0]->acl_index != UINT16_MAX)
               {
                   vlib_increment_combined_counter (vcm->combined_acl_counters +
 				   e[0]->acl_index,
@@ -377,8 +377,8 @@ ip_in_out_acl_inline_trace (
 						     hash[0], now);
 		  if (e[0])
 		    {
-		      if (e[0]->acl_index != ~0)
-	              {
+	              if (e[0]->acl_index != UINT16_MAX)
+		      {
 	                  vlib_increment_combined_counter (vcm->combined_acl_counters +
     				   e[0]->acl_index,
     				   vm->thread_index,
@@ -433,7 +433,7 @@ ip_in_out_acl_inline_trace (
 	    vnet_classify_find_entry_inline (t[1], (u8 *) h[1], hash[1], now);
 	  if (e[1])
 	    {
-	      if (e[1]->acl_index != ~0)
+	       if (e[1]->acl_index != UINT16_MAX)
               {
                   vlib_increment_combined_counter (vcm->combined_acl_counters +
     				   e[1]->acl_index,
@@ -452,7 +452,7 @@ ip_in_out_acl_inline_trace (
 	      if (e[1]->next_index == ((~0 - 1) & 0xFFFF))
 	      {
 	          b[1]->no_nat = 1;
-	      } 
+	      }
           b[1]->acl_index = e[1]->acl_index;
 
 	      b[1]->error =
@@ -511,8 +511,8 @@ ip_in_out_acl_inline_trace (
 						     hash[1], now);
 		  if (e[1])
 		    {
-		      if (e[1]->acl_index != ~0)
-	              {
+	       	      if (e[1]->acl_index != UINT16_MAX)
+		      {
 	                  vlib_increment_combined_counter (vcm->combined_acl_counters +
     				   e[1]->acl_index,
     				   vm->thread_index,
@@ -664,7 +664,7 @@ ip_in_out_acl_inline_trace (
 	  e0 = vnet_classify_find_entry_inline (t0, (u8 *) h0, hash0, now);
 	  if (e0)
 	    {
-	      if (e0->acl_index != ~0)
+	      if (e0->acl_index != UINT16_MAX)
               {
                   vlib_increment_combined_counter (vcm->combined_acl_counters +
 				   e0->acl_index,
@@ -738,7 +738,7 @@ ip_in_out_acl_inline_trace (
 		    (t0, (u8 *) h0, hash0, now);
 		  if (e0)
 		    {
-		      if (e0->acl_index != ~0)
+	              if (e0->acl_index != UINT16_MAX)
 	              {
 	                  vlib_increment_combined_counter (vcm->combined_acl_counters +
 				       e0->acl_index,

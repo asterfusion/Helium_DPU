@@ -337,7 +337,7 @@ l2_in_out_acl_node_fn (vlib_main_t * vm,
 	      e0 = vnet_classify_find_entry (t0, (u8 *) h0, hash0, now);
 	      if (e0)
 		{
-		  if (e0->acl_index != ~0)
+		  if (e0->acl_index != UINT16_MAX)
 	          {
 	              vlib_increment_combined_counter (vcm->combined_acl_counters +
 				   e0->acl_index,
@@ -402,7 +402,7 @@ l2_in_out_acl_node_fn (vlib_main_t * vm,
 			(t0, (u8 *) h0, hash0, now);
 		      if (e0)
 			{
-			  if (e0->acl_index != ~0)
+			  if (e0->acl_index != UINT16_MAX)
 		          {
 		              vlib_increment_combined_counter (vcm->combined_acl_counters +
 					   e0->acl_index,
