@@ -162,6 +162,13 @@ ip_in_out_acl_inline_trace (
       else
 	h[3] = b[1]->data;
 
+      if (!is_output)
+      {
+          if (vnet_buffer (b[2])->l2.l2_len > 0)
+              h[2] = h[2] + b[2]->current_data - vnet_buffer (b[2])->l2.l2_len;
+          if (vnet_buffer (b[3])->l2.l2_len > 0)
+              h[3] = h[3] + b[3]->current_data - vnet_buffer (b[3])->l2.l2_len;
+      }
       if (is_output)
 	{
 	  /* Save the rewrite length, since we are using the l2_classify struct */
@@ -252,6 +259,13 @@ ip_in_out_acl_inline_trace (
 	  else
 	    h[3] = b[3]->data;
 
+	  if (!is_output)
+          {
+            if (vnet_buffer (b[2])->l2.l2_len > 0)
+                h[2] = h[2] + b[2]->current_data - vnet_buffer (b[2])->l2.l2_len;
+	    if (vnet_buffer (b[3])->l2.l2_len > 0)
+		h[3] = h[3] + b[3]->current_data - vnet_buffer (b[3])->l2.l2_len;
+          }
 	  if (is_output)
 	    {
 	      /* Save the rewrite length, since we are using the l2_classify struct */
@@ -316,10 +330,10 @@ ip_in_out_acl_inline_trace (
 
 	      hits++;
 	      if (e[0]->next_index == ((~0 - 1) & 0xFFFF))
-	      {
-	          b[0]->no_nat = 1;
-	      }
-          b[0]->acl_index = e[0]->acl_index;
+              {
+                  b[0]->no_nat = 1;
+              }
+              b[0]->acl_index = e[0]->acl_index;
 
 	      b[0]->error =
 		(_next[0] == ACL_NEXT_INDEX_DENY) ? error_deny : error_none;
@@ -366,6 +380,10 @@ ip_in_out_acl_inline_trace (
 		  else
 		    h[0] = b[0]->data;
 
+		  if (!is_output && vnet_buffer (b[0])->l2.l2_len > 0)
+                  {
+                        h[0] = h[0] + b[0]->current_data - vnet_buffer (b[0])->l2.l2_len;
+                  }
 		  /* advance the match pointer so the matching happens on IP header */
 		  if (is_output)
 		    h[0] += vnet_buffer (b[0])->l2.l2_len;
@@ -392,12 +410,12 @@ ip_in_out_acl_inline_trace (
 			e[0]->next_index : _next[0];
 		      hits++;
 		      chain_hits++;
-
 		      if (e[0]->next_index == ((~0 - 1) & 0xFFFF))
-		      {
-		          b[0]->no_nat = 1;
-		      }
-              b[0]->acl_index = e[0]->acl_index;
+                      {
+                          b[0]->no_nat = 1;
+                      }
+                      b[0]->acl_index = e[0]->acl_index;
+
 		      b[0]->error = (_next[0] == ACL_NEXT_INDEX_DENY) ?
 				      error_deny :
 				      error_none;
@@ -500,6 +518,10 @@ ip_in_out_acl_inline_trace (
 		  else
 		    h[1] = b[1]->data;
 
+		  if (!is_output && vnet_buffer (b[1])->l2.l2_len > 0)
+                  {
+                        h[1] = h[1] + b[1]->current_data - vnet_buffer (b[1])->l2.l2_len;
+                  }
 		  /* advance the match pointer so the matching happens on IP header */
 		  if (is_output)
 		    h[1] += vnet_buffer (b[1])->l2.l2_len;
@@ -526,12 +548,12 @@ ip_in_out_acl_inline_trace (
 			e[1]->next_index : _next[1];
 		      hits++;
 		      chain_hits++;
-
 		      if (e[1]->next_index == ((~0 - 1) & 0xFFFF))
-		      {
-		          b[1]->no_nat = 1;
-		      }
-              b[1]->acl_index = e[1]->acl_index;
+                      {
+                          b[1]->no_nat = 1;
+                      }
+                      b[1]->acl_index = e[1]->acl_index;
+
 		      b[1]->error = (_next[1] == ACL_NEXT_INDEX_DENY) ?
 				      error_deny :
 				      error_none;
@@ -627,6 +649,11 @@ ip_in_out_acl_inline_trace (
       else
 	h0 = b[0]->data;
 
+      if (!is_output && vnet_buffer (b[0])->l2.l2_len > 0)
+      {
+          h0 = h0 + b[0]->current_data - vnet_buffer (b[0])->l2.l2_len;
+      }
+
       if (is_output)
 	{
 	  /* Save the rewrite length, since we are using the l2_classify struct */
@@ -657,6 +684,10 @@ ip_in_out_acl_inline_trace (
 	  else
 	    h0 = b[0]->data;
 
+	  if (!is_output && vnet_buffer (b[0])->l2.l2_len > 0)
+          {
+                h0 = h0 + b[0]->current_data - vnet_buffer (b[0])->l2.l2_len;
+          }
 	  /* advance the match pointer so the matching happens on IP header */
 	  if (is_output)
 	    h0 += vnet_buffer (b[0])->l2.l2_len;
@@ -680,10 +711,10 @@ ip_in_out_acl_inline_trace (
 
 	      hits++;
 	      if (e0->next_index == ((~0 - 1) & 0xFFFF))
-	      {
-	          b[0]->no_nat = 1;
-	      }
-          b[0]->acl_index = e0->acl_index;
+              {
+                  b[0]->no_nat = 1;
+              }
+              b[0]->acl_index = e0->acl_index;
 
 	      b[0]->error =
 		(next0 == ACL_NEXT_INDEX_DENY) ? error_deny : error_none;
@@ -729,6 +760,10 @@ ip_in_out_acl_inline_trace (
 		  else
 		    h0 = b[0]->data;
 
+		  if (!is_output && vnet_buffer (b[0])->l2.l2_len > 0)
+		  {
+			h0 = h0 + b[0]->current_data - vnet_buffer (b[0])->l2.l2_len;
+		  }
 		  /* advance the match pointer so the matching happens on IP header */
 		  if (is_output)
 		    h0 += vnet_buffer (b[0])->l2.l2_len;
@@ -752,11 +787,12 @@ ip_in_out_acl_inline_trace (
 		      next0 = (e0->next_index < n_next_nodes) ?
 			e0->next_index : next0;
 		      hits++;
+
 		      if (e0->next_index == ((~0 - 1) & 0xFFFF))
-		      {
-		          b[0]->no_nat = 1;
-		      }
-              b[0]->acl_index = e0->acl_index;
+                      {
+                          b[0]->no_nat = 1;
+                      }
+                      b[0]->acl_index = e0->acl_index;
 
 		      b[0]->error = (next0 == ACL_NEXT_INDEX_DENY) ?
 				      error_deny :
