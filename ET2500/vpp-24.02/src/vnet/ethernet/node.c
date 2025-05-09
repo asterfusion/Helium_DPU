@@ -260,7 +260,7 @@ determine_next_node (ethernet_main_t * em,
 {
   vnet_buffer (b0)->l3_hdr_offset = b0->current_data;
   b0->flags |= VNET_BUFFER_F_L3_HDR_OFFSET_VALID;
-
+  
   if (PREDICT_FALSE (*error0 != ETHERNET_ERROR_NONE))
     {
       // some error occurred
@@ -1312,8 +1312,16 @@ ethernet_input_inline (vlib_main_t * vm,
 		  b0->flags |= VNET_BUFFER_F_L3_HDR_OFFSET_VALID;
 		  b1->flags |= VNET_BUFFER_F_L3_HDR_OFFSET_VALID;
 		  next0 = em->l2_next;
+      if(type0 < 0x600){
+        next0 =ETHERNET_INPUT_NEXT_LLC;
+        vlib_buffer_advance (b0, sizeof (ethernet_header_t));
+      }
 		  vnet_buffer (b0)->l2.l2_len = sizeof (ethernet_header_t);
 		  next1 = em->l2_next;
+      if(type1 < 0x600){
+        next1 =ETHERNET_INPUT_NEXT_LLC;
+        vlib_buffer_advance (b1, sizeof (ethernet_header_t));
+      }
 		  vnet_buffer (b1)->l2.l2_len = sizeof (ethernet_header_t);
 		}
 	      else
@@ -1550,14 +1558,20 @@ ethernet_input_inline (vlib_main_t * vm,
 		  cached_is_l2 = is_l20 = subint0->flags & SUBINT_CONFIG_L2;
 		}
 
-
+ 
 	      if (PREDICT_TRUE (is_l20 != 0))
 		{
 		  vnet_buffer (b0)->l3_hdr_offset =
 		    vnet_buffer (b0)->l2_hdr_offset +
 		    sizeof (ethernet_header_t);
 		  b0->flags |= VNET_BUFFER_F_L3_HDR_OFFSET_VALID;
+
 		  next0 = em->l2_next;
+
+      if(type0 < 0x600){
+        next0 =ETHERNET_INPUT_NEXT_LLC;
+        vlib_buffer_advance (b0, sizeof (ethernet_header_t));
+      }
 		  vnet_buffer (b0)->l2.l2_len = sizeof (ethernet_header_t);
 		}
 	      else
@@ -1710,9 +1724,9 @@ VLIB_NODE_FN (ethernet_input_node) (vlib_main_t * vm,
       vnet_hw_interface_t *hi = vnet_get_hw_interface (vnm, ef->hw_if_index);
       eth_input_single_int (vm, node, hi, from, n_packets, ip4_cksum_ok);
     }
-  else
+  else{
     ethernet_input_inline (vm, node, from, n_packets,
-			   ETHERNET_INPUT_VARIANT_ETHERNET);
+			   ETHERNET_INPUT_VARIANT_ETHERNET);}
   return n_packets;
 }
 
