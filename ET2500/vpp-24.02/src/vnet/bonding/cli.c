@@ -1171,7 +1171,7 @@ set_member_state_command_fn (vlib_main_t * vm, unformat_input_t * input,
   if (args.member == ~0)
     return clib_error_return (0,
 			      "please specify valid member interface name");
-  if (args.is_active == ~0)
+  if (args.is_active == UINT8_MAX)
     return clib_error_return (0,
 			      "Missing state");    
 

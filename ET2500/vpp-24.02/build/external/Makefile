@@ -40,9 +40,17 @@ INSTALL_QUICLY      ?= n
 INSTALL_DPDK        ?= n
 INSTALL_RDMA        ?= n
 INSTALL_XDP         ?= n
-INSTALL_OCTEON_ROC  ?= y
+INSTALL_OCTEON_ROC  ?= n
 CONFIG_PACKAGE_LIST  =
 INSTALL_PACKAGE_LIST =
+
+ifeq ($(ARCH_X86_64), x86_64)
+INSTALL_DPDK := y
+endif
+
+ifeq ($(AARCH64), aarch64)
+INSTALL_OCTEON_ROC := y
+endif
 
 include packages.mk
 
