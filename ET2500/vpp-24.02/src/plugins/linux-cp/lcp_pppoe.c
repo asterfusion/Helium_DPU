@@ -350,6 +350,21 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       vnet_set_interface_l3_output_node (vnm->vlib_main, sw_if_index,
 					 (u8 *) "tunnel-output");
 
+      /* add default punt feature */
+      vnet_feature_enable_disable("ip4-multicast", "linux-cp-ospfv2-phy",
+              sw_if_index, 1, NULL, 0);
+      vnet_feature_enable_disable("ip6-multicast", "linux-cp-ospfv3-phy",
+              sw_if_index, 1, NULL, 0);
+      /* enable bfd/bfdv6 punt for interfaces */
+      vnet_feature_enable_disable("ip4-unicast", "linux-cp-bfd-phy",
+              sw_if_index, 1, NULL, 0);
+      vnet_feature_enable_disable("ip4-multicast", "linux-cp-bfd-phy",
+              sw_if_index, 1, NULL, 0);
+      vnet_feature_enable_disable("ip6-unicast", "linux-cp-bfdv6-phy",
+              sw_if_index, 1, NULL, 0);
+      vnet_feature_enable_disable("ip6-multicast", "linux-cp-bfdv6-phy",
+              sw_if_index, 1, NULL, 0);
+
   }
   else
   {
