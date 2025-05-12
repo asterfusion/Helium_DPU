@@ -13,9 +13,5 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: configure
-      run: cd ET2500/vpp-24.02/; export ASROUTER_NAME=octeon10
-    - name: make
-      run: make build-release
-    - name: make pkg
-      run: make pkg-deb
+    - name: configure and make
+      run: pwd;cd ET2500/vpp-24.02/; export ASROUTER_NAME=octeon10;make build-release; make pkg-deb
