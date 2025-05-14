@@ -318,6 +318,29 @@ acl_fa_node_common_prepare_fn (vlib_main_t * vm,
     }
 }
 
+always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, u32 *rule_index, u8 *action)
+{
+    for (int i = 0; i < match_acl_info->acl_match_count; i++)
+    {
+        if (ACL_ACTION_DENY == match_acl_info->action[i])
+        {
+            *action = ACL_ACTION_DENY;
+            *acl_index = match_acl_info->acl_index[i];
+            *rule_index = match_acl_info->rule_index[i];
+            break;
+        }
+
+        if (match_acl_info->action[i] > *action)
+        {
+            *action = match_acl_info->action[i];
+            *acl_index = match_acl_info->acl_index[i];
+            *rule_index = match_acl_info->rule_index[i];
+        }
+    }
+
+    return;
+}   
+
 
 always_inline uword
 acl_fa_inner_node_fn (vlib_main_t * vm,
@@ -384,6 +407,9 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
       u32 match_acl_in_index = ~0;
       u32 match_acl_pos = ~0;
       u32 match_rule_index = ~0;
+      match_acl_t match_acl_info;
+
+      memset(&match_acl_info, 0, sizeof(match_acl_t));
 
       next[0] = 0;		/* drop by default */
 
@@ -472,36 +498,50 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 		  am->output_lc_index_by_sw_if_index[sw_if_index[0]];
 
 	      action = 0;	/* deny by default */
-	      int is_match = acl_plugin_match_5tuple_inline (am, lc_index0,
+	      acl_plugin_match_5tuple_inline_sai (am, lc_index0,
 							     (fa_5tuple_opaque_t *) & fa_5tuple[0], is_ip6,
-							     &action,
-							     &match_acl_pos,
-							     &match_acl_in_index,
-							     &match_rule_index,
-							     &trace_bitmap);
+							     &trace_bitmap,
+							     &match_acl_info);
 	      if (PREDICT_FALSE
-		  (is_match && am->interface_acl_counters_enabled))
+		  (match_acl_info.acl_match_count && am->interface_acl_counters_enabled))
 		{
 		  u32 buf_len = vlib_buffer_length_in_chain (vm, b[0]);
-		  vlib_increment_combined_counter (am->combined_acl_counters +
-						   saved_matched_acl_index,
-						   thread_index,
-						   saved_matched_ace_index,
-						   saved_packet_count,
-						   saved_byte_count);
-		  saved_matched_acl_index = match_acl_in_index;
-		  saved_matched_ace_index = match_rule_index;
-		  saved_packet_count = 1;
-		  saved_byte_count = buf_len;
-		  if (!is_l2_path && is_input)
+          saved_byte_count = buf_len;
+          if (!is_l2_path && is_input)
 		  {
 			saved_byte_count += ethernet_buffer_header_size(b[0]);
 		  }
-		  /* prefetch the counter that we are going to increment */
-		  vlib_prefetch_combined_counter (am->combined_acl_counters +
-						  saved_matched_acl_index,
+          for (int i = 0; i < match_acl_info.acl_match_count; i++)
+          {
+              /* prefetch the counter that we are going to increment */
+		      vlib_prefetch_combined_counter (am->combined_acl_counters +
+						  match_acl_info.acl_index[i],
 						  thread_index,
-						  saved_matched_ace_index);
+						  match_acl_info.rule_index[i]);
+
+		      vlib_increment_combined_counter (am->combined_acl_counters +
+						   match_acl_info.acl_index[i],
+						   thread_index,
+						   match_acl_info.rule_index[i],
+						   1,
+						   saved_byte_count);
+              
+          }
+
+          acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &action);
+		  //saved_matched_acl_index = match_acl_in_index;
+		  //saved_matched_ace_index = match_rule_index;
+		  //saved_packet_count = 1;
+		  //saved_byte_count = buf_len;
+		  //if (!is_l2_path && is_input)
+		  //{
+			//saved_byte_count += ethernet_buffer_header_size(b[0]);
+		  //}
+		  /* prefetch the counter that we are going to increment */
+		  //vlib_prefetch_combined_counter (am->combined_acl_counters +
+			//			  saved_matched_acl_index,
+			//			  thread_index,
+			//			  saved_matched_ace_index);
 		}
 
 	      b[0]->error = error_node->errors[action];
@@ -1005,3 +1045,4 @@ VNET_FEATURE_INIT (acl_out_ip4_fa_feature, static) = {
  * eval: (c-set-style "gnu")
  * End:
  */
+
