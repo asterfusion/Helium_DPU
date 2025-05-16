@@ -467,7 +467,7 @@ add_to_flow_record_state (vlib_main_t *vm, vlib_node_runtime_t *node,
 
       octets = clib_net_to_host_u16 (ip4->length);
     }
-
+    k.ethertype = clib_host_to_net_u16(k.ethertype);
   if (udp)
     {
       k.src_port = udp->src_port;
