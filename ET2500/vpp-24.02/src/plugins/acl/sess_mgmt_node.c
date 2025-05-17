@@ -28,7 +28,11 @@
 #include <plugins/acl/lookup_context.h>
 #include <plugins/acl/public_inlines.h>
 #include <plugins/acl/session_inlines.h>
-
+#include <vppinfra/bihash_32_8.h>
+#include <vppinfra/bihash_template.c>
+#include <vppinfra/bihash_64_8.h>
+#include <vppinfra/bihash_template.h>
+#include <vppinfra/bihash_template.c>
 
 
 static_always_inline u8 *
@@ -41,18 +45,18 @@ format_ip46_session_bihash_kv (u8 * s, va_list * args, int is_ip6)
 
   if (is_ip6)
     {
-      clib_bihash_kv_40_8_t *kv_40_8 =
-	va_arg (*args, clib_bihash_kv_40_8_t *);
-      a5t.kv_40_8 = *kv_40_8;
+      clib_bihash_kv_64_8_t *kv_64_8 =
+	va_arg (*args, clib_bihash_kv_64_8_t *);
+      a5t.kv_64_8 = *kv_64_8;
       paddr0 = &a5t.ip6_addr[0];
       paddr1 = &a5t.ip6_addr[1];
       format_addr_func = format_ip6_address;
     }
   else
     {
-      clib_bihash_kv_16_8_t *kv_16_8 =
-	va_arg (*args, clib_bihash_kv_16_8_t *);
-      a5t.kv_16_8 = *kv_16_8;
+      clib_bihash_kv_32_8_t *kv_32_8 =
+	va_arg (*args, clib_bihash_kv_32_8_t *);
+      a5t.kv_32_8 = *kv_32_8;
       paddr0 = &a5t.ip4_addr[0];
       paddr1 = &a5t.ip4_addr[1];
       format_addr_func = format_ip4_address;
@@ -102,18 +106,18 @@ acl_fa_verify_init_sessions (acl_main_t * am)
 	}
 
       /* ... and the interface session hash table */
-      clib_bihash_init_40_8 (&am->fa_ip6_sessions_hash,
+      clib_bihash_init_64_8 (&am->fa_ip6_sessions_hash,
 			     "ACL plugin FA IPv6 session bihash",
 			     am->fa_conn_table_hash_num_buckets,
 			     am->fa_conn_table_hash_memory_size);
-      clib_bihash_set_kvp_format_fn_40_8 (&am->fa_ip6_sessions_hash,
+      clib_bihash_set_kvp_format_fn_64_8 (&am->fa_ip6_sessions_hash,
 					  format_ip6_session_bihash_kv);
 
-      clib_bihash_init_16_8 (&am->fa_ip4_sessions_hash,
+      clib_bihash_init_32_8 (&am->fa_ip4_sessions_hash,
 			     "ACL plugin FA IPv4 session bihash",
 			     am->fa_conn_table_hash_num_buckets,
 			     am->fa_conn_table_hash_memory_size);
-      clib_bihash_set_kvp_format_fn_16_8 (&am->fa_ip4_sessions_hash,
+      clib_bihash_set_kvp_format_fn_32_8 (&am->fa_ip4_sessions_hash,
 					  format_ip4_session_bihash_kv);
 
       am->fa_sessions_hash_is_initialized = 1;
@@ -912,11 +916,11 @@ show_fa_sessions_hash (vlib_main_t * vm, u32 verbose)
   if (am->fa_sessions_hash_is_initialized)
     {
       vlib_cli_output (vm, "\nIPv6 Session lookup hash table:\n%U\n\n",
-		       format_bihash_40_8, &am->fa_ip6_sessions_hash,
+		       format_bihash_64_8, &am->fa_ip6_sessions_hash,
 		       verbose);
 
       vlib_cli_output (vm, "\nIPv4 Session lookup hash table:\n%U\n\n",
-		       format_bihash_16_8, &am->fa_ip4_sessions_hash,
+		       format_bihash_32_8, &am->fa_ip4_sessions_hash,
 		       verbose);
     }
   else

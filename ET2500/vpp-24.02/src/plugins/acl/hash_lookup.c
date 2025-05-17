@@ -26,7 +26,8 @@
 #include <vppinfra/error.h>
 #include <vnet/plugin/plugin.h>
 #include <acl/acl.h>
-#include <vppinfra/bihash_48_8.h>
+#include <vppinfra/bihash_72_8.h>
+#include <vppinfra/bihash_template.c>
 
 #include "hash_lookup.h"
 #include "hash_lookup_private.h"
@@ -44,11 +45,12 @@ always_inline applied_hash_ace_entry_t **get_applied_hash_aces(acl_main_t *am, u
 
 
 static void
-hashtable_add_del(acl_main_t *am, clib_bihash_kv_48_8_t *kv, int is_add)
+hashtable_add_del(acl_main_t *am, clib_bihash_kv_72_8_t *kv, int is_add)
 {
-    DBG("HASH ADD/DEL: %016llx %016llx %016llx %016llx %016llx %016llx %016llx add %d",
+    DBG("HASH ADD/DEL: %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx add %d",
                         kv->key[0], kv->key[1], kv->key[2],
-                        kv->key[3], kv->key[4], kv->key[5], kv->value, is_add);
+                        kv->key[3], kv->key[4], kv->key[5],
+                        kv->key[6], kv->key[7], kv->key[8],kv->value, is_add);
     BV (clib_bihash_add_del) (&am->acl_lookup_hash, kv, is_add);
 }
 
@@ -82,9 +84,24 @@ count_bits (u64 word)
 static u8
 first_mask_contains_second_mask(int is_ip6, fa_5tuple_t * mask1, fa_5tuple_t * mask2)
 {
-  int i;
   if (is_ip6)
     {
+      u32 padcheck = 0;
+      int i;
+      for (i=0; i<3; i++) {
+        padcheck |= mask1->l3_zero_pad_1[i];
+        padcheck |= mask2->l3_zero_pad_1[i];
+      }
+      if (padcheck != 0)
+        return 0;
+      if ((mask1->mac6_addr[0].u.first_4 & mask2->mac6_addr[0].u.first_4) != mask1->mac6_addr[0].u.first_4)
+        return 0;
+      if ((mask1->mac6_addr[0].u.last_2 & mask2->mac6_addr[0].u.last_2) != mask1->mac6_addr[0].u.last_2)
+        return 0;
+      if ((mask1->mac6_addr[1].u.first_4 & mask2->mac6_addr[1].u.first_4) != mask1->mac6_addr[1].u.first_4)
+        return 0;
+      if ((mask1->mac6_addr[1].u.last_2 & mask2->mac6_addr[1].u.last_2) != mask1->mac6_addr[1].u.last_2)
+        return 0;
       for (i = 0; i < 2; i++)
         {
           if ((mask1->ip6_addr[0].as_u64[i] & mask2->ip6_addr[0].as_u64[i]) !=
@@ -100,11 +117,19 @@ first_mask_contains_second_mask(int is_ip6, fa_5tuple_t * mask1, fa_5tuple_t * m
       /* check the pads, both masks must have it 0 */
       u32 padcheck = 0;
       int i;
-      for (i=0; i<6; i++) {
+      for (i=0; i<9; i++) {
         padcheck |= mask1->l3_zero_pad[i];
         padcheck |= mask2->l3_zero_pad[i];
       }
       if (padcheck != 0)
+        return 0;
+      if ((mask1->mac4_addr[0].u.first_4 & mask2->mac4_addr[0].u.first_4) != mask1->mac4_addr[0].u.first_4)
+        return 0;
+      if ((mask1->mac4_addr[0].u.last_2 & mask2->mac4_addr[0].u.last_2) != mask1->mac4_addr[0].u.last_2)
+        return 0;
+      if ((mask1->mac4_addr[1].u.first_4 & mask2->mac4_addr[1].u.first_4) != mask1->mac4_addr[1].u.first_4)
+        return 0;
+      if ((mask1->mac4_addr[1].u.last_2 & mask2->mac4_addr[1].u.last_2) != mask1->mac4_addr[1].u.last_2)
         return 0;
       if ((mask1->ip4_addr[0].as_u32 & mask2->ip4_addr[0].as_u32) !=
           mask1->ip4_addr[0].as_u32)
@@ -123,7 +148,6 @@ first_mask_contains_second_mask(int is_ip6, fa_5tuple_t * mask1, fa_5tuple_t * m
 
   return 1;
 }
-
 
 
 /*
@@ -304,7 +328,6 @@ lock_mask_type_index(acl_main_t *am, u32 mask_type_index)
   DBG0("LOCK MTE index %d new refcount %d", mask_type_index, mte->refcount);
 }
 
-
 static void
 release_mask_type_index(acl_main_t *am, u32 mask_type_index)
 {
@@ -379,7 +402,7 @@ static void
 fill_applied_hash_ace_kv(acl_main_t *am,
                             applied_hash_ace_entry_t **applied_hash_aces,
                             u32 lc_index,
-                            u32 new_index, clib_bihash_kv_48_8_t *kv)
+                            u32 new_index, clib_bihash_kv_72_8_t *kv)
 {
   fa_5tuple_t *kv_key = (fa_5tuple_t *)kv->key;
   hash_acl_lookup_value_t *kv_val = (hash_acl_lookup_value_t *)&kv->value;
@@ -400,6 +423,9 @@ fill_applied_hash_ace_kv(acl_main_t *am,
   *pkey++ = *pmatch++ & *pmask++;
   *pkey++ = *pmatch++ & *pmask++;
   *pkey++ = *pmatch++ & *pmask++;
+  *pkey++ = *pmatch++ & *pmask++;
+  *pkey++ = *pmatch++ & *pmask++;
+  *pkey++ = *pmatch++ & *pmask++;
 
   kv_key->pkt.mask_type_index_lsb = pae->mask_type_index;
   kv_key->pkt.lc_index = lc_index;
@@ -413,7 +439,7 @@ add_del_hashtable_entry(acl_main_t *am,
                             applied_hash_ace_entry_t **applied_hash_aces,
 			    u32 index, int is_add)
 {
-  clib_bihash_kv_48_8_t kv;
+  clib_bihash_kv_72_8_t kv;
 
   fill_applied_hash_ace_kv(am, applied_hash_aces, lc_index, index, &kv);
   hashtable_add_del(am, &kv, is_add);
@@ -552,7 +578,7 @@ activate_applied_ace_hash_entry(acl_main_t *am,
                             applied_hash_ace_entry_t **applied_hash_aces,
                             u32 new_index)
 {
-  clib_bihash_kv_48_8_t kv;
+  clib_bihash_kv_72_8_t kv;
   ASSERT(new_index != ~0);
   DBG("activate_applied_ace_hash_entry lc_index %d new_index %d", lc_index, new_index);
 
@@ -562,7 +588,7 @@ activate_applied_ace_hash_entry(acl_main_t *am,
 			kv.key[0], kv.key[1], kv.key[2],
 			kv.key[3], kv.key[4], kv.key[5]);
 
-  clib_bihash_kv_48_8_t result;
+  clib_bihash_kv_72_8_t result;
   hash_acl_lookup_value_t *result_val = (hash_acl_lookup_value_t *)&result.value;
   int res = BV (clib_bihash_search) (&am->acl_lookup_hash, &kv, &result);
   ASSERT(new_index != ~0);
@@ -1002,13 +1028,49 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
 
   mask->pkt.is_ip6 = 1;
   hi->match.pkt.is_ip6 = r->is_ipv6;
+  
   if (r->is_ipv6) {
+    clib_memset(hi->match.l3_zero_pad_1, 0, sizeof(u32) * 3);
+    if (r->src_mac_len != 0)
+    {
+        clib_memcpy(&hi->match.mac6_addr[0], r->src_mac, 6);
+        for (int i = 0; i < r->src_mac_len; i++)
+        {
+            mask->mac6_addr[0].bytes[i] = 0xff;
+        }
+    }
+
+    if (r->dst_mac_len != 0)
+    {
+        clib_memcpy(&hi->match.mac6_addr[1], r->dst_mac, 6);
+        for (int i = 0; i < r->src_mac_len; i++)
+        {
+            mask->mac6_addr[1].bytes[i] = 0xff;
+        }
+    }
     make_ip6_address_mask(&mask->ip6_addr[0], r->src_prefixlen);
     hi->match.ip6_addr[0] = r->src.ip6;
     make_ip6_address_mask(&mask->ip6_addr[1], r->dst_prefixlen);
     hi->match.ip6_addr[1] = r->dst.ip6;
   } else {
-    clib_memset(hi->match.l3_zero_pad, 0, sizeof(hi->match.l3_zero_pad));
+    clib_memset(hi->match.l3_zero_pad, 0, sizeof(u32) * 9);
+    if (r->src_mac_len != 0)
+    {
+        clib_memcpy(&hi->match.mac4_addr[0], r->src_mac, 6);
+        for (int i = 0; i < r->src_mac_len; i++)
+        {
+            mask->mac4_addr[0].bytes[i] = 0xff;
+        }
+    }
+
+    if (r->dst_mac_len != 0)
+    {
+        clib_memcpy(&hi->match.mac4_addr[1], r->dst_mac, 6);
+        for (int i = 0; i < r->src_mac_len; i++)
+        {
+            mask->mac4_addr[1].bytes[i] = 0xff;
+        }
+    }
     make_ip4_address_mask(&mask->ip4_addr[0], r->src_prefixlen);
     hi->match.ip4_addr[0] = r->src.ip4;
     make_ip4_address_mask(&mask->ip4_addr[1], r->dst_prefixlen);
@@ -1044,11 +1106,10 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
   u64 *pmask = (u64 *)mask;
   u64 *pmatch = (u64 *)&hi->match;
   int j;
-  for(j=0; j<6; j++) {
+  for(j=0; j<9; j++) {
     pmatch[j] = pmatch[j] & pmask[j];
   }
 }
-
 
 int hash_acl_exists(acl_main_t *am, int acl_index)
 {
@@ -1162,10 +1223,11 @@ acl_plugin_show_tables_mask_type (void)
     /* *INDENT-OFF* */
     pool_foreach (mte, am->ace_mask_type_pool)
      {
-      vlib_cli_output(vm, "     %3d: %016llx %016llx %016llx %016llx %016llx %016llx  refcount %d",
+      vlib_cli_output(vm, "     %3d: %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx  refcount %d",
 		    mte - am->ace_mask_type_pool,
-		    mte->mask.kv_40_8.key[0], mte->mask.kv_40_8.key[1], mte->mask.kv_40_8.key[2],
-		    mte->mask.kv_40_8.key[3], mte->mask.kv_40_8.key[4], mte->mask.kv_40_8.value, mte->refcount);
+		    mte->mask.kv_64_8.key[0], mte->mask.kv_64_8.key[1], mte->mask.kv_64_8.key[2],
+		    mte->mask.kv_64_8.key[3], mte->mask.kv_64_8.key[4], mte->mask.kv_64_8.key[5],
+		    mte->mask.kv_64_8.key[6], mte->mask.kv_64_8.key[7],mte->mask.kv_64_8.value, mte->refcount);
     }
     /* *INDENT-ON* */
 }
@@ -1193,8 +1255,8 @@ acl_plugin_show_tables_acl_hash_info (u32 acl_index)
 	  hash_ace_info_t *pa = &ha->rules[j];
 	  m = (u64 *) & pa->match;
 	  vlib_cli_output (vm,
-			   "    %4d: %016llx %016llx %016llx %016llx %016llx %016llx base mask index %d acl %d rule %d action %d\n",
-			   j, m[0], m[1], m[2], m[3], m[4], m[5],
+			   "    %4d: %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx base mask index %d acl %d rule %d action %d\n",
+			   j, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8],
 			   pa->base_mask_type_index, pa->acl_index, pa->ace_index,
 			   pa->action);
 	}
@@ -1609,3 +1671,4 @@ split_partition(acl_main_t *am, u32 first_index,
 	DBG( "TM-split_partition - END");
 
 }
+

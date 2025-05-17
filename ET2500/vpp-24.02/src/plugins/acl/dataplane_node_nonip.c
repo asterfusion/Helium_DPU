@@ -30,7 +30,7 @@
 #include <plugins/acl/public_inlines.h>
 #include <plugins/acl/session_inlines.h>
 
-#include <vppinfra/bihash_40_8.h>
+#include <vppinfra/bihash_64_8.h>
 #include <vppinfra/bihash_template.h>
 
 typedef struct

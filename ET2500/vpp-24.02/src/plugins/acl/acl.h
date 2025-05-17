@@ -24,9 +24,9 @@
 #include <vppinfra/error.h>
 #include <vppinfra/bitmap.h>
 #include <vppinfra/elog.h>
-#include <vppinfra/bihash_48_8.h>
-#include <vppinfra/bihash_40_8.h>
-#include <vppinfra/bihash_16_8.h>
+#include <vppinfra/bihash_72_8.h>
+#include <vppinfra/bihash_64_8.h>
+#include <vppinfra/bihash_32_8.h>
 #include <vlib/counter.h>
 
 #include "types.h"
@@ -135,7 +135,7 @@ typedef struct {
 
   acl_list_t *acls;	/* Pool of ACLs */
   hash_acl_info_t *hash_acl_infos; /* corresponding hash matching housekeeping info */
-  clib_bihash_48_8_t acl_lookup_hash; /* ACL lookup hash table. */
+  clib_bihash_72_8_t acl_lookup_hash; /* ACL lookup hash table. */
   u32 hash_lookup_hash_buckets;
   uword hash_lookup_hash_memory;
 
@@ -231,8 +231,8 @@ typedef struct {
   uword *fa_out_acl_on_sw_if_index;
   /* bihash holding all of the sessions */
   int fa_sessions_hash_is_initialized;
-  clib_bihash_40_8_t fa_ip6_sessions_hash;
-  clib_bihash_16_8_t fa_ip4_sessions_hash;
+  clib_bihash_64_8_t fa_ip6_sessions_hash;
+  clib_bihash_32_8_t fa_ip4_sessions_hash;
   /* The process node which orchestrates the cleanup */
   u32 fa_cleaner_node_index;
   /* FA session timeouts, in seconds */
@@ -391,3 +391,4 @@ void aclp_post_session_change_request(acl_main_t *am, u32 target_thread, u32 tar
 void aclp_swap_wip_and_pending_session_change_requests(acl_main_t *am, u32 target_thread);
 
 #endif
+

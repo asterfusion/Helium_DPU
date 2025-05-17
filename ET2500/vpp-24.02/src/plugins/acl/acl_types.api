@@ -42,6 +42,10 @@ enum acl_action : u8
 typedef acl_rule
 {
   vl_api_acl_action_t is_permit;
+  vl_api_mac_address_t src_mac;
+  u8 src_mac_len;
+  vl_api_mac_address_t dst_mac;
+  u8 dst_mac_len;
   vl_api_prefix_t src_prefix;
   vl_api_prefix_t dst_prefix;
 /*

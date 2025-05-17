@@ -22,6 +22,10 @@ typedef struct
 {
   u8 is_permit;
   u8 is_ipv6;
+  u8 src_mac[6];
+  u8 src_mac_len;
+  u8 dst_mac[6];
+  u8 dst_mac_len;
   ip46_address_t src;
   u8 src_prefixlen;
   ip46_address_t dst;

@@ -29,7 +29,7 @@
 #include <plugins/acl/public_inlines.h>
 #include <plugins/acl/session_inlines.h>
 
-#include <vppinfra/bihash_40_8.h>
+#include <vppinfra/bihash_64_8.h>
 #include <vppinfra/bihash_template.h>
 
 typedef struct
@@ -39,7 +39,7 @@ typedef struct
   u32 lc_index;
   u32 match_acl_in_index;
   u32 match_rule_index;
-  u64 packet_info[6];
+  u64 packet_info[9];
   u32 trace_bitmap;
   u8 action;
 } acl_fa_trace_t;
@@ -92,12 +92,15 @@ maybe_trace_buffer (vlib_main_t * vm, vlib_node_runtime_t * node,
       t->next_index = next0;
       t->match_acl_in_index = match_acl_in_index;
       t->match_rule_index = match_rule_index;
-      t->packet_info[0] = fa_5tuple->kv_40_8.key[0];
-      t->packet_info[1] = fa_5tuple->kv_40_8.key[1];
-      t->packet_info[2] = fa_5tuple->kv_40_8.key[2];
-      t->packet_info[3] = fa_5tuple->kv_40_8.key[3];
-      t->packet_info[4] = fa_5tuple->kv_40_8.key[4];
-      t->packet_info[5] = fa_5tuple->kv_40_8.value;
+      t->packet_info[0] = fa_5tuple->kv_64_8.key[0];
+      t->packet_info[1] = fa_5tuple->kv_64_8.key[1];
+      t->packet_info[2] = fa_5tuple->kv_64_8.key[2];
+      t->packet_info[3] = fa_5tuple->kv_64_8.key[3];
+      t->packet_info[4] = fa_5tuple->kv_64_8.key[4];
+      t->packet_info[6] = fa_5tuple->kv_64_8.key[5];
+      t->packet_info[6] = fa_5tuple->kv_64_8.key[6];
+      t->packet_info[7] = fa_5tuple->kv_64_8.key[7];
+      t->packet_info[8] = fa_5tuple->kv_64_8.value;
       t->action = action;
       t->trace_bitmap = trace_bitmap;
     }
@@ -318,6 +321,29 @@ acl_fa_node_common_prepare_fn (vlib_main_t * vm,
     }
 }
 
+always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, u32 *rule_index, u8 *action)
+{
+    for (int i = 0; i < match_acl_info->acl_match_count; i++)
+    {
+        if (ACL_ACTION_DENY == match_acl_info->action[i])
+        {
+            *action = ACL_ACTION_DENY;
+            *acl_index = match_acl_info->acl_index[i];
+            *rule_index = match_acl_info->rule_index[i];
+            break;
+        }
+
+        if (match_acl_info->action[i] > *action)
+        {
+            *action = match_acl_info->action[i];
+            *acl_index = match_acl_info->acl_index[i];
+            *rule_index = match_acl_info->rule_index[i];
+        }
+    }
+
+    return;
+}   
+
 
 always_inline uword
 acl_fa_inner_node_fn (vlib_main_t * vm,
@@ -344,9 +370,6 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
   fa_5tuple_t *fa_5tuple;
   u64 *hash;
   /* for the delayed counters */
-  u32 saved_matched_acl_index = 0;
-  u32 saved_matched_ace_index = 0;
-  u32 saved_packet_count = 0;
   u32 saved_byte_count = 0;
 
   error_node = vlib_node_get_runtime (vm, node->node_index);
@@ -382,8 +405,10 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
       u32 lc_index0 = ~0;
       int acl_check_needed = 1;
       u32 match_acl_in_index = ~0;
-      u32 match_acl_pos = ~0;
       u32 match_rule_index = ~0;
+      match_acl_t match_acl_info;
+
+      memset(&match_acl_info, 0, sizeof(match_acl_t));
 
       next[0] = 0;		/* drop by default */
 
@@ -472,36 +497,37 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 		  am->output_lc_index_by_sw_if_index[sw_if_index[0]];
 
 	      action = 0;	/* deny by default */
-	      int is_match = acl_plugin_match_5tuple_inline (am, lc_index0,
+	      acl_plugin_match_5tuple_inline_sai (am, lc_index0,
 							     (fa_5tuple_opaque_t *) & fa_5tuple[0], is_ip6,
-							     &action,
-							     &match_acl_pos,
-							     &match_acl_in_index,
-							     &match_rule_index,
-							     &trace_bitmap);
+							     &trace_bitmap,
+							     &match_acl_info);
 	      if (PREDICT_FALSE
-		  (is_match && am->interface_acl_counters_enabled))
+		  (match_acl_info.acl_match_count && am->interface_acl_counters_enabled))
 		{
 		  u32 buf_len = vlib_buffer_length_in_chain (vm, b[0]);
-		  vlib_increment_combined_counter (am->combined_acl_counters +
-						   saved_matched_acl_index,
-						   thread_index,
-						   saved_matched_ace_index,
-						   saved_packet_count,
-						   saved_byte_count);
-		  saved_matched_acl_index = match_acl_in_index;
-		  saved_matched_ace_index = match_rule_index;
-		  saved_packet_count = 1;
-		  saved_byte_count = buf_len;
-		  if (!is_l2_path && is_input)
+          saved_byte_count = buf_len;
+          if (!is_l2_path && is_input)
 		  {
 			saved_byte_count += ethernet_buffer_header_size(b[0]);
 		  }
-		  /* prefetch the counter that we are going to increment */
-		  vlib_prefetch_combined_counter (am->combined_acl_counters +
-						  saved_matched_acl_index,
+          for (int i = 0; i < match_acl_info.acl_match_count; i++)
+          {
+              /* prefetch the counter that we are going to increment */
+		      vlib_prefetch_combined_counter (am->combined_acl_counters +
+						  match_acl_info.acl_index[i],
 						  thread_index,
-						  saved_matched_ace_index);
+						  match_acl_info.rule_index[i]);
+
+		      vlib_increment_combined_counter (am->combined_acl_counters +
+						   match_acl_info.acl_index[i],
+						   thread_index,
+						   match_acl_info.rule_index[i],
+						   1,
+						   saved_byte_count);
+              
+          }
+
+          acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &action);
 		}
 
 	      b[0]->error = error_node->errors[action];
@@ -597,11 +623,6 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
    * if we were had an acl match then we have a counter to increment.
    * else it is all zeroes, so this will be harmless.
    */
-  vlib_increment_combined_counter (am->combined_acl_counters +
-				   saved_matched_acl_index,
-				   thread_index,
-				   saved_matched_ace_index,
-				   saved_packet_count, saved_byte_count);
 
   vlib_node_increment_counter (vm, node->node_index,
 			       ACL_FA_ERROR_ACL_CHECK, frame->n_vectors);
@@ -809,6 +830,20 @@ VLIB_NODE_FN (acl_out_fa_ip4_node) (vlib_main_t * vm,
   return acl_fa_node_fn (vm, node, frame, 0, 0, 0);
 }
 
+VLIB_NODE_FN (acl_in_sai_nonip_node) (vlib_main_t * vm,
+				    vlib_node_runtime_t * node,
+				    vlib_frame_t * frame)
+{
+  return acl_fa_node_fn (vm, node, frame, 0, 1, 1);
+}
+
+VLIB_NODE_FN (acl_out_sai_nonip_node) (vlib_main_t * vm,
+				    vlib_node_runtime_t * node,
+				    vlib_frame_t * frame)
+{
+  return acl_fa_node_fn (vm, node, frame, 0, 0, 1);
+}
+
 VLIB_REGISTER_NODE (acl_in_l2_ip6_node) =
 {
   .name = "acl-plugin-in-ip6-l2",
@@ -996,6 +1031,54 @@ VNET_FEATURE_INIT (acl_out_ip4_fa_feature, static) = {
   .runs_before = VNET_FEATURES ("ip4-dvr-reinject", "interface-output"),
 };
 
+VLIB_REGISTER_NODE (acl_in_sai_nonip_node) =
+{
+  .name = "acl-plugin-in-sai-nonip-l2",
+  .vector_size = sizeof (u32),
+  .format_trace = format_acl_plugin_trace,
+  .type = VLIB_NODE_TYPE_INTERNAL,
+  .n_errors = ARRAY_LEN (acl_fa_error_strings),
+  .error_strings = acl_fa_error_strings,
+  .n_next_nodes = ACL_FA_N_NEXT,
+    /* edit / add dispositions here */
+  .next_nodes =
+  {
+    [ACL_FA_ERROR_DROP] = "error-drop",
+    [ACL_FA_PUNT] = "linux-cp-punt",
+  }
+};
+
+VNET_FEATURE_INIT (acl_in_l2_sai_nonip_fa_feature, static) =
+{
+  .arc_name = "l2-input-nonip",
+  .node_name = "acl-plugin-in-sai-nonip-l2",
+  .runs_before = VNET_FEATURES ("l2-input-feat-arc-end"),
+};
+
+VLIB_REGISTER_NODE (acl_out_sai_nonip_node) =
+{
+  .name = "acl-plugin-out-sai-nonip-l2",
+  .vector_size = sizeof (u32),
+  .format_trace = format_acl_plugin_trace,
+  .type = VLIB_NODE_TYPE_INTERNAL,
+  .n_errors = ARRAY_LEN (acl_fa_error_strings),
+  .error_strings = acl_fa_error_strings,
+  .n_next_nodes = ACL_FA_N_NEXT,
+    /* edit / add dispositions here */
+  .next_nodes =
+  {
+    [ACL_FA_ERROR_DROP] = "error-drop",
+    [ACL_FA_PUNT] = "linux-cp-punt",
+  }
+};
+
+VNET_FEATURE_INIT (acl_out_l2_sai_nonip_fa_feature, static) =
+{
+  .arc_name = "l2-output-nonip",
+  .node_name = "acl-plugin-out-sai-nonip-l2",
+  .runs_before = VNET_FEATURES ("l2-output-feat-arc-end"),
+};
+
 /* *INDENT-ON* */
 
 /*
@@ -1005,3 +1088,4 @@ VNET_FEATURE_INIT (acl_out_ip4_fa_feature, static) = {
  * eval: (c-set-style "gnu")
  * End:
  */
+
