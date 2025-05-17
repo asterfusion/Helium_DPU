@@ -29,5 +29,6 @@ jobs:
     - name: configure and make
       working-directory: ./ET2500/vpp-24.02/
       run: |
+        make install-dep
         make build-release
         make pkg-deb
