@@ -804,6 +804,7 @@ static void security_check_dai_init(security_check_main_t *secm)
     clib_bitmap_alloc(dai->enable_by_vlan, SECURITY_CHECK_VLAN_NUM);
 
     /* per vlan trust port init */
+    vec_validate (dai->trust_sw_if_index_by_vlan, SECURITY_CHECK_VLAN_NUM);
     for (vlan = 0; vlan < SECURITY_CHECK_VLAN_NUM; vlan++)
     {
         clib_bitmap_alloc(dai->trust_sw_if_index_by_vlan[vlan], SECURITY_CHECK_DEFAULT_INTF_INITIAL_NUM);
@@ -831,6 +832,7 @@ static void security_check_savi_init(security_check_main_t *secm)
     clib_bitmap_alloc(savi->enable_by_vlan, SECURITY_CHECK_VLAN_NUM);
 
     /* per vlan trust port init */
+    vec_validate (savi->trust_sw_if_index_by_vlan, SECURITY_CHECK_VLAN_NUM);
     for (vlan = 0; vlan < SECURITY_CHECK_VLAN_NUM; vlan++)
     {
         clib_bitmap_alloc(savi->trust_sw_if_index_by_vlan[vlan], SECURITY_CHECK_DEFAULT_INTF_INITIAL_NUM);
@@ -858,6 +860,7 @@ static void security_check_ipsg_init(security_check_main_t *secm)
     clib_bitmap_alloc(ipsg->enable_by_vlan, SECURITY_CHECK_VLAN_NUM);
 
     /* per vlan trust port init */
+    vec_validate (ipsg->trust_sw_if_index_by_vlan, SECURITY_CHECK_VLAN_NUM);
     for (vlan = 0; vlan < SECURITY_CHECK_VLAN_NUM; vlan++)
     {
         clib_bitmap_alloc(ipsg->trust_sw_if_index_by_vlan[vlan], SECURITY_CHECK_DEFAULT_INTF_INITIAL_NUM);
@@ -885,6 +888,7 @@ static void security_check_ipsgv6_init(security_check_main_t *secm)
     clib_bitmap_alloc(ipsgv6->enable_by_vlan, SECURITY_CHECK_VLAN_NUM);
 
     /* per vlan trust port init */
+    vec_validate (ipsgv6->trust_sw_if_index_by_vlan, SECURITY_CHECK_VLAN_NUM);
     for (vlan = 0; vlan < SECURITY_CHECK_VLAN_NUM; vlan++)
     {
         clib_bitmap_alloc(ipsgv6->trust_sw_if_index_by_vlan[vlan], SECURITY_CHECK_DEFAULT_INTF_INITIAL_NUM);
