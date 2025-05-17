@@ -12,13 +12,17 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: debian:12
-
+    env:
+      ASROUTER_NAME: octeon10
     steps:
-    - uses: actions/checkout@v4
+    - name: checkout code
+      uses: actions/checkout@v4
+      
+    - name: print env
+      run: echo "currently $ASROUTER_NAME"
+      
     - name: configure and make
       working-directory: ./ET2500/vpp-24.02/
       run: |
-        pwd
-        export ASROUTER_NAME=octeon10
         make build-release
         make pkg-deb
