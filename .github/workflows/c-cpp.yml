@@ -15,6 +15,11 @@ jobs:
     env:
       ASROUTER_NAME: octeon10
     steps:
+    - name: Update apt and install make
+      run: |
+        apt-get update
+        apt-get install -y make gcc g++
+          
     - name: checkout code
       uses: actions/checkout@v4
       
