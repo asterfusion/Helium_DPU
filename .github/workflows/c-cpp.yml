@@ -25,10 +25,12 @@ jobs:
       
     - name: print env
       run: echo "currently $ASROUTER_NAME"
+    - name: install deps
+      working-directory: ./ET2500/vpp-24.02/
+      run: yes | make install-dep
       
-    - name: configure and make
+    - name: make
       working-directory: ./ET2500/vpp-24.02/
       run: |
-        make install-dep
         make build-release
         make pkg-deb
