@@ -1,0 +1,36 @@
+name: C/C++ CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    container:
+      image: debian:12
+    env:
+      ASROUTER_NAME: octeon10
+    steps:
+    - name: Update apt and install make
+      run: |
+        apt-get update
+        apt-get install -y make gcc g++ sudo
+          
+    - name: checkout code
+      uses: actions/checkout@v4
+      
+    - name: print env
+      run: echo "currently $ASROUTER_NAME"
+    - name: install deps
+      working-directory: ./ET2500/vpp-24.02/
+      run: yes | make install-dep
+      
+    - name: make
+      working-directory: ./ET2500/vpp-24.02/
+      run: |
+        make build-release
+        make pkg-deb
