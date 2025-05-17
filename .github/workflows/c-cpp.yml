@@ -18,7 +18,7 @@ jobs:
     - name: Update apt and install make
       run: |
         apt-get update
-        apt-get install -y make gcc g++
+        apt-get install -y make gcc g++ sudo
           
     - name: checkout code
       uses: actions/checkout@v4
