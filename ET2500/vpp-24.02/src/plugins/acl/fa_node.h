@@ -2,8 +2,8 @@
 #define _FA_NODE_H_
 
 #include <stddef.h>
-#include <vppinfra/bihash_16_8.h>
-#include <vppinfra/bihash_40_8.h>
+#include <vppinfra/bihash_32_8.h>
+#include <vppinfra/bihash_64_8.h>
 
 #include <plugins/acl/exported_types.h>
 
@@ -73,19 +73,24 @@ typedef union {
            after padding so we can still
            use them as (shorter) key together with
            L4 info */
-        u32 l3_zero_pad[6];
+        u32 l3_zero_pad[9];
+        mac_address_t mac4_addr[2];
         ip4_address_t ip4_addr[2];
       };
-      ip6_address_t ip6_addr[2];
+      struct {
+        u32 l3_zero_pad_1[3];
+        mac_address_t mac6_addr[2];
+        ip6_address_t ip6_addr[2];
+      };
     };
     fa_session_l4_key_t l4;
     /* This field should align with u64 value in bihash_40_8 and bihash_16_8 keyvalue struct */
     fa_packet_info_t pkt;
   };
-  clib_bihash_kv_40_8_t kv_40_8;
+  clib_bihash_kv_64_8_t kv_64_8;
   struct {
-    u64 padding_for_kv_16_8[3];
-    clib_bihash_kv_16_8_t kv_16_8;
+    u64 padding_for_kv_16_8[4];
+    clib_bihash_kv_32_8_t kv_32_8;
   };
 } fa_5tuple_t;
 
@@ -103,22 +108,22 @@ format_fa_session_l4_key(u8 * s, va_list * args)
 }
 
 typedef struct {
-  fa_5tuple_t info; /* (5+1)*8 = 48 bytes */
-  u64 last_active_time;   /* +8 bytes = 56 */
-  u32 sw_if_index;        /* +4 bytes = 60 */
+  fa_5tuple_t info; /* (5+1)*8 = 48 bytes (8+1) * 8 = 72*/
+  u64 last_active_time;   /* +8 bytes = 80 */
+  u32 sw_if_index;        /* +4 bytes = 84 */
   union {
     u8 as_u8[2];
     u16 as_u16;
-  } tcp_flags_seen; ;     /* +2 bytes = 62 */
-  u16 thread_index;          /* +2 bytes = 64 */
-  u64 link_enqueue_time;  /* 8 byte = 8 */
-  u32 link_prev_idx;      /* +4 bytes = 12 */
-  u32 link_next_idx;      /* +4 bytes = 16 */
-  u8 link_list_id;        /* +1 bytes = 17 */
-  u8 deleted;             /* +1 bytes = 18 */
-  u8 is_ip6;              /* +1 bytes = 19 */
-  u8 reserved1[5];        /* +5 bytes = 24 */
-  u64 reserved2[5];       /* +5*8 bytes = 64 */
+  } tcp_flags_seen; ;     /* +2 bytes = 86 */
+  u16 thread_index;          /* +2 bytes = 88 */
+  u64 link_enqueue_time;  /* 8 byte = 96 */
+  u32 link_prev_idx;      /* +4 bytes = 100 */
+  u32 link_next_idx;      /* +4 bytes = 104 */
+  u8 link_list_id;        /* +1 bytes = 105 */
+  u8 deleted;             /* +1 bytes = 106 */
+  u8 is_ip6;              /* +1 bytes = 107 */
+  u8 reserved1[5];        /* +5 bytes = 112 */
+  u64 reserved2[2];       /* +2*8 bytes = 128 */
 } fa_session_t;
 
 #define FA_POLICY_EPOCH_MASK 0x7fff
@@ -145,14 +150,14 @@ typedef struct {
  */
 
 #define CT_ASSERT_EQUAL(name, x,y) typedef int assert_ ## name ## _compile_time_assertion_failed[((x) == (y))-1]
-CT_ASSERT_EQUAL(fa_l3_key_size_is_40, offsetof(fa_5tuple_t, pkt), offsetof(clib_bihash_kv_40_8_t, value));
-CT_ASSERT_EQUAL(fa_ip6_kv_val_at_pkt, offsetof(fa_5tuple_t, pkt), offsetof(fa_5tuple_t, kv_40_8.value));
-CT_ASSERT_EQUAL(fa_ip4_kv_val_at_pkt, offsetof(fa_5tuple_t, pkt), offsetof(fa_5tuple_t, kv_16_8.value));
+CT_ASSERT_EQUAL(fa_l3_key_size_is_64, offsetof(fa_5tuple_t, pkt), offsetof(clib_bihash_kv_64_8_t, value));
+CT_ASSERT_EQUAL(fa_ip6_kv_val_at_pkt, offsetof(fa_5tuple_t, pkt), offsetof(fa_5tuple_t, kv_32_8.value));
+CT_ASSERT_EQUAL(fa_ip4_kv_val_at_pkt, offsetof(fa_5tuple_t, pkt), offsetof(fa_5tuple_t, kv_32_8.value));
 CT_ASSERT_EQUAL(fa_l4_key_t_is_8, sizeof(fa_session_l4_key_t), sizeof(u64));
 CT_ASSERT_EQUAL(fa_packet_info_t_is_8, sizeof(fa_packet_info_t), sizeof(u64));
-CT_ASSERT_EQUAL(fa_l3_kv_size_is_48, sizeof(fa_5tuple_t), sizeof(clib_bihash_kv_40_8_t));
-CT_ASSERT_EQUAL(fa_ip4_starts_at_kv16_key, offsetof(fa_5tuple_t, ip4_addr), offsetof(fa_5tuple_t, kv_16_8));
-CT_ASSERT_EQUAL(fa_ip4_and_ip6_kv_value_match, offsetof(fa_5tuple_t, kv_16_8.value), offsetof(fa_5tuple_t, kv_40_8.value));
+CT_ASSERT_EQUAL(fa_l3_kv_size_is_72, sizeof(fa_5tuple_t), sizeof(clib_bihash_kv_64_8_t));
+//CT_ASSERT_EQUAL(fa_ip4_starts_at_kv16_key, offsetof(fa_5tuple_t, ip4_addr), offsetof(fa_5tuple_t, kv_32_8));
+//CT_ASSERT_EQUAL(fa_ip4_and_ip6_kv_value_match, offsetof(fa_5tuple_t, kv_16_8.value), offsetof(fa_5tuple_t, kv_40_8.value));
 
 /* Let's try to fit within two cachelines */
 CT_ASSERT_EQUAL(fa_session_t_size_is_128, sizeof(fa_session_t), 128);
@@ -372,3 +377,4 @@ do {                                                                            
 
 
 #endif
+

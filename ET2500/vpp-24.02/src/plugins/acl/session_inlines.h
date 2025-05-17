@@ -268,9 +268,9 @@ acl_fa_restart_timer_for_session (acl_main_t * am, u64 now,
 always_inline int
 is_ip6_5tuple (fa_5tuple_t * p5t)
 {
-  return (p5t->l3_zero_pad[0] | p5t->
-	  l3_zero_pad[1] | p5t->l3_zero_pad[2] | p5t->l3_zero_pad[3] | p5t->
-	  l3_zero_pad[4] | p5t->l3_zero_pad[5]) != 0;
+  return (p5t->l3_zero_pad[0] | p5t->l3_zero_pad[1] | p5t->l3_zero_pad[2] | p5t->l3_zero_pad[3] |
+	  p5t->l3_zero_pad[4] | p5t->l3_zero_pad[5] | p5t->l3_zero_pad[6] | 
+	  p5t->l3_zero_pad[7] | p5t->l3_zero_pad[8]) != 0;
 }
 
 always_inline u8
@@ -357,45 +357,52 @@ reverse_l4_u64_slowpath_valid (u64 l4, int is_ip6, u64 * out)
 
 always_inline void
 reverse_session_add_del_ip6 (acl_main_t * am,
-			     clib_bihash_kv_40_8_t * pkv, int is_add)
+			     clib_bihash_kv_64_8_t * pkv, int is_add)
 {
-  clib_bihash_kv_40_8_t kv2;
-  kv2.key[0] = pkv->key[2];
-  kv2.key[1] = pkv->key[3];
-  kv2.key[2] = pkv->key[0];
-  kv2.key[3] = pkv->key[1];
+  clib_bihash_kv_64_8_t kv2;
+  kv2.key[0] = pkv->key[0];
+  kv2.key[1] = pkv->key[1];
+  kv2.key[2] = pkv->key[2];
+  kv2.key[3] = pkv->key[3];
+  kv2.key[4] = pkv->key[4];
+  kv2.key[5] = pkv->key[5];
+  kv2.key[6] = pkv->key[6];
   /* the last u64 needs special treatment (ports, etc.) so we do it last */
   kv2.value = pkv->value;
-  if (PREDICT_FALSE (is_session_l4_key_u64_slowpath (pkv->key[4])))
+  if (PREDICT_FALSE (is_session_l4_key_u64_slowpath (pkv->key[7])))
     {
-      if (reverse_l4_u64_slowpath_valid (pkv->key[4], 1, &kv2.key[4]))
-	clib_bihash_add_del_40_8 (&am->fa_ip6_sessions_hash, &kv2, is_add);
+      if (reverse_l4_u64_slowpath_valid (pkv->key[7], 1, &kv2.key[7]))
+	clib_bihash_add_del_64_8 (&am->fa_ip6_sessions_hash, &kv2, is_add);
     }
   else
     {
-      kv2.key[4] = reverse_l4_u64_fastpath (pkv->key[4], 1);
-      clib_bihash_add_del_40_8 (&am->fa_ip6_sessions_hash, &kv2, is_add);
+      kv2.key[7] = reverse_l4_u64_fastpath (pkv->key[7], 1);
+      clib_bihash_add_del_64_8 (&am->fa_ip6_sessions_hash, &kv2, is_add);
     }
 }
 
 always_inline void
 reverse_session_add_del_ip4 (acl_main_t * am,
-			     clib_bihash_kv_16_8_t * pkv, int is_add)
+			     clib_bihash_kv_32_8_t * pkv, int is_add)
 {
-  clib_bihash_kv_16_8_t kv2;
+  clib_bihash_kv_32_8_t kv2;
   kv2.key[0] =
     ((pkv->key[0] & 0xffffffff) << 32) | ((pkv->key[0] >> 32) & 0xffffffff);
+  kv2.key[1] =
+    ((pkv->key[1] & 0xffffffff) << 32) | ((pkv->key[1] >> 32) & 0xffffffff);
+  kv2.key[0] =
+    ((pkv->key[2] & 0xffffffff) << 32) | ((pkv->key[2] >> 32) & 0xffffffff);
   /* the last u64 needs special treatment (ports, etc.) so we do it last */
   kv2.value = pkv->value;
-  if (PREDICT_FALSE (is_session_l4_key_u64_slowpath (pkv->key[1])))
+  if (PREDICT_FALSE (is_session_l4_key_u64_slowpath (pkv->key[3])))
     {
-      if (reverse_l4_u64_slowpath_valid (pkv->key[1], 0, &kv2.key[1]))
-	clib_bihash_add_del_16_8 (&am->fa_ip4_sessions_hash, &kv2, is_add);
+      if (reverse_l4_u64_slowpath_valid (pkv->key[3], 0, &kv2.key[3]))
+	clib_bihash_add_del_32_8 (&am->fa_ip4_sessions_hash, &kv2, is_add);
     }
   else
     {
-      kv2.key[1] = reverse_l4_u64_fastpath (pkv->key[1], 0);
-      clib_bihash_add_del_16_8 (&am->fa_ip4_sessions_hash, &kv2, is_add);
+      kv2.key[1] = reverse_l4_u64_fastpath (pkv->key[3], 0);
+      clib_bihash_add_del_32_8 (&am->fa_ip4_sessions_hash, &kv2, is_add);
     }
 }
 
@@ -408,15 +415,15 @@ acl_fa_deactivate_session (acl_main_t * am, u32 sw_if_index,
   ASSERT (sess->thread_index == os_get_thread_index ());
   if (sess->is_ip6)
     {
-      clib_bihash_add_del_40_8 (&am->fa_ip6_sessions_hash,
-				&sess->info.kv_40_8, 0);
-      reverse_session_add_del_ip6 (am, &sess->info.kv_40_8, 0);
+      clib_bihash_add_del_64_8 (&am->fa_ip6_sessions_hash,
+				&sess->info.kv_64_8, 0);
+      reverse_session_add_del_ip6 (am, &sess->info.kv_64_8, 0);
     }
   else
     {
-      clib_bihash_add_del_16_8 (&am->fa_ip4_sessions_hash,
-				&sess->info.kv_16_8, 0);
-      reverse_session_add_del_ip4 (am, &sess->info.kv_16_8, 0);
+      clib_bihash_add_del_32_8 (&am->fa_ip4_sessions_hash,
+				&sess->info.kv_32_8, 0);
+      reverse_session_add_del_ip4 (am, &sess->info.kv_32_8, 0);
     }
 
   sess->deleted = 1;
@@ -534,18 +541,23 @@ acl_fa_add_session (acl_main_t * am, int is_input, int is_ip6,
 
   if (is_ip6)
     {
-      sess->info.kv_40_8.key[0] = p5tuple->kv_40_8.key[0];
-      sess->info.kv_40_8.key[1] = p5tuple->kv_40_8.key[1];
-      sess->info.kv_40_8.key[2] = p5tuple->kv_40_8.key[2];
-      sess->info.kv_40_8.key[3] = p5tuple->kv_40_8.key[3];
-      sess->info.kv_40_8.key[4] = p5tuple->kv_40_8.key[4];
-      sess->info.kv_40_8.value = f_sess_id.as_u64;
+      sess->info.kv_64_8.key[0] = p5tuple->kv_64_8.key[0];
+      sess->info.kv_64_8.key[1] = p5tuple->kv_64_8.key[1];
+      sess->info.kv_64_8.key[2] = p5tuple->kv_64_8.key[2];
+      sess->info.kv_64_8.key[3] = p5tuple->kv_64_8.key[3];
+      sess->info.kv_64_8.key[4] = p5tuple->kv_64_8.key[4];
+      sess->info.kv_64_8.key[5] = p5tuple->kv_64_8.key[5];
+      sess->info.kv_64_8.key[6] = p5tuple->kv_64_8.key[6];
+      sess->info.kv_64_8.key[7] = p5tuple->kv_64_8.key[7];
+      sess->info.kv_64_8.value = f_sess_id.as_u64;
     }
   else
     {
-      sess->info.kv_16_8.key[0] = p5tuple->kv_16_8.key[0];
-      sess->info.kv_16_8.key[1] = p5tuple->kv_16_8.key[1];
-      sess->info.kv_16_8.value = f_sess_id.as_u64;
+      sess->info.kv_32_8.key[0] = p5tuple->kv_32_8.key[0];
+      sess->info.kv_32_8.key[1] = p5tuple->kv_32_8.key[1];
+      sess->info.kv_32_8.key[2] = p5tuple->kv_32_8.key[2];
+      sess->info.kv_32_8.key[3] = p5tuple->kv_32_8.key[3];
+      sess->info.kv_32_8.value = f_sess_id.as_u64;
     }
 
   sess->last_active_time = now;
@@ -563,15 +575,15 @@ acl_fa_add_session (acl_main_t * am, int is_input, int is_ip6,
   ASSERT (am->fa_sessions_hash_is_initialized == 1);
   if (is_ip6)
     {
-      reverse_session_add_del_ip6 (am, &sess->info.kv_40_8, 1);
-      clib_bihash_add_del_40_8 (&am->fa_ip6_sessions_hash,
-				&sess->info.kv_40_8, 1);
+      reverse_session_add_del_ip6 (am, &sess->info.kv_64_8, 1);
+      clib_bihash_add_del_64_8 (&am->fa_ip6_sessions_hash,
+				&sess->info.kv_64_8, 1);
     }
   else
     {
-      reverse_session_add_del_ip4 (am, &sess->info.kv_16_8, 1);
-      clib_bihash_add_del_16_8 (&am->fa_ip4_sessions_hash,
-				&sess->info.kv_16_8, 1);
+      reverse_session_add_del_ip4 (am, &sess->info.kv_32_8, 1);
+      clib_bihash_add_del_32_8 (&am->fa_ip4_sessions_hash,
+				&sess->info.kv_32_8, 1);
     }
 
   vec_validate (pw->fa_session_adds_by_sw_if_index, sw_if_index);
@@ -587,16 +599,16 @@ acl_fa_find_session (acl_main_t * am, int is_ip6, u32 sw_if_index0,
   int res = 0;
   if (is_ip6)
     {
-      clib_bihash_kv_40_8_t kv_result;
-      res = (clib_bihash_search_inline_2_40_8
-	     (&am->fa_ip6_sessions_hash, &p5tuple->kv_40_8, &kv_result) == 0);
+      clib_bihash_kv_64_8_t kv_result;
+      res = (clib_bihash_search_inline_2_64_8
+	     (&am->fa_ip6_sessions_hash, &p5tuple->kv_64_8, &kv_result) == 0);
       *pvalue_sess = kv_result.value;
     }
   else
     {
-      clib_bihash_kv_16_8_t kv_result;
-      res = (clib_bihash_search_inline_2_16_8
-	     (&am->fa_ip4_sessions_hash, &p5tuple->kv_16_8, &kv_result) == 0);
+      clib_bihash_kv_32_8_t kv_result;
+      res = (clib_bihash_search_inline_2_32_8
+	     (&am->fa_ip4_sessions_hash, &p5tuple->kv_32_8, &kv_result) == 0);
       *pvalue_sess = kv_result.value;
     }
   return res;
@@ -607,9 +619,9 @@ acl_fa_make_session_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
 			  fa_5tuple_t * p5tuple)
 {
   if (is_ip6)
-    return clib_bihash_hash_40_8 (&p5tuple->kv_40_8);
+    return clib_bihash_hash_64_8 (&p5tuple->kv_64_8);
   else
-    return clib_bihash_hash_16_8 (&p5tuple->kv_16_8);
+    return clib_bihash_hash_32_8 (&p5tuple->kv_32_8);
 }
 
 always_inline void
@@ -617,18 +629,18 @@ acl_fa_prefetch_session_bucket_for_hash (acl_main_t * am, int is_ip6,
 					 u64 hash)
 {
   if (is_ip6)
-    clib_bihash_prefetch_bucket_40_8 (&am->fa_ip6_sessions_hash, hash);
+    clib_bihash_prefetch_bucket_64_8 (&am->fa_ip6_sessions_hash, hash);
   else
-    clib_bihash_prefetch_bucket_16_8 (&am->fa_ip4_sessions_hash, hash);
+    clib_bihash_prefetch_bucket_32_8 (&am->fa_ip4_sessions_hash, hash);
 }
 
 always_inline void
 acl_fa_prefetch_session_data_for_hash (acl_main_t * am, int is_ip6, u64 hash)
 {
   if (is_ip6)
-    clib_bihash_prefetch_data_40_8 (&am->fa_ip6_sessions_hash, hash);
+    clib_bihash_prefetch_data_64_8 (&am->fa_ip6_sessions_hash, hash);
   else
-    clib_bihash_prefetch_data_16_8 (&am->fa_ip4_sessions_hash, hash);
+    clib_bihash_prefetch_data_32_8 (&am->fa_ip4_sessions_hash, hash);
 }
 
 always_inline int
@@ -639,19 +651,19 @@ acl_fa_find_session_with_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
   int res = 0;
   if (is_ip6)
     {
-      clib_bihash_kv_40_8_t kv_result;
+      clib_bihash_kv_64_8_t kv_result;
       kv_result.value = ~0ULL;
-      res = (clib_bihash_search_inline_2_with_hash_40_8
-	     (&am->fa_ip6_sessions_hash, hash, &p5tuple->kv_40_8,
+      res = (clib_bihash_search_inline_2_with_hash_64_8
+	     (&am->fa_ip6_sessions_hash, hash, &p5tuple->kv_64_8,
 	      &kv_result) == 0);
       *pvalue_sess = kv_result.value;
     }
   else
     {
-      clib_bihash_kv_16_8_t kv_result;
+      clib_bihash_kv_32_8_t kv_result;
       kv_result.value = ~0ULL;
-      res = (clib_bihash_search_inline_2_with_hash_16_8
-	     (&am->fa_ip4_sessions_hash, hash, &p5tuple->kv_16_8,
+      res = (clib_bihash_search_inline_2_with_hash_32_8
+	     (&am->fa_ip4_sessions_hash, hash, &p5tuple->kv_32_8,
 	      &kv_result) == 0);
       *pvalue_sess = kv_result.value;
     }
@@ -666,3 +678,4 @@ acl_fa_find_session_with_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
  * eval: (c-set-style "gnu")
  * End:
  */
+

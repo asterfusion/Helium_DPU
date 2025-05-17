@@ -22,6 +22,8 @@
 #include <plugins/acl/acl.h>
 #include <plugins/acl/fa_node.h>
 #include <plugins/acl/hash_lookup_private.h>
+#include <vppinfra/bihash_72_8.h>
+#include <vppinfra/bihash_template.h>
 
 #include <plugins/acl/exported_types.h>
 
@@ -65,6 +67,35 @@ offset_beyond_packet (vlib_buffer_t * b0, int offset)
   return (offset > (b0->current_length - 8));
 }
 
+always_inline void
+acl_fill_5tuple_l2_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6, 
+		 int l2_offset, fa_5tuple_t * p5tuple_pkt)
+{
+    ethernet_header_t *mac_addr = vlib_buffer_get_current (b0) + l2_offset;
+
+    if (is_ip6)
+    {
+        int ii;
+        for(ii = 0; ii < 3; ii++)
+        {
+            p5tuple_pkt->l3_zero_pad_1[ii] = 0;
+        }
+
+        clib_memcpy(&p5tuple_pkt->mac6_addr[0], mac_addr->src_address, 6);
+        clib_memcpy(&p5tuple_pkt->mac6_addr[1], mac_addr->dst_address, 6);
+    }
+    else
+    {
+        int ii;
+        for(ii = 0; ii < 9; ii++)
+        {
+            p5tuple_pkt->l3_zero_pad[ii] = 0;
+        }
+
+        clib_memcpy(&p5tuple_pkt->mac4_addr[0], mac_addr->src_address, 6);
+        clib_memcpy(&p5tuple_pkt->mac4_addr[1], mac_addr->dst_address, 6);
+    }
+}
 
 always_inline void
 acl_fill_5tuple_l3_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
@@ -78,10 +109,6 @@ acl_fill_5tuple_l3_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
     }
   else
     {
-      int ii;
-      for(ii=0; ii<6; ii++) {
-        p5tuple_pkt->l3_zero_pad[ii] = 0;
-      }
       ip4_header_t *ip4 = vlib_buffer_get_current (b0) + l3_offset;
       p5tuple_pkt->ip4_addr[0] = ip4->src_address;
       p5tuple_pkt->ip4_addr[1] = ip4->dst_address;
@@ -208,23 +235,45 @@ acl_fill_5tuple (acl_main_t * am, u32 sw_if_index0, vlib_buffer_t * b0, int is_i
 		 int is_input, int is_l2_path, fa_5tuple_t * p5tuple_pkt)
 {
   int l3_offset;
+  int l2_offset;
+  int no_l3_l4_flag = 0;
 
   if (is_l2_path)
     {
+      l2_offset = 0;
       l3_offset = ethernet_buffer_header_size(b0);
+
+      u16 ethertype = 0;
+      ethernet_header_t *h0 = vlib_buffer_get_current (b0);
+      u8 *l3h0 = (u8 *) h0 + vnet_buffer (b0)->l2.l2_len;
+      ethertype = clib_net_to_host_u16(*((u16 *)(l3h0 - 2)));
+      if ((ETHERNET_TYPE_IP6 != ethertype) && (ETHERNET_TYPE_IP4 != ethertype))
+      {
+          no_l3_l4_flag = 1;
+      }
     }
   else
     {
       if (is_input)
+      {
         l3_offset = 0;
+        l2_offset = 0 - (vnet_buffer(b0)->l3_hdr_offset - vnet_buffer(b0)->l2_hdr_offset);
+      }
       else
+      {
+        l2_offset = vnet_buffer(b0)->ip.save_rewrite_length - (vnet_buffer(b0)->l3_hdr_offset - vnet_buffer(b0)->l2_hdr_offset);
         l3_offset = vnet_buffer(b0)->ip.save_rewrite_length;
+      }
     }
 
   /* key[0..3] contains src/dst address and is cleared/set below */
   /* Remainder of the key and per-packet non-key data */
-  acl_fill_5tuple_l3_data(am, b0, is_ip6, l3_offset, p5tuple_pkt);
-  acl_fill_5tuple_l4_and_pkt_data(am, sw_if_index0, b0, is_ip6, is_input, l3_offset, &p5tuple_pkt->l4, &p5tuple_pkt->pkt);
+  acl_fill_5tuple_l2_data(am, b0, is_ip6, l2_offset, p5tuple_pkt);
+  if (0 == no_l3_l4_flag)
+  {
+      acl_fill_5tuple_l3_data(am, b0, is_ip6, l3_offset, p5tuple_pkt);
+      acl_fill_5tuple_l4_and_pkt_data(am, sw_if_index0, b0, is_ip6, is_input, l3_offset, &p5tuple_pkt->l4, &p5tuple_pkt->pkt);
+  }
 }
 
 always_inline void
@@ -235,6 +284,21 @@ acl_plugin_fill_5tuple_inline (void *p_acl_main, u32 lc_index, vlib_buffer_t * b
   acl_fill_5tuple(am, 0, b0, is_ip6, is_input, is_l2_path, (fa_5tuple_t *)p5tuple_pkt);
 }
 
+always_inline int
+fa_acl_match_mac_addr (mac_address_t *addr1, u8 *addr2, int prefixlen)
+{
+  if (prefixlen == 0)
+    {
+      return 1;
+    }
+    if (clib_memcmp (addr1, addr2, prefixlen))
+	{
+	  /* If the starting full bytes do not match, no point in bittwidling the thumbs further */
+	  return 0;
+	}
+
+    return 0;
+}
 
 
 always_inline int
@@ -312,7 +376,17 @@ single_acl_match_5tuple (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5tupl
 	{
 	  continue;
 	}
+
       if (is_ip6) {
+	if (!fa_acl_match_mac_addr(&pkt_5tuple->mac6_addr[1], r->dst_mac, r->dst_mac_len))
+        {
+  	      continue;
+        }
+  
+        if (!fa_acl_match_mac_addr(&pkt_5tuple->mac6_addr[0], r->src_mac, r->src_mac_len))
+        {
+  	      continue;
+        }
         if (!fa_acl_match_ip6_addr
 	  (&pkt_5tuple->ip6_addr[1], &r->dst.ip6, r->dst_prefixlen))
 	continue;
@@ -320,6 +394,15 @@ single_acl_match_5tuple (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5tupl
 	  (&pkt_5tuple->ip6_addr[0], &r->src.ip6, r->src_prefixlen))
 	continue;
       } else {
+	if (!fa_acl_match_mac_addr(&pkt_5tuple->mac4_addr[1], r->dst_mac, r->dst_mac_len))
+        {
+  	      continue;
+        }
+  
+        if (!fa_acl_match_mac_addr(&pkt_5tuple->mac4_addr[0], r->src_mac, r->src_mac_len))
+        {
+  	      continue;
+        }
         if (!fa_acl_match_ip4_addr
 	  (&pkt_5tuple->ip4_addr[1], &r->dst.ip4, r->dst_prefixlen))
 	continue;
@@ -578,8 +661,8 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
 always_inline u32
 multi_acl_match_get_applied_ace_index (acl_main_t * am, int is_ip6, fa_5tuple_t * match)
 {
-  clib_bihash_kv_48_8_t kv;
-  clib_bihash_kv_48_8_t result;
+  clib_bihash_kv_72_8_t kv;
+  clib_bihash_kv_72_8_t result;
   fa_5tuple_t *kv_key = (fa_5tuple_t *) kv.key;
   hash_acl_lookup_value_t *result_val =
     (hash_acl_lookup_value_t *) & result.value;
@@ -600,8 +683,8 @@ multi_acl_match_get_applied_ace_index (acl_main_t * am, int is_ip6, fa_5tuple_t 
 
   hash_applied_mask_info_t *minfo;
 
-  DBG ("TRYING TO MATCH: %016llx %016llx %016llx %016llx %016llx %016llx",
-       pmatch[0], pmatch[1], pmatch[2], pmatch[3], pmatch[4], pmatch[5]);
+  DBG ("TRYING TO MATCH: %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx",
+       pmatch[0], pmatch[1], pmatch[2], pmatch[3], pmatch[4], pmatch[5], pmatch[6], pmatch[7], pmatch[8]);
 
   for (order_index = 0; order_index < vec_len ((*hash_applied_mask_info_vec));
        order_index++)
@@ -633,6 +716,9 @@ multi_acl_match_get_applied_ace_index (acl_main_t * am, int is_ip6, fa_5tuple_t 
       *pkey++ = *pmatch++ & *pmask++;
       *pkey++ = *pmatch++ & *pmask++;
       *pkey++ = *pmatch++ & *pmask++;
+      *pkey++ = *pmatch++ & *pmask++;
+      *pkey++ = *pmatch++ & *pmask++;
+      *pkey++ = *pmatch++ & *pmask++;
 
       /*
        * The use of temporary variable convinces the compiler
@@ -643,8 +729,8 @@ multi_acl_match_get_applied_ace_index (acl_main_t * am, int is_ip6, fa_5tuple_t 
       tmp_pkt.mask_type_index_lsb = mask_type_index;
       kv_key->pkt.as_u64 = tmp_pkt.as_u64;
 
-      int res =
-	clib_bihash_search_inline_2_48_8 (&am->acl_lookup_hash, &kv, &result);
+      //int res = 0;
+      int res = clib_bihash_search_inline_2_72_8 (&am->acl_lookup_hash, &kv, &result);
 
       if (res == 0)
 	{
@@ -675,8 +761,8 @@ always_inline u32
 multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6, 
                                                                 fa_5tuple_t * match, match_acl_t *match_acl_info)
 {
-    clib_bihash_kv_48_8_t kv;
-    clib_bihash_kv_48_8_t result;
+    clib_bihash_kv_72_8_t kv;
+    clib_bihash_kv_72_8_t result;
     fa_5tuple_t *kv_key = (fa_5tuple_t *) kv.key;
     hash_acl_lookup_value_t *result_val = (hash_acl_lookup_value_t *) & result.value;
     u64 *pmatch = (u64 *) match;
@@ -708,6 +794,9 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
         *pkey++ = *pmatch++ & *pmask++;
         *pkey++ = *pmatch++ & *pmask++;
         *pkey++ = *pmatch++ & *pmask++;
+        *pkey++ = *pmatch++ & *pmask++;
+        *pkey++ = *pmatch++ & *pmask++;
+        *pkey++ = *pmatch++ & *pmask++;
 
         /*
          * The use of temporary variable convinces the compiler
@@ -718,7 +807,7 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
         tmp_pkt.mask_type_index_lsb = mask_type_index;
         kv_key->pkt.as_u64 = tmp_pkt.as_u64;
 
-        int res = clib_bihash_search_inline_2_48_8 (&am->acl_lookup_hash, &kv, &result);
+        int res = clib_bihash_search_inline_2_72_8 (&am->acl_lookup_hash, &kv, &result);
 
         if (res == 0)
         {
@@ -805,6 +894,7 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
     }
 
     match_acl_info->acl_match_count = acl_match_count;
+
     return 0;
 }
 

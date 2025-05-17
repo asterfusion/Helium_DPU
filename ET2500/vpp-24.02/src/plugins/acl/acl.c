@@ -49,7 +49,7 @@ acl_main_t acl_main;
  * The code for the bihash, used by the session management.
  */
 #include <vppinfra/bihash_32_8.h>
-#include <vppinfra/bihash_40_8.h>
+#include <vppinfra/bihash_64_8.h>
 #include <vppinfra/bihash_48_8.h>
 #include <vppinfra/bihash_template.h>
 #include <vppinfra/bihash_template.c>
@@ -170,6 +170,10 @@ acl_print_acl_x (acl_vector_print_func_t vpr, vlib_main_t * vm,
       r = &acl_rules[j];
       out0 = format (out0, "  %9d: %s ", j, r->is_ipv6 ? "ipv6" : "ipv4");
       out0 = format_acl_action (out0, r->is_permit);
+      out0 = format (out0, " smac %02x:%02x:%02x:%02x:%02x:%02x ",
+        r->src_mac[0], r->src_mac[1], r->src_mac[2], r->src_mac[3], r->src_mac[4], r->src_mac[5]);
+      out0 = format (out0, " dmac %02x:%02x:%02x:%02x:%02x:%02x ",
+        r->dst_mac[0], r->dst_mac[1], r->dst_mac[2], r->dst_mac[3], r->dst_mac[4], r->dst_mac[5]);
       out0 = format (out0, " src %U/%d", format_ip46_address, &r->src,
 		     r->is_ipv6 ? IP46_TYPE_IP6 : IP46_TYPE_IP4,
 		     r->src_prefixlen);
@@ -555,6 +559,10 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       r = vec_elt_at_index (acl_new_rules, i);
       clib_memset (r, 0, sizeof (*r));
       r->is_permit = rules[i].is_permit;
+      memcpy(r->src_mac, rules[i].src_mac, 6);
+      r->dst_mac_len = rules[i].dst_mac_len;
+      memcpy(r->dst_mac, rules[i].dst_mac, 6);
+      r->src_mac_len = rules[i].src_mac_len;
       r->is_ipv6 = rules[i].src_prefix.address.af;
       ip_address_decode (&rules[i].src_prefix.address, &r->src);
       ip_address_decode (&rules[i].dst_prefix.address, &r->dst);
@@ -747,6 +755,11 @@ acl_interface_in_enable_disable (acl_main_t * am, u32 sw_if_index,
   if (rv)
     clib_error ("Could not enable on input");
 
+  rv = vnet_l2_feature_enable_disable ("l2-input-nonip", "acl-plugin-in-sai-nonip-l2",
+				       sw_if_index, enable_disable, 0, 0);
+  if (rv)
+    clib_error ("Could not enable on input");
+
   if (intf_has_etype_whitelist (am, sw_if_index, 1))
     vnet_l2_feature_enable_disable ("l2-input-nonip",
 				    "acl-plugin-in-nonip-l2", sw_if_index,
@@ -784,6 +797,12 @@ acl_interface_out_enable_disable (acl_main_t * am, u32 sw_if_index,
 				    sw_if_index, enable_disable, 0, 0);
   if (rv)
     clib_error ("Could not enable on output");
+
+  rv = vnet_l2_feature_enable_disable ("l2-output-nonip", "acl-plugin-out-sai-nonip-l2",
+				       sw_if_index, enable_disable, 0, 0);
+  if (rv)
+    clib_error ("Could not enable on output");
+
   if (intf_has_etype_whitelist (am, sw_if_index, 0))
     vnet_l2_feature_enable_disable ("l2-output-nonip",
 				    "acl-plugin-out-nonip-l2", sw_if_index,
@@ -4077,7 +4096,6 @@ acl_init (vlib_main_t * vm)
 
 VLIB_INIT_FUNCTION (acl_init);
 
-
 /*
  * fd.io coding-style-patch-verification: ON
  *
@@ -4085,3 +4103,4 @@ VLIB_INIT_FUNCTION (acl_init);
  * eval: (c-set-style "gnu")
  * End:
  */
+

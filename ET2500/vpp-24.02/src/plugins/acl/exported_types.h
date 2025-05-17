@@ -23,7 +23,7 @@
  */
 
 typedef struct {
-  u64 opaque[6];
+  u64 opaque[9];
 } fa_5tuple_opaque_t;
 
 /*
