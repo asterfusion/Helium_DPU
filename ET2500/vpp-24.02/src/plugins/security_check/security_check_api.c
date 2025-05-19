@@ -207,6 +207,68 @@ send_security_check_intf_drop_detail (vl_api_registration_t * reg,
     if (!hw)
         goto intf_drop_detail_fill;
 
+    switch(type)
+    {
+    case SECURITY_CHECK_TYPE_DAI:
+        vec_foreach(pcounter, secm->dai_config.counter) 
+        {
+            vec_validate(pcounter->if_counter, sw_if_index);
+            drop_pkt   += pcounter->if_counter[sw_if_index].pkt;
+            drop_bytes += pcounter->if_counter[sw_if_index].bytes;
+        }
+        break;
+    case SECURITY_CHECK_TYPE_SAVI:
+        vec_foreach(pcounter, secm->savi_config.counter) 
+        {
+            vec_validate(pcounter->if_counter, sw_if_index);
+            drop_pkt   += pcounter->if_counter[sw_if_index].pkt;
+            drop_bytes += pcounter->if_counter[sw_if_index].bytes;
+        }
+        break;
+    case SECURITY_CHECK_TYPE_IPSG:
+        vec_foreach(pcounter, secm->ipsg_config.counter) 
+        {
+            vec_validate(pcounter->if_counter, sw_if_index);
+            drop_pkt   += pcounter->if_counter[sw_if_index].pkt;
+            drop_bytes += pcounter->if_counter[sw_if_index].bytes;
+        }
+        break;
+    case SECURITY_CHECK_TYPE_IPSGV6:
+        vec_foreach(pcounter, secm->ipsgv6_config.counter) 
+        {
+            vec_validate(pcounter->if_counter, sw_if_index);
+            drop_pkt   += pcounter->if_counter[sw_if_index].pkt;
+            drop_bytes += pcounter->if_counter[sw_if_index].bytes;
+        }
+        break;
+    case SECURITY_CHECK_TYPE_NONE:
+        vec_foreach(pcounter, secm->dai_config.counter) 
+        {
+            vec_validate(pcounter->if_counter, sw_if_index);
+            drop_pkt   += pcounter->if_counter[sw_if_index].pkt;
+            drop_bytes += pcounter->if_counter[sw_if_index].bytes;
+        }
+        vec_foreach(pcounter, secm->savi_config.counter) 
+        {
+            vec_validate(pcounter->if_counter, sw_if_index);
+            drop_pkt   += pcounter->if_counter[sw_if_index].pkt;
+            drop_bytes += pcounter->if_counter[sw_if_index].bytes;
+        }
+        vec_foreach(pcounter, secm->ipsg_config.counter) 
+        {
+            vec_validate(pcounter->if_counter, sw_if_index);
+            drop_pkt   += pcounter->if_counter[sw_if_index].pkt;
+            drop_bytes += pcounter->if_counter[sw_if_index].bytes;
+        }
+        vec_foreach(pcounter, secm->ipsgv6_config.counter) 
+        {
+            vec_validate(pcounter->if_counter, sw_if_index);
+            drop_pkt   += pcounter->if_counter[sw_if_index].pkt;
+            drop_bytes += pcounter->if_counter[sw_if_index].bytes;
+        }
+        break;
+    }
+
     hash_foreach (id, foreach_sw_if_index, hw->sub_interface_sw_if_index_by_id,
     ({
         switch(type)
@@ -220,7 +282,7 @@ send_security_check_intf_drop_detail (vl_api_registration_t * reg,
             }
             break;
         case SECURITY_CHECK_TYPE_SAVI:
-            vec_foreach(pcounter, secm->dai_config.counter) 
+            vec_foreach(pcounter, secm->savi_config.counter) 
             {
                 vec_validate(pcounter->if_counter, foreach_sw_if_index);
                 drop_pkt   += pcounter->if_counter[foreach_sw_if_index].pkt;
@@ -228,7 +290,7 @@ send_security_check_intf_drop_detail (vl_api_registration_t * reg,
             }
             break;
         case SECURITY_CHECK_TYPE_IPSG:
-            vec_foreach(pcounter, secm->dai_config.counter) 
+            vec_foreach(pcounter, secm->ipsg_config.counter) 
             {
                 vec_validate(pcounter->if_counter, foreach_sw_if_index);
                 drop_pkt   += pcounter->if_counter[foreach_sw_if_index].pkt;
@@ -236,7 +298,7 @@ send_security_check_intf_drop_detail (vl_api_registration_t * reg,
             }
             break;
         case SECURITY_CHECK_TYPE_IPSGV6:
-            vec_foreach(pcounter, secm->dai_config.counter) 
+            vec_foreach(pcounter, secm->ipsgv6_config.counter) 
             {
                 vec_validate(pcounter->if_counter, foreach_sw_if_index);
                 drop_pkt   += pcounter->if_counter[foreach_sw_if_index].pkt;
@@ -250,19 +312,19 @@ send_security_check_intf_drop_detail (vl_api_registration_t * reg,
                 drop_pkt   += pcounter->if_counter[foreach_sw_if_index].pkt;
                 drop_bytes += pcounter->if_counter[foreach_sw_if_index].bytes;
             }
-            vec_foreach(pcounter, secm->dai_config.counter) 
+            vec_foreach(pcounter, secm->savi_config.counter) 
             {
                 vec_validate(pcounter->if_counter, foreach_sw_if_index);
                 drop_pkt   += pcounter->if_counter[foreach_sw_if_index].pkt;
                 drop_bytes += pcounter->if_counter[foreach_sw_if_index].bytes;
             }
-            vec_foreach(pcounter, secm->dai_config.counter) 
+            vec_foreach(pcounter, secm->ipsg_config.counter) 
             {
                 vec_validate(pcounter->if_counter, foreach_sw_if_index);
                 drop_pkt   += pcounter->if_counter[foreach_sw_if_index].pkt;
                 drop_bytes += pcounter->if_counter[foreach_sw_if_index].bytes;
             }
-            vec_foreach(pcounter, secm->dai_config.counter) 
+            vec_foreach(pcounter, secm->ipsgv6_config.counter) 
             {
                 vec_validate(pcounter->if_counter, foreach_sw_if_index);
                 drop_pkt   += pcounter->if_counter[foreach_sw_if_index].pkt;
@@ -329,21 +391,21 @@ send_security_check_vlan_drop_detail (vl_api_registration_t * reg,
         }
         break;
     case SECURITY_CHECK_TYPE_SAVI:
-        vec_foreach(pcounter, secm->dai_config.counter) 
+        vec_foreach(pcounter, secm->savi_config.counter) 
         {
             drop_pkt   += pcounter->vlan_counter[vlan_id].pkt;
             drop_bytes += pcounter->vlan_counter[vlan_id].bytes;
         }
         break;
     case SECURITY_CHECK_TYPE_IPSG:
-        vec_foreach(pcounter, secm->dai_config.counter) 
+        vec_foreach(pcounter, secm->ipsg_config.counter) 
         {
             drop_pkt   += pcounter->vlan_counter[vlan_id].pkt;
             drop_bytes += pcounter->vlan_counter[vlan_id].bytes;
         }
         break;
     case SECURITY_CHECK_TYPE_IPSGV6:
-        vec_foreach(pcounter, secm->dai_config.counter) 
+        vec_foreach(pcounter, secm->ipsgv6_config.counter) 
         {
             drop_pkt   += pcounter->vlan_counter[vlan_id].pkt;
             drop_bytes += pcounter->vlan_counter[vlan_id].bytes;

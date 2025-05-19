@@ -187,14 +187,21 @@ int security_check_enable_disable(u32 sw_if_index,
 
     hw = vnet_get_hw_interface_or_null (secm->vnet_main, sw_if_index);
 
+    int feature_enabled;
+
     if (!hw)
         return VNET_ERR_INVALID_VALUE;
 
     switch(security_check_type)
     {
     case SECURITY_CHECK_TYPE_DAI:
-        if (clib_bitmap_get(secm->dai_config.enable_by_sw_if_index, sw_if_index) && is_enable)
+        feature_enabled = vnet_feature_is_enabled("l2-input-nonip", "dai-check-node", sw_if_index);
+        if (feature_enabled && is_enable)
             //already enable
+            break;
+        if (feature_enabled && !is_enable &&
+            !clib_bitmap_get(secm->dai_config.enable_by_sw_if_index, sw_if_index))
+            //vlan enable dont' disable
             break;
         rv = vnet_l2_feature_enable_disable ("l2-input-nonip", "dai-check-node",
                 sw_if_index, is_enable, 0, 0);
@@ -207,8 +214,13 @@ int security_check_enable_disable(u32 sw_if_index,
         }
         break;
     case SECURITY_CHECK_TYPE_SAVI:
-        if (clib_bitmap_get(secm->savi_config.enable_by_sw_if_index, sw_if_index) && is_enable)
+        feature_enabled = vnet_feature_is_enabled("l2-input-ip6", "savi-check-node", sw_if_index);
+        if (feature_enabled && is_enable)
             //already enable
+            break;
+        if (feature_enabled && !is_enable &&
+            !clib_bitmap_get(secm->savi_config.enable_by_sw_if_index, sw_if_index))
+            //vlan enable dont' disable
             break;
         rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "savi-check-node",
                 sw_if_index, is_enable, 0, 0);
@@ -221,8 +233,13 @@ int security_check_enable_disable(u32 sw_if_index,
         }
         break;
     case SECURITY_CHECK_TYPE_IPSG:
-        if (clib_bitmap_get(secm->ipsg_config.enable_by_sw_if_index, sw_if_index) && is_enable)
+        feature_enabled = vnet_feature_is_enabled("l2-input-ip4", "ipsg-check-node", sw_if_index);
+        if (feature_enabled && is_enable)
             //already enable
+            break;
+        if (feature_enabled && !is_enable &&
+            !clib_bitmap_get(secm->ipsg_config.enable_by_sw_if_index, sw_if_index))
+            //vlan enable dont' disable
             break;
         rv = vnet_l2_feature_enable_disable ("l2-input-ip4", "ipsg-check-node",
                 sw_if_index, is_enable, 0, 0);
@@ -236,8 +253,13 @@ int security_check_enable_disable(u32 sw_if_index,
         }
         break;
     case SECURITY_CHECK_TYPE_IPSGV6:
-        if (clib_bitmap_get(secm->ipsgv6_config.enable_by_sw_if_index, sw_if_index) && is_enable)
+        feature_enabled = vnet_feature_is_enabled("l2-input-ip6", "ipsgv6-check-node", sw_if_index);
+        if (feature_enabled && is_enable)
             //already enable
+            break;
+        if (feature_enabled && !is_enable &&
+            !clib_bitmap_get(secm->ipsgv6_config.enable_by_sw_if_index, sw_if_index))
+            //vlan enable dont' disable
             break;
         rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "ipsgv6-check-node",
                 sw_if_index, is_enable, 0, 0);
@@ -259,8 +281,13 @@ int security_check_enable_disable(u32 sw_if_index,
         switch(security_check_type)
         {
         case SECURITY_CHECK_TYPE_DAI:
-            if (clib_bitmap_get(secm->dai_config.enable_by_sw_if_index, foreach_sw_if_index) && is_enable)
+            feature_enabled = vnet_feature_is_enabled("l2-input-nonip", "dai-check-node", foreach_sw_if_index);
+            if (feature_enabled && is_enable)
                 //already enable
+                break;
+            if (feature_enabled && !is_enable &&
+                !clib_bitmap_get(secm->dai_config.enable_by_sw_if_index, foreach_sw_if_index))
+                //vlan enable dont' disable
                 break;
             rv = vnet_l2_feature_enable_disable ("l2-input-nonip", "dai-check-node",
                                                   foreach_sw_if_index, is_enable, 0, 0);
@@ -273,8 +300,13 @@ int security_check_enable_disable(u32 sw_if_index,
             }
             break;
         case SECURITY_CHECK_TYPE_SAVI:
-            if (clib_bitmap_get(secm->savi_config.enable_by_sw_if_index, foreach_sw_if_index) && is_enable)
+            feature_enabled = vnet_feature_is_enabled("l2-input-ip6", "savi-check-node", foreach_sw_if_index);
+            if (feature_enabled && is_enable)
                 //already enable
+                break;
+            if (feature_enabled && !is_enable &&
+                !clib_bitmap_get(secm->savi_config.enable_by_sw_if_index, foreach_sw_if_index))
+                //vlan enable dont' disable
                 break;
             rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "savi-check-node",
                                                   foreach_sw_if_index, is_enable, 0, 0);
@@ -287,8 +319,13 @@ int security_check_enable_disable(u32 sw_if_index,
             }
             break;
         case SECURITY_CHECK_TYPE_IPSG:
-            if (clib_bitmap_get(secm->ipsg_config.enable_by_sw_if_index, foreach_sw_if_index) && is_enable)
+            feature_enabled = vnet_feature_is_enabled("l2-input-ip4", "ipsg-check-node", foreach_sw_if_index);
+            if (feature_enabled && is_enable)
                 //already enable
+                break;
+            if (feature_enabled && !is_enable &&
+                !clib_bitmap_get(secm->ipsg_config.enable_by_sw_if_index, foreach_sw_if_index))
+                //vlan enable dont' disable
                 break;
             rv = vnet_l2_feature_enable_disable ("l2-input-ip4", "ipsg-check-node",
                                                  foreach_sw_if_index, is_enable, 0, 0);
@@ -302,8 +339,13 @@ int security_check_enable_disable(u32 sw_if_index,
             }
             break;
         case SECURITY_CHECK_TYPE_IPSGV6:
-            if (clib_bitmap_get(secm->ipsgv6_config.enable_by_sw_if_index, foreach_sw_if_index) && is_enable)
+            feature_enabled = vnet_feature_is_enabled("l2-input-ip6", "ipsgv6-check-node", foreach_sw_if_index);
+            if (feature_enabled && is_enable)
                 //already enable
+                break;
+            if (feature_enabled && !is_enable &&
+                !clib_bitmap_get(secm->ipsgv6_config.enable_by_sw_if_index, foreach_sw_if_index))
+                //vlan enable dont' disable
                 break;
             rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "ipsgv6-check-node",
                                                  foreach_sw_if_index, is_enable, 0, 0);
@@ -351,32 +393,44 @@ int security_check_vlan_enable_disable(u16 vlan_id,
         switch(security_check_type)
         {
         case SECURITY_CHECK_TYPE_DAI:
-            if (clib_bitmap_get(secm->dai_config.enable_by_sw_if_index, m->sw_if_index) && is_enable)
+            if (vnet_feature_is_enabled("l2-input-nonip", "dai-check-node", m->sw_if_index) && is_enable)
                 //already enable
+                break;
+            if (clib_bitmap_get(secm->dai_config.enable_by_sw_if_index, m->sw_if_index) && !is_enable)
+                //don't disable
                 break;
             rv = vnet_l2_feature_enable_disable ("l2-input-nonip", "dai-check-node",
                                                   m->sw_if_index, is_enable, 0, 0);
             if (rv) clib_error ("Could not %s dai-check-node on l2-input-nonip feature", is_enable ? "enable" : "diable");
             break;
         case SECURITY_CHECK_TYPE_SAVI:
-            if (clib_bitmap_get(secm->savi_config.enable_by_sw_if_index, m->sw_if_index) && is_enable)
+            if (vnet_feature_is_enabled("l2-input-ip6", "savi-check-node", m->sw_if_index) && is_enable)
                 //already enable
+                break;
+            if (clib_bitmap_get(secm->savi_config.enable_by_sw_if_index, m->sw_if_index) && !is_enable)
+                //don't disable
                 break;
             rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "savi-check-node",
                                                   m->sw_if_index, is_enable, 0, 0);
             if (rv) clib_error ("Could not %s savi-check-node on l2-input-ip6 feature", is_enable ? "enable" : "diable");
             break;
         case SECURITY_CHECK_TYPE_IPSG:
-            if (clib_bitmap_get(secm->ipsg_config.enable_by_sw_if_index, m->sw_if_index) && is_enable)
+            if (vnet_feature_is_enabled("l2-input-ip4", "ipsg-check-node", m->sw_if_index) && is_enable)
                 //already enable
+                break;
+            if (clib_bitmap_get(secm->ipsg_config.enable_by_sw_if_index, m->sw_if_index) && !is_enable)
+                //don't disable
                 break;
             rv = vnet_l2_feature_enable_disable ("l2-input-ip4", "ipsg-check-node",
                                                  m->sw_if_index, is_enable, 0, 0);
             if (rv) clib_error ("Could not %s ipsg-check-node on l2-input-ip4 feature", is_enable ? "enable" : "diable");
             break;
         case SECURITY_CHECK_TYPE_IPSGV6:
-            if (clib_bitmap_get(secm->ipsgv6_config.enable_by_sw_if_index, m->sw_if_index) && is_enable)
+            if (vnet_feature_is_enabled("l2-input-ip6", "ipsgv6-check-node", m->sw_if_index) && is_enable)
                 //already enable
+                break;
+            if (clib_bitmap_get(secm->ipsgv6_config.enable_by_sw_if_index, m->sw_if_index) && !is_enable)
+                //don't disable
                 break;
             rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "ipsgv6-check-node",
                                                  m->sw_if_index, is_enable, 0, 0);
@@ -399,7 +453,7 @@ int security_check_vlan_enable_disable(u16 vlan_id,
         break;
     case SECURITY_CHECK_TYPE_SAVI:
         clib_bitmap_set(secm->savi_config.enable_by_vlan, vlan_id, is_enable);
-        vec_foreach(pcounter, secm->dai_config.counter) 
+        vec_foreach(pcounter, secm->savi_config.counter) 
         {
             pcounter->vlan_counter[vlan_id].pkt = 0;
             pcounter->vlan_counter[vlan_id].bytes = 0;
@@ -457,8 +511,11 @@ int security_check_vlan_refresh(u16 vlan_id, u32 security_check_type)
         case SECURITY_CHECK_TYPE_DAI:
             is_enable = clib_bitmap_get_no_check(secm->dai_config.enable_by_vlan, vlan_id) ? 1 : 0;
 
-            if (clib_bitmap_get(secm->dai_config.enable_by_sw_if_index, m->sw_if_index) && is_enable)
+            if (vnet_feature_is_enabled("l2-input-nonip", "dai-check-node", m->sw_if_index) && is_enable)
                 //already enable
+                break;
+            if (clib_bitmap_get(secm->dai_config.enable_by_sw_if_index, m->sw_if_index) && !is_enable)
+                //don't disable
                 break;
 
             rv = vnet_l2_feature_enable_disable ("l2-input-nonip", "dai-check-node",
@@ -468,8 +525,12 @@ int security_check_vlan_refresh(u16 vlan_id, u32 security_check_type)
         case SECURITY_CHECK_TYPE_SAVI:
             is_enable = clib_bitmap_get_no_check(secm->savi_config.enable_by_vlan, vlan_id) ? 1 : 0;
 
-            if (clib_bitmap_get(secm->savi_config.enable_by_sw_if_index, m->sw_if_index) && is_enable)
+            if (vnet_feature_is_enabled("l2-input-ip6", "savi-check-node", m->sw_if_index) && is_enable)
                 //already enable
+                break;
+
+            if (clib_bitmap_get(secm->savi_config.enable_by_sw_if_index, m->sw_if_index) && !is_enable)
+                //don't disable
                 break;
 
             rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "savi-check-node",
@@ -479,8 +540,12 @@ int security_check_vlan_refresh(u16 vlan_id, u32 security_check_type)
         case SECURITY_CHECK_TYPE_IPSG:
             is_enable = clib_bitmap_get_no_check(secm->ipsg_config.enable_by_vlan, vlan_id) ? 1 : 0;
 
-            if (clib_bitmap_get(secm->ipsg_config.enable_by_sw_if_index, m->sw_if_index) && is_enable)
+            if (vnet_feature_is_enabled("l2-input-ip4", "ipsg-check-node", m->sw_if_index) && is_enable)
                 //already enable
+                break;
+
+            if (clib_bitmap_get(secm->ipsg_config.enable_by_sw_if_index, m->sw_if_index) && !is_enable)
+                //don't disable
                 break;
 
             rv = vnet_l2_feature_enable_disable ("l2-input-ip4", "ipsg-check-node",
@@ -490,8 +555,12 @@ int security_check_vlan_refresh(u16 vlan_id, u32 security_check_type)
         case SECURITY_CHECK_TYPE_IPSGV6:
             is_enable = clib_bitmap_get_no_check(secm->ipsgv6_config.enable_by_vlan, vlan_id) ? 1 : 0;
 
-            if (clib_bitmap_get(secm->ipsgv6_config.enable_by_sw_if_index, m->sw_if_index) && is_enable)
+            if (vnet_feature_is_enabled("l2-input-ip6", "ipsgv6-check-node", m->sw_if_index) && is_enable)
                 //already enable
+                break;
+
+            if (clib_bitmap_get(secm->ipsgv6_config.enable_by_sw_if_index, m->sw_if_index) && !is_enable)
+                //don't disable
                 break;
 
             rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "ipsgv6-check-node",
@@ -572,37 +641,44 @@ int security_check_ragurad_role(u32 sw_if_index,
     {
     case RAGUARD_ROLE_NONE:
     case RAGUARD_ROLE_ROUTER:
-        rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "raguard-check-node-l2",
-                sw_if_index, 0, 0, 0);
-        if (rv) clib_error ("Could not disable raguard-check-node-l2 on l2-input-ip6 feature");
-
-        rv = vnet_feature_enable_disable("ip6-unicast", "raguard-check-node-ip6", 
-                sw_if_index, 0, 0, 0);
-        if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-unicast feature");
-
-        rv = vnet_feature_enable_disable("ip6-multicast", "raguard-check-node-ip6", 
-                sw_if_index, 0, 0, 0);
-        if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-multicast feature");
-
         vec_validate(secm->raguard_config.role_by_sw_if_index, sw_if_index);
-        secm->raguard_config.role_by_sw_if_index[sw_if_index] = role;
 
+        if (secm->raguard_config.role_by_sw_if_index[sw_if_index] != RAGUARD_ROLE_NONE &&
+            secm->raguard_config.role_by_sw_if_index[sw_if_index] != RAGUARD_ROLE_ROUTER)
+        {
+            rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "raguard-check-node-l2",
+                    sw_if_index, 0, 0, 0);
+            if (rv) clib_error ("Could not disable raguard-check-node-l2 on l2-input-ip6 feature");
+
+            rv = vnet_feature_enable_disable("ip6-unicast", "raguard-check-node-ip6", 
+                    sw_if_index, 0, 0, 0);
+            if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-unicast feature");
+
+            rv = vnet_feature_enable_disable("ip6-multicast", "raguard-check-node-ip6", 
+                    sw_if_index, 0, 0, 0);
+            if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-multicast feature");
+        }
+        secm->raguard_config.role_by_sw_if_index[sw_if_index] = role;
         break;
     case RAGUARD_ROLE_USER:
     case RAGUARD_ROLE_HYBRID:
-        rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "raguard-check-node-l2",
-                sw_if_index, 1, 0, 0);
-        if (rv) clib_error ("Could not disable raguard-check-node-l2 on l2-input-ip6 feature");
-
-        rv = vnet_feature_enable_disable("ip6-unicast", "raguard-check-node-ip6", 
-                sw_if_index, 1, 0, 0);
-        if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-unicast feature");
-
-        rv = vnet_feature_enable_disable("ip6-multicast", "raguard-check-node-ip6", 
-                sw_if_index, 1, 0, 0);
-        if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-multicast feature");
-
         vec_validate(secm->raguard_config.role_by_sw_if_index, sw_if_index);
+
+        if (secm->raguard_config.role_by_sw_if_index[sw_if_index] != RAGUARD_ROLE_USER &&
+            secm->raguard_config.role_by_sw_if_index[sw_if_index] != RAGUARD_ROLE_HYBRID)
+        {
+            rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "raguard-check-node-l2",
+                    sw_if_index, 1, 0, 0);
+            if (rv) clib_error ("Could not disable raguard-check-node-l2 on l2-input-ip6 feature");
+
+            rv = vnet_feature_enable_disable("ip6-unicast", "raguard-check-node-ip6", 
+                    sw_if_index, 1, 0, 0);
+            if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-unicast feature");
+
+            rv = vnet_feature_enable_disable("ip6-multicast", "raguard-check-node-ip6", 
+                    sw_if_index, 1, 0, 0);
+            if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-multicast feature");
+        }
         secm->raguard_config.role_by_sw_if_index[sw_if_index] = role;
         break;
     default:
@@ -615,37 +691,44 @@ int security_check_ragurad_role(u32 sw_if_index,
         {
         case RAGUARD_ROLE_NONE:
         case RAGUARD_ROLE_ROUTER:
-            rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "raguard-check-node-l2",
-                                                 foreach_sw_if_index, 0, 0, 0);
-            if (rv) clib_error ("Could not disable raguard-check-node-l2 on l2-input-ip6 feature");
-
-            rv = vnet_feature_enable_disable("ip6-unicast", "raguard-check-node-ip6", 
-                                             foreach_sw_if_index, 0, 0, 0);
-            if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-unicast feature");
-
-            rv = vnet_feature_enable_disable("ip6-multicast", "raguard-check-node-ip6", 
-                                             foreach_sw_if_index, 0, 0, 0);
-            if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-multicast feature");
-
             vec_validate(secm->raguard_config.role_by_sw_if_index, foreach_sw_if_index);
-            secm->raguard_config.role_by_sw_if_index[foreach_sw_if_index] = role;
 
+            if (secm->raguard_config.role_by_sw_if_index[foreach_sw_if_index] != RAGUARD_ROLE_NONE &&
+                secm->raguard_config.role_by_sw_if_index[foreach_sw_if_index] != RAGUARD_ROLE_ROUTER)
+            {
+                rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "raguard-check-node-l2",
+                        foreach_sw_if_index, 0, 0, 0);
+                if (rv) clib_error ("Could not disable raguard-check-node-l2 on l2-input-ip6 feature");
+
+                rv = vnet_feature_enable_disable("ip6-unicast", "raguard-check-node-ip6", 
+                        foreach_sw_if_index, 0, 0, 0);
+                if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-unicast feature");
+
+                rv = vnet_feature_enable_disable("ip6-multicast", "raguard-check-node-ip6", 
+                        foreach_sw_if_index, 0, 0, 0);
+                if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-multicast feature");
+            }
+            secm->raguard_config.role_by_sw_if_index[foreach_sw_if_index] = role;
             break;
         case RAGUARD_ROLE_USER:
         case RAGUARD_ROLE_HYBRID:
-            rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "raguard-check-node-l2",
-                                                 foreach_sw_if_index, 1, 0, 0);
-            if (rv) clib_error ("Could not disable raguard-check-node-l2 on l2-input-ip6 feature");
-
-            rv = vnet_feature_enable_disable("ip6-unicast", "raguard-check-node-ip6", 
-                                             foreach_sw_if_index, 1, 0, 0);
-            if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-unicast feature");
-
-            rv = vnet_feature_enable_disable("ip6-multicast", "raguard-check-node-ip6", 
-                                             foreach_sw_if_index, 1, 0, 0);
-            if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-multicast feature");
-
             vec_validate(secm->raguard_config.role_by_sw_if_index, foreach_sw_if_index);
+
+            if (secm->raguard_config.role_by_sw_if_index[sw_if_index] != RAGUARD_ROLE_USER &&
+                secm->raguard_config.role_by_sw_if_index[sw_if_index] != RAGUARD_ROLE_HYBRID)
+            {
+                rv = vnet_l2_feature_enable_disable ("l2-input-ip6", "raguard-check-node-l2",
+                                                     foreach_sw_if_index, 1, 0, 0);
+                if (rv) clib_error ("Could not disable raguard-check-node-l2 on l2-input-ip6 feature");
+
+                rv = vnet_feature_enable_disable("ip6-unicast", "raguard-check-node-ip6", 
+                                                 foreach_sw_if_index, 1, 0, 0);
+                if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-unicast feature");
+
+                rv = vnet_feature_enable_disable("ip6-multicast", "raguard-check-node-ip6", 
+                                                 foreach_sw_if_index, 1, 0, 0);
+                if (rv) clib_error ("Could not disable raguard-check-node-ip6 on ip6-multicast feature");
+            }
             secm->raguard_config.role_by_sw_if_index[foreach_sw_if_index] = role;
             break;
         default:
