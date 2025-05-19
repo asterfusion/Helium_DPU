@@ -193,6 +193,8 @@ typedef union
     u16 no_nat:1;
     u16 acl_index:15;
 
+    u32 policer_index;
+    u32 reserved[15];
     /**< More opaque data, see ../vnet/vnet/buffer.h */
     u32 opaque2[14];
 

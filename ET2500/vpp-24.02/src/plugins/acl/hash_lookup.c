@@ -726,6 +726,7 @@ hash_acl_apply(acl_main_t *am, u32 lc_index, int acl_index, u32 acl_position)
     pae->ace_index = ha->rules[i].ace_index;
     pae->acl_position = acl_position;
     pae->action = ha->rules[i].action;
+    pae->policer_index = ha->rules[i].policer_index;
     pae->hitcount = 0;
     pae->hash_ace_info_index = i;
     /* we might link it in later */
@@ -1020,6 +1021,7 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
   clib_memset(mask, 0, sizeof(*mask));
   clib_memset(&hi->match, 0, sizeof(hi->match));
   hi->action = r->is_permit;
+  hi->policer_index = r->policer_index;
 
   /* we will need to be matching based on lc_index and mask_type_index when applied */
   mask->pkt.lc_index = ~0;
