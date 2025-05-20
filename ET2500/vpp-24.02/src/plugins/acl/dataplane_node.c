@@ -321,7 +321,7 @@ acl_fa_node_common_prepare_fn (vlib_main_t * vm,
     }
 }
 
-always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, u32 *rule_index, u8 *action)
+always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, u32 *rule_index, u32 *policer_index, u8 *action)
 {
     for (int i = 0; i < match_acl_info->acl_match_count; i++)
     {
@@ -330,6 +330,7 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             *action = ACL_ACTION_DENY;
             *acl_index = match_acl_info->acl_index[i];
             *rule_index = match_acl_info->rule_index[i];
+            *policer_index = match_acl_info->policer_index[i];
             break;
         }
 
@@ -338,6 +339,7 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             *action = match_acl_info->action[i];
             *acl_index = match_acl_info->acl_index[i];
             *rule_index = match_acl_info->rule_index[i];
+            *policer_index = match_acl_info->policer_index[i];
         }
     }
 
@@ -406,6 +408,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
       int acl_check_needed = 1;
       u32 match_acl_in_index = ~0;
       u32 match_rule_index = ~0;
+      u32 policer_index = ~0;
       match_acl_t match_acl_info;
 
       memset(&match_acl_info, 0, sizeof(match_acl_t));
@@ -527,7 +530,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
               
           }
 
-          acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &action);
+          acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &policer_index, &action);
 		}
 
 	      b[0]->error = error_node->errors[action];
@@ -593,6 +596,11 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
         if (ACL_ACTION_PUNT == action)
         {
             next[0] = ACL_FA_PUNT;
+        }
+        if (ACL_ACTION_POLICER == action)
+        {
+            next[0] = ACL_FA_POLICER;
+            b[0]->policer_index = policer_index;
         }
 
             if (ACL_ACTION_NO_NAT == action)
@@ -857,6 +865,7 @@ VLIB_REGISTER_NODE (acl_in_l2_ip6_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
+    [ACL_FA_POLICER] = "policer-acl-plugin-in-ip6-l2",
   }
 };
 
@@ -880,6 +889,7 @@ VLIB_REGISTER_NODE (acl_in_l2_ip4_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
+    [ACL_FA_POLICER] = "policer-acl-plugin-in-ip4-l2",
   }
 };
 
@@ -904,6 +914,7 @@ VLIB_REGISTER_NODE (acl_out_l2_ip6_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
+    [ACL_FA_POLICER] = "policer-acl-plugin-out-ip6-l2",
   }
 };
 
@@ -928,6 +939,7 @@ VLIB_REGISTER_NODE (acl_out_l2_ip4_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
+    [ACL_FA_POLICER] = "policer-acl-plugin-out-ip4-l2",
   }
 };
 
@@ -952,6 +964,7 @@ VLIB_REGISTER_NODE (acl_in_fa_ip6_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
+    [ACL_FA_POLICER] = "policer-acl-plugin-in-ip6-fa"
   }
 };
 
@@ -975,6 +988,7 @@ VLIB_REGISTER_NODE (acl_in_fa_ip4_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
+    [ACL_FA_POLICER] = "policer-acl-plugin-in-ip4-fa",
   }
 };
 
@@ -999,6 +1013,7 @@ VLIB_REGISTER_NODE (acl_out_fa_ip6_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
+    [ACL_FA_POLICER] = "policer-acl-plugin-out-ip6-fa",
   }
 };
 
@@ -1022,6 +1037,7 @@ VLIB_REGISTER_NODE (acl_out_fa_ip4_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
+    [ACL_FA_POLICER] = "policer-acl-plugin-out-ip4-fa",
   }
 };
 
@@ -1045,6 +1061,7 @@ VLIB_REGISTER_NODE (acl_in_sai_nonip_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
+    [ACL_FA_POLICER] = "policer-acl-plugin-in-sai-nonip-l2",
   }
 };
 
@@ -1069,6 +1086,7 @@ VLIB_REGISTER_NODE (acl_out_sai_nonip_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
+    [ACL_FA_POLICER] = "policer-acl-plugin-out-sai-nonip-l2",
   }
 };
 

@@ -243,6 +243,7 @@ typedef struct {
 typedef enum {
   ACL_FA_ERROR_DROP,
   ACL_FA_PUNT,
+  ACL_FA_POLICER,
   ACL_FA_N_NEXT,
 } acl_fa_next_t;
 

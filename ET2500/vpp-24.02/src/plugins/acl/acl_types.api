@@ -30,6 +30,7 @@ enum acl_action : u8
     @param is_permit - deny (0), permit (1), or permit+reflect(2) action on this rule.
     @param src_prefix - Source prefix
     @param dst_prefix - Destination prefix
+    @param policer_index - Index of policer to use(applicable in action mode ACL_ACTION_POLICER only)
     @param proto - L4 protocol (http://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml)
     @param srcport_or_icmptype_first - beginning of source port or ICMP4/6 type range
     @param srcport_or_icmptype_last - end of source port or ICMP4/6 type range
@@ -48,6 +49,7 @@ typedef acl_rule
   u8 dst_mac_len;
   vl_api_prefix_t src_prefix;
   vl_api_prefix_t dst_prefix;
+  u32 policer_index;
 /*
  * L4 protocol. IANA number. 1 = ICMP, 58 = ICMPv6, 6 = TCP, 17 = UDP.
  * 0 => ignore L4 and ignore the ports/tcpflags when matching.

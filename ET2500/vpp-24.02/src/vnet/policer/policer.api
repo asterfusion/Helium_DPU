@@ -244,6 +244,12 @@ service {
     @param extended_limit - extended limit
     @param extended_bucket - extended bucket
     @param last_update_time - last update time
+    @param conform_packets - conform_packets
+    @param exceed_packets - exceed_packets
+    @param violate_packets - violate_packets
+    @param conform_bytes - conform_bytes
+    @param exceed_bytes - exceed_bytes
+    @param violate_bytes - violate_bytes
 */
 define policer_details
 {
@@ -270,6 +276,12 @@ define policer_details
   u32 extended_limit;
   u32 extended_bucket;
   u64 last_update_time;
+  u64 conform_packets;
+  u64 exceed_packets;
+  u64 violate_packets;
+  u64 conform_bytes;
+  u64 exceed_bytes;
+  u64 violate_bytes;
 };
 
 /*
