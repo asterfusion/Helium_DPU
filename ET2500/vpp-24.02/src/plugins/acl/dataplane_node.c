@@ -17,6 +17,7 @@
 
 #include <vlib/vlib.h>
 #include <vnet/vnet.h>
+#include <vnet/l2/l2_input.h>
 #include <vppinfra/error.h>
 
 
@@ -30,7 +31,9 @@
 #include <plugins/acl/session_inlines.h>
 
 #include <vppinfra/bihash_64_8.h>
+#include <vppinfra/bihash_8_8.h>
 #include <vppinfra/bihash_template.h>
+//#include <vppinfra/bihash_template.c>
 
 typedef struct
 {
@@ -344,6 +347,53 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
     return;
 }   
 
+always_inline void acl_calc_acl_match(vlib_buffer_t *b, match_acl_t *match_acl_info, int is_l2_path)
+{
+    u8 acl_match_count = 0;
+    acl_main_t *am = &acl_main;
+    l2_bridge_domain_t *bd_config;
+    u32 vlan = 0;
+    if (is_l2_path)
+    {
+        bd_config = vec_elt_at_index (l2input_main.bd_configs, vnet_buffer (b)->l2.bd_index);
+        vlan = bd_config->bd_id;
+    }
+
+    for (int i = 0; i < match_acl_info->acl_match_count; i++)
+    {
+        if (0 == match_acl_info->acl_index[i])
+        {
+            match_acl_info->acl_index[acl_match_count] = match_acl_info->acl_index[i];
+            match_acl_info->action[acl_match_count] = match_acl_info->action[i];
+            match_acl_info->rule_index[acl_match_count] = match_acl_info->rule_index[i];
+            match_acl_info->acl_pos[acl_match_count] = match_acl_info->acl_pos[i];
+            match_acl_info->curr_match_index[acl_match_count] = match_acl_info->curr_match_index[i];
+            acl_match_count++;
+        }
+
+        else
+        {
+            clib_bihash_kv_8_8_t kv_result;
+            clib_bihash_kv_8_8_t key;
+            clib_memset(&key, 0, sizeof(clib_bihash_kv_8_8_t));
+            key.key = ((u64)vlan << 32) | match_acl_info->acl_index[i];
+            int res = clib_bihash_search_inline_2_8_8(&am->acl_index_bd_id_hash, &key, &kv_result);
+            if (0 == res && 1 == kv_result.value)
+            {
+                match_acl_info->acl_index[acl_match_count] = match_acl_info->acl_index[i];
+                match_acl_info->action[acl_match_count] = match_acl_info->action[i];
+                match_acl_info->rule_index[acl_match_count] = match_acl_info->rule_index[i];
+                match_acl_info->acl_pos[acl_match_count] = match_acl_info->acl_pos[i];
+                match_acl_info->curr_match_index[acl_match_count] = match_acl_info->curr_match_index[i];
+                acl_match_count++;
+            }
+        }
+    }
+
+    match_acl_info->acl_match_count = acl_match_count;
+
+    return;
+}
 
 always_inline uword
 acl_fa_inner_node_fn (vlib_main_t * vm,
@@ -501,6 +551,11 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 							     (fa_5tuple_opaque_t *) & fa_5tuple[0], is_ip6,
 							     &trace_bitmap,
 							     &match_acl_info);
+	      if (PREDICT_FALSE
+		  (match_acl_info.acl_match_count && am->interface_acl_counters_enabled))
+              {
+                  acl_calc_acl_match(b[0], &match_acl_info, is_l2_path);
+              }
 	      if (PREDICT_FALSE
 		  (match_acl_info.acl_match_count && am->interface_acl_counters_enabled))
 		{

@@ -182,6 +182,7 @@ autoreply define acl_interface_set_acl_list
   vl_api_interface_index_t sw_if_index;
   u8 count;
   u8 n_input; /* First n_input ACLs are set as a list of input ACLs, the rest are applied as output */
+  u32 vlan_id;
   u32 acls[count];
   option vat_help = "<intfc> | sw_if_index <if-idx> input [acl-idx list] output [acl-idx list]";
 };
