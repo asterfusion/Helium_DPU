@@ -47,9 +47,9 @@ format_lcp_vrrp_trace (u8 * s, va_list * args)
   return s;
 }
 
-VLIB_NODE_FN (lcp_vrrp_node) (vlib_main_t * vm,
-                                        vlib_node_runtime_t * node,
-                                        vlib_frame_t * frame)
+always_inline uword 
+vrrp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame, int is_l2_path)
+
 {
   u32 n_left_from, *from, *to_next;
   u32 next_index = node->cached_next_index;
@@ -91,12 +91,23 @@ VLIB_NODE_FN (lcp_vrrp_node) (vlib_main_t * vm,
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
           sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
 
-          ip40 = vlib_buffer_get_current (b0);
-          ip41 = vlib_buffer_get_current (b1);
+          if (is_l2_path)
+          {
+              ip40 = vlib_buffer_get_current (b0) + vnet_buffer (b0)->l2.l2_len;
+              ip41 = vlib_buffer_get_current (b1) + vnet_buffer (b1)->l2.l2_len;
+              len0 = 0;
+              len1 = 0;
+          }
+          else
+          {
+              ip40 = vlib_buffer_get_current (b0);
+              ip41 = vlib_buffer_get_current (b1);
+              len0 = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
+              len1 = ((u8 *) vlib_buffer_get_current (b1) - (u8 *) ethernet_buffer_get_header (b1));
+          }
 
           if(IP_PROTOCOL_VRRP == ip40->protocol)
           {
-              len0 = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
               vlib_buffer_advance (b0, -len0);
               c0 = vlib_buffer_copy (vm, b0);
               vlib_buffer_advance (b0, len0);
@@ -108,7 +119,6 @@ VLIB_NODE_FN (lcp_vrrp_node) (vlib_main_t * vm,
 
           if (IP_PROTOCOL_VRRP == ip41->protocol)
           {
-              len1 = ((u8 *) vlib_buffer_get_current (b1) - (u8 *) ethernet_buffer_get_header (b1));
               vlib_buffer_advance (b1, -len1);
               c1 = vlib_buffer_copy (vm, b1);
               vlib_buffer_advance (b1, len1);
@@ -118,21 +128,21 @@ VLIB_NODE_FN (lcp_vrrp_node) (vlib_main_t * vm,
               }
           }
 
-      if (b0->flags & VLIB_BUFFER_IS_TRACED)
-      {
-          lcp_vrrp_trace_t *t0 =
-              vlib_add_trace (vm, node, b0, sizeof (*t0));
-
-          t0->sw_if_index = sw_if_index0;
-      }
-
-      if (b1->flags & VLIB_BUFFER_IS_TRACED)
-      {
-          lcp_vrrp_trace_t *t1 =
-              vlib_add_trace (vm, node, b1, sizeof (*t1));
-
-          t1->sw_if_index = sw_if_index1;
-      }
+          if (b0->flags & VLIB_BUFFER_IS_TRACED)
+          {
+              lcp_vrrp_trace_t *t0 =
+                  vlib_add_trace (vm, node, b0, sizeof (*t0));
+    
+              t0->sw_if_index = sw_if_index0;
+          }
+    
+          if (b1->flags & VLIB_BUFFER_IS_TRACED)
+          {
+              lcp_vrrp_trace_t *t1 =
+                  vlib_add_trace (vm, node, b1, sizeof (*t1));
+    
+              t1->sw_if_index = sw_if_index1;
+          }
 
           from += 2;
           n_left_from -= 2;
@@ -165,11 +175,19 @@ VLIB_NODE_FN (lcp_vrrp_node) (vlib_main_t * vm,
 
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
 
-          ip4 = vlib_buffer_get_current (b0);
+          if (is_l2_path)
+          {
+              ip4 = vlib_buffer_get_current (b0) + vnet_buffer (b0)->l2.l2_len;
+              len = 0;
+          }
+          else
+          {
+              ip4 = vlib_buffer_get_current (b0);
+              len = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
+          }
 
           if (IP_PROTOCOL_VRRP == ip4->protocol)
           {
-              len = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
               vlib_buffer_advance (b0, -len);
               c = vlib_buffer_copy (vm, b0);
               vlib_buffer_advance (b0, len);
@@ -210,9 +228,8 @@ VLIB_NODE_FN (lcp_vrrp_node) (vlib_main_t * vm,
   return frame->n_vectors;
 }
 
-VLIB_NODE_FN (lcp_vrrp6_node) (vlib_main_t * vm,
-                                        vlib_node_runtime_t * node,
-                                        vlib_frame_t * frame)
+always_inline uword 
+vrrp_ip6_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame, int is_l2_path)
 {
   u32 n_left_from, *from, *to_next;
   u32 next_index = node->cached_next_index;
@@ -254,12 +271,23 @@ VLIB_NODE_FN (lcp_vrrp6_node) (vlib_main_t * vm,
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
           sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
 
-          ip60 = vlib_buffer_get_current (b0);
-          ip61 = vlib_buffer_get_current (b1);
+          if (is_l2_path)
+          {
+              ip60 = vlib_buffer_get_current (b0) + vnet_buffer (b0)->l2.l2_len;
+              ip61 = vlib_buffer_get_current (b1) + vnet_buffer (b1)->l2.l2_len;
+              len0 = 0;
+              len1 = 0;
+          }
+          else
+          {
+              ip60 = vlib_buffer_get_current (b0);
+              ip61 = vlib_buffer_get_current (b1);
+              len0 = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
+              len1 = ((u8 *) vlib_buffer_get_current (b1) - (u8 *) ethernet_buffer_get_header (b1));
+          }
 
           if(IP_PROTOCOL_VRRP == ip60->protocol)
           {
-              len0 = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
               vlib_buffer_advance (b0, -len0);
               c0 = vlib_buffer_copy (vm, b0);
               vlib_buffer_advance (b0, len0);
@@ -271,7 +299,6 @@ VLIB_NODE_FN (lcp_vrrp6_node) (vlib_main_t * vm,
 
           if (IP_PROTOCOL_VRRP == ip61->protocol)
           {
-              len1 = ((u8 *) vlib_buffer_get_current (b1) - (u8 *) ethernet_buffer_get_header (b1));
               vlib_buffer_advance (b1, -len1);
               c1 = vlib_buffer_copy (vm, b1);
               vlib_buffer_advance (b1, len1);
@@ -281,21 +308,21 @@ VLIB_NODE_FN (lcp_vrrp6_node) (vlib_main_t * vm,
               }
           }
 
-      if (b0->flags & VLIB_BUFFER_IS_TRACED)
-      {
-          lcp_vrrp_trace_t *t0 =
-              vlib_add_trace (vm, node, b0, sizeof (*t0));
-
-          t0->sw_if_index = sw_if_index0;
-      }
-
-      if (b1->flags & VLIB_BUFFER_IS_TRACED)
-      {
-          lcp_vrrp_trace_t *t1 =
-              vlib_add_trace (vm, node, b1, sizeof (*t1));
-
-          t1->sw_if_index = sw_if_index1;
-      }
+          if (b0->flags & VLIB_BUFFER_IS_TRACED)
+          {
+              lcp_vrrp_trace_t *t0 =
+                  vlib_add_trace (vm, node, b0, sizeof (*t0));
+    
+              t0->sw_if_index = sw_if_index0;
+          }
+    
+          if (b1->flags & VLIB_BUFFER_IS_TRACED)
+          {
+              lcp_vrrp_trace_t *t1 =
+                  vlib_add_trace (vm, node, b1, sizeof (*t1));
+    
+              t1->sw_if_index = sw_if_index1;
+          }
 
           from += 2;
           n_left_from -= 2;
@@ -328,11 +355,19 @@ VLIB_NODE_FN (lcp_vrrp6_node) (vlib_main_t * vm,
 
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
 
-          ip6 = vlib_buffer_get_current (b0);
+          if (is_l2_path)
+          {
+              ip6 = vlib_buffer_get_current (b0) + vnet_buffer (b0)->l2.l2_len;
+              len = 0;
+          }
+          else
+          {
+              ip6 = vlib_buffer_get_current (b0);
+              len = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
+          }
 
           if (IP_PROTOCOL_VRRP == ip6->protocol)
           {
-              len = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
               vlib_buffer_advance (b0, -len);
               c = vlib_buffer_copy (vm, b0);
               vlib_buffer_advance (b0, len);
@@ -373,8 +408,28 @@ VLIB_NODE_FN (lcp_vrrp6_node) (vlib_main_t * vm,
   return frame->n_vectors;
 }
 
+VLIB_NODE_FN (lcp_vrrp4_node) (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
+{
+    return vrrp_ip4_node_fn(vm, node, frame, 0);
+}
 
-VLIB_REGISTER_NODE (lcp_vrrp_node) =
+VLIB_NODE_FN (lcp_vrrp6_node) (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
+{
+    return vrrp_ip6_node_fn(vm, node, frame, 0);
+}
+
+VLIB_NODE_FN (lcp_l2_vrrp4_node) (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
+{
+    return vrrp_ip4_node_fn(vm, node, frame, 1);
+}
+
+VLIB_NODE_FN (lcp_l2_vrrp6_node) (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
+{
+    return vrrp_ip6_node_fn(vm, node, frame, 1);
+}
+
+
+VLIB_REGISTER_NODE (lcp_vrrp4_node) =
 {
   .name = "linux-cp-vrrp",
   .vector_size = sizeof (u32),
@@ -408,7 +463,7 @@ VLIB_REGISTER_NODE (lcp_vrrp6_node) =
   },
 };
 
-VNET_FEATURE_INIT (lcp_vrrp_mc, static) =
+VNET_FEATURE_INIT (lcp_vrrp4_mc, static) =
 {
   .arc_name = "ip4-multicast",
   .node_name = "linux-cp-vrrp",
@@ -420,6 +475,56 @@ VNET_FEATURE_INIT (lcp_vrrp6_mc, static) =
   .arc_name = "ip6-multicast",
   .node_name = "linux-cp-vrrp6",
   .runs_before = VNET_FEATURES ("ip6-not-enabled"),
+};
+
+
+VLIB_REGISTER_NODE (lcp_l2_vrrp4_node) =
+{
+  .name = "linux-cp-l2-vrrp",
+  .vector_size = sizeof (u32),
+  .format_trace = format_lcp_vrrp_trace,
+  .type = VLIB_NODE_TYPE_INTERNAL,
+
+  .n_errors = LINUXCP_N_ERROR,
+  .error_counters = linuxcp_error_counters,
+
+  .n_next_nodes = LCP_VRRP_N_NEXT,
+
+  .next_nodes = {
+    [LCP_VRRP_NEXT_PUNT] = "linux-cp-punt",
+  },
+};
+
+VNET_FEATURE_INIT (lcp_l2_vrrp4_feature, static) =
+{
+  .arc_name = "l2-input-ip4",
+  .node_name = "linux-cp-l2-vrrp",
+  .runs_before = VNET_FEATURES ("l2-input-feat-arc-end"),
+};
+
+
+VLIB_REGISTER_NODE (lcp_l2_vrrp6_node) =
+{
+  .name = "linux-cp-l2-vrrp6",
+  .vector_size = sizeof (u32),
+  .format_trace = format_lcp_vrrp_trace,
+  .type = VLIB_NODE_TYPE_INTERNAL,
+
+  .n_errors = LINUXCP_N_ERROR,
+  .error_counters = linuxcp_error_counters,
+
+  .n_next_nodes = LCP_VRRP_N_NEXT,
+
+  .next_nodes = {
+    [LCP_VRRP_NEXT_PUNT] = "linux-cp-punt",
+  },
+};
+
+VNET_FEATURE_INIT (lcp_l2_vrrp6_feature, static) =
+{
+  .arc_name = "l2-input-ip6",
+  .node_name = "linux-cp-l2-vrrp6",
+  .runs_before = VNET_FEATURES ("l2-input-feat-arc-end"),
 };
 
 
