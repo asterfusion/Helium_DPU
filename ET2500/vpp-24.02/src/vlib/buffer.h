@@ -193,6 +193,8 @@ typedef union
     u16 no_nat:1;
     u16 acl_index:15;
 
+    u32 policer_index;
+    u32 reserved[15];
     /**< More opaque data, see ../vnet/vnet/buffer.h */
     u32 opaque2[14];
 
@@ -232,7 +234,7 @@ typedef union
 #endif
 } vlib_buffer_t;
 
-STATIC_ASSERT_SIZEOF (vlib_buffer_t, 128 + VLIB_BUFFER_TRACE_TRAJECTORY_SZ +
+STATIC_ASSERT_SIZEOF (vlib_buffer_t, 192 + VLIB_BUFFER_TRACE_TRAJECTORY_SZ +
 				       VLIB_BUFFER_PRE_DATA_SIZE);
 STATIC_ASSERT (VLIB_BUFFER_PRE_DATA_SIZE % CLIB_CACHE_LINE_BYTES == 0,
 	       "VLIB_BUFFER_PRE_DATA_SIZE must be divisible by cache line size");

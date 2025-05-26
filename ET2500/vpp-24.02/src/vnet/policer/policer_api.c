@@ -318,6 +318,23 @@ vl_api_policer_output_v2_t_handler (vl_api_policer_output_v2_t *mp)
   BAD_SW_IF_INDEX_LABEL;
   REPLY_MACRO (VL_API_POLICER_OUTPUT_REPLY);
 }
+static void
+send_policer_stats(u32 policer_index, vl_api_policer_details_t *mp) {
+  int result;
+  vlib_counter_t counts[NUM_POLICE_RESULTS];
+
+  for (result = 0; result < NUM_POLICE_RESULTS; result++) {
+    vlib_get_combined_counter(&policer_counters[result], policer_index,
+      &counts[result]);
+  }
+
+  mp->conform_packets = clib_host_to_net_u64(counts[POLICE_CONFORM].packets);
+  mp->conform_bytes = clib_host_to_net_u64(counts[POLICE_CONFORM].bytes);
+  mp->exceed_packets = clib_host_to_net_u64(counts[POLICE_EXCEED].packets);
+  mp->exceed_bytes = clib_host_to_net_u64(counts[POLICE_EXCEED].bytes);
+  mp->violate_packets = clib_host_to_net_u64(counts[POLICE_VIOLATE].packets);
+  mp->violate_bytes = clib_host_to_net_u64(counts[POLICE_VIOLATE].bytes);
+}
 
 static void
 send_policer_details (qos_pol_cfg_params_st *config, policer_t *policer,
@@ -356,6 +373,50 @@ send_policer_details (qos_pol_cfg_params_st *config, policer_t *policer,
   mp->extended_bucket = htonl (policer->extended_bucket);
   mp->last_update_time = clib_host_to_net_u64 (policer->last_update_time);
 
+  strncpy ((char *) mp->name, (char *) policer->name,
+	   ARRAY_LEN (mp->name) - 1);
+
+  vl_api_send_msg (reg, (u8 *) mp);
+}
+
+static void
+send_policer_details_v2 (qos_pol_cfg_params_st *config, policer_t *policer,
+		      u32 policer_index, vl_api_registration_t *reg, u32 context)
+{
+  vl_api_policer_details_t *mp;
+
+  mp = vl_msg_api_alloc (sizeof (*mp));
+  clib_memset (mp, 0, sizeof (*mp));
+  mp->_vl_msg_id = ntohs (REPLY_MSG_ID_BASE + VL_API_POLICER_DETAILS);
+  mp->context = context;
+  mp->cir = htonl (config->rb.kbps.cir_kbps);
+  mp->eir = htonl (config->rb.kbps.eir_kbps);
+  mp->cb = clib_host_to_net_u64 (config->rb.kbps.cb_bytes);
+  mp->eb = clib_host_to_net_u64 (config->rb.kbps.eb_bytes);
+  mp->rate_type = (vl_api_sse2_qos_rate_type_t) config->rate_type;
+  mp->round_type = (vl_api_sse2_qos_round_type_t) config->rnd_type;
+  mp->type = (vl_api_sse2_qos_policer_type_t) config->rfc;
+  mp->conform_action.type =
+    (vl_api_sse2_qos_action_type_t) policer->action[POLICE_CONFORM];
+  mp->conform_action.dscp = policer->mark_dscp[POLICE_CONFORM];
+  mp->exceed_action.type =
+    (vl_api_sse2_qos_action_type_t) policer->action[POLICE_EXCEED];
+  mp->exceed_action.dscp = policer->mark_dscp[POLICE_EXCEED];
+  mp->violate_action.type =
+    (vl_api_sse2_qos_action_type_t) policer->action[POLICE_VIOLATE];
+  mp->violate_action.dscp = policer->mark_dscp[POLICE_VIOLATE];
+  mp->single_rate = policer->single_rate ? 1 : 0;
+  mp->color_aware = policer->color_aware ? 1 : 0;
+  mp->scale = htonl (policer->scale);
+  mp->cir_tokens_per_period = htonl (policer->cir_tokens_per_period);
+  mp->pir_tokens_per_period = htonl (policer->pir_tokens_per_period);
+  mp->current_limit = htonl (policer->current_limit);
+  mp->current_bucket = htonl (policer->current_bucket);
+  mp->extended_limit = htonl (policer->extended_limit);
+  mp->extended_bucket = htonl (policer->extended_bucket);
+  mp->last_update_time = clib_host_to_net_u64 (policer->last_update_time);
+
+  send_policer_stats(policer_index, mp);
   strncpy ((char *) mp->name, (char *) policer->name,
 	   ARRAY_LEN (mp->name) - 1);
 
@@ -434,7 +495,7 @@ vl_api_policer_dump_v2_t_handler (vl_api_policer_dump_v2_t *mp)
 	  p = hash_get_mem (pm->policer_config_by_name, policer->name);
 	  pool_index = p[0];
 	  config = pool_elt_at_index (pm->configs, pool_index);
-	  send_policer_details (config, policer, reg, mp->context);
+	  send_policer_details_v2 (config, policer, policer_index, reg, mp->context);
 	};
     }
   else
@@ -446,7 +507,7 @@ vl_api_policer_dump_v2_t_handler (vl_api_policer_dump_v2_t *mp)
       p = hash_get_mem (pm->policer_config_by_name, policer->name);
       pool_index = p[0];
       config = pool_elt_at_index (pm->configs, pool_index);
-      send_policer_details (config, policer, reg, mp->context);
+      send_policer_details_v2 (config, policer, policer_index, reg, mp->context);
     }
 }
 

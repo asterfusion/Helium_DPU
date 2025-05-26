@@ -483,6 +483,142 @@ single_acl_match_5tuple (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5tupl
 }
 
 always_inline int
+single_acl_match_5tuple_sai (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5tuple,
+		  int is_ip6, u8 * r_action, u32 * r_acl_match_p,
+		  u32 * r_rule_match_p, u32 * trace_bitmap, u32 * r_policer_index)
+{
+  int i;
+  acl_rule_t *r;
+  acl_rule_t *acl_rules;
+
+  if (pool_is_free_index (am->acls, acl_index))
+    {
+      if (r_acl_match_p)
+	*r_acl_match_p = acl_index;
+      if (r_rule_match_p)
+	*r_rule_match_p = -1;
+      /* the ACL does not exist but is used for policy. Block traffic. */
+      return 0;
+    }
+  acl_rules = am->acls[acl_index].rules;
+  for (i = 0; i < vec_len(acl_rules); i++)
+    {
+      r = &acl_rules[i];
+      if (is_ip6 != r->is_ipv6)
+	{
+	  continue;
+	}
+
+      if (is_ip6) {
+	if (!fa_acl_match_mac_addr(&pkt_5tuple->mac6_addr[1], r->dst_mac, r->dst_mac_len))
+        {
+          continue;
+        }
+
+        if (!fa_acl_match_mac_addr(&pkt_5tuple->mac6_addr[0], r->src_mac, r->src_mac_len))
+        {
+          continue;
+        }
+        if (!fa_acl_match_ip6_addr
+	  (&pkt_5tuple->ip6_addr[1], &r->dst.ip6, r->dst_prefixlen))
+	continue;
+        if (!fa_acl_match_ip6_addr
+	  (&pkt_5tuple->ip6_addr[0], &r->src.ip6, r->src_prefixlen))
+	continue;
+      } else {
+	if (!fa_acl_match_mac_addr(&pkt_5tuple->mac4_addr[1], r->dst_mac, r->dst_mac_len))
+        {
+          continue;
+        }
+
+        if (!fa_acl_match_mac_addr(&pkt_5tuple->mac4_addr[0], r->src_mac, r->src_mac_len))
+        {
+          continue;
+        }
+        if (!fa_acl_match_ip4_addr
+	  (&pkt_5tuple->ip4_addr[1], &r->dst.ip4, r->dst_prefixlen))
+	continue;
+        if (!fa_acl_match_ip4_addr
+	  (&pkt_5tuple->ip4_addr[0], &r->src.ip4, r->src_prefixlen))
+	continue;
+      }
+
+      if (r->proto)
+	{
+	  if (pkt_5tuple->l4.proto != r->proto)
+	    continue;
+
+          if (PREDICT_FALSE (pkt_5tuple->pkt.is_nonfirst_fragment &&
+                     am->l4_match_nonfirst_fragment))
+          {
+            /* non-initial fragment with frag match configured - match this rule */
+            *trace_bitmap |= 0x80000000;
+            *r_action = r->is_permit;
+            if (r_policer_index)
+              *r_policer_index = r->policer_index;
+            if (r_acl_match_p)
+	      *r_acl_match_p = acl_index;
+            if (r_rule_match_p)
+	      *r_rule_match_p = i;
+            return 1;
+          }
+
+	  /* A sanity check just to ensure we are about to match the ports extracted from the packet */
+	  if (PREDICT_FALSE (!pkt_5tuple->pkt.l4_valid))
+	    continue;
+
+#ifdef FA_NODE_VERBOSE_DEBUG
+	  clib_warning
+	    ("ACL_FA_NODE_DBG acl %d rule %d pkt proto %d match rule %d",
+	     acl_index, i, pkt_5tuple->l4.proto, r->proto);
+#endif
+
+	  if (!fa_acl_match_port
+	      (pkt_5tuple->l4.port[0], r->src_port_or_type_first,
+	       r->src_port_or_type_last, is_ip6))
+	    continue;
+
+#ifdef FA_NODE_VERBOSE_DEBUG
+	  clib_warning
+	    ("ACL_FA_NODE_DBG acl %d rule %d pkt sport %d match rule [%d..%d]",
+	     acl_index, i, pkt_5tuple->l4.port[0], r->src_port_or_type_first,
+	     r->src_port_or_type_last);
+#endif
+
+	  if (!fa_acl_match_port
+	      (pkt_5tuple->l4.port[1], r->dst_port_or_code_first,
+	       r->dst_port_or_code_last, is_ip6))
+	    continue;
+
+#ifdef FA_NODE_VERBOSE_DEBUG
+	  clib_warning
+	    ("ACL_FA_NODE_DBG acl %d rule %d pkt dport %d match rule [%d..%d]",
+	     acl_index, i, pkt_5tuple->l4.port[1], r->dst_port_or_code_first,
+	     r->dst_port_or_code_last);
+#endif
+	  if (pkt_5tuple->pkt.tcp_flags_valid
+	      && ((pkt_5tuple->pkt.tcp_flags & r->tcp_flags_mask) !=
+		  r->tcp_flags_value))
+	    continue;
+	}
+      /* everything matches! */
+#ifdef FA_NODE_VERBOSE_DEBUG
+      clib_warning ("ACL_FA_NODE_DBG acl %d rule %d FULL-MATCH, action %d",
+		    acl_index, i, r->is_permit);
+#endif
+      *r_action = r->is_permit;
+      if (r_policer_index)
+        *r_policer_index = r->policer_index;
+      if (r_acl_match_p)
+	*r_acl_match_p = acl_index;
+      if (r_rule_match_p)
+	*r_rule_match_p = i;
+      return 1;
+    }
+  return 0;
+}
+
+always_inline int
 acl_plugin_single_acl_match_5tuple (void *p_acl_main, u32 acl_index, fa_5tuple_t * pkt_5tuple,
 		  int is_ip6, u8 * r_action, u32 * r_acl_match_p,
 		  u32 * r_rule_match_p, u32 * trace_bitmap)
@@ -538,6 +674,7 @@ typedef struct match_acl{
     u32 rule_index[64];
     u32 acl_pos[64];
     u32 curr_match_index[64];
+    u32 policer_index[64];
 } match_acl_t;
 
 always_inline int
@@ -551,13 +688,14 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
     u8 action = 0;
     u32 acl_match = 0;
     u32 rule_match = 0;
+    u32 policer_index = 0;
     acl_lookup_context_t *acontext = pool_elt_at_index(am->acl_lookup_contexts, lc_index);
 
     acl_vector = acontext->acl_indices;
 
     for (i = 0; i < vec_len (acl_vector); i++)
     {
-        if (single_acl_match_5tuple(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap))
+        if (single_acl_match_5tuple_sai(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap, &policer_index))
         {
             if (j > 64)
             {
@@ -567,6 +705,7 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
             match_acl_info->action[j] = action;
             match_acl_info->rule_index[j] = rule_match;
             match_acl_info->acl_pos[j] = i;
+            match_acl_info->policer_index[j] = i;
             j++;
             match_acl_info->acl_match_count = j;
             j++;
@@ -874,6 +1013,7 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
                         match_acl_info->rule_index[j] = pae->ace_index;
                         match_acl_info->action[j] = pae->action;
                         match_acl_info->acl_pos[j] = pae->acl_position;
+                        match_acl_info->policer_index[j] = pae->policer_index;
                         match_acl_info->curr_match_index[j] = match_index;
                     }
 
@@ -887,6 +1027,7 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
                 match_acl_info->rule_index[acl_match_count] = pae->ace_index;
                 match_acl_info->action[acl_match_count] = pae->action;
                 match_acl_info->acl_pos[acl_match_count] = pae->acl_position;
+                match_acl_info->policer_index[acl_match_count] = pae->policer_index;
                 match_acl_info->curr_match_index[acl_match_count] = match_index;
                 acl_match_count++;
             }
