@@ -27,6 +27,7 @@
 #include <vppinfra/bihash_72_8.h>
 #include <vppinfra/bihash_64_8.h>
 #include <vppinfra/bihash_32_8.h>
+#include <vppinfra/bihash_8_8.h>
 #include <vlib/counter.h>
 
 #include "types.h"
@@ -234,6 +235,7 @@ typedef struct {
   int fa_sessions_hash_is_initialized;
   clib_bihash_64_8_t fa_ip6_sessions_hash;
   clib_bihash_32_8_t fa_ip4_sessions_hash;
+  clib_bihash_8_8_t acl_index_bd_id_hash;
   /* The process node which orchestrates the cleanup */
   u32 fa_cleaner_node_index;
   /* FA session timeouts, in seconds */

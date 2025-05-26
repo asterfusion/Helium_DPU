@@ -53,6 +53,7 @@ acl_main_t acl_main;
 #include <vppinfra/bihash_48_8.h>
 #include <vppinfra/bihash_template.h>
 #include <vppinfra/bihash_template.c>
+#include <vppinfra/bihash_8_8.h>
 
 /* *INDENT-OFF* */
 VLIB_PLUGIN_REGISTER () = {
@@ -2119,49 +2120,171 @@ static void
   vl_api_acl_interface_set_acl_list_t_handler
   (vl_api_acl_interface_set_acl_list_t * mp)
 {
-  acl_main_t *am = &acl_main;
-  vl_api_acl_interface_set_acl_list_reply_t *rmp;
-  int rv = 0;
-  int i;
-  vnet_interface_main_t *im = &am->vnet_main->interface_main;
-  u32 sw_if_index = ntohl (mp->sw_if_index);
+    acl_main_t *am = &acl_main;
+    vl_api_acl_interface_set_acl_list_reply_t *rmp;
+    int rv = 0;
+    int i;
+    vnet_interface_main_t *im = &am->vnet_main->interface_main;
+    u32 sw_if_index = ntohl (mp->sw_if_index);
 
-  if (pool_is_free_index (im->sw_interfaces, sw_if_index))
-    rv = VNET_API_ERROR_INVALID_SW_IF_INDEX;
-  else
+    if (pool_is_free_index (im->sw_interfaces, sw_if_index))
     {
-      int may_clear_sessions = 1;
-      for (i = 0; i < mp->count; i++)
-	{
-	  if (acl_is_not_defined (am, ntohl (mp->acls[i])))
-	    {
-	      /* ACL does not exist, so we can not apply it */
-	      rv = VNET_API_ERROR_NO_SUCH_ENTRY;
-	    }
-	}
-      if (0 == rv)
-	{
-	  u32 *in_acl_vec = 0;
-	  u32 *out_acl_vec = 0;
-	  for (i = 0; i < mp->count; i++)
-	    if (i < mp->n_input)
-	      vec_add1 (in_acl_vec, clib_net_to_host_u32 (mp->acls[i]));
-	    else
-	      vec_add1 (out_acl_vec, clib_net_to_host_u32 (mp->acls[i]));
+        rv = VNET_API_ERROR_INVALID_SW_IF_INDEX;
+    }
+    else
+    {
+        int may_clear_sessions = 1;
+        u32 vlan_id = ntohl(mp->vlan_id);
 
-	  rv =
-	    acl_interface_set_inout_acl_list (am, sw_if_index, 0, out_acl_vec,
-					      &may_clear_sessions);
-	  rv = rv
-	    || acl_interface_set_inout_acl_list (am, sw_if_index, 1,
-						 in_acl_vec,
-						 &may_clear_sessions);
-	  vec_free (in_acl_vec);
-	  vec_free (out_acl_vec);
-	}
+        for (i = 0; i < mp->count; i++)
+        {
+            if (acl_is_not_defined (am, ntohl (mp->acls[i])))
+            {
+                /* ACL does not exist, so we can not apply it */
+                rv = VNET_API_ERROR_NO_SUCH_ENTRY;
+            }
+        }
+        if (0 == rv)
+        {
+            if (vlan_id != ~0)
+            {
+                u32 ***pin_acl_vec_by_sw_if_index = &am->input_acl_vec_by_sw_if_index;
+                u32 ***pout_acl_vec_by_sw_if_index = &am->output_acl_vec_by_sw_if_index;
+                u32 *elem;
+                u32 *in_acl_vec_old = 0;
+                u32 *out_acl_vec_old = 0;
+                u32 *in_acl_vec_new = 0;
+                u32 *out_acl_vec_new = 0;
+                clib_bihash_kv_8_8_t key;
+
+                if (sw_if_index < vec_len (*pin_acl_vec_by_sw_if_index))
+                {
+                    in_acl_vec_old = vec_dup((*pin_acl_vec_by_sw_if_index)[sw_if_index]);
+                }
+                if (sw_if_index < vec_len (*pout_acl_vec_by_sw_if_index))
+                {
+                    out_acl_vec_old = vec_dup((*pout_acl_vec_by_sw_if_index)[sw_if_index]);
+                }
+
+                for (i = 0; i < mp->count; i++)
+                {
+                    if (i < mp->n_input)
+                    {
+                        vec_add1 (in_acl_vec_new, clib_net_to_host_u32 (mp->acls[i]));
+                    }
+                    else
+                    {
+                        vec_add1 (out_acl_vec_new, clib_net_to_host_u32 (mp->acls[i]));
+                    }
+                }
+
+                if ((vec_len(in_acl_vec_old) == vec_len(in_acl_vec_new)) && 
+                    (vec_len(out_acl_vec_old) == vec_len(out_acl_vec_new)))
+                {
+                    vec_foreach(elem, in_acl_vec_old)
+                    {
+                        clib_memset(&key, 0, sizeof(clib_bihash_kv_8_8_t));
+                        key.key = ((u64)vlan_id << 32) | *elem;
+                        key.value = 1;
+                        clib_bihash_add_del_8_8(&am->acl_index_bd_id_hash, &key, 1);
+                    }
+
+                    vec_foreach(elem, out_acl_vec_old)
+                    {
+                        clib_memset(&key, 0, sizeof(clib_bihash_kv_8_8_t));
+                        key.key = ((u64)vlan_id << 32) | *elem;
+                        key.value = 1;
+                        clib_bihash_add_del_8_8(&am->acl_index_bd_id_hash, &key, 1);
+                    }
+
+                }
+
+                if (vec_len(in_acl_vec_old) == vec_len(in_acl_vec_new))
+                {
+                    if (vec_len(out_acl_vec_old) > vec_len(out_acl_vec_new))
+                    {
+                        clib_memset(&key, 0, sizeof(clib_bihash_kv_8_8_t));
+                        vec_foreach(elem, out_acl_vec_old)
+                        {
+                            if (!vec_is_member(elem, out_acl_vec_new))
+                            {
+                                key.key = ((u64)vlan_id << 32) | *elem;
+                                clib_bihash_add_del_8_8(&am->acl_index_bd_id_hash, &key, 0);
+                            }
+                        }
+                    }
+
+                    if (vec_len(out_acl_vec_new) > vec_len(out_acl_vec_old))
+                    {
+                        clib_memset(&key, 0, sizeof(clib_bihash_kv_8_8_t));
+                        vec_foreach(elem, out_acl_vec_new)
+                        {
+                            if (!vec_is_member(elem, out_acl_vec_old))
+                            {
+                                key.key = ((u64)vlan_id << 32) | *elem;
+                                key.value = 1;
+                                clib_bihash_add_del_8_8(&am->acl_index_bd_id_hash, &key, 1);
+                            }
+                        }
+                    }
+                }
+
+                else
+                {
+                    if (vec_len(in_acl_vec_old) > vec_len(in_acl_vec_new))
+                    {
+                        clib_memset(&key, 0, sizeof(clib_bihash_kv_8_8_t));
+                        vec_foreach(elem, in_acl_vec_old)
+                        {
+                            if (!vec_is_member(elem, in_acl_vec_new))
+                            {
+                                key.key = ((u64)vlan_id << 32) | *elem;
+                                clib_bihash_add_del_8_8(&am->acl_index_bd_id_hash, &key, 0);
+                            }
+                        }
+                    }
+
+                    if (vec_len(in_acl_vec_new) > vec_len(in_acl_vec_old))
+                    {
+                        clib_memset(&key, 0, sizeof(clib_bihash_kv_8_8_t));
+                        vec_foreach(elem, in_acl_vec_new)
+                        {
+                            if (!vec_is_member(elem, in_acl_vec_old))
+                            {
+                                key.key = ((u64)vlan_id << 32) | *elem;
+                                key.value = 1;
+                                clib_bihash_add_del_8_8(&am->acl_index_bd_id_hash, &key, 1);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (vlan_id != 0)
+            {
+                u32 *in_acl_vec = 0;
+                u32 *out_acl_vec = 0;
+                for (i = 0; i < mp->count; i++)
+                {
+                    if (i < mp->n_input)
+                    {
+                        vec_add1 (in_acl_vec, clib_net_to_host_u32 (mp->acls[i]));
+                    }
+                    else
+                    {
+                        vec_add1 (out_acl_vec, clib_net_to_host_u32 (mp->acls[i]));
+                    }
+                }
+
+                rv = acl_interface_set_inout_acl_list (am, sw_if_index, 0, out_acl_vec, &may_clear_sessions);
+                rv = rv || acl_interface_set_inout_acl_list (am, sw_if_index, 1, in_acl_vec, &may_clear_sessions);
+                vec_free (in_acl_vec);
+                vec_free (out_acl_vec);
+            }
+        }
     }
 
-  REPLY_MACRO (VL_API_ACL_INTERFACE_SET_ACL_LIST_REPLY);
+    REPLY_MACRO (VL_API_ACL_INTERFACE_SET_ACL_LIST_REPLY);
 }
 
 static void
@@ -4098,6 +4221,11 @@ acl_init (vlib_main_t * vm)
   am->acl_counter_lock = clib_mem_alloc_aligned (CLIB_CACHE_LINE_BYTES,
 						 CLIB_CACHE_LINE_BYTES);
   am->acl_counter_lock[0] = 0;	/* should be no need */
+
+  clib_bihash_init_8_8 (&am->acl_index_bd_id_hash,
+			     "ACL plugin acl_index and bd_id bihash",
+			     ACL_INDEX_BD_ID_TABLE_HASH_NUM_BUCKETS,
+			     ACL_INDEX_BD_ID_TABLE_HASH_MEMORY_SIZE);
 
   return error;
 }
