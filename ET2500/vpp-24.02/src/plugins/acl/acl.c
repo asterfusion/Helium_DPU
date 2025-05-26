@@ -573,6 +573,8 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       r->src_port_or_type_last = ntohs (rules[i].srcport_or_icmptype_last);
       r->dst_port_or_code_first = ntohs (rules[i].dstport_or_icmpcode_first);
       r->dst_port_or_code_last = ntohs (rules[i].dstport_or_icmpcode_last);
+      if (r->is_permit == ACL_ACTION_POLICER)
+        r->policer_index = ntohl(rules[i].policer_index);
       r->tcp_flags_value = rules[i].tcp_flags_value;
       r->tcp_flags_mask = rules[i].tcp_flags_mask;
       r->rule_id = rules[i].rule_id;
@@ -3128,6 +3130,7 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
   u32 port1 = 0;
   u32 port2 = 0;
   u32 action = 0;
+  u32 policer_index = 0;
   u32 tcpflags, tcpmask;
   ip_prefix_t src, dst;
   u8 *tag = 0;
@@ -3218,6 +3221,11 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
 	{
 	  vec_validate_acl_rules (rules, rule_idx);
 	  rules[rule_idx].proto = proto;
+	}
+      else if (unformat (line_input, "policer %d", &policer_index))
+	{
+	  vec_validate_acl_rules (rules, rule_idx);
+	  rules[rule_idx].policer_index = htonl(policer_index);
 	}
       else if (unformat (line_input, "tag %s", &tag))
 	{
