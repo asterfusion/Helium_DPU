@@ -24,7 +24,8 @@
 #include <linux/if_ether.h>
 
 #include <vnet/plugin/plugin.h>
-#include <vnet/plugin/plugin.h>
+
+#include <vnet/l2/l2_in_out_feat_arc.h>
 
 #include <vppinfra/linux/netns.h>
 
