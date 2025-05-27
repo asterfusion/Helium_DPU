@@ -977,6 +977,13 @@ VNET_FEATURE_INIT (policer_acl_in_l2_nonip_fa_feature, static) =
   .runs_before = VNET_FEATURES ("l2-input-feat-arc-end"),
 };
 
+VLIB_NODE_FN (policer_acl_out_nonip_node) (vlib_main_t * vm,
+				  vlib_node_runtime_t * node,
+				  vlib_frame_t * frame)
+{
+  return policer_acl_inline (vm, node, frame);
+}
+
 VLIB_REGISTER_NODE (policer_acl_out_nonip_node) =
 {
   .name = "policer-acl-plugin-out-nonip-l2",
