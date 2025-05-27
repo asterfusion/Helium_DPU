@@ -736,7 +736,30 @@ cnxk_pktio_link_info_set(vlib_main_t* vm, cnxk_pktio_t* dev,
   nix_info.full_duplex = link_info->is_full_duplex;
   nix_info.speed = link_info->speed;
 
-  rv = roc_nix_mac_link_advertise_set(nix, &nix_info);
+  rv = roc_nix_mac_link_info_set(nix, &nix_info);
+  if (rv) {
+    cnxk_pktio_err(
+      "roc_nix_mac_link_info_set failed with '%s' error on dev %d",
+      roc_error_msg_get(rv), dev->pktio_index, rv);
+    return -1;
+  }
+  return 0;
+}
+
+i32
+cnxk_pktio_link_advertise_set(vlib_main_t* vm, cnxk_pktio_t* dev,
+			  cnxk_pktio_link_info_t *link_info, int rpm_id)
+{
+  struct roc_nix_link_info nix_info = {};
+  struct roc_nix* nix = &dev->nix;
+  int rv;
+
+  nix_info.status = link_info->is_up;
+  nix_info.full_duplex = link_info->is_full_duplex;
+  nix_info.speed = link_info->speed;
+  nix_info.autoneg = link_info->is_autoneg;
+
+  rv = roc_nix_mac_link_advertise_set(nix, &nix_info, rpm_id);
   if (rv) {
     cnxk_pktio_err(
       "roc_nix_mac_link_advertise_set failed with '%s' error on dev %d",
@@ -1143,6 +1166,21 @@ cnxk_drv_pktio_stop (vlib_main_t *vm, u16 pktio_index)
   ASSERT (vm->thread_index == 0);
 
   return ops_map->fops.pktio_stop (vm, &ops_map->pktio);
+}
+
+i32
+cnxk_drv_pktio_link_advertise_set(vlib_main_t* vm, u16 pktio_index,
+			      cnxk_pktio_link_info_t *link_info)
+{
+  cnxk_pktio_ops_map_t* ops_map = cnxk_pktio_get_pktio_ops(pktio_index);
+
+  ASSERT(vm->thread_index == 0);
+
+  int rpm_id = 0;
+#ifdef VPP_PLATFORM_ET2500
+  rpm_id = (pktio_index < 8) ? 0 : (pktio_index <= 11) ? 1 : (pktio_index <= 15) ? 2 : -1;
+#endif
+  return ops_map->fops.pktio_link_advertise_set(vm, &ops_map->pktio, link_info, rpm_id);
 }
 
 i32

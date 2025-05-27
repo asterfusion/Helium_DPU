@@ -5,10 +5,16 @@
 #include "roc_api.h"
 #include "roc_priv.h"
 #define ETH_SPEED_NUM_10G 10000
+#define ETH_SPEED_NUM_2GH 2500
 #define ETH_SPEED_NUM_1G 1000
+#define ETH_SPEED_NUM_100 100
+#define ETH_SPEED_NUM_10 10
 
-#define ETH_SPEED_ADVERTISE_10G 0x10
-#define ETH_SPEED_ADVERTISE_1G 0x2
+#define ETH_MODE_1000_BASEX_BIT 1
+#define ETH_MODE_QSGMII_BIT 2
+#define ETH_MODE_10G_C2C_BIT 3
+#define ETH_MODE_SGMII_10M_BIT 38
+#define ETH_MODE_SGMII_100M_BIT 39
 
 int
 roc_nix_mac_rxtx_start_stop(struct roc_nix *roc_nix, bool start)
@@ -304,14 +310,13 @@ exit:
 
 int
 roc_nix_mac_link_advertise_set(struct roc_nix *roc_nix,
-			  struct roc_nix_link_info *link_info)
+			  struct roc_nix_link_info *link_info, int rpm_id)
 {
 	struct nix *nix = roc_nix_to_nix_priv(roc_nix);
 	struct dev *dev = &nix->dev;
 	struct mbox *mbox = mbox_get(dev->mbox);
 	struct cgx_set_link_mode_req *req;
 	struct cgx_set_link_mode_rsp *rsp;
-	uint64_t advertising = 0;
 	int rc = -ENOSPC;
 
 	req = mbox_alloc_msg_cgx_set_link_mode(mbox);
@@ -319,17 +324,45 @@ roc_nix_mac_link_advertise_set(struct roc_nix *roc_nix,
 		rc =  -ENOSPC;
 		goto exit;
 	}
+	req->args.speed = link_info->speed;
+	req->args.duplex = link_info->full_duplex;
+	req->args.an = link_info->autoneg;
 
-	if (ETH_SPEED_NUM_10G == link_info->speed)
-		advertising = ETH_SPEED_ADVERTISE_10G;
-	else if (ETH_SPEED_NUM_1G == link_info->speed)
-		advertising = ETH_SPEED_ADVERTISE_1G;
-	else {
-		rc = -EINVAL;
-		goto exit;
+	if (rpm_id == 2) {
+		req->args.an = 0;
+		req->args.duplex = 1;
+		if (link_info->speed == 10000)
+			req->args.mode = 1ULL << ETH_MODE_10G_C2C_BIT;
+		else if (link_info->speed == 1000)
+			req->args.mode = 1ULL << ETH_MODE_1000_BASEX_BIT;
+		else
+			goto exit;
 	}
+	else if (rpm_id == 1) {
+		if (link_info->speed == 2500)
+			req->args.mode = 1ULL << ETH_MODE_QSGMII_BIT;
+		else if (link_info->speed == 1000)
+			req->args.mode = 1ULL << ETH_MODE_1000_BASEX_BIT;
+		else if (link_info->speed == 100)
+			req->args.mode = 1ULL << ETH_MODE_SGMII_100M_BIT;
+		else if (link_info->speed == 10)
+			req->args.mode = 1ULL << ETH_MODE_SGMII_10M_BIT;
+		else
+			goto exit;
+	}
+	else if (rpm_id == 0) {
+		if (link_info->speed == 1000)
+			req->args.mode = 1ULL << ETH_MODE_1000_BASEX_BIT;
+		else if (link_info->speed == 100)
+			req->args.mode = 1ULL << ETH_MODE_SGMII_100M_BIT;
+		else if (link_info->speed == 10)
+			req->args.mode = 1ULL << ETH_MODE_SGMII_10M_BIT;
+		else
+			goto exit;
+	}
+	else
+		goto exit;
 
-	req->args.mode = advertising;
 	rc = mbox_process_msg(mbox, (void**)(&rsp));
 exit:
 	mbox_put(mbox);

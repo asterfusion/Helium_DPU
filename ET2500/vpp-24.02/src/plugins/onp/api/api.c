@@ -266,12 +266,139 @@ vl_api_onp_set_port_speed_t_handler(vl_api_onp_set_port_speed_t* mp) {
   cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
   if (!link_info.is_autoneg && cnxk_drv_pktio_get_lmac_speed(link_info.lmac_type_id) != port_speed) {
     link_info.speed = port_speed;
-    cnxk_drv_pktio_link_info_set(vm, pktio->cnxk_pktio_index, &link_info);
+    cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
   }
 
   BAD_SW_IF_INDEX_LABEL;
 
   ONP_REPLY_MACRO(VL_API_ONP_SET_PORT_SPEED_REPLY, onp_set_port_speed,);
+}
+
+static void
+vl_api_onp_set_port_autoneg_t_handler(vl_api_onp_set_port_autoneg_t* mp) {
+  onp_main_t *om = onp_get_main();
+  vlib_main_t *vm = vlib_get_main();
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+  bool autoneg_enable = mp->autoneg;
+  onp_pktio_t* pktio;
+  int rv = 1;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios) ?
+    __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
+    if (pktio->sw_if_index == sw_if_index)
+    {
+      rv = 0;
+      break;
+    }
+  }
+
+  cnxk_pktio_link_info_t link_info = {};
+  cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
+  link_info.is_autoneg = autoneg_enable;
+  cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
+
+  BAD_SW_IF_INDEX_LABEL;
+
+  ONP_REPLY_MACRO(VL_API_ONP_SET_PORT_AUTONEG, onp_set_port_autoneg,);
+}
+
+static void
+vl_api_onp_get_port_autoneg_t_handler(vl_api_onp_get_port_autoneg_t* mp) {
+  onp_main_t* om = onp_get_main();
+  vlib_main_t* vm = vlib_get_main();
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+  cnxk_pktio_link_info_t link_info = {};
+  onp_pktio_t* pktio;
+  int rv = 1;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios) ?
+    __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
+    if (pktio->sw_if_index == sw_if_index) {
+      rv = 0;
+      break;
+    }
+  }
+
+
+  ONP_REPLY_MACRO(VL_API_ONP_GET_PORT_AUTONEG_REPLY, onp_get_port_autoneg, ({
+  rv = cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
+    reply->autoneg = link_info.is_autoneg;
+    }));
+  return;
+
+  BAD_SW_IF_INDEX_LABEL;
+  ONP_REPLY_MACRO(VL_API_ONP_GET_PORT_AUTONEG_REPLY, onp_get_port_autoneg, );
+  return;
+}
+
+static void
+vl_api_onp_set_port_duplex_t_handler(vl_api_onp_set_port_duplex_t* mp) {
+  onp_main_t *om = onp_get_main();
+  vlib_main_t *vm = vlib_get_main();
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+  bool duplex_enable = mp->duplex;
+  onp_pktio_t* pktio;
+  int rv = 1;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios) ?
+    __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
+    if (pktio->sw_if_index == sw_if_index)
+    {
+      rv = 0;
+      break;
+    }
+  }
+
+  cnxk_pktio_link_info_t link_info = {};
+  cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
+  link_info.is_full_duplex = duplex_enable;
+  cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
+
+  BAD_SW_IF_INDEX_LABEL;
+
+  ONP_REPLY_MACRO(VL_API_ONP_SET_PORT_DUPLEX, onp_set_port_duplex,);
+}
+
+static void
+vl_api_onp_get_port_duplex_t_handler(vl_api_onp_get_port_duplex_t* mp) {
+  onp_main_t *om = onp_get_main();
+  vlib_main_t *vm = vlib_get_main();
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+  cnxk_pktio_link_info_t link_info = {};
+  onp_pktio_t* pktio;
+  int rv = 1;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios) ?
+    __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
+    if (pktio->sw_if_index == sw_if_index)
+    {
+      rv = 0;
+      break;
+    }
+  }
+
+
+  ONP_REPLY_MACRO(VL_API_ONP_GET_PORT_DUPLEX_REPLY, onp_get_port_duplex, ({
+  rv = cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
+		reply->duplex = link_info.is_full_duplex;
+    }));
+  return;
+
+  BAD_SW_IF_INDEX_LABEL;
+  ONP_REPLY_MACRO(VL_API_ONP_GET_PORT_DUPLEX_REPLY, onp_get_port_duplex, );
+  return;
 }
 
 static void

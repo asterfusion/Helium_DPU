@@ -98,6 +98,78 @@ autoreply define onp_set_port_speed
 };
 
 /**
+ * @brief Set the port autoneg
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to set port autoneg on
+ * @param[in] autoneg           - antoneg enable if non-zero; disable otherwise
+ */
+autoreply define onp_set_port_autoneg
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool autoneg;
+};
+
+/**
+ * @brief Get the port autoneg status
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to get port autoneg on
+ */
+define onp_get_port_autoneg
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+};
+define onp_get_port_autoneg_reply
+{
+  u32 context;
+  bool autoneg;
+  u32 retval;
+};
+
+/**
+ * @brief Set the port duplex
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to set port duplex on
+ * @param[in] duplex            - duplex enable if non-zero; disable otherwise
+ */
+autoreply define onp_set_port_duplex
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool duplex;
+};
+
+/**
+ * @brief Get the port duplex status
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to get port duplex on
+ */
+define onp_get_port_duplex
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+};
+define onp_get_port_duplex_reply
+{
+  u32 context;
+  bool duplex;
+  u32 retval;
+};
+
+/**
  * @brief ONP hardware interface statistics structure
  * @param[in] sw_if_index       - index of the interface
  *

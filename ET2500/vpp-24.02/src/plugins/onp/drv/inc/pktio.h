@@ -342,6 +342,9 @@ i32 cnxk_drv_pktio_xstats_get (vlib_main_t *vm, u16 pktio_idx, u64 *xstats,
 i32 cnxk_drv_pktio_xstats_names_get (vlib_main_t *vm, u16 pktio_idx,
 				     u8 *xstats_names[], u32 count);
 
+i32 cnxk_drv_pktio_link_advertise_set (vlib_main_t *vm, u16 pktio_idx,
+				  cnxk_pktio_link_info_t *link_info);
+
 i32 cnxk_drv_pktio_link_info_set (vlib_main_t *vm, u16 pktio_idx,
 				  cnxk_pktio_link_info_t *link_info);
 
