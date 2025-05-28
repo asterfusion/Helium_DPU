@@ -74,7 +74,8 @@ typedef struct
 {
   CLIB_CACHE_LINE_ALIGN_MARK (cacheline0);
   u32 single_rate;		// 1 = single rate policer, 0 = two rate policer
-  u32 color_aware;		// for hierarchical policing
+  u32 color_aware:8;		// for hierarchical policing
+  u8 mark_pcp[3];
   u32 scale;			// power-of-2 shift amount for lower rates
   qos_action_type_en action[3];
   ip_dscp_t mark_dscp[3];

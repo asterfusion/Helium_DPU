@@ -23,13 +23,16 @@
 #define IP4_DSCP_SHIFT    2
 #define IP6_NON_DSCP_BITS 0xf03fffff
 #define IP6_DSCP_SHIFT    22
+#define VLAN_NO_PCP_BITS  0x1FFF
+#define VLAN_PCP_SHIFT    13
 
 static_always_inline void
-vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp)
+vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp)
 {
   ethernet_header_t *eh;
   ip4_header_t *ip4h;
   ip6_header_t *ip6h;
+  ethernet_vlan_header_t* vlanh;
   u16 type;
 
   eh = (ethernet_header_t *) b->data;
@@ -52,6 +55,15 @@ vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp)
 	  ip6h->ip_version_traffic_class_and_flow_label |=
 	    clib_host_to_net_u32 (dscp << IP6_DSCP_SHIFT);
 	}
+      else
+      {
+        if (PREDICT_TRUE(type == ETHERNET_TYPE_VLAN))
+        {
+          vlanh = (ethernet_vlan_header_t*)&b->data[sizeof(ethernet_header_t)];
+          vlanh->priority_cfi_and_id &= clib_host_to_net_u16(VLAN_NO_PCP_BITS);
+          vlanh->priority_cfi_and_id |= clib_host_to_net_u16(pcp << VLAN_PCP_SHIFT);
+        }
+      }
     }
 }
 
@@ -94,7 +106,7 @@ vnet_policer_police (vlib_main_t *vm, vlib_buffer_t *b, u32 policer_index,
   vlib_increment_combined_counter (&policer_counters[col], vm->thread_index,
 				   policer_index, 1, len);
   if (PREDICT_TRUE (act == QOS_ACTION_MARK_AND_TRANSMIT))
-    vnet_policer_mark (b, pol->mark_dscp[col]);
+    vnet_policer_mark (b, pol->mark_dscp[col], pol->mark_pcp[col]);
 
   return act;
 }
