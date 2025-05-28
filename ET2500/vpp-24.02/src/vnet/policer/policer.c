@@ -349,7 +349,7 @@ format_policer_action_type (u8 * s, va_list * va)
   else if (a->action_type == QOS_ACTION_TRANSMIT)
     s = format (s, "transmit");
   else if (a->action_type == QOS_ACTION_MARK_AND_TRANSMIT)
-    s = format (s, "mark-and-transmit %U", format_ip_dscp, a->dscp);
+    s = format (s, "mark-and-transmit dscp:%U pcp:%u", format_ip_dscp, a->dscp, a->pcp);
   else
     s = format (s, "ILLEGAL");
   return s;
@@ -481,8 +481,8 @@ unformat_policer_action_type (unformat_input_t * input, va_list * va)
     a->action_type = QOS_ACTION_DROP;
   else if (unformat (input, "transmit"))
     a->action_type = QOS_ACTION_TRANSMIT;
-  else if (unformat (input, "mark-and-transmit %U", unformat_ip_dscp,
-		     &a->dscp))
+  else if (unformat (input, "mark-and-transmit %U %u", unformat_ip_dscp,
+		     &a->dscp, &a->pcp))
     a->action_type = QOS_ACTION_MARK_AND_TRANSMIT;
   else
     return 0;
@@ -886,9 +886,9 @@ VLIB_CLI_COMMAND (configure_policer_command, static) = {
 		"1r3c | 2r3c-2698 "
 		"| 2r3c-4115] [color-aware] [cir <cir>] [cb <cb>] [eir <eir>] "
 		"[eb <eb>] [rate kbps | pps] [round closest | up | down] "
-		"[conform-action drop | transmit | mark-and-transmit <dscp>] "
-		"[exceed-action drop | transmit | mark-and-transmit <dscp>] "
-		"[violate-action drop | transmit | mark-and-transmit <dscp>]",
+		"[conform-action drop | transmit | mark-and-transmit <dscp> <pcp>] "
+		"[exceed-action drop | transmit | mark-and-transmit <dscp> <pcp>] "
+		"[violate-action drop | transmit | mark-and-transmit <dscp> <pcp>]",
   .function = policer_add_command_fn,
   .function_arg = 1
 };
@@ -898,9 +898,9 @@ VLIB_CLI_COMMAND (policer_add_command, static) = {
   .short_help = "policer add name <name> [type 1r2c | 1r3c | 2r3c-2698 | "
 		"2r3c-4115] [color-aware] [cir <cir>] [cb <cb>] [eir <eir>] "
 		"[eb <eb>] [rate kbps | pps] [round closest | up | down] "
-		"[conform-action drop | transmit | mark-and-transmit <dscp>] "
-		"[exceed-action drop | transmit | mark-and-transmit <dscp>] "
-		"[violate-action drop | transmit | mark-and-transmit <dscp>]",
+		"[conform-action drop | transmit | mark-and-transmit <dscp> <pcp>] "
+		"[exceed-action drop | transmit | mark-and-transmit <dscp> <pcp>] "
+		"[violate-action drop | transmit | mark-and-transmit <dscp> <pcp>]",
   .function = policer_add_command_fn,
   .function_arg = 0
 };

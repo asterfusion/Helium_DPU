@@ -49,11 +49,13 @@ enum sse2_qos_action_type : u8
 /** \brief QOS action
     @param conform_action_type - conform action type
     @param conform_dscp - DSCP for conform mark-and-transmit action
+    @param conform_pcp - PCP for conform mark-and-transmit action
 */
 typedef sse2_qos_action
 {
   vl_api_sse2_qos_action_type_t type;
   u8 dscp;
+  u8 pcp;
 };
 
 /** \brief Policer configuration

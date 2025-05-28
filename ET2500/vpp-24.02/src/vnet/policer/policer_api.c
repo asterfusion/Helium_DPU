@@ -58,12 +58,15 @@ vl_api_policer_add_del_t_handler (vl_api_policer_add_del_t * mp)
       cfg.conform_action.action_type =
 	(qos_action_type_en) mp->conform_action.type;
       cfg.conform_action.dscp = mp->conform_action.dscp;
+      cfg.conform_action.pcp = mp->conform_action.pcp;
       cfg.exceed_action.action_type =
 	(qos_action_type_en) mp->exceed_action.type;
       cfg.exceed_action.dscp = mp->exceed_action.dscp;
+      cfg.exceed_action.pcp = mp->exceed_action.pcp;
       cfg.violate_action.action_type =
 	(qos_action_type_en) mp->violate_action.type;
       cfg.violate_action.dscp = mp->violate_action.dscp;
+      cfg.violate_action.pcp = mp->violate_action.pcp;
       cfg.color_aware = mp->color_aware;
 
       rv = policer_add (vm, (u8 *) name, &cfg, &policer_index);
@@ -100,12 +103,15 @@ policer_set_configuration (qos_pol_cfg_params_st *cfg,
   cfg->conform_action.action_type =
     (qos_action_type_en) infos->conform_action.type;
   cfg->conform_action.dscp = infos->conform_action.dscp;
+  cfg->conform_action.pcp = infos->conform_action.pcp;
   cfg->exceed_action.action_type =
     (qos_action_type_en) infos->exceed_action.type;
   cfg->exceed_action.dscp = infos->exceed_action.dscp;
+  cfg->exceed_action.pcp = infos->exceed_action.pcp;
   cfg->violate_action.action_type =
     (qos_action_type_en) infos->violate_action.type;
   cfg->violate_action.dscp = infos->violate_action.dscp;
+  cfg->violate_action.pcp = infos->violate_action.pcp;
   cfg->color_aware = infos->color_aware;
 }
 
@@ -356,12 +362,15 @@ send_policer_details (qos_pol_cfg_params_st *config, policer_t *policer,
   mp->conform_action.type =
     (vl_api_sse2_qos_action_type_t) policer->action[POLICE_CONFORM];
   mp->conform_action.dscp = policer->mark_dscp[POLICE_CONFORM];
+  mp->conform_action.pcp = policer->mark_pcp[POLICE_CONFORM];
   mp->exceed_action.type =
     (vl_api_sse2_qos_action_type_t) policer->action[POLICE_EXCEED];
   mp->exceed_action.dscp = policer->mark_dscp[POLICE_EXCEED];
+  mp->exceed_action.pcp = policer->mark_pcp[POLICE_EXCEED];
   mp->violate_action.type =
     (vl_api_sse2_qos_action_type_t) policer->action[POLICE_VIOLATE];
   mp->violate_action.dscp = policer->mark_dscp[POLICE_VIOLATE];
+  mp->violate_action.pcp = policer->mark_pcp[POLICE_VIOLATE];
   mp->single_rate = policer->single_rate ? 1 : 0;
   mp->color_aware = policer->color_aware ? 1 : 0;
   mp->scale = htonl (policer->scale);
@@ -399,12 +408,15 @@ send_policer_details_v2 (qos_pol_cfg_params_st *config, policer_t *policer,
   mp->conform_action.type =
     (vl_api_sse2_qos_action_type_t) policer->action[POLICE_CONFORM];
   mp->conform_action.dscp = policer->mark_dscp[POLICE_CONFORM];
+  mp->conform_action.pcp = policer->mark_pcp[POLICE_CONFORM];
   mp->exceed_action.type =
     (vl_api_sse2_qos_action_type_t) policer->action[POLICE_EXCEED];
   mp->exceed_action.dscp = policer->mark_dscp[POLICE_EXCEED];
+  mp->exceed_action.pcp = policer->mark_pcp[POLICE_EXCEED];
   mp->violate_action.type =
     (vl_api_sse2_qos_action_type_t) policer->action[POLICE_VIOLATE];
   mp->violate_action.dscp = policer->mark_dscp[POLICE_VIOLATE];
+  mp->violate_action.pcp = policer->mark_pcp[POLICE_VIOLATE];
   mp->single_rate = policer->single_rate ? 1 : 0;
   mp->color_aware = policer->color_aware ? 1 : 0;
   mp->scale = htonl (policer->scale);
