@@ -174,7 +174,7 @@ vl_api_security_check_raguard_role_t_handler (vl_api_security_check_raguard_role
     int rv;
     vl_api_security_check_raguard_role_reply_t *rmp;
 
-    rv = api_security_check_ragurad_role(ntohs (mp->sw_if_index), ntohl (mp->role));
+    rv = api_security_check_ragurad_role(ntohl (mp->sw_if_index), ntohl (mp->role));
 
     REPLY_MACRO (VL_API_SECURITY_CHECK_RAGUARD_ROLE_REPLY);
 }
