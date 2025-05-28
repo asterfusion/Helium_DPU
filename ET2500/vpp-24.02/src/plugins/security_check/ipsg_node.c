@@ -23,6 +23,9 @@
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/ip/ip4.h>
 #include <vnet/ip/ip6.h>
+#include <vnet/ip/icmp46_packet.h>
+#include <vnet/udp/udp_local.h>
+#include <vnet/udp/udp_packet.h>
 #include <vnet/l2/l2_bd.h>
 #include <vnet/l2/l2_input.h>
 
@@ -95,6 +98,17 @@ always_inline void process_ipsg_check(security_check_main_t *secm,
     //get vlan
     bd_config = vec_elt_at_index (l2input_main.bd_configs, vnet_buffer (b)->l2.bd_index);
     vlan = bd_config->bd_id;
+
+    /*
+     * For packets with a (0.0.0.0, 255.255.255.255) (eg DHCP,BOOTP)
+     *     skip check
+     * For packets with a (0.0.0.0, serverip) (eg TFTP)
+     *     skip check
+     */
+    if (ip4->src_address.as_u32 == 0) 
+    {
+        return;
+    }
 
     //fill bihash key
     k.key[0] = (u64)eth->src_address[0] << 56 | 
@@ -196,6 +210,8 @@ always_inline void process_ipsgv6_check(security_check_main_t *secm,
 
     ethernet_header_t *eth;
     ip6_header_t *ip6;
+    icmp46_header_t *icmp;
+    udp_header_t *udph;
 
     u16 vlan;
     snp_entry_t *entry = NULL;
@@ -204,6 +220,20 @@ always_inline void process_ipsgv6_check(security_check_main_t *secm,
 
     eth = vlib_buffer_get_current (b);
     ip6 = vlib_buffer_get_current (b) + vnet_buffer (b)->l2.l2_len;
+    icmp = ip6_ext_header_find(secm->vlib_main, b, ip6, IP_PROTOCOL_ICMP6, NULL);
+    udph = ip6_ext_header_find(secm->vlib_main, b, ip6, IP_PROTOCOL_UDP, NULL);
+
+    if (PREDICT_FALSE(
+          (icmp && (ICMP6_neighbor_solicitation == icmp->type ||
+                   ICMP6_neighbor_advertisement == icmp->type ||
+                   ICMP6_router_solicitation == icmp->type ||
+                   ICMP6_router_advertisement == icmp->type ||
+                   ICMP6_redirect == icmp->type)) || 
+          (udph && (UDP6_DST_PORT_dhcpv6_to_server == clib_net_to_host_u16(udph->dst_port) ||
+                    UDP6_DST_PORT_dhcpv6_to_client == clib_net_to_host_u16(udph->dst_port)))))
+    {
+        return;
+    }
 
     //get sup sw_if_index
     sw = vnet_get_sw_interface (secm->vnet_main, sw_if_index);

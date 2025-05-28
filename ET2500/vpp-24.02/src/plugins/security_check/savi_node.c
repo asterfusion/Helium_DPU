@@ -108,6 +108,19 @@ always_inline void process_savi_check(security_check_main_t *secm,
     bd_config = vec_elt_at_index (l2input_main.bd_configs, vnet_buffer (b)->l2.bd_index);
     vlan = bd_config->bd_id;
 
+    /*
+     * For packets with a (::, ff02::1:xxxxx) (eg NDP-NS)
+     *     skip check
+     * For packets with a (::, ff02::2) (eg NDP-RS)
+     *     skip check
+     */
+    if (ip6->src_address.as_u64[0] == 0 && ip6->src_address.as_u64[1] == 0 &&
+        icmp && (ICMP6_neighbor_solicitation == icmp->type ||
+                 ICMP6_router_solicitation == icmp->type))
+    {
+        return;
+    }
+
     //ndp and dhcpv6 ; ra check for raguard
     if (PREDICT_FALSE(
           (icmp && (ICMP6_neighbor_solicitation == icmp->type ||
