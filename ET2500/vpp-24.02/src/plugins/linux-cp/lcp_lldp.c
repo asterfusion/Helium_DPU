@@ -95,6 +95,16 @@ VLIB_NODE_FN (lcp_lldp_punt_node) (vlib_main_t * vm,
 
           //vnet_feature_next (&next0, b0);
           //vnet_feature_next (&next1, b1);
+        if (vnet_buffer2(b0)->l2_rx_sw_if_index > 0)
+          {
+                sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
+                vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
+          }
+          if (vnet_buffer2(b1)->l2_rx_sw_if_index > 0)
+          {
+                sw_if_index1 = vnet_buffer2(b1)->l2_rx_sw_if_index;
+                vnet_buffer2(b1)->l2_rx_sw_if_index = ~0;
+          }
 
 	      lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0); 
           if (lipi0 == INDEX_INVALID)
@@ -190,6 +200,12 @@ VLIB_NODE_FN (lcp_lldp_punt_node) (vlib_main_t * vm,
           //vnet_feature_next (&next0, b0);
 
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
+          if (vnet_buffer2(b0)->l2_rx_sw_if_index > 0)
+          {
+                sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
+                vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
+          }
+     
 
 	      lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0); 
           if (lipi0 == INDEX_INVALID)

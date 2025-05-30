@@ -549,11 +549,14 @@ eth_input_tag_lookup (vlib_main_t * vm, vnet_main_t * vnm,
 	      matched = 1;
 	      is_l2 = main_is_l3 == 0;
 	    }
-	  else
+	  else{
 	    matched = eth_identify_subint (hi, SUBINT_CONFIG_VALID |
 					   SUBINT_CONFIG_MATCH_1_TAG, mif,
 					   vif, qif, &new_sw_if_index,
 					   &l->err, &is_l2);
+      vnet_buffer2 (b)->l2_rx_sw_if_index = vnet_buffer(b)->sw_if_index[VLIB_RX];
+   
+            }
 	}
 
       if (l->sw_if_index != new_sw_if_index)
