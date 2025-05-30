@@ -264,7 +264,7 @@ vl_api_onp_set_port_speed_t_handler(vl_api_onp_set_port_speed_t* mp) {
 
   cnxk_pktio_link_info_t link_info = {};
   cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
-  if (!link_info.is_autoneg && cnxk_drv_pktio_get_lmac_speed(link_info.lmac_type_id) != port_speed) {
+  if (!link_info.is_autoneg && link_info.speed != port_speed) {
     link_info.speed = port_speed;
     cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
   }
@@ -302,7 +302,7 @@ vl_api_onp_set_port_autoneg_t_handler(vl_api_onp_set_port_autoneg_t* mp) {
 
   BAD_SW_IF_INDEX_LABEL;
 
-  ONP_REPLY_MACRO(VL_API_ONP_SET_PORT_AUTONEG, onp_set_port_autoneg,);
+  ONP_REPLY_MACRO(VL_API_ONP_SET_PORT_AUTONEG_REPLY, onp_set_port_autoneg,);
 }
 
 static void
@@ -365,7 +365,7 @@ vl_api_onp_set_port_duplex_t_handler(vl_api_onp_set_port_duplex_t* mp) {
 
   BAD_SW_IF_INDEX_LABEL;
 
-  ONP_REPLY_MACRO(VL_API_ONP_SET_PORT_DUPLEX, onp_set_port_duplex,);
+  ONP_REPLY_MACRO(VL_API_ONP_SET_PORT_DUPLEX_REPLY, onp_set_port_duplex,);
 }
 
 static void
