@@ -391,7 +391,7 @@ always_inline void acl_calc_acl_match(vlib_buffer_t *b, match_acl_t *match_acl_i
             }
             else if (0 != vlan)
             {
-                key.key = 0 << 32 | match_acl_info->acl_index[i];
+                key.key = 0ULL << 32 | match_acl_info->acl_index[i];
                 int res = clib_bihash_search_inline_2_8_8(&am->acl_index_bd_id_hash, &key, &kv_result);
                 if (0 == res && 1 == kv_result.value)
                 {
