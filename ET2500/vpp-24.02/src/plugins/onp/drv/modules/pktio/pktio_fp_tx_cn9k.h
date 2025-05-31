@@ -179,19 +179,21 @@ cn9k_pkts_send (vlib_main_t *vm, vlib_node_runtime_t *node, u32 txq,
    *  __cn9k_sched_lock (vm, CNXK_SCHED_LOCK_HEAD_WAIT);
    */
 
-  if (PREDICT_FALSE (fpsq->cached_pkts < tx_pkts))
-    {
+  while (fpsq->cached_pkts < tx_pkts)
+  {
       fpsq->cached_pkts = (sq->nb_sqb_bufs_adj - *((uint64_t *) sq->fc))
 			  << sq->sqes_per_sqb_log2;
 
       if (PREDICT_FALSE (fpsq->cached_pkts < tx_pkts))
-	{
-	  if (fpsq->cached_pkts < 0)
-	    return 0;
+        {
+          if (fpsq->cached_pkts < 0)
+          {
+            return 0;
+          }
 
-	  tx_pkts = fpsq->cached_pkts;
-	}
-    }
+          continue;
+        }
+  }
 
   send_hdr0 = (struct nix_send_hdr_s *) &desc0[0];
   send_hdr1 = (struct nix_send_hdr_s *) &desc1[0];
