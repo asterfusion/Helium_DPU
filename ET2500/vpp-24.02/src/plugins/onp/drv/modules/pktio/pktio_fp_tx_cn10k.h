@@ -250,7 +250,9 @@ cn10k_pkts_send (vlib_main_t *vm, vlib_node_runtime_t *node, u32 txq,
         {
           if (fpsq->cached_pkts < 0)
           {
-            return 0;
+              n_drop = tx_pkts;
+	      tx_pkts = 0;
+	      goto free_pkts;
           }
 
           continue;
