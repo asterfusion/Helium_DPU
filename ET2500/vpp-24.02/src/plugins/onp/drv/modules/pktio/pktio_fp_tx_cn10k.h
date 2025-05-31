@@ -241,23 +241,21 @@ cn10k_pkts_send (vlib_main_t *vm, vlib_node_runtime_t *node, u32 txq,
   if (off_flags & CNXK_PKTIO_TX_OFF_FLAG_SCHED_EN)
     cn10k_sched_lock_wait (vm);
 
-  if (PREDICT_FALSE (fpsq->cached_pkts < tx_pkts))
-    {
+  while (fpsq->cached_pkts < tx_pkts)
+  {
       fpsq->cached_pkts = (sq->nb_sqb_bufs_adj - *((u64 *) sq->fc))
 			  << sq->sqes_per_sqb_log2;
 
       if (PREDICT_FALSE (fpsq->cached_pkts < tx_pkts))
-	{
-	  if (fpsq->cached_pkts < 0)
-	    {
-	      n_drop = tx_pkts;
-	      tx_pkts = 0;
-	      goto free_pkts;
-	    }
-	  n_drop = tx_pkts - fpsq->cached_pkts;
-	  tx_pkts = fpsq->cached_pkts;
-	}
-    }
+        {
+          if (fpsq->cached_pkts < 0)
+          {
+            return 0;
+          }
+
+          continue;
+        }
+  }
 
   send_hdr0 = (struct nix_send_hdr_s *) &desc0[0];
   send_hdr1 = (struct nix_send_hdr_s *) &desc1[0];
