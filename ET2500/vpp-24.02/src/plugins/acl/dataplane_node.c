@@ -20,6 +20,8 @@
 #include <vnet/l2/l2_input.h>
 #include <vppinfra/error.h>
 
+#include <vnet/policer/policer.h>
+#include <vnet/policer/police_inlines.h>
 
 #include <acl/acl.h>
 #include <vnet/ip/icmp46_packet.h>
@@ -667,10 +669,16 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
         {
             next[0] = ACL_FA_PUNT;
         }
+
         if (ACL_ACTION_POLICER == action)
         {
-            next[0] = ACL_FA_POLICER;
-            b[0]->policer_index = policer_index;
+            u8 policer_act;
+            u64 time_in_policer_periods = clib_cpu_time_now () >> POLICER_TICKS_PER_PERIOD_SHIFT;
+            policer_act = vnet_policer_police(vm, b[0], policer_index, time_in_policer_periods, POLICE_CONFORM, false);
+            if (policer_act == QOS_ACTION_DROP)
+            {
+                next[0] = 0;
+            }
         }
 
             if (ACL_ACTION_NO_NAT == action)
@@ -935,7 +943,6 @@ VLIB_REGISTER_NODE (acl_in_l2_ip6_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
-    [ACL_FA_POLICER] = "policer-acl-plugin-in-ip6-l2",
   }
 };
 
@@ -959,7 +966,6 @@ VLIB_REGISTER_NODE (acl_in_l2_ip4_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
-    [ACL_FA_POLICER] = "policer-acl-plugin-in-ip4-l2",
   }
 };
 
@@ -984,7 +990,6 @@ VLIB_REGISTER_NODE (acl_out_l2_ip6_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
-    [ACL_FA_POLICER] = "policer-acl-plugin-out-ip6-l2",
   }
 };
 
@@ -1009,7 +1014,6 @@ VLIB_REGISTER_NODE (acl_out_l2_ip4_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
-    [ACL_FA_POLICER] = "policer-acl-plugin-out-ip4-l2",
   }
 };
 
@@ -1034,7 +1038,6 @@ VLIB_REGISTER_NODE (acl_in_fa_ip6_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
-    [ACL_FA_POLICER] = "policer-acl-plugin-in-ip6-fa"
   }
 };
 
@@ -1058,7 +1061,6 @@ VLIB_REGISTER_NODE (acl_in_fa_ip4_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
-    [ACL_FA_POLICER] = "policer-acl-plugin-in-ip4-fa",
   }
 };
 
@@ -1083,7 +1085,6 @@ VLIB_REGISTER_NODE (acl_out_fa_ip6_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
-    [ACL_FA_POLICER] = "policer-acl-plugin-out-ip6-fa",
   }
 };
 
@@ -1107,7 +1108,6 @@ VLIB_REGISTER_NODE (acl_out_fa_ip4_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
-    [ACL_FA_POLICER] = "policer-acl-plugin-out-ip4-fa",
   }
 };
 
@@ -1131,7 +1131,6 @@ VLIB_REGISTER_NODE (acl_in_sai_nonip_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
-    [ACL_FA_POLICER] = "policer-acl-plugin-in-sai-nonip-l2",
   }
 };
 
@@ -1156,7 +1155,6 @@ VLIB_REGISTER_NODE (acl_out_sai_nonip_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
-    [ACL_FA_POLICER] = "policer-acl-plugin-out-sai-nonip-l2",
   }
 };
 
