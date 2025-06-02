@@ -34,7 +34,7 @@ typedef struct
   u8 is_ip6;
   u16 dst_port;
   u16 id;
-  u16 pad;
+  u16 qp_type;
   u8 dst_address[16];
   u8 *name;
 } dns_pending_request_t;
@@ -68,6 +68,7 @@ typedef struct
 
   /** Cached dns request, for sending retries */
   u8 *dns_request;
+  u8 *dns_request6;
 
   /** Retry parameters */
   int retry_count;
@@ -78,6 +79,7 @@ typedef struct
 
   /** Cached dns response */
   u8 *dns_response;
+  u8 *dns_response6;
 
   /** Clients / peers awaiting responses */
   dns_pending_request_t *pending_requests;
@@ -86,6 +88,9 @@ typedef struct
 #define DNS_CACHE_ENTRY_FLAG_VALID	(1<<0) /**< we have Actual Data */
 #define DNS_CACHE_ENTRY_FLAG_STATIC	(1<<1) /**< static entry */
 #define DNS_CACHE_ENTRY_FLAG_CNAME	(1<<2) /**< CNAME (indirect) entry */
+#define DNS_CACHE_ENTRY_FLAG_V6_VALID	(1<<3) /**< we have v6 Actual Data */
+
+#define DNS_TYPE_AAAA_ID_BASE 0x8000
 
 #define DNS_RETRIES_PER_SERVER 3
 
@@ -175,7 +180,7 @@ typedef enum
 void vnet_send_dns_request (vlib_main_t * vm, dns_main_t * dm,
 			    dns_cache_entry_t * ep);
 int vnet_dns_cname_indirection_nolock (vlib_main_t * vm, dns_main_t * dm,
-				       u32 ep_index, u8 * reply);
+				       u32 ep_index, u8 * reply, u8 is_v6);
 
 int vnet_dns_delete_entry_by_index_nolock (dns_main_t * dm, u32 index);
 
@@ -231,6 +236,9 @@ dns_cache_unlock (dns_main_t * dm)
 extern int dns_resolve_name (u8 *name, dns_cache_entry_t **ep,
 			     dns_pending_request_t *t0,
 			     dns_resolve_name_t *rn);
+extern int dns_resolve_name_ex (u8 *name, dns_cache_entry_t **ep,
+			     dns_pending_request_t *t0,
+			     dns_resolve_name_t **rn);
 #endif /* included_dns_h */
 
 /*

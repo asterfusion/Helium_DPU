@@ -229,6 +229,16 @@ dns46_request_inline (vlib_main_t * vm,
 	  t0->dst_port = u0->src_port;
 	  t0->id = d0->id;
 	  t0->name = name0;
+      t0->qp_type = clib_net_to_host_u16(q0->type);
+
+      if (t0->qp_type != DNS_TYPE_A && t0->qp_type != DNS_TYPE_AAAA)
+      {
+          //current do not forward other qp_type, to do
+	      next0 = DNS46_REQUEST_NEXT_DROP;
+	      error0 = DNS46_REQUEST_ERROR_RESOLUTION_REQUIRED;
+	      goto done0;
+      }
+
 	  if (is_ip6)
 	    clib_memcpy_fast (t0->dst_address, ip60->src_address.as_u8,
 			      sizeof (ip6_address_t));

@@ -49,13 +49,19 @@ resolve_event (vlib_main_t * vm, dns_main_t * dm, f64 now, u8 * reply)
   int entry_was_valid;
   int remove_count;
   int rv = 0;
+  u8 is_v6 = 0;
 
   d = (dns_header_t *) reply;
   flags = clib_net_to_host_u16 (d->flags);
   rcode = flags & DNS_RCODE_MASK;
 
   /* $$$ u16 limits cache to 65K entries, fix later multiple dst ports */
-  pool_index = clib_net_to_host_u16 (d->id);
+  pool_index = clib_net_to_host_u16 (d->id); 
+  if (pool_index >= DNS_TYPE_AAAA_ID_BASE) //for ipv6
+  {
+      pool_index -= DNS_TYPE_AAAA_ID_BASE;
+      is_v6 = 1;
+  }
   dns_cache_lock (dm, 10);
 
   if (pool_is_free_index (dm->entries, pool_index))
@@ -71,11 +77,9 @@ resolve_event (vlib_main_t * vm, dns_main_t * dm, f64 now, u8 * reply)
 
   ep = pool_elt_at_index (dm->entries, pool_index);
 
-  if (ep->dns_response)
-    vec_free (ep->dns_response);
 
   /* Handle [sic] recursion AKA CNAME indirection */
-  rv = vnet_dns_cname_indirection_nolock (vm, dm, pool_index, reply);
+  rv = vnet_dns_cname_indirection_nolock (vm, dm, pool_index, reply, is_v6);
 
   /* CNAME found, further resolution pending, we're done here */
   if (rv > 0)
@@ -139,7 +143,18 @@ resolve_event (vlib_main_t * vm, dns_main_t * dm, f64 now, u8 * reply)
 
 reply:
   /* Save the response */
-  ep->dns_response = reply;
+  if (is_v6 == 1)
+  {
+      if (ep->dns_response6)
+          vec_free (ep->dns_response6);
+      ep->dns_response6 = reply;
+  }
+  else
+  {
+      if (ep->dns_response)
+          vec_free (ep->dns_response);
+      ep->dns_response = reply;
+  }
 
   /*
    * Pick a sensible default cache entry expiration time.
@@ -160,11 +175,21 @@ reply:
    * First response wins in terms of the response sent to the client.
    */
 
-  /* Strong hint that we may not find a pending resolution entry */
-  entry_was_valid = (ep->flags & DNS_CACHE_ENTRY_FLAG_VALID) ? 1 : 0;
-
   if (vec_len (ep->dns_response))
     ep->flags |= DNS_CACHE_ENTRY_FLAG_VALID;
+
+  if (vec_len (ep->dns_response6))
+    ep->flags |= DNS_CACHE_ENTRY_FLAG_V6_VALID;
+
+  /* Strong hint that we may not find a pending resolution entry */
+  entry_was_valid = ((ep->flags & DNS_CACHE_ENTRY_FLAG_VALID)&&(ep->flags & DNS_CACHE_ENTRY_FLAG_V6_VALID)) ? 1 : 0;
+
+  //only when ip and ipv6 valid, then handle pending_requests
+  if(entry_was_valid == 0)
+  {
+      dns_cache_unlock (dm);
+      return;
+  }
 
   /* Most likely, send 1 message */
   for (i = 0; i < vec_len (ep->pending_requests); i++)
@@ -295,7 +320,7 @@ retry_scan (vlib_main_t * vm, dns_main_t * dm, f64 now)
       dns_cache_lock (dm, 11);
       ep = pool_elt_at_index (dm->entries, dm->unresolved_entries[i]);
 
-      ASSERT ((ep->flags & DNS_CACHE_ENTRY_FLAG_VALID) == 0);
+      //ASSERT ((ep->flags & DNS_CACHE_ENTRY_FLAG_VALID) == 0);
       vnet_send_dns_request (vm, dm, ep);
       dns_cache_unlock (dm);
     }
