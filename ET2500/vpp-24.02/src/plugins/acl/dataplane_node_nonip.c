@@ -252,7 +252,6 @@ VLIB_REGISTER_NODE (acl_in_nonip_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
-    [ACL_FA_POLICER] = "policer-acl-plugin-in-nonip-l2",
   }
 };
 
@@ -276,7 +275,6 @@ VLIB_REGISTER_NODE (acl_out_nonip_node) =
   {
     [ACL_FA_ERROR_DROP] = "error-drop",
     [ACL_FA_PUNT] = "linux-cp-punt",
-    [ACL_FA_POLICER] = "policer-acl-plugin-out-nonip-l2",
   }
 };
 
