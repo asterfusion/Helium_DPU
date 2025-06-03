@@ -1913,6 +1913,9 @@ nat44_api_hookup (vlib_main_t * vm)
 {
   snat_main_t *sm = &snat_main;
   sm->msg_id_base = setup_message_id_table ();
+
+  api_main_t *am = vlibapi_get_main ();
+  vl_api_set_msg_thread_safe(am, sm->msg_id_base + VL_API_NAT44_USER_SESSION_V4_DUMP, 1);
   return 0;
 }
 
