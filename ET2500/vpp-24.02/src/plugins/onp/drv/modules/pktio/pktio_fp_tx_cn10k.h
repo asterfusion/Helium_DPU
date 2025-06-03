@@ -241,7 +241,7 @@ cn10k_pkts_send (vlib_main_t *vm, vlib_node_runtime_t *node, u32 txq,
   if (off_flags & CNXK_PKTIO_TX_OFF_FLAG_SCHED_EN)
     cn10k_sched_lock_wait (vm);
 
-  while (fpsq->cached_pkts < tx_pkts)
+  if (PREDICT_FALSE (fpsq->cached_pkts < tx_pkts))
   {
       fpsq->cached_pkts = (sq->nb_sqb_bufs_adj - *((u64 *) sq->fc))
 			  << sq->sqes_per_sqb_log2;
@@ -251,11 +251,12 @@ cn10k_pkts_send (vlib_main_t *vm, vlib_node_runtime_t *node, u32 txq,
           if (fpsq->cached_pkts < 0)
           {
               n_drop = tx_pkts;
-	      tx_pkts = 0;
-	      goto free_pkts;
+	          tx_pkts = 0;
+	          goto free_pkts;
           }
 
-          continue;
+          n_drop = tx_pkts - fpsq->cached_pkts;
+          tx_pkts = fpsq->cached_pkts;
         }
   }
 
