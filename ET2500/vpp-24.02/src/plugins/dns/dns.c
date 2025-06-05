@@ -3032,6 +3032,7 @@ vnet_send_dns4_reply (vlib_main_t * vm, dns_main_t * dm,
    */
   vec_dec_len(pr->name, 1);//delete the last zero
   reply = name_to_labels (pr->name);
+  vec_inc_len(pr->name, 1);//inc for free, or will coredump
   vec_free (pr->name);
 
   qp_offset = vec_len (reply);
