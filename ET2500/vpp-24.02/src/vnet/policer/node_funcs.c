@@ -299,13 +299,9 @@ VLIB_REGISTER_NODE (policer_output_node) = {
 };
 
 VNET_FEATURE_INIT (policer_output_node, static) = {
-  .arc_name = "ip4-output",
+  .arc_name = "interface-output",
   .node_name = "policer-output",
-};
-
-VNET_FEATURE_INIT (policer6_output_node, static) = {
-  .arc_name = "ip6-output",
-  .node_name = "policer-output",
+  .runs_before = VNET_FEATURES ("interface-output"),
 };
 
 static char *policer_input_handoff_error_strings[] = { "congestion drop" };

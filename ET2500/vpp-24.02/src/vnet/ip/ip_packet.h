@@ -90,6 +90,7 @@ typedef enum
  * The set of RFC defined DSCP values.
  */
 #define foreach_ip_dscp                       \
+  _(-1, INVALID)                              \
   _(0, CS0)                                   \
   _(8, CS1)                                   \
   _(10, AF11)                                 \
