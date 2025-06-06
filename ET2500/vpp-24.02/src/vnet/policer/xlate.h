@@ -74,6 +74,8 @@ typedef enum
  *      Action type (see qos_action_type_en).
  * element: dscp
  *      DSCP value to set when action is QOS_ACTION_MARK_AND_TRANSMIT.
+ * element: pcp
+ *      PCP value to set when action is QOS_ACTION_MARK_AND_TRANSMIT.
  */
 typedef struct qos_pol_action_params_st_
 {

@@ -34,36 +34,38 @@ vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp)
   ip6_header_t *ip6h;
   ethernet_vlan_header_t* vlanh;
   u16 type;
+  u8* l3;
 
-  eh = (ethernet_header_t *) b->data;
+  eh = (ethernet_header_t *) vlib_buffer_get_current(b);
   type = clib_net_to_host_u16 (eh->type);
+  l3 = (u8 *)vlib_buffer_get_current(b) + sizeof(ethernet_header_t);
+  
+  if (type == ETHERNET_TYPE_VLAN && pcp != ~0)
+  {
+    vlanh = (ethernet_vlan_header_t *)(eh + 1);
+    vlanh->priority_cfi_and_id &= clib_host_to_net_u16(VLAN_NO_PCP_BITS);
+    vlanh->priority_cfi_and_id |= clib_host_to_net_u16(pcp << VLAN_PCP_SHIFT);
+    type = clib_net_to_host_u16(vlanh->type);
+    l3 += sizeof(ethernet_vlan_header_t);
+  }
 
-  if (PREDICT_TRUE (type == ETHERNET_TYPE_IP4))
+  if (PREDICT_TRUE (type == ETHERNET_TYPE_IP4 && dscp != IP_DSCP_INVALID))
     {
-      ip4h = (ip4_header_t *) & (b->data[sizeof (ethernet_header_t)]);;
+      ip4h = (ip4_header_t *) l3;
       ip4h->tos &= IP4_NON_DSCP_BITS;
       ip4h->tos |= dscp << IP4_DSCP_SHIFT;
       ip4h->checksum = ip4_header_checksum (ip4h);
     }
   else
     {
-      if (PREDICT_TRUE (type == ETHERNET_TYPE_IP6))
+      if (PREDICT_TRUE (type == ETHERNET_TYPE_IP6 && dscp != IP_DSCP_INVALID))
 	{
-	  ip6h = (ip6_header_t *) & (b->data[sizeof (ethernet_header_t)]);
+	  ip6h = (ip6_header_t *) l3;
 	  ip6h->ip_version_traffic_class_and_flow_label &=
 	    clib_host_to_net_u32 (IP6_NON_DSCP_BITS);
 	  ip6h->ip_version_traffic_class_and_flow_label |=
 	    clib_host_to_net_u32 (dscp << IP6_DSCP_SHIFT);
 	}
-      else
-      {
-        if (PREDICT_TRUE(type == ETHERNET_TYPE_VLAN))
-        {
-          vlanh = (ethernet_vlan_header_t*)&b->data[sizeof(ethernet_header_t)];
-          vlanh->priority_cfi_and_id &= clib_host_to_net_u16(VLAN_NO_PCP_BITS);
-          vlanh->priority_cfi_and_id |= clib_host_to_net_u16(pcp << VLAN_PCP_SHIFT);
-        }
-      }
     }
 }
 

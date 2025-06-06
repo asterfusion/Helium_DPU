@@ -243,9 +243,7 @@ policer_input (u32 policer_index, u32 sw_if_index, vlib_dir_t dir, bool apply)
     }
   else
     {
-      vnet_feature_enable_disable ("ip4-output", "policer-output", sw_if_index,
-				   apply, 0, 0);
-      vnet_feature_enable_disable ("ip6-output", "policer-output", sw_if_index,
+      vnet_feature_enable_disable ("interface-output", "policer-output", sw_if_index,
 				   apply, 0, 0);
     }
   return 0;
@@ -560,7 +558,14 @@ policer_add_command_fn (vlib_main_t *vm, unformat_input_t *input,
 			vlib_cli_command_t *cmd)
 {
   vnet_policer_main_t *pm = &vnet_policer_main;
-  qos_pol_cfg_params_st c;
+  qos_pol_cfg_params_st c = {
+    .conform_action.dscp = IP_DSCP_INVALID,
+    .conform_action.pcp = ~0,
+    .exceed_action.dscp = IP_DSCP_INVALID,
+    .exceed_action.pcp = ~0,
+    .violate_action.dscp = IP_DSCP_INVALID,
+    .exceed_action.pcp = ~0
+  };
   unformat_input_t _line_input, *line_input = &_line_input;
   u8 *name = 0;
   uword *p;
