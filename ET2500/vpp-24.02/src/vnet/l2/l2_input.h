@@ -137,6 +137,7 @@ l2input_bd_config (u32 bd_index)
  _(ARP_TERM,      "arp-term-l2bd")              \
  _(UU_FLOOD,      "l2-flood")                   \
  _(UU_FWD,        "l2-uu-fwd")                  \
+ _(UU_POLICER,    "l2-uu-policer")              \
  _(FWD,           "l2-fwd")                     \
  _(RW,            "l2-rw")                      \
  _(LEARN,         "l2-learn")                   \
@@ -144,7 +145,7 @@ l2input_bd_config (u32 bd_index)
  _(L2_IP_QOS_RECORD, "l2-ip-qos-record")        \
  _(VPATH,         "vpath-input-l2")             \
  _(ACL,           "l2-input-acl")               \
- _(POLICER_CLAS,  "l2-policer-classify")	\
+ _(POLICER_CLAS,  "l2-policer-classify")        \
  _(INPUT_FEAT_ARC, "l2-input-feat-arc")         \
  _(INPUT_CLASSIFY, "l2-input-classify")         \
  _(SPAN,          "span-l2-input")
