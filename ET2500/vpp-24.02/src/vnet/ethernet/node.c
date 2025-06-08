@@ -851,6 +851,7 @@ eth_input_process_frame (vlib_main_t * vm, vlib_node_runtime_t * node,
   u16 et_ip6 = clib_host_to_net_u16 (ETHERNET_TYPE_IP6);
   u16 et_mpls = clib_host_to_net_u16 (ETHERNET_TYPE_MPLS);
   u16 et_vlan = clib_host_to_net_u16 (ETHERNET_TYPE_VLAN);
+  u16 et_lldp = clib_host_to_net_u16 (ETHERNET_TYPE_802_1_LLDP);
   u16 et_dot1ad = clib_host_to_net_u16 (ETHERNET_TYPE_DOT1AD);
   i32 n_left = n_packets;
   vlib_buffer_t *bufs[VLIB_FRAME_SIZE];
@@ -1004,7 +1005,7 @@ eth_input_process_frame (vlib_main_t * vm, vlib_node_runtime_t * node,
       else if (main_is_l3 && etype[0] == et_mpls)
 	next[0] = next_mpls;
       else if (main_is_l3 == 0 &&
-        etype[0] != et_vlan && etype[0] != et_dot1ad && clib_host_to_net_u16 (etype[0])>=0x600)
+        etype[0] != et_vlan && etype[0] != et_dot1ad && clib_host_to_net_u16 (etype[0])>=0x600 && etype[0] != et_lldp)
         next[0] = next_l2;
       else
 	{
