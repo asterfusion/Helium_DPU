@@ -1911,8 +1911,8 @@ roc_nix_tm_prepare_user_tree(struct roc_nix *roc_nix)
 
 		node->id = nonleaf_id + i;
 		node->parent_id = parent;
-        node->priority = i % NIX_TM_TLX_SP_PRIO_MAX; //SP
-        //node->priority = 0; //DWRR
+        //node->priority = i % NIX_TM_TLX_SP_PRIO_MAX; //SP
+        node->priority = 0; //DWRR
 		node->weight = NIX_TM_DFLT_RR_WT;
 		node->shaper_profile_id = ROC_NIX_TM_SHAPER_PROFILE_NONE;
 		node->lvl = lvl;

@@ -399,7 +399,6 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
         }
     }
 
-#if 0
     /* There is an exception in the handling here now */
     //update current node
     tm_node_list[qid]->weight = new_weight;
@@ -430,7 +429,9 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
         onp_pktio_warn("roc_nix_tm_hierarchy_enable sw_if_index %u failed", sw_if_index);
         return rv;
     }
-#endif
+
+    //Flush all smq queue
+    roc_nix_smq_flush(nix);
 
     vec_free(tm_node_list);
     vec_free(tm_node_priority);
