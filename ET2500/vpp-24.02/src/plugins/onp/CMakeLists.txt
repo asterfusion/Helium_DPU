@@ -61,9 +61,7 @@ set(CNXK_DRV_SRCS
   drv/roc/base/roc_nix_queue.c
   drv/roc/base/roc_nix_rss.c
   drv/roc/base/roc_nix_stats.c
-  drv/roc/base/roc_nix_tm.c
   drv/roc/base/roc_nix_tm_mark.c
-  drv/roc/base/roc_nix_tm_ops.c
   drv/roc/base/roc_nix_tm_utils.c
   drv/roc/base/roc_nix_vlan.c
   drv/roc/base/roc_npa.c
@@ -88,7 +86,6 @@ set(CNXK_DRV_SRCS
 
   drv/roc/init.c
   drv/modules/pktio/pktio_cn9k.c
-  drv/modules/pktio/pktio_cn10k.c
   drv/modules/pktio/pktio_inl_dev_cn10k.c
   drv/modules/pktio/pktio_cnxk.c
   drv/modules/pktio/pktio_flow.c
@@ -109,6 +106,20 @@ set(CNXK_DRV_SRCS
   drv/modules/ipsec/ipsec_session_cn10k.c
   drv/modules/ipsec/ipsec_cnxk.c
 )
+
+if (${ASROUTER_NAME} MATCHES "octeon10")
+    list(APPEND CNXK_DRV_SRCS
+        drv/roc/base/roc_nix_tm_et2500.c
+        drv/roc/base/roc_nix_tm_ops_et2500.c
+        drv/modules/pktio/pktio_cn10k_et2500.c
+    )
+else()
+    list(APPEND CNXK_DRV_SRCS
+        drv/roc/base/roc_nix_tm.c
+        drv/roc/base/roc_nix_tm_ops.c
+        drv/modules/pktio/pktio_cn10k.c
+    )
+endif()
 
 set(CNXK_DRV_HEADERS
   drv/roc/base/roc_nix_inl.h
@@ -181,6 +192,17 @@ set(CNXK_DRV_HEADERS
   drv/roc/base/hw/dpi.h
   drv/roc/base/hw/cpt.h
 )
+
+if (${ASROUTER_NAME} MATCHES "octeon10")
+add_vpp_library(cnxk-roc
+  SOURCES ${CNXK_DRV_SRCS}
+  INSTALL_HEADERS ${CNXK_DRV_HEADERS}
+
+  MULTIARCH_SOURCES
+  drv/modules/pktio/pktio_cn9k.c
+  drv/modules/pktio/pktio_cn10k_et2500.c
+)
+else()
 add_vpp_library(cnxk-roc
   SOURCES ${CNXK_DRV_SRCS}
   INSTALL_HEADERS ${CNXK_DRV_HEADERS}
@@ -189,6 +211,7 @@ add_vpp_library(cnxk-roc
   drv/modules/pktio/pktio_cn9k.c
   drv/modules/pktio/pktio_cn10k.c
 )
+endif()
 
 add_vpp_plugin(onp
   SOURCES
@@ -206,6 +229,7 @@ add_vpp_plugin(onp
   pktio/input.c
   pktio/output.c
   pktio/flow.c
+  pktio/tm.c
 
   sched/input.c
   sched/sched.c

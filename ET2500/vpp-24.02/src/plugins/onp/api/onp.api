@@ -195,7 +195,93 @@ define onp_interface_stats
   u32 context;
   vl_api_interface_index_t sw_if_index [default=0xFFFFFFFF];
 };
+
+/**
+ * @brief Set the port scheduler profile
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to set port duplex on
+ * @param[in] sche_profile      - sche_profile id; ~0 is none
+ */
+autoreply define onp_pktio_port_set_scheduler
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u32 profile_id;
+};
+
+/**
+ * @brief Set the port queue scheduler profile
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to set port duplex on
+ * @param[in] queue             - queue id
+ * @param[in] sche_profile      - sche_profile id; ~0 is none
+ */
+autoreply define onp_pktio_port_queue_set_scheduler
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u32 queue_id;
+  u32 profile_id;
+};
+
+enum onp_pktio_scheduler_type
+{
+  API_ONP_PKTIO_SCHEDULER_STRICT = 0,
+  API_ONP_PKTIO_SCHEDULER_DWRR = 1,
+};
+
+/**
+ * @brief Reply to onp-pktio_ scheduler_profile add or del
+ *
+ * @param context[in] - Returned sender context, to match reply w/ request.
+ *
+ * Reply for the corresponding request is stored in this structure.
+ */
+define onp_pktio_scheduler_profile_add_del_reply
+{
+  u32 context;
+  u32 profile_id;
+  i32 retval;
+};
  
+/**
+ * @brief add/del/update the scheduler profile
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] is_add            - add or del
+ * @param[in] profile_id        - when is_add is set, and profile_id not ~0, update
+ * @param[in] type              - SP or DWRR
+ * @param[in] weight            - DWRR weight
+ * @param[in] pkt_mode          - rate limit use packets
+ * @param[in] min_rate          - min rate
+ * @param[in] min_burst         - min burst
+ * @param[in] max_rate          - max rate
+ * @param[in] max_burst         - max burst
+ */
+define onp_pktio_scheduler_profile_add_del
+{
+  u32 client_index;
+  u32 context;
+
+  bool is_add [default=true];
+  u32 profile_id;
+
+  vl_api_onp_pktio_scheduler_type_t type;
+  u32 weight;
+  bool pkt_mode;
+  u64 min_rate;
+  u64 min_burst;
+  u64 max_rate;
+  u64 max_burst;
+};
+
 /*
  * Local Variables:
  * eval: (c-set-style "gnu")
