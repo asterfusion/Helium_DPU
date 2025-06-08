@@ -40,19 +40,26 @@ test_ipsec_command_fn (vlib_main_t *vm, unformat_input_t *input,
   if (~0 != sa_id)
     {
       ipsec_sa_t *sa;
+      ipsec_sa_inb_rt_t *irt;
+      ipsec_sa_outb_rt_t *ort;
       u32 sa_index;
 
       sa_index = ipsec_sa_find_and_lock (sa_id);
       sa = ipsec_sa_get (sa_index);
+      irt = ipsec_sa_get_inb_rt (sa);
+      ort = ipsec_sa_get_outb_rt (sa);
 
-      sa->seq = seq_num & 0xffffffff;
-      sa->seq_hi = seq_num >> 32;
+      if (ort)
+	ort->seq64 = seq_num;
 
-      /* clear the window */
-      if (ipsec_sa_is_set_ANTI_REPLAY_HUGE (sa))
-	clib_bitmap_zero (sa->replay_window_huge);
-      else
-	sa->replay_window = 0;
+      if (irt)
+	{
+	  irt->seq64 = seq_num;
+
+	  /* clear the window */
+	  clib_bitmap_zero(irt->replay_window);
+			 
+	}
 
       ipsec_sa_unlock (sa_index);
     }

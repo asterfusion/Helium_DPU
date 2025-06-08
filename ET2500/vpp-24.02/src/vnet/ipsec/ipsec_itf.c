@@ -188,7 +188,6 @@ ipsec_itf_update_adj (vnet_main_t * vnm, u32 sw_if_index, adj_index_t ai)
     (ai, NULL, NULL, ADJ_FLAG_MIDCHAIN_IP_STACK, ipsec_itf_build_rewrite ());
 }
 
-/* *INDENT-OFF* */
 VNET_DEVICE_CLASS (ipsec_itf_device_class) = {
   .name = "IPSEC Tunnel",
   .format_device_name = format_ipsec_itf_name,
@@ -208,7 +207,6 @@ VNET_HW_INTERFACE_CLASS(ipsec_p2mp_hw_interface_class) = {
   .update_adjacency = ipsec_itf_update_adj,
   .flags = VNET_HW_INTERFACE_CLASS_FLAG_NBMA,
 };
-/* *INDENT-ON* */
 
 /*
  * Maintain a bitmap of allocated ipsec_itf instance numbers.
@@ -383,6 +381,7 @@ ipsec_itf_create_cli (vlib_main_t * vm,
 		      unformat_input_t * input, vlib_cli_command_t * cmd)
 {
   unformat_input_t _line_input, *line_input = &_line_input;
+  tunnel_mode_t mode = TUNNEL_MODE_P2P;
   u32 instance, sw_if_index;
   clib_error_t *error;
   mac_address_t mac;
@@ -398,6 +397,8 @@ ipsec_itf_create_cli (vlib_main_t * vm,
 	{
 	  if (unformat (line_input, "instance %d", &instance))
 	    ;
+	  else if (unformat (line_input, "p2mp"))
+	    mode = TUNNEL_MODE_MP;
 	  else
 	    {
 	      error = clib_error_return (0, "unknown input: %U",
@@ -412,7 +413,7 @@ ipsec_itf_create_cli (vlib_main_t * vm,
 	return error;
     }
 
-  rv = ipsec_itf_create (instance, TUNNEL_MODE_P2P, &sw_if_index);
+  rv = ipsec_itf_create (instance, mode, &sw_if_index);
 
   if (rv)
     return clib_error_return (0, "iPSec interface create failed");
@@ -427,17 +428,15 @@ ipsec_itf_create_cli (vlib_main_t * vm,
  *
  * @cliexpar
  * The following two command syntaxes are equivalent:
- * @cliexcmd{ipsec itf create [instance <instance>]}
+ * @cliexcmd{ipsec itf create [instance <instance>] [p2mp]}
  * Example of how to create a ipsec interface:
  * @cliexcmd{ipsec itf create}
 ?*/
-/* *INDENT-OFF* */
 VLIB_CLI_COMMAND (ipsec_itf_create_command, static) = {
   .path = "ipsec itf create",
-  .short_help = "ipsec itf create [instance <instance>]",
+  .short_help = "ipsec itf create [instance <instance>] [p2mp]",
   .function = ipsec_itf_create_cli,
 };
-/* *INDENT-ON* */
 
 static clib_error_t *
 ipsec_itf_delete_cli (vlib_main_t * vm,
@@ -482,13 +481,11 @@ ipsec_itf_delete_cli (vlib_main_t * vm,
  * Example of how to create a ipsec_itf interface:
  * @cliexcmd{ipsec itf delete ipsec0}
 ?*/
-/* *INDENT-OFF* */
 VLIB_CLI_COMMAND (ipsec_itf_delete_command, static) = {
   .path = "ipsec itf delete",
   .short_help = "ipsec itf delete <interface>",
   .function = ipsec_itf_delete_cli,
 };
-/* *INDENT-ON* */
 
 static clib_error_t *
 ipsec_interface_show (vlib_main_t * vm,
@@ -496,12 +493,10 @@ ipsec_interface_show (vlib_main_t * vm,
 {
   index_t ii;
 
-  /* *INDENT-OFF* */
   pool_foreach_index (ii, ipsec_itf_pool)
    {
     vlib_cli_output (vm, "%U", format_ipsec_itf, ii);
   }
-  /* *INDENT-ON* */
 
   return NULL;
 }
@@ -509,14 +504,12 @@ ipsec_interface_show (vlib_main_t * vm,
 /**
  * show IPSEC tunnel protection hash tables
  */
-/* *INDENT-OFF* */
 VLIB_CLI_COMMAND (ipsec_interface_show_node, static) =
 {
   .path = "show ipsec interface",
   .function = ipsec_interface_show,
   .short_help =  "show ipsec interface",
 };
-/* *INDENT-ON* */
 
 /*
  * fd.io coding-style-patch-verification: ON

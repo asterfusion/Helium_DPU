@@ -60,8 +60,8 @@ format_ipsec_tun_protect_input_trace (u8 * s, va_list * args)
     s = format (s, "IPSec: %U seq %u",
 		format_ipsec6_tunnel_kv, &t->kv6, t->seq);
   else
-    s = format (s, "IPSec: %U seq %u sa %d",
-		format_ipsec4_tunnel_kv, &t->kv4, t->seq);
+    s =
+      format (s, "IPSec: %U seq %u", format_ipsec4_tunnel_kv, &t->kv4, t->seq);
   return s;
 }
 
@@ -411,7 +411,6 @@ VLIB_NODE_FN (ipsec4_tun_input_node) (vlib_main_t * vm,
   return ipsec_tun_protect_input_inline (vm, node, from_frame, 0);
 }
 
-/* *INDENT-OFF* */
 VLIB_REGISTER_NODE (ipsec4_tun_input_node) = {
   .name = "ipsec4-tun-input",
   .vector_size = sizeof (u32),
@@ -421,7 +420,6 @@ VLIB_REGISTER_NODE (ipsec4_tun_input_node) = {
   .error_counters = ipsec_tun_error_counters,
   .sibling_of = "device-input",
 };
-/* *INDENT-ON* */
 
 VLIB_NODE_FN (ipsec6_tun_input_node) (vlib_main_t * vm,
 				      vlib_node_runtime_t * node,
@@ -430,7 +428,6 @@ VLIB_NODE_FN (ipsec6_tun_input_node) (vlib_main_t * vm,
   return ipsec_tun_protect_input_inline (vm, node, from_frame, 1);
 }
 
-/* *INDENT-OFF* */
 VLIB_REGISTER_NODE (ipsec6_tun_input_node) = {
   .name = "ipsec6-tun-input",
   .vector_size = sizeof (u32),
@@ -440,7 +437,6 @@ VLIB_REGISTER_NODE (ipsec6_tun_input_node) = {
   .error_counters = ipsec_tun_error_counters,
   .sibling_of = "device-input",
 };
-/* *INDENT-ON* */
 
 /*
  * fd.io coding-style-patch-verification: ON

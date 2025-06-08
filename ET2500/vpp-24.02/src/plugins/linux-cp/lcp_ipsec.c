@@ -636,7 +636,9 @@ get_sa_by_sa_id (u32 sa_id)
   ipsec_sa_t *sa;
   u32 sai;
 
-  pool_foreach_index (sai, ipsec_sa_pool)
+  ipsec_main_t *im = &ipsec_main;
+  pool_foreach_index (sai, im->sa_pool)
+  //pool_foreach_index (sai, ipsec_sa_pool)
     {
       sa = ipsec_sa_get (sai);
       if (!sa)
@@ -657,7 +659,9 @@ get_reverse_sa_by_tun_ip (ip_address_t *saddr, ip_address_t *daddr, u8 is_ipv6,
   uword *p = NULL;
   u32 sai;
 
-  pool_foreach_index (sai, ipsec_sa_pool)
+  ipsec_main_t *im = &ipsec_main;
+  pool_foreach_index (sai, im->sa_pool)
+  //pool_foreach_index (sai, ipsec_sa_pool)
     {
       sa = ipsec_sa_get (sai);
       if (!sa)
@@ -1569,7 +1573,9 @@ check_for_expiry ()
   ipsec_sa_t *sa = NULL;
   int rv = 0;
 
-  pool_foreach (sa, ipsec_sa_pool)
+  ipsec_main_t *im = &ipsec_main;
+  pool_foreach (sa, im->sa_pool)
+  //pool_foreach (sa, ipsec_sa_pool)
     {
       p = hash_get (lifetime_by_sa_id, sa->id);
       if (!p)

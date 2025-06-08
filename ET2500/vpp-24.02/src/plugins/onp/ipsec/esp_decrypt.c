@@ -76,6 +76,7 @@ onp_esp_dec_add_trace (ipsec_sa_t *sa, vlib_buffer_t *b, vlib_main_t *vm,
 		       u16 next, vlib_node_runtime_t *node, u32 sa_index,
 		       u32 seq)
 {
+#if 0
   onp_esp_decrypt_trace_t *tr;
 
   if (PREDICT_TRUE (!(b->flags & VLIB_BUFFER_IS_TRACED)))
@@ -95,6 +96,7 @@ onp_esp_dec_add_trace (ipsec_sa_t *sa, vlib_buffer_t *b, vlib_main_t *vm,
   clib_memcpy_fast (&tr->buf, b, sizeof b[0] - sizeof b->pre_data);
   clib_memcpy_fast (tr->buf.pre_data, b->data, sizeof tr->buf.pre_data);
   clib_memcpy_fast (tr->data, vlib_buffer_get_current (b), 256);
+#endif
 }
 
 static_always_inline uword

@@ -16,6 +16,7 @@
 static_always_inline void
 cnxk_ipsec_sa_len_precalc (ipsec_sa_t *sa, cnxk_ipsec_encap_len_t *encap)
 {
+#if 0
   if (ipsec_sa_is_set_IS_TUNNEL_V6 (sa))
     encap->partial_len = ROC_CPT_TUNNEL_IPV6_HDR_LEN;
   else
@@ -37,6 +38,7 @@ cnxk_ipsec_sa_len_precalc (ipsec_sa_t *sa, cnxk_ipsec_encap_len_t *encap)
 
   encap->roundup_byte = sa->esp_block_align;
   encap->icv_len = sa->integ_icv_size;
+#endif
 }
 
 static_always_inline i32

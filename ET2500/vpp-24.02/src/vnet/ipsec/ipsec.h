@@ -112,19 +112,22 @@ typedef struct
 
 typedef struct
 {
-  vnet_crypto_op_id_t enc_op_id;
-  vnet_crypto_op_id_t dec_op_id;
-  vnet_crypto_alg_t alg;
-  u8 iv_size;
-  u8 block_align;
-  u8 icv_size;
+  const vnet_crypto_op_id_t enc_op_id;
+  const vnet_crypto_op_id_t dec_op_id;
+  const vnet_crypto_alg_t alg;
+  const u8 iv_size;
+  const u8 block_align;
+  const u8 icv_size;
+  const u8 is_aead : 1;
+  const u8 is_ctr : 1;
+  const u8 is_null_gmac : 1;
 } ipsec_main_crypto_alg_t;
 
 typedef struct
 {
-  vnet_crypto_op_id_t op_id;
-  vnet_crypto_alg_t alg;
-  u8 icv_size;
+  const vnet_crypto_op_id_t op_id;
+  const vnet_crypto_alg_t alg;
+  const u8 icv_size;
 } ipsec_main_integ_alg_t;
 
 typedef struct
@@ -224,10 +227,10 @@ typedef struct
   u32 esp_default_backend;
 
   /* crypto alg data */
-  ipsec_main_crypto_alg_t *crypto_algs;
+  ipsec_main_crypto_alg_t crypto_algs[IPSEC_CRYPTO_N_ALG];
 
   /* crypto integ data */
-  ipsec_main_integ_alg_t *integ_algs;
+  ipsec_main_integ_alg_t integ_algs[IPSEC_INTEG_N_ALG];
 
   /* per-thread data */
   ipsec_per_thread_data_t *ptd;
@@ -248,6 +251,8 @@ typedef struct
   u32 esp4_dec_tun_fq_index;
   u32 esp6_dec_tun_fq_index;
 
+  u32 handoff_queue_size;
+
   /* Number of buckets for flow cache */
   u32 ipsec4_out_spd_hash_num_buckets;
   u32 ipsec4_out_spd_flow_cache_entries;
@@ -261,6 +266,10 @@ typedef struct
 
   u8 async_mode;
   u16 msg_id_base;
+
+  ipsec_sa_t *sa_pool;
+  ipsec_sa_inb_rt_t **inb_sa_runtimes;
+  ipsec_sa_outb_rt_t **outb_sa_runtimes;
 } ipsec_main_t;
 
 typedef enum ipsec_format_flags_t_
@@ -352,8 +361,9 @@ ipsec_spinlock_unlock (i32 *lock)
  */
 always_inline void
 ipsec_set_next_index (vlib_buffer_t *b, vlib_node_runtime_t *node,
-		      u32 thread_index, u32 err, u32 ipsec_sa_err, u16 index,
-		      u16 *nexts, u16 drop_next, u32 sa_index)
+		      u32 thread_index, u32 err,
+		      u32 ipsec_sa_err, u16 index, u16 *nexts, u16 drop_next,
+		      u32 sa_index)
 {
   nexts[index] = drop_next;
   b->error = node->errors[err];
@@ -393,6 +403,8 @@ extern void ipsec_unregister_udp_port (u16 udp_port, u8 is_ip4);
 extern clib_error_t *ipsec_register_next_header (vlib_main_t *vm,
 						 u8 next_header,
 						 const char *next_node);
+
+#include <vnet/ipsec/ipsec_funcs.h>
 
 #endif /* __IPSEC_H__ */
 

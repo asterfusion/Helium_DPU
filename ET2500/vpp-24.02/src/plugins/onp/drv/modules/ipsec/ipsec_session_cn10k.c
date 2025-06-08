@@ -442,8 +442,10 @@ cn10k_ipsec_inb_session_update (vlib_main_t *vm,
 
   cnxk_ipsec_sa_len_precalc (sa, &sess->encap);
 
+#if 0
   if (sa->flags & IPSEC_SA_FLAG_USE_ANTI_REPLAY)
     roc_sa->w0.s.ar_win = max_log2 (IPSEC_SA_ANTI_REPLAY_WINDOW_SIZE (sa)) - 5;
+#endif
 
   /* Set direction and enable ESN (if needed) */
   w2.s.dir = ROC_IE_SA_DIR_INBOUND;

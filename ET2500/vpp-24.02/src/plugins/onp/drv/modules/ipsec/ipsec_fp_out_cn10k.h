@@ -761,6 +761,7 @@ submit_fail:
   return n_noop;
 }
 
+#if 0
 static_always_inline u32
 cn10k_ipsec_outbound_sort (vlib_main_t *vm, vlib_node_runtime_t *node,
 			   vlib_frame_t *f, cnxk_per_thread_data_t *ptd,
@@ -911,6 +912,7 @@ cn10k_ipsec_outbound_sort (vlib_main_t *vm, vlib_node_runtime_t *node,
     }
   return f->n_vectors;
 }
+#endif
 
 static_always_inline void
 cn10k_ipsec_get_enc_errors (vlib_main_t *vm, vlib_node_runtime_t *node,

@@ -30,19 +30,15 @@ typedef struct
 } ah_header_t;
 
 
-/* *INDENT-OFF* */
 typedef CLIB_PACKED (struct {
   ip4_header_t ip4;
   ah_header_t ah;
 }) ip4_and_ah_header_t;
-/* *INDENT-ON* */
 
-/* *INDENT-OFF* */
 typedef CLIB_PACKED (struct {
   ip6_header_t ip6;
   ah_header_t ah;
 }) ip6_and_ah_header_t;
-/* *INDENT-ON* */
 
 always_inline u32
 ah_encrypt_err_to_sa_err (u32 err)
@@ -78,8 +74,8 @@ ah_decrypt_err_to_sa_err (u32 err)
 
 always_inline void
 ah_encrypt_set_next_index (vlib_buffer_t *b, vlib_node_runtime_t *node,
-			   u32 thread_index, u32 err, u16 index, u16 *nexts,
-			   u16 drop_next, u32 sa_index)
+			   u32 thread_index, u32 err,
+			   u16 index, u16 *nexts, u16 drop_next, u32 sa_index)
 {
   ipsec_set_next_index (b, node, thread_index, err,
 			ah_encrypt_err_to_sa_err (err), index, nexts,
@@ -88,8 +84,8 @@ ah_encrypt_set_next_index (vlib_buffer_t *b, vlib_node_runtime_t *node,
 
 always_inline void
 ah_decrypt_set_next_index (vlib_buffer_t *b, vlib_node_runtime_t *node,
-			   u32 thread_index, u32 err, u16 index, u16 *nexts,
-			   u16 drop_next, u32 sa_index)
+			   u32 thread_index, u32 err,
+			   u16 index, u16 *nexts, u16 drop_next, u32 sa_index)
 {
   ipsec_set_next_index (b, node, thread_index, err,
 			ah_decrypt_err_to_sa_err (err), index, nexts,

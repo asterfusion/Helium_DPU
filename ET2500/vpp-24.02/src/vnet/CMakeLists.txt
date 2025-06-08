@@ -556,6 +556,7 @@ list(APPEND VNET_SOURCES
   ipsec/ipsec_spd_policy.c
   ipsec/ipsec_tun.c
   ipsec/ipsec_tun_in.c
+  ipsec/main.c
   ipsec/esp_format.c
   ipsec/esp_encrypt.c
   ipsec/esp_decrypt.c
@@ -591,6 +592,7 @@ list(APPEND VNET_HEADERS
   ipsec/ipsec_tun.h
   ipsec/ipsec_types_api.h
   ipsec/ipsec_punt.h
+  ipsec/ipsec_funcs.h
   ipsec/esp.h
   ipsec/ah.h
 )

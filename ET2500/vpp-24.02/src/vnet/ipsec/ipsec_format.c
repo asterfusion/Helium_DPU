@@ -441,19 +441,24 @@ format_ipsec_sa_flags (u8 * s, va_list * args)
 u8 *
 format_ipsec_sa (u8 * s, va_list * args)
 {
+  ipsec_main_t *im = &ipsec_main;
   u32 sai = va_arg (*args, u32);
   ipsec_format_flags_t flags = va_arg (*args, ipsec_format_flags_t);
   vlib_counter_t counts;
   counter_t errors;
   ipsec_sa_t *sa;
+  ipsec_sa_inb_rt_t *irt;
+  ipsec_sa_outb_rt_t *ort;
 
-  if (pool_is_free_index (ipsec_sa_pool, sai))
+  if (pool_is_free_index (im->sa_pool, sai))
     {
       s = format (s, "No such SA index: %d", sai);
       goto done;
     }
 
   sa = ipsec_sa_get (sai);
+  irt = ipsec_sa_get_inb_rt (sa);
+  ort = ipsec_sa_get_outb_rt (sa);
 
   s = format (s, "[%d] sa %u (0x%x) spi %u (0x%08x) protocol:%s flags:[%U]",
 	      sai, sa->id, sa->id, sa->spi, sa->spi,
@@ -464,12 +469,20 @@ format_ipsec_sa (u8 * s, va_list * args)
 
   s = format (s, "\n   locks %d", sa->node.fn_locks);
   s = format (s, "\n   salt 0x%x", clib_net_to_host_u32 (sa->salt));
-  s = format (s, "\n   thread-index:%d", sa->thread_index);
-  s = format (s, "\n   seq %u seq-hi %u", sa->seq, sa->seq_hi);
-  s = format (s, "\n   window-size: %llu",
-	      IPSEC_SA_ANTI_REPLAY_WINDOW_SIZE (sa));
-  s = format (s, "\n   window: Bl <- %U Tl", format_ipsec_replay_window,
-	      ipsec_sa_anti_replay_get_64b_window (sa));
+  if (irt)
+    s = format (s, "\n   inbound thread-index:%d", irt->thread_index);
+  if (ort)
+    s = format (s, "\n   outbound thread-index:%d", ort->thread_index);
+  if (irt)
+    s = format (s, "\n   inbound seq %lu", irt->seq64);
+  if (ort)
+    s = format (s, "\n   outbound seq %lu", ort->seq64);
+  if (irt)
+    {
+      s = format (s, "\n   window-size: %llu", irt->anti_replay_window_size);
+      s = format (s, "\n   window: Bl <- %U Tl", format_ipsec_replay_window,
+		  ipsec_sa_anti_replay_get_64b_window (irt));
+    }
   s =
     format (s, "\n   crypto alg %U", format_ipsec_crypto_alg, sa->crypto_alg);
   if (sa->crypto_alg && (flags & IPSEC_FORMAT_INSECURE))
@@ -482,9 +495,8 @@ format_ipsec_sa (u8 * s, va_list * args)
     s = format (s, " key %U", format_ipsec_key, &sa->integ_key);
   else
     s = format (s, " key [redacted]");
-  s = format (s, "\n   UDP:[src:%d dst:%d]",
-	      clib_host_to_net_u16 (sa->udp_hdr.src_port),
-	      clib_host_to_net_u16 (sa->udp_hdr.dst_port));
+  s =
+    format (s, "\n   UDP:[src:%d dst:%d]", sa->udp_src_port, sa->udp_dst_port);
 
   vlib_get_combined_counter (&ipsec_sa_counters, sai, &counts);
   s = format (s, "\n   tx/rx:[packets:%Ld bytes:%Ld]", counts.packets,
@@ -549,12 +561,10 @@ format_ipsec_tun_protect (u8 * s, va_list * args)
 	      IPSEC_FORMAT_BRIEF);
 
   s = format (s, "\n input-sa:");
-  /* *INDENT-OFF* */
   FOR_EACH_IPSEC_PROTECT_INPUT_SAI(itp, sai,
   ({
   s = format (s, "\n  %U", format_ipsec_sa, sai, IPSEC_FORMAT_BRIEF);
   }));
-  /* *INDENT-ON* */
 
   return (s);
 }

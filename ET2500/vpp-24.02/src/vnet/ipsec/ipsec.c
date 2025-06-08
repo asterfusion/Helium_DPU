@@ -36,8 +36,6 @@
  */
 #define IPSEC4_SPD_DEFAULT_HASH_NUM_BUCKETS (1 << 22)
 
-ipsec_main_t ipsec_main;
-
 esp_async_post_next_t esp_encrypt_async_next;
 esp_async_post_next_t esp_decrypt_async_next;
 
@@ -314,9 +312,9 @@ clib_error_t *
 ipsec_rsc_in_use (ipsec_main_t * im)
 {
   /* return an error is crypto resource are in use */
-  if (pool_elts (ipsec_sa_pool) > 0)
+  if (pool_elts (im->sa_pool) > 0)
     return clib_error_return (0, "%d SA entries configured",
-			      pool_elts (ipsec_sa_pool));
+			      pool_elts (im->sa_pool));
   if (ipsec_itf_count () > 0)
     return clib_error_return (0, "%d IPSec interface configured",
 			      ipsec_itf_count ());
@@ -386,7 +384,7 @@ ipsec_set_async_mode (u32 is_enabled)
   im->async_mode = is_enabled;
 
   /* change SA crypto op data */
-  pool_foreach (sa, ipsec_sa_pool)
+  pool_foreach (sa, im->sa_pool)
     ipsec_sa_set_async_mode (sa, is_enabled);
 }
 
@@ -424,7 +422,6 @@ ipsec_init (vlib_main_t * vm)
 {
   clib_error_t *error;
   ipsec_main_t *im = &ipsec_main;
-  ipsec_main_crypto_alg_t *a;
 
   /* Backend registration requires the feature arcs to be set up */
   if ((error = vlib_call_init_function (vm, vnet_feature_init)))
@@ -471,154 +468,6 @@ ipsec_init (vlib_main_t * vm)
   if ((error = vlib_call_init_function (vm, ipsec_cli_init)))
     return error;
 
-  vec_validate (im->crypto_algs, IPSEC_CRYPTO_N_ALG - 1);
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_NONE;
-  a->enc_op_id = VNET_CRYPTO_OP_NONE;
-  a->dec_op_id = VNET_CRYPTO_OP_NONE;
-  a->alg = VNET_CRYPTO_ALG_NONE;
-  a->iv_size = 0;
-  a->block_align = 1;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_DES_CBC;
-  a->enc_op_id = VNET_CRYPTO_OP_DES_CBC_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_DES_CBC_DEC;
-  a->alg = VNET_CRYPTO_ALG_DES_CBC;
-  a->iv_size = a->block_align = 8;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_3DES_CBC;
-  a->enc_op_id = VNET_CRYPTO_OP_3DES_CBC_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_3DES_CBC_DEC;
-  a->alg = VNET_CRYPTO_ALG_3DES_CBC;
-  a->iv_size = a->block_align = 8;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_AES_CBC_128;
-  a->enc_op_id = VNET_CRYPTO_OP_AES_128_CBC_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_AES_128_CBC_DEC;
-  a->alg = VNET_CRYPTO_ALG_AES_128_CBC;
-  a->iv_size = a->block_align = 16;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_AES_CBC_192;
-  a->enc_op_id = VNET_CRYPTO_OP_AES_192_CBC_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_AES_192_CBC_DEC;
-  a->alg = VNET_CRYPTO_ALG_AES_192_CBC;
-  a->iv_size = a->block_align = 16;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_AES_CBC_256;
-  a->enc_op_id = VNET_CRYPTO_OP_AES_256_CBC_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_AES_256_CBC_DEC;
-  a->alg = VNET_CRYPTO_ALG_AES_256_CBC;
-  a->iv_size = a->block_align = 16;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_AES_CTR_128;
-  a->enc_op_id = VNET_CRYPTO_OP_AES_128_CTR_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_AES_128_CTR_DEC;
-  a->alg = VNET_CRYPTO_ALG_AES_128_CTR;
-  a->iv_size = 8;
-  a->block_align = 1;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_AES_CTR_192;
-  a->enc_op_id = VNET_CRYPTO_OP_AES_192_CTR_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_AES_192_CTR_DEC;
-  a->alg = VNET_CRYPTO_ALG_AES_192_CTR;
-  a->iv_size = 8;
-  a->block_align = 1;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_AES_CTR_256;
-  a->enc_op_id = VNET_CRYPTO_OP_AES_256_CTR_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_AES_256_CTR_DEC;
-  a->alg = VNET_CRYPTO_ALG_AES_256_CTR;
-  a->iv_size = 8;
-  a->block_align = 1;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_AES_GCM_128;
-  a->enc_op_id = VNET_CRYPTO_OP_AES_128_GCM_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_AES_128_GCM_DEC;
-  a->alg = VNET_CRYPTO_ALG_AES_128_GCM;
-  a->iv_size = 8;
-  a->block_align = 1;
-  a->icv_size = 16;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_AES_GCM_192;
-  a->enc_op_id = VNET_CRYPTO_OP_AES_192_GCM_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_AES_192_GCM_DEC;
-  a->alg = VNET_CRYPTO_ALG_AES_192_GCM;
-  a->iv_size = 8;
-  a->block_align = 1;
-  a->icv_size = 16;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_AES_GCM_256;
-  a->enc_op_id = VNET_CRYPTO_OP_AES_256_GCM_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_AES_256_GCM_DEC;
-  a->alg = VNET_CRYPTO_ALG_AES_256_GCM;
-  a->iv_size = 8;
-  a->block_align = 1;
-  a->icv_size = 16;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_CHACHA20_POLY1305;
-  a->enc_op_id = VNET_CRYPTO_OP_CHACHA20_POLY1305_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_CHACHA20_POLY1305_DEC;
-  a->alg = VNET_CRYPTO_ALG_CHACHA20_POLY1305;
-  a->iv_size = 8;
-  a->icv_size = 16;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_AES_NULL_GMAC_128;
-  a->enc_op_id = VNET_CRYPTO_OP_AES_128_NULL_GMAC_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_AES_128_NULL_GMAC_DEC;
-  a->alg = VNET_CRYPTO_ALG_AES_128_GCM;
-  a->iv_size = 8;
-  a->block_align = 1;
-  a->icv_size = 16;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_AES_NULL_GMAC_192;
-  a->enc_op_id = VNET_CRYPTO_OP_AES_192_NULL_GMAC_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_AES_192_NULL_GMAC_DEC;
-  a->alg = VNET_CRYPTO_ALG_AES_192_GCM;
-  a->iv_size = 8;
-  a->block_align = 1;
-  a->icv_size = 16;
-
-  a = im->crypto_algs + IPSEC_CRYPTO_ALG_AES_NULL_GMAC_256;
-  a->enc_op_id = VNET_CRYPTO_OP_AES_256_NULL_GMAC_ENC;
-  a->dec_op_id = VNET_CRYPTO_OP_AES_256_NULL_GMAC_DEC;
-  a->alg = VNET_CRYPTO_ALG_AES_256_GCM;
-  a->iv_size = 8;
-  a->block_align = 1;
-  a->icv_size = 16;
-
-  vec_validate (im->integ_algs, IPSEC_INTEG_N_ALG - 1);
-  ipsec_main_integ_alg_t *i;
-
-  i = &im->integ_algs[IPSEC_INTEG_ALG_MD5_96];
-  i->op_id = VNET_CRYPTO_OP_MD5_HMAC;
-  i->alg = VNET_CRYPTO_ALG_HMAC_MD5;
-  i->icv_size = 12;
-
-  i = &im->integ_algs[IPSEC_INTEG_ALG_SHA1_96];
-  i->op_id = VNET_CRYPTO_OP_SHA1_HMAC;
-  i->alg = VNET_CRYPTO_ALG_HMAC_SHA1;
-  i->icv_size = 12;
-
-  i = &im->integ_algs[IPSEC_INTEG_ALG_SHA_256_96];
-  i->op_id = VNET_CRYPTO_OP_SHA1_HMAC;
-  i->alg = VNET_CRYPTO_ALG_HMAC_SHA256;
-  i->icv_size = 12;
-
-  i = &im->integ_algs[IPSEC_INTEG_ALG_SHA_256_128];
-  i->op_id = VNET_CRYPTO_OP_SHA256_HMAC;
-  i->alg = VNET_CRYPTO_ALG_HMAC_SHA256;
-  i->icv_size = 16;
-
-  i = &im->integ_algs[IPSEC_INTEG_ALG_SHA_384_192];
-  i->op_id = VNET_CRYPTO_OP_SHA384_HMAC;
-  i->alg = VNET_CRYPTO_ALG_HMAC_SHA384;
-  i->icv_size = 24;
-
-  i = &im->integ_algs[IPSEC_INTEG_ALG_SHA_512_256];
-  i->op_id = VNET_CRYPTO_OP_SHA512_HMAC;
-  i->alg = VNET_CRYPTO_ALG_HMAC_SHA512;
-  i->icv_size = 32;
-
   vec_validate_aligned (im->ptd, vlib_num_workers (), CLIB_CACHE_LINE_BYTES);
 
   im->async_mode = 0;
@@ -663,6 +512,7 @@ ipsec_config (vlib_main_t *vm, unformat_input_t *input)
   u32 ipsec_spd_fp_num_buckets;
   bool fp_spd_ip4_enabled = false;
   bool fp_spd_ip6_enabled = false;
+  u32 handoff_queue_size;
 
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
@@ -757,6 +607,11 @@ ipsec_config (vlib_main_t *vm, unformat_input_t *input)
 	    }
 
 	  ipsec_tun_table_init (AF_IP6, table_size, n_buckets);
+	}
+      else if (unformat (input, "async-handoff-queue-size %d",
+			 &handoff_queue_size))
+	{
+	  im->handoff_queue_size = handoff_queue_size;
 	}
       else
 	return clib_error_return (0, "unknown input `%U'",

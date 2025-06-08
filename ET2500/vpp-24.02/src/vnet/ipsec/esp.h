@@ -37,27 +37,21 @@ typedef struct
   u8 next_header;
 } esp_footer_t;
 
-/* *INDENT-OFF* */
 typedef CLIB_PACKED (struct {
   ip4_header_t ip4;
   esp_header_t esp;
 }) ip4_and_esp_header_t;
-/* *INDENT-ON* */
 
-/* *INDENT-OFF* */
 typedef CLIB_PACKED (struct {
   ip4_header_t ip4;
   udp_header_t udp;
   esp_header_t esp;
 }) ip4_and_udp_and_esp_header_t;
-/* *INDENT-ON* */
 
-/* *INDENT-OFF* */
 typedef CLIB_PACKED (struct {
   ip6_header_t ip6;
   esp_header_t esp;
 }) ip6_and_esp_header_t;
-/* *INDENT-ON* */
 
 /**
  * AES counter mode nonce
@@ -85,46 +79,28 @@ typedef struct esp_aead_t_
   u32 data[3];
 } __clib_packed esp_aead_t;
 
-#define ESP_SEQ_MAX		(4294967295UL)
-
 u8 *format_esp_header (u8 * s, va_list * args);
 
 /* TODO seq increment should be atomic to be accessed by multiple workers */
 always_inline int
-esp_seq_advance (ipsec_sa_t * sa)
+esp_seq_advance (ipsec_sa_outb_rt_t *ort)
 {
-  if (PREDICT_TRUE (ipsec_sa_is_set_USE_ESN (sa)))
-    {
-      if (PREDICT_FALSE (sa->seq == ESP_SEQ_MAX))
-	{
-	  if (PREDICT_FALSE (ipsec_sa_is_set_USE_ANTI_REPLAY (sa) &&
-			     sa->seq_hi == ESP_SEQ_MAX))
-	    return 1;
-	  sa->seq_hi++;
-	}
-      sa->seq++;
-    }
-  else
-    {
-      if (PREDICT_FALSE (ipsec_sa_is_set_USE_ANTI_REPLAY (sa) &&
-			 sa->seq == ESP_SEQ_MAX))
-	return 1;
-      sa->seq++;
-    }
-
+  u64 max = ort->use_esn ? CLIB_U64_MAX : CLIB_U32_MAX;
+  if (ort->seq64 == max)
+    return 1;
+  ort->seq64++;
   return 0;
 }
 
 always_inline u16
-esp_aad_fill (u8 *data, const esp_header_t *esp, const ipsec_sa_t *sa,
-	      u32 seq_hi)
+esp_aad_fill (u8 *data, const esp_header_t *esp, int use_esn, u32 seq_hi)
 {
   esp_aead_t *aad;
 
   aad = (esp_aead_t *) data;
   aad->data[0] = esp->spi;
 
-  if (ipsec_sa_is_set_USE_ESN (sa))
+  if (use_esn)
     {
       /* SPI, seq-hi, seq-low */
       aad->data[1] = (u32) clib_host_to_net_u32 (seq_hi);
@@ -193,8 +169,8 @@ esp_decrypt_err_to_sa_err (u32 err)
 
 always_inline void
 esp_encrypt_set_next_index (vlib_buffer_t *b, vlib_node_runtime_t *node,
-			    u32 thread_index, u32 err, u16 index, u16 *nexts,
-			    u16 drop_next, u32 sa_index)
+			    u32 thread_index, u32 err,
+			    u16 index, u16 *nexts, u16 drop_next, u32 sa_index)
 {
   ipsec_set_next_index (b, node, thread_index, err,
 			esp_encrypt_err_to_sa_err (err), index, nexts,
@@ -203,8 +179,8 @@ esp_encrypt_set_next_index (vlib_buffer_t *b, vlib_node_runtime_t *node,
 
 always_inline void
 esp_decrypt_set_next_index (vlib_buffer_t *b, vlib_node_runtime_t *node,
-			    u32 thread_index, u32 err, u16 index, u16 *nexts,
-			    u16 drop_next, u32 sa_index)
+			    u32 thread_index, u32 err,
+			    u16 index, u16 *nexts, u16 drop_next, u32 sa_index)
 {
   ipsec_set_next_index (b, node, thread_index, err,
 			esp_decrypt_err_to_sa_err (err), index, nexts,
@@ -224,7 +200,8 @@ typedef struct
     {
       u8 icv_sz;
       u8 iv_sz;
-      ipsec_sa_flags_t flags;
+      u8 udp_sz;
+      u8 is_transport;
       u32 sa_index;
     };
     u64 sa_data;

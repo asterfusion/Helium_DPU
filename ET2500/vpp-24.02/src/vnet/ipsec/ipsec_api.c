@@ -40,6 +40,26 @@
 #define REPLY_MSG_ID_BASE ipsec_main.msg_id_base
 #include <vlibapi/api_helper_macros.h>
 
+static inline u64
+ipsec_sa_get_inb_seq (ipsec_sa_t *sa)
+{
+  ipsec_sa_inb_rt_t *irt = ipsec_sa_get_inb_rt (sa);
+  u64 seq = irt->seq64;
+  if (!ipsec_sa_is_set_USE_ESN (sa))
+    seq = (u32) seq;
+  return seq;
+}
+
+static inline u64
+ipsec_sa_get_outb_seq (ipsec_sa_t *sa)
+{
+  ipsec_sa_outb_rt_t *ort = ipsec_sa_get_outb_rt (sa);
+  u64 seq;
+
+  seq = ort->seq64;
+  return seq;
+}
+
 static void
 vl_api_ipsec_spd_add_del_t_handler (vl_api_ipsec_spd_add_del_t * mp)
 {
@@ -150,12 +170,10 @@ send_ipsec_tunnel_protect_details (index_t itpi, void *arg)
   sa = ipsec_sa_get (itp->itp_out_sa);
   mp->tun.sa_out = htonl (sa->id);
   mp->tun.n_sa_in = itp->itp_n_sa_in;
-  /* *INDENT-OFF* */
   FOR_EACH_IPSEC_PROTECT_INPUT_SA(itp, sa,
   ({
     mp->tun.sa_in[ii++] = htonl (sa->id);
   }));
-  /* *INDENT-ON* */
 
   vl_api_send_msg (ctx->reg, (u8 *) mp);
 
@@ -264,12 +282,10 @@ static void vl_api_ipsec_spd_entry_add_del_t_handler
     goto out;
 
 out:
-  /* *INDENT-OFF* */
   REPLY_MACRO2 (VL_API_IPSEC_SPD_ENTRY_ADD_DEL_REPLY,
   ({
     rmp->stat_index = ntohl(stat_index);
   }));
-  /* *INDENT-ON* */
 }
 
 static void
@@ -388,12 +404,10 @@ static void vl_api_ipsec_sad_entry_add_del_t_handler
     htons (mp->entry.udp_dst_port), 0, &tun, &sa_index);
 
 out:
-  /* *INDENT-OFF* */
   REPLY_MACRO2 (VL_API_IPSEC_SAD_ENTRY_ADD_DEL_REPLY,
   {
     rmp->stat_index = htonl (sa_index);
   });
-  /* *INDENT-ON* */
 }
 
 static void vl_api_ipsec_sad_entry_add_del_v2_t_handler
@@ -462,12 +476,10 @@ static void vl_api_ipsec_sad_entry_add_del_v2_t_handler
     htons (mp->entry.udp_dst_port), 0, &tun, &sa_index);
 
 out:
-  /* *INDENT-OFF* */
   REPLY_MACRO2 (VL_API_IPSEC_SAD_ENTRY_ADD_DEL_V2_REPLY,
   {
     rmp->stat_index = htonl (sa_index);
   });
-  /* *INDENT-ON* */
 }
 
 static int
@@ -839,12 +851,10 @@ vl_api_ipsec_spd_interface_dump_t_handler (vl_api_ipsec_spd_interface_dump_t *
   if (mp->spd_index_valid)
     {
       spd_index = ntohl (mp->spd_index);
-      /* *INDENT-OFF* */
       hash_foreach(k, v, im->spd_index_by_sw_if_index, ({
         if (v == spd_index)
           send_ipsec_spd_interface_details(reg, v, k, mp->context);
       }));
-      /* *INDENT-ON* */
     }
   else
     {
@@ -867,12 +877,10 @@ vl_api_ipsec_itf_create_t_handler (vl_api_ipsec_itf_create_t * mp)
   if (!rv)
     rv = ipsec_itf_create (ntohl (mp->itf.user_instance), mode, &sw_if_index);
 
-  /* *INDENT-OFF* */
   REPLY_MACRO2 (VL_API_IPSEC_ITF_CREATE_REPLY,
   ({
     rmp->sw_if_index = htonl (sw_if_index);
   }));
-  /* *INDENT-ON* */
 }
 
 static void
@@ -962,6 +970,8 @@ ipsec_sa_dump_match_sa (index_t itpi, void *arg)
 static walk_rc_t
 send_ipsec_sa_details (ipsec_sa_t * sa, void *arg)
 {
+  ipsec_main_t *im = &ipsec_main;
+  ipsec_sa_inb_rt_t *irt = ipsec_sa_get_inb_rt (sa);
   ipsec_dump_walk_ctx_t *ctx = arg;
   vl_api_ipsec_sa_details_t *mp;
 
@@ -987,7 +997,7 @@ send_ipsec_sa_details (ipsec_sa_t * sa, void *arg)
   if (ipsec_sa_is_set_IS_PROTECT (sa))
     {
       ipsec_sa_dump_match_ctx_t ctx = {
-	.sai = sa - ipsec_sa_pool,
+	.sai = sa - im->sa_pool,
 	.sw_if_index = ~0,
       };
       ipsec_tun_protect_walk (ipsec_sa_dump_match_sa, &ctx);
@@ -1004,22 +1014,16 @@ send_ipsec_sa_details (ipsec_sa_t * sa, void *arg)
     }
   if (ipsec_sa_is_set_UDP_ENCAP (sa))
     {
-      mp->entry.udp_src_port = sa->udp_hdr.src_port;
-      mp->entry.udp_dst_port = sa->udp_hdr.dst_port;
+      mp->entry.udp_src_port = clib_host_to_net_u16 (sa->udp_src_port);
+      mp->entry.udp_dst_port = clib_host_to_net_u16 (sa->udp_dst_port);
     }
 
-  mp->seq_outbound = clib_host_to_net_u64 (((u64) sa->seq));
-  mp->last_seq_inbound = clib_host_to_net_u64 (((u64) sa->seq));
-  if (ipsec_sa_is_set_USE_ESN (sa))
-    {
-      mp->seq_outbound |= (u64) (clib_host_to_net_u32 (sa->seq_hi));
-      mp->last_seq_inbound |= (u64) (clib_host_to_net_u32 (sa->seq_hi));
-    }
-  if (ipsec_sa_is_set_USE_ANTI_REPLAY (sa))
-    {
-      mp->replay_window =
-	clib_host_to_net_u64 (ipsec_sa_anti_replay_get_64b_window (sa));
-    }
+  mp->seq_outbound = clib_host_to_net_u64 (ipsec_sa_get_outb_seq (sa));
+  mp->last_seq_inbound = clib_host_to_net_u64 (ipsec_sa_get_inb_seq (sa));
+
+  if (ipsec_sa_is_set_USE_ANTI_REPLAY (sa) && irt)
+    mp->replay_window =
+      clib_host_to_net_u64 (ipsec_sa_anti_replay_get_64b_window (irt));
 
   mp->stat_index = clib_host_to_net_u32 (sa->stat_index);
 
@@ -1048,6 +1052,8 @@ vl_api_ipsec_sa_dump_t_handler (vl_api_ipsec_sa_dump_t * mp)
 static walk_rc_t
 send_ipsec_sa_v2_details (ipsec_sa_t * sa, void *arg)
 {
+  ipsec_main_t *im = &ipsec_main;
+  ipsec_sa_inb_rt_t *irt = ipsec_sa_get_inb_rt (sa);
   ipsec_dump_walk_ctx_t *ctx = arg;
   vl_api_ipsec_sa_v2_details_t *mp;
 
@@ -1073,7 +1079,7 @@ send_ipsec_sa_v2_details (ipsec_sa_t * sa, void *arg)
   if (ipsec_sa_is_set_IS_PROTECT (sa))
     {
       ipsec_sa_dump_match_ctx_t ctx = {
-	.sai = sa - ipsec_sa_pool,
+	.sai = sa - im->sa_pool,
 	.sw_if_index = ~0,
       };
       ipsec_tun_protect_walk (ipsec_sa_dump_match_sa, &ctx);
@@ -1090,26 +1096,20 @@ send_ipsec_sa_v2_details (ipsec_sa_t * sa, void *arg)
     }
   if (ipsec_sa_is_set_UDP_ENCAP (sa))
     {
-      mp->entry.udp_src_port = sa->udp_hdr.src_port;
-      mp->entry.udp_dst_port = sa->udp_hdr.dst_port;
+      mp->entry.udp_src_port = clib_host_to_net_u16 (sa->udp_src_port);
+      mp->entry.udp_dst_port = clib_host_to_net_u16 (sa->udp_dst_port);
     }
 
   mp->entry.tunnel_flags =
     tunnel_encap_decap_flags_encode (sa->tunnel.t_encap_decap_flags);
   mp->entry.dscp = ip_dscp_encode (sa->tunnel.t_dscp);
 
-  mp->seq_outbound = clib_host_to_net_u64 (((u64) sa->seq));
-  mp->last_seq_inbound = clib_host_to_net_u64 (((u64) sa->seq));
-  if (ipsec_sa_is_set_USE_ESN (sa))
-    {
-      mp->seq_outbound |= (u64) (clib_host_to_net_u32 (sa->seq_hi));
-      mp->last_seq_inbound |= (u64) (clib_host_to_net_u32 (sa->seq_hi));
-    }
-  if (ipsec_sa_is_set_USE_ANTI_REPLAY (sa))
-    {
-      mp->replay_window =
-	clib_host_to_net_u64 (ipsec_sa_anti_replay_get_64b_window (sa));
-    }
+  mp->seq_outbound = clib_host_to_net_u64 (ipsec_sa_get_outb_seq (sa));
+  mp->last_seq_inbound = clib_host_to_net_u64 (ipsec_sa_get_inb_seq (sa));
+
+  if (ipsec_sa_is_set_USE_ANTI_REPLAY (sa) && irt)
+    mp->replay_window =
+      clib_host_to_net_u64 (ipsec_sa_anti_replay_get_64b_window (irt));
 
   mp->stat_index = clib_host_to_net_u32 (sa->stat_index);
 
@@ -1138,6 +1138,8 @@ vl_api_ipsec_sa_v2_dump_t_handler (vl_api_ipsec_sa_v2_dump_t *mp)
 static walk_rc_t
 send_ipsec_sa_v3_details (ipsec_sa_t *sa, void *arg)
 {
+  ipsec_main_t *im = &ipsec_main;
+  ipsec_sa_inb_rt_t *irt = ipsec_sa_get_inb_rt (sa);
   ipsec_dump_walk_ctx_t *ctx = arg;
   vl_api_ipsec_sa_v3_details_t *mp;
 
@@ -1162,7 +1164,7 @@ send_ipsec_sa_v3_details (ipsec_sa_t *sa, void *arg)
   if (ipsec_sa_is_set_IS_PROTECT (sa))
     {
       ipsec_sa_dump_match_ctx_t ctx = {
-	.sai = sa - ipsec_sa_pool,
+	.sai = sa - im->sa_pool,
 	.sw_if_index = ~0,
       };
       ipsec_tun_protect_walk (ipsec_sa_dump_match_sa, &ctx);
@@ -1177,22 +1179,16 @@ send_ipsec_sa_v3_details (ipsec_sa_t *sa, void *arg)
 
   if (ipsec_sa_is_set_UDP_ENCAP (sa))
     {
-      mp->entry.udp_src_port = sa->udp_hdr.src_port;
-      mp->entry.udp_dst_port = sa->udp_hdr.dst_port;
+      mp->entry.udp_src_port = clib_host_to_net_u16 (sa->udp_src_port);
+      mp->entry.udp_dst_port = clib_host_to_net_u16 (sa->udp_dst_port);
     }
 
-  mp->seq_outbound = clib_host_to_net_u64 (((u64) sa->seq));
-  mp->last_seq_inbound = clib_host_to_net_u64 (((u64) sa->seq));
-  if (ipsec_sa_is_set_USE_ESN (sa))
-    {
-      mp->seq_outbound |= (u64) (clib_host_to_net_u32 (sa->seq_hi));
-      mp->last_seq_inbound |= (u64) (clib_host_to_net_u32 (sa->seq_hi));
-    }
-  if (ipsec_sa_is_set_USE_ANTI_REPLAY (sa))
-    {
-      mp->replay_window =
-	clib_host_to_net_u64 (ipsec_sa_anti_replay_get_64b_window (sa));
-    }
+  mp->seq_outbound = clib_host_to_net_u64 (ipsec_sa_get_outb_seq (sa));
+  mp->last_seq_inbound = clib_host_to_net_u64 (ipsec_sa_get_inb_seq (sa));
+
+  if (ipsec_sa_is_set_USE_ANTI_REPLAY (sa) && irt)
+    mp->replay_window =
+      clib_host_to_net_u64 (ipsec_sa_anti_replay_get_64b_window (irt));
 
   mp->stat_index = clib_host_to_net_u32 (sa->stat_index);
 
@@ -1221,8 +1217,12 @@ vl_api_ipsec_sa_v3_dump_t_handler (vl_api_ipsec_sa_v3_dump_t *mp)
 static walk_rc_t
 send_ipsec_sa_v4_details (ipsec_sa_t *sa, void *arg)
 {
+  ipsec_main_t *im = &ipsec_main;
+  ipsec_sa_inb_rt_t *irt = ipsec_sa_get_inb_rt (sa);
+  ipsec_sa_outb_rt_t *ort = ipsec_sa_get_outb_rt (sa);
   ipsec_dump_walk_ctx_t *ctx = arg;
   vl_api_ipsec_sa_v4_details_t *mp;
+  u32 thread_index = 0;
 
   mp = vl_msg_api_alloc (sizeof (*mp));
   clib_memset (mp, 0, sizeof (*mp));
@@ -1245,7 +1245,7 @@ send_ipsec_sa_v4_details (ipsec_sa_t *sa, void *arg)
   if (ipsec_sa_is_set_IS_PROTECT (sa))
     {
       ipsec_sa_dump_match_ctx_t ctx = {
-	.sai = sa - ipsec_sa_pool,
+	.sai = sa - im->sa_pool,
 	.sw_if_index = ~0,
       };
       ipsec_tun_protect_walk (ipsec_sa_dump_match_sa, &ctx);
@@ -1260,24 +1260,23 @@ send_ipsec_sa_v4_details (ipsec_sa_t *sa, void *arg)
 
   if (ipsec_sa_is_set_UDP_ENCAP (sa))
     {
-      mp->entry.udp_src_port = sa->udp_hdr.src_port;
-      mp->entry.udp_dst_port = sa->udp_hdr.dst_port;
+      mp->entry.udp_src_port = clib_host_to_net_u16 (sa->udp_src_port);
+      mp->entry.udp_dst_port = clib_host_to_net_u16 (sa->udp_dst_port);
     }
 
-  mp->seq_outbound = clib_host_to_net_u64 (((u64) sa->seq));
-  mp->last_seq_inbound = clib_host_to_net_u64 (((u64) sa->seq));
-  if (ipsec_sa_is_set_USE_ESN (sa))
-    {
-      mp->seq_outbound |= (u64) (clib_host_to_net_u32 (sa->seq_hi));
-      mp->last_seq_inbound |= (u64) (clib_host_to_net_u32 (sa->seq_hi));
-    }
-  if (ipsec_sa_is_set_USE_ANTI_REPLAY (sa))
-    {
-      mp->replay_window =
-	clib_host_to_net_u64 (ipsec_sa_anti_replay_get_64b_window (sa));
-    }
+  mp->seq_outbound = clib_host_to_net_u64 (ipsec_sa_get_outb_seq (sa));
+  mp->last_seq_inbound = clib_host_to_net_u64 (ipsec_sa_get_inb_seq (sa));
 
-  mp->thread_index = clib_host_to_net_u32 (sa->thread_index);
+  if (ipsec_sa_is_set_USE_ANTI_REPLAY (sa) && irt)
+    mp->replay_window =
+      clib_host_to_net_u64 (ipsec_sa_anti_replay_get_64b_window (irt));
+
+  if (ort)
+    thread_index = ort->thread_index;
+  else if (irt)
+    thread_index = irt->thread_index;
+
+  mp->thread_index = clib_host_to_net_u32 (thread_index);
   mp->stat_index = clib_host_to_net_u32 (sa->stat_index);
 
   vl_api_send_msg (ctx->reg, (u8 *) mp);
@@ -1305,8 +1304,12 @@ vl_api_ipsec_sa_v4_dump_t_handler (vl_api_ipsec_sa_v4_dump_t *mp)
 static walk_rc_t
 send_ipsec_sa_v5_details (ipsec_sa_t *sa, void *arg)
 {
+  ipsec_main_t *im = &ipsec_main;
+  ipsec_sa_inb_rt_t *irt = ipsec_sa_get_inb_rt (sa);
+  ipsec_sa_outb_rt_t *ort = ipsec_sa_get_outb_rt (sa);
   ipsec_dump_walk_ctx_t *ctx = arg;
   vl_api_ipsec_sa_v5_details_t *mp;
+  u32 thread_index = 0;
 
   mp = vl_msg_api_alloc (sizeof (*mp));
   clib_memset (mp, 0, sizeof (*mp));
@@ -1329,7 +1332,7 @@ send_ipsec_sa_v5_details (ipsec_sa_t *sa, void *arg)
   if (ipsec_sa_is_set_IS_PROTECT (sa))
     {
       ipsec_sa_dump_match_ctx_t ctx = {
-	.sai = sa - ipsec_sa_pool,
+	.sai = sa - im->sa_pool,
 	.sw_if_index = ~0,
       };
       ipsec_tun_protect_walk (ipsec_sa_dump_match_sa, &ctx);
@@ -1344,27 +1347,27 @@ send_ipsec_sa_v5_details (ipsec_sa_t *sa, void *arg)
 
   if (ipsec_sa_is_set_UDP_ENCAP (sa))
     {
-      mp->entry.udp_src_port = sa->udp_hdr.src_port;
-      mp->entry.udp_dst_port = sa->udp_hdr.dst_port;
+      mp->entry.udp_src_port = clib_host_to_net_u16 (sa->udp_src_port);
+      mp->entry.udp_dst_port = clib_host_to_net_u16 (sa->udp_dst_port);
     }
 
-  mp->seq_outbound = clib_host_to_net_u64 (((u64) sa->seq));
-  mp->last_seq_inbound = clib_host_to_net_u64 (((u64) sa->seq));
-  if (ipsec_sa_is_set_USE_ESN (sa))
-    {
-      mp->seq_outbound |= (u64) (clib_host_to_net_u32 (sa->seq_hi));
-      mp->last_seq_inbound |= (u64) (clib_host_to_net_u32 (sa->seq_hi));
-    }
-  if (ipsec_sa_is_set_USE_ANTI_REPLAY (sa))
+  mp->seq_outbound = clib_host_to_net_u64 (ipsec_sa_get_outb_seq (sa));
+  mp->last_seq_inbound = clib_host_to_net_u64 (ipsec_sa_get_inb_seq (sa));
+
+  if (ipsec_sa_is_set_USE_ANTI_REPLAY (sa) && irt)
     {
       mp->replay_window =
-	clib_host_to_net_u64 (ipsec_sa_anti_replay_get_64b_window (sa));
-
+	clib_host_to_net_u64 (ipsec_sa_anti_replay_get_64b_window (irt));
       mp->entry.anti_replay_window_size =
-	clib_host_to_net_u32 (IPSEC_SA_ANTI_REPLAY_WINDOW_SIZE (sa));
+	clib_host_to_net_u32 (irt->anti_replay_window_size);
     }
 
-  mp->thread_index = clib_host_to_net_u32 (sa->thread_index);
+  if (ort)
+    thread_index = ort->thread_index;
+  else if (irt)
+    thread_index = irt->thread_index;
+
+  mp->thread_index = clib_host_to_net_u32 (thread_index);
   mp->stat_index = clib_host_to_net_u32 (sa->stat_index);
 
   vl_api_send_msg (ctx->reg, (u8 *) mp);
@@ -1406,7 +1409,6 @@ vl_api_ipsec_backend_dump_t_handler (vl_api_ipsec_backend_dump_t *mp)
 
   ipsec_ah_backend_t *ab;
   ipsec_esp_backend_t *eb;
-  /* *INDENT-OFF* */
   pool_foreach (ab, im->ah_backends) {
     vl_api_ipsec_backend_details_t *mp = vl_msg_api_alloc (sizeof (*mp));
     clib_memset (mp, 0, sizeof (*mp));
@@ -1431,7 +1433,6 @@ vl_api_ipsec_backend_dump_t_handler (vl_api_ipsec_backend_dump_t *mp)
     mp->active = mp->index == im->esp_current_backend ? 1 : 0;
     vl_api_send_msg (rp, (u8 *)mp);
   }
-  /* *INDENT-ON* */
 }
 
 static void
@@ -1441,11 +1442,11 @@ vl_api_ipsec_select_backend_t_handler (vl_api_ipsec_select_backend_t * mp)
   vl_api_ipsec_select_backend_reply_t *rmp;
   ipsec_protocol_t protocol;
   int rv = 0;
-  if (pool_elts (ipsec_sa_pool) > 0)
-    {
-      rv = VNET_API_ERROR_INSTANCE_IN_USE;
-      goto done;
-    }
+  if (pool_elts (im->sa_pool) > 0)
+  {
+    rv = VNET_API_ERROR_INSTANCE_IN_USE;
+    goto done;
+  }
 
   rv = ipsec_proto_decode (mp->protocol, &protocol);
 

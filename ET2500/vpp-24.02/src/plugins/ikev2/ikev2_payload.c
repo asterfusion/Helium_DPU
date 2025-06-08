@@ -24,7 +24,6 @@
 #include <plugins/ikev2/ikev2.h>
 #include <plugins/ikev2/ikev2_priv.h>
 
-/* *INDENT-OFF* */
 typedef CLIB_PACKED (struct {
   u8 nextpayload;
   u8 flags;
@@ -34,9 +33,7 @@ typedef CLIB_PACKED (struct {
   u16 msg_type;
   u8 payload[0];
 }) ike_notify_payload_header_t;
-/* *INDENT-ON* */
 
-/* *INDENT-OFF* */
 typedef CLIB_PACKED (struct {
   ip4_address_t start_addr;
   ip4_address_t end_addr;
@@ -55,9 +52,7 @@ typedef CLIB_PACKED (struct {
   u16 end_port;
   u8 addr_pair[0];
 }) ikev2_ts_payload_entry_t;
-/* *INDENT-OFF* */
 
-/* *INDENT-OFF* */
 typedef CLIB_PACKED (struct {
   u8 nextpayload;
   u8 flags;
@@ -66,9 +61,7 @@ typedef CLIB_PACKED (struct {
   u8 reserved[3];
   ikev2_ts_payload_entry_t ts[0];
 }) ike_ts_payload_header_t;
-/* *INDENT-OFF* */
 
-/* *INDENT-OFF* */
 typedef CLIB_PACKED (struct {
   u8 last_or_more;
   u8 reserved;
@@ -78,9 +71,7 @@ typedef CLIB_PACKED (struct {
   u8 spi_size;
   u8 num_transforms; u32 spi[0];
 }) ike_sa_proposal_data_t;
-/* *INDENT-OFF* */
 
-/* *INDENT-OFF* */
 typedef CLIB_PACKED (struct {
   u8 last_or_more;
   u8 reserved;
@@ -90,9 +81,7 @@ typedef CLIB_PACKED (struct {
   u16 transform_id;
   u8 attributes[0];
 }) ike_sa_transform_data_t;
-/* *INDENT-OFF* */
 
-/* *INDENT-OFF* */
 typedef CLIB_PACKED (struct {
   u8 nextpayload;
   u8 flags;
@@ -102,7 +91,6 @@ typedef CLIB_PACKED (struct {
   u16 num_of_spi;
   u32 spi[0];
 }) ike_delete_payload_header_t;
-/* *INDENT-OFF* */
 
 static ike_payload_header_t *
 ikev2_payload_add_hdr (ikev2_payload_chain_t * c, u8 payload_type, int len)
@@ -167,8 +155,8 @@ ikev2_payload_add_notify_2 (ikev2_payload_chain_t * c, u16 msg_type,
 }
 
 void
-ikev2_payload_add_sa (ikev2_payload_chain_t * c,
-		      ikev2_sa_proposal_t * proposals)
+ikev2_payload_add_sa (ikev2_payload_chain_t *c, ikev2_sa_proposal_t *proposals,
+		      u8 force_spi)
 {
   ike_payload_header_t *ph;
   ike_sa_proposal_data_t *prop;
@@ -184,7 +172,13 @@ ikev2_payload_add_sa (ikev2_payload_chain_t * c,
 
   vec_foreach (p, proposals)
   {
-    int spi_size = (p->protocol_id == IKEV2_PROTOCOL_ESP) ? 4 : 0;
+    int spi_size = 0;
+
+    if (p->protocol_id == IKEV2_PROTOCOL_ESP)
+      spi_size = 4;
+    else if (force_spi && p->protocol_id == IKEV2_PROTOCOL_IKE)
+      spi_size = 8;
+
     pr_data = vec_new (u8, sizeof (ike_sa_proposal_data_t) + spi_size);
     prop = (ike_sa_proposal_data_t *) pr_data;
     prop->last_or_more = proposals - p + 1 < vec_len (proposals) ? 2 : 0;
@@ -193,8 +187,13 @@ ikev2_payload_add_sa (ikev2_payload_chain_t * c,
     prop->spi_size = spi_size;
     prop->num_transforms = vec_len (p->transforms);
 
-    if (spi_size)
+    if (spi_size == 4)
       prop->spi[0] = clib_host_to_net_u32 (p->spi);
+    else if (spi_size == 8)
+      {
+	u64 s = clib_host_to_net_u64 (p->spi);
+	clib_memcpy_fast (prop->spi, &s, sizeof (s));
+      }
 
     vec_foreach (t, p->transforms)
     {
@@ -384,8 +383,9 @@ ikev2_parse_sa_payload (ike_payload_header_t * ikep, u32 rlen)
       sap = (ike_sa_proposal_data_t *) & ikep->payload[proposal_ptr];
       int i, transform_ptr;
 
-      /* IKE proposal should not have SPI */
-      if (sap->protocol_id == IKEV2_PROTOCOL_IKE && sap->spi_size != 0)
+      /* IKE proposal should have 8 bytes or no SPI */
+      if (sap->protocol_id == IKEV2_PROTOCOL_IKE && sap->spi_size != 0 &&
+	  sap->spi_size != 8)
 	goto data_corrupted;
 
       /* IKE proposal should not have SPI */
@@ -403,6 +403,12 @@ ikev2_parse_sa_payload (ike_payload_header_t * ikep, u32 rlen)
       if (sap->spi_size == 4)
 	{
 	  proposal->spi = clib_net_to_host_u32 (sap->spi[0]);
+	}
+      else if (sap->spi_size == 8)
+	{
+	  u64 s;
+	  clib_memcpy_fast (&s, &sap->spi[0], sizeof (s));
+	  proposal->spi = clib_net_to_host_u64 (s);
 	}
 
       for (i = 0; i < sap->num_transforms; i++)

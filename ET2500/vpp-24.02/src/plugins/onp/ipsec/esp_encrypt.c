@@ -102,6 +102,7 @@ onp_esp_encrypt_tun_add_trace (vlib_main_t *vm, vlib_node_runtime_t *node,
 			       vlib_frame_t *frame, vlib_buffer_t *b,
 			       u32 next_index)
 {
+#if 0
   onp_esp_encrypt_trace_t *tr;
   ipsec_sa_t *sa;
   u32 sa_index;
@@ -122,6 +123,7 @@ onp_esp_encrypt_tun_add_trace (vlib_main_t *vm, vlib_node_runtime_t *node,
   clib_memcpy_fast (&tr->buf, b, sizeof b[0] - sizeof b->pre_data);
   clib_memcpy_fast (tr->buf.pre_data, b->data, sizeof tr->buf.pre_data);
   clib_memcpy_fast (tr->data, vlib_buffer_get_current (b), 256);
+#endif
 }
 
 static_always_inline uword
