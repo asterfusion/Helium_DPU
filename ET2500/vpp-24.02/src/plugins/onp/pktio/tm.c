@@ -103,15 +103,27 @@ onp_pktio_scheduler_profile_add_del(vlib_main_t *vm, onp_main_t *om, onp_pktio_s
         if (tmp_profile->shaping_flag)
         {
             tmp_profile->shaping_profile.tm_shaper_profile.id = tmp_profile->id;
-            tmp_profile->shaping_profile.tm_shaper_profile.commit_rate = profile->shaping_profile.tm_shaper_profile.commit_rate;
-            tmp_profile->shaping_profile.tm_shaper_profile.commit_sz = profile->shaping_profile.tm_shaper_profile.commit_sz;
-            tmp_profile->shaping_profile.tm_shaper_profile.peak_rate = profile->shaping_profile.tm_shaper_profile.peak_rate;
-            tmp_profile->shaping_profile.tm_shaper_profile.peak_sz = profile->shaping_profile.tm_shaper_profile.peak_sz;
-            tmp_profile->shaping_profile.tm_shaper_profile.peak_rate = profile->shaping_profile.tm_shaper_profile.peak_rate;
-            tmp_profile->shaping_profile.tm_shaper_profile.pkt_len_adj = profile->shaping_profile.tm_shaper_profile.pkt_len_adj;
             tmp_profile->shaping_profile.tm_shaper_profile.pkt_mode = profile->shaping_profile.tm_shaper_profile.pkt_mode;
             tmp_profile->shaping_profile.tm_shaper_profile.accuracy = profile->shaping_profile.tm_shaper_profile.accuracy;
             tmp_profile->shaping_profile.tm_shaper_profile.red_algo = profile->shaping_profile.tm_shaper_profile.red_algo;
+
+            tmp_profile->shaping_profile.tm_shaper_profile.commit_sz = profile->shaping_profile.tm_shaper_profile.commit_sz;
+            tmp_profile->shaping_profile.tm_shaper_profile.peak_sz = profile->shaping_profile.tm_shaper_profile.peak_sz;
+
+            if (tmp_profile->shaping_profile.tm_shaper_profile.pkt_mode)
+            {
+                tmp_profile->shaping_profile.tm_shaper_profile.commit_rate = profile->shaping_profile.tm_shaper_profile.commit_rate;
+                tmp_profile->shaping_profile.tm_shaper_profile.peak_rate = profile->shaping_profile.tm_shaper_profile.peak_rate;
+                tmp_profile->shaping_profile.tm_shaper_profile.pkt_len_adj = 0;
+            }
+            else
+            {
+                //bytes to bits
+                tmp_profile->shaping_profile.tm_shaper_profile.commit_rate = profile->shaping_profile.tm_shaper_profile.commit_rate * 8;
+                tmp_profile->shaping_profile.tm_shaper_profile.peak_rate = profile->shaping_profile.tm_shaper_profile.peak_rate * 8;
+                tmp_profile->shaping_profile.tm_shaper_profile.pkt_len_adj = profile->shaping_profile.tm_shaper_profile.pkt_len_adj;
+            }
+
 
             if (!tmp_profile->shaping_profile.tm_shaper_profile.commit_rate && !tmp_profile->shaping_profile.tm_shaper_profile.commit_sz)
             {
