@@ -560,11 +560,11 @@ policer_add_command_fn (vlib_main_t *vm, unformat_input_t *input,
   vnet_policer_main_t *pm = &vnet_policer_main;
   qos_pol_cfg_params_st c = {
     .conform_action.dscp = IP_DSCP_INVALID,
-    .conform_action.pcp = ~0,
+    .conform_action.pcp = UINT8_MAX,
     .exceed_action.dscp = IP_DSCP_INVALID,
-    .exceed_action.pcp = ~0,
+    .exceed_action.pcp = UINT8_MAX,
     .violate_action.dscp = IP_DSCP_INVALID,
-    .exceed_action.pcp = ~0
+    .violate_action.pcp = UINT8_MAX
   };
   unformat_input_t _line_input, *line_input = &_line_input;
   u8 *name = 0;

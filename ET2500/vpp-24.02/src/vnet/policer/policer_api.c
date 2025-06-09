@@ -124,11 +124,11 @@ vl_api_policer_add_t_handler (vl_api_policer_add_t *mp)
   char name[sizeof (mp->name) + 1];
   qos_pol_cfg_params_st cfg = {
     .conform_action.dscp = IP_DSCP_INVALID,
-    .conform_action.pcp = ~0,
+    .conform_action.pcp = UINT8_MAX,
     .exceed_action.dscp = IP_DSCP_INVALID,
-    .exceed_action.pcp = ~0,
+    .exceed_action.pcp = UINT8_MAX,
     .violate_action.dscp = IP_DSCP_INVALID,
-    .exceed_action.pcp = ~0
+    .violate_action.pcp = UINT8_MAX
   };
   u32 policer_index;
 
@@ -168,11 +168,11 @@ vl_api_policer_update_t_handler (vl_api_policer_update_t *mp)
   int rv = 0;
   qos_pol_cfg_params_st cfg = {
     .conform_action.dscp = IP_DSCP_INVALID,
-    .conform_action.pcp = ~0,
+    .conform_action.pcp = UINT8_MAX,
     .exceed_action.dscp = IP_DSCP_INVALID,
-    .exceed_action.pcp = ~0,
+    .exceed_action.pcp = UINT8_MAX,
     .violate_action.dscp = IP_DSCP_INVALID,
-    .exceed_action.pcp = ~0
+    .violate_action.pcp = UINT8_MAX
   };
   u32 policer_index;
 

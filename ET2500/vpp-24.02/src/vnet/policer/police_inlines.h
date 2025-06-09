@@ -40,7 +40,7 @@ vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp)
   type = clib_net_to_host_u16 (eh->type);
   l3 = (u8 *)vlib_buffer_get_current(b) + sizeof(ethernet_header_t);
   
-  if (type == ETHERNET_TYPE_VLAN && pcp != ~0)
+  if (type == ETHERNET_TYPE_VLAN && pcp != UINT8_MAX)
   {
     vlanh = (ethernet_vlan_header_t *)(eh + 1);
     vlanh->priority_cfi_and_id &= clib_host_to_net_u16(VLAN_NO_PCP_BITS);
