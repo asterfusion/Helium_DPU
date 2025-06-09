@@ -286,9 +286,6 @@ cn10k_pktio_rxq_setup (vlib_main_t *vm, cnxk_pktio_t *dev,
   rq_type = CNXK_PKTIO_RQ_TYPE_RSS;
   n_desc = conf->rx_desc;
 
-  pool_alloc(dev->cqs, rx_queues);
-  pool_alloc(dev->rqs, rx_queues);
-  pool_alloc(dev->fprqs, rx_queues);
   for (i = 0; i < rx_queues; i++)
     {
       pool_get_zero (dev->cqs, cq);
@@ -386,9 +383,6 @@ cn10k_pktio_txq_setup (vlib_main_t *vm, cnxk_pktio_t *dev,
   else
     max_sqe_sz = NIX_MAXSQESZ_W8;
 
-  pool_alloc(dev->sqs, n_tx_queues);
-  pool_alloc(dev->fpsqs, dev->n_tx_queues);
-  pool_alloc(dev->ipsec_fpsqs, dev->n_tx_ipsec_queues);
   for (i = 0; i < n_tx_queues; i++)
     {
       pool_get_zero (dev->sqs, sq);
