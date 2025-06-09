@@ -524,6 +524,228 @@ VLIB_CLI_COMMAND (onp_pktio_flow_del_command, static) = {
   .short_help = "onp pktio flow del index <value> <interface name>",
   .function = onp_pktio_flow_del_command_fn,
 };
+
+clib_error_t *
+onp_pktio_scheduler_profile_add_command_fn (vlib_main_t *vm, unformat_input_t *input,
+			       vlib_cli_command_t *cmd)
+{
+  onp_main_t *om = onp_get_main ();
+
+  onp_pktio_scheduler_profile_t profile;
+  int rc;
+
+  clib_memset(&profile, 0, sizeof(profile));
+  profile.id = ONP_PKTIO_SCHEDULER_PROFILE_NONE;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "type SP"))
+          profile.type = ONP_PKTIO_SCHEDULER_STRICT;
+      else if (unformat (input, "type DWRR"))
+          profile.type = ONP_PKTIO_SCHEDULER_DWRR;
+      else if (unformat (input, "weight %u", &profile.weight))
+	;
+      else if (unformat (input, "meter-type bytes"))
+          profile.shaping_profile.tm_shaper_profile.pkt_mode = false;
+      else if (unformat (input, "meter-type packets"))
+          profile.shaping_profile.tm_shaper_profile.pkt_mode = true;
+      else if (unformat (input, "min-rate %u", &profile.shaping_profile.tm_shaper_profile.commit_rate))
+	;
+      else if (unformat (input, "min-burst %u", &profile.shaping_profile.tm_shaper_profile.commit_sz))
+	;
+      else if (unformat (input, "max-rate %u", &profile.shaping_profile.tm_shaper_profile.peak_rate))
+	;
+      else if (unformat (input, "max-burst %u", &profile.shaping_profile.tm_shaper_profile.peak_sz))
+	;
+      else if (unformat (input, "index %u", &profile.id))
+	;
+      else
+	return clib_error_return (0, "Unknown input '%U'",
+				  format_unformat_error, input);
+    }
+
+  if (profile.shaping_profile.tm_shaper_profile.commit_rate ||
+      profile.shaping_profile.tm_shaper_profile.commit_sz ||
+      profile.shaping_profile.tm_shaper_profile.peak_rate ||
+      profile.shaping_profile.tm_shaper_profile.peak_sz )
+  {
+      profile.shaping_flag = true;
+  }
+
+  rc = onp_pktio_scheduler_profile_add_del(vm, om, &profile, false);
+  if (rc)
+    return clib_error_return (0, "onp_pktio_scheduler_profile_add error: %u", rc);
+
+  vlib_cli_output (vm, "Scheduler profile id : %u", profile.id);
+
+  return 0;
+}
+
+
+VLIB_CLI_COMMAND (onp_pktio_scheduler_profile_add_command, static) = {
+  .path = "onp pktio scheduler profile add",
+  .short_help = "onp pktio scheduler profile add type <type> weight <weight> meter-type <bytes|packets> min-rate <value> min-burst <value> max-rate <value> max-burst <value> [index <index>]",
+  .function = onp_pktio_scheduler_profile_add_command_fn,
+};
+
+clib_error_t *
+onp_pktio_scheduler_profile_del_command_fn (vlib_main_t *vm, unformat_input_t *input,
+			       vlib_cli_command_t *cmd)
+{
+  onp_main_t *om = onp_get_main ();
+
+  onp_pktio_scheduler_profile_t profile;
+  int rc;
+
+  clib_memset(&profile, 0, sizeof(profile));
+  profile.id = ONP_PKTIO_SCHEDULER_PROFILE_NONE;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "index %u", &profile.id))
+	;
+      else
+	return clib_error_return (0, "Unknown input '%U'",
+				  format_unformat_error, input);
+    }
+
+  rc = onp_pktio_scheduler_profile_add_del(vm, om, &profile, true);
+  if (rc)
+    return clib_error_return (0, "onp_pktio_scheduler_profile_del error: %u", rc);
+
+  return 0;
+}
+
+VLIB_CLI_COMMAND (onp_pktio_scheduler_profile_del_command, static) = {
+  .path = "onp pktio scheduler profile del",
+  .short_help = "onp pktio scheduler profile del index <index>",
+  .function = onp_pktio_scheduler_profile_del_command_fn,
+};
+
+u8 *
+format_onp_pktio_scheduler_profile (u8 * s, va_list * args)
+{
+    onp_pktio_scheduler_profile_t *profile = va_arg (*args, onp_pktio_scheduler_profile_t *);
+
+    s = format (s, "Profile Id (%u)\n", profile->id);
+
+    s = format (s, "\tType %s , Weight : %u\n", profile->type ? "DWRR" : "SP", profile->weight);
+
+    s = format (s, "\tShaping is %s \n", profile->shaping_flag ? "enable" : "disable");
+
+    s =  format (s, "\t\tShaping Profile %u , Pkt mode %s, Pkt_len_adj %u, Accuracy %u\n",
+                     profile->shaping_profile.tm_shaper_profile.id,
+                     profile->shaping_profile.tm_shaper_profile.pkt_mode ? "Bytes" : "Packets",
+                     profile->shaping_profile.tm_shaper_profile.pkt_len_adj,
+                     profile->shaping_profile.tm_shaper_profile.accuracy);
+    s =  format (s, "\t\t\tMin Rate %lu , Min Burst %lu\n",
+                     profile->shaping_profile.tm_shaper_profile.commit_rate,
+                     profile->shaping_profile.tm_shaper_profile.commit_sz);
+    s =  format (s, "\t\t\tMax Rate %lu , Max Burst %lu\n",
+                     profile->shaping_profile.tm_shaper_profile.peak_rate,
+                     profile->shaping_profile.tm_shaper_profile.peak_sz);
+
+    return s;
+}
+
+static clib_error_t *
+onp_pktio_scheduler_profile_command_fn (vlib_main_t *vm, unformat_input_t *input,
+				vlib_cli_command_t *cmd)
+{
+  onp_main_t *om = onp_get_main ();
+  onp_pktio_scheduler_profile_t *profile;
+
+  pool_foreach (profile, om->scheduler_profile_pool)
+  {
+      vlib_cli_output (vm, " %U", format_onp_pktio_scheduler_profile, profile);
+  }
+  return NULL;
+}
+
+VLIB_CLI_COMMAND (onp_pktio_scheduler_profile_dump_command, static) = {
+  .path = "show onp pktio scheduler profile",
+  .short_help = "show onp pktio scheduler profile",
+  .function = onp_pktio_scheduler_profile_command_fn,
+};
+
+clib_error_t *
+onp_pktio_scheduler_shaping_profile_add_del_command_fn (vlib_main_t *vm, unformat_input_t *input,
+			       vlib_cli_command_t *cmd)
+{
+  onp_main_t *om = onp_get_main ();
+  vnet_main_t *vnm = om->vnet_main;
+
+  u32 scheduler_profile_id = ONP_PKTIO_SCHEDULER_PROFILE_NONE;
+  u32 hw_if_index = ~0;
+  int rc;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "profile %u", &scheduler_profile_id))
+	;
+      else if (unformat (input, "name %U", unformat_vnet_hw_interface, vnm, &hw_if_index))
+	;
+      else if (unformat (input, "del"))
+          scheduler_profile_id = ONP_PKTIO_SCHEDULER_PROFILE_NONE;
+      else
+	return clib_error_return (0, "Unknown input '%U'",
+				  format_unformat_error, input);
+    }
+
+  rc = onp_pktio_root_node_scheduler_shaping_update(vm, om, hw_if_index, scheduler_profile_id, true);
+  if (rc)
+    return clib_error_return (0, "onp_pktio_root_node_scheduler_shaping_update error: %u", rc);
+
+  return 0;
+}
+
+
+VLIB_CLI_COMMAND (onp_pktio_scheduler_shaping_profile_add_del_command, static) = {
+  .path = "onp pktio scheduler shaping profile  ",
+  .short_help = "onp pktio scheduler shaping profile name <name> profile <index> [del]",
+  .function = onp_pktio_scheduler_shaping_profile_add_del_command_fn,
+};
+
+clib_error_t *
+onp_pktio_scheduler_queue_profile_add_del_command_fn (vlib_main_t *vm, unformat_input_t *input,
+			       vlib_cli_command_t *cmd)
+{
+  onp_main_t *om = onp_get_main ();
+  vnet_main_t *vnm = om->vnet_main;
+
+  u32 scheduler_profile_id = ONP_PKTIO_SCHEDULER_PROFILE_NONE;
+  u32 hw_if_index = ~0;
+  u32 qid = 0;
+  int rc;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "profile %u", &scheduler_profile_id))
+	;
+      else if (unformat (input, "queue %u", &qid))
+	;
+      else if (unformat (input, "name %U", unformat_vnet_hw_interface, vnm, &hw_if_index))
+	;
+      else if (unformat (input, "del"))
+          scheduler_profile_id = ONP_PKTIO_SCHEDULER_PROFILE_NONE;
+      else
+	return clib_error_return (0, "Unknown input '%U'",
+				  format_unformat_error, input);
+    }
+
+  rc = onp_pktio_mdq_node_scheduler_update(vm, om, hw_if_index, qid, scheduler_profile_id);
+  if (rc)
+    return clib_error_return (0, "onp_pktio_mdq_node_scheduler_update error: %u", rc);
+
+  return 0;
+}
+
+VLIB_CLI_COMMAND (onp_pktio_scheduler_queue_profile_add_del_command, static) = {
+  .path = "onp pktio scheduler queue profile ",
+  .short_help = "onp pktio scheduler queue profile name <name> queue <qid> profile <index> [del]",
+  .function = onp_pktio_scheduler_queue_profile_add_del_command_fn,
+};
+
 /*
  * fd.io coding-style-patch-verification: ON
  *

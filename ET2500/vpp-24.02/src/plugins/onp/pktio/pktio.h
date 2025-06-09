@@ -44,7 +44,7 @@
  * If not passed in startup configuration, default value becomes number
  * of VPP threads
  */
-#define ONP_MIN_N_TX_IPSEC_QUEUES 1
+#define ONP_MIN_N_TX_IPSEC_QUEUES 0
 
 /** @anchor ONP_MAX_N_TX_IPSEC_QUEUES **/
 /* Max number of IPsec send queues allowed per pktio */
@@ -287,6 +287,36 @@ void onp_pktio_hw_interface_assign_rx_thread (onp_pktio_t *od,
 
 int onp_pktio_flow_ops (vnet_main_t *vnm, vnet_flow_dev_op_t op,
 			u32 dev_instance, u32 flow_index, uword *private_data);
+
+/* TM Heeader */
+#define ONP_PKTIO_SCHEDULER_PROFILE_NONE ROC_NIX_TM_SHAPER_PROFILE_NONE
+#define ONP_PKTIO_SHAPER_PROFILE_NONE    ROC_NIX_TM_SHAPER_PROFILE_NONE
+#define ONP_PKTIO_TM_NODE_ID_INVALID     ROC_NIX_TM_NODE_ID_INVALID
+
+typedef enum
+{
+    ONP_PKTIO_SCHEDULER_STRICT = 0,
+    ONP_PKTIO_SCHEDULER_DWRR   = 1,
+} onp_pktio_scheduler_type_e ;
+
+typedef struct
+{
+    struct roc_nix_tm_shaper_profile tm_shaper_profile;
+
+} onp_pktio_scheduler_shaping_profile_t;
+
+typedef struct
+{
+    u32 id;
+
+    onp_pktio_scheduler_type_e type;
+
+    u32 weight;
+
+    bool shaping_flag;
+    onp_pktio_scheduler_shaping_profile_t shaping_profile;
+
+} onp_pktio_scheduler_profile_t;
 
 #endif /* included_onp_pktio_pktio_h */
 

@@ -157,7 +157,11 @@ onp_pktio_set_default_config (onp_config_main_t *conf,
    */
   tmp.n_rx_q = num_worker_cores;
   tmp.n_tx_q = num_worker_cores + 1;
+#ifndef VPP_PLATFORM_ET2500
   tmp.n_tx_ipsec_q = num_worker_cores + 1;
+#else
+  tmp.n_tx_ipsec_q = 0;
+#endif
 
   /* If parameters is less than min_val. override with default values */
 #define _(name, var, val, min, max, p)                                        \
@@ -720,9 +724,20 @@ onp_pktio_txqs_fp_set (vlib_main_t *vm, u32 onp_pktio_index, int is_enable)
 
       for (ti = 0; ti < tm->n_vlib_mains; ti++)
 	{
+#ifndef VPP_PLATFORM_ET2500
 	  qi = pktio->onp_pktio_txqs[ti % queues].vnet_hw_txq_index;
 
 	  vnet_hw_if_tx_queue_assign_thread (vnm, qi, ti);
+#else
+      /*
+       * We need to bind all queues to all threads
+       */
+      vec_foreach_index (queues, pktio->onp_pktio_txqs)
+	{
+	  qi = pktio->onp_pktio_txqs[queues].vnet_hw_txq_index;
+	  vnet_hw_if_tx_queue_assign_thread (vnm, qi, ti);
+	}
+#endif
 	}
 
       vnet_hw_if_update_runtime_data (vnm, pktio->hw_if_index);

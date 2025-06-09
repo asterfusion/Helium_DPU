@@ -439,6 +439,83 @@ vl_api_onp_interface_stats_t_handler(vl_api_onp_interface_stats_t* mp) {
     }));
   return;
 }
+
+static void
+vl_api_onp_pktio_port_set_scheduler_t_handler(vl_api_onp_pktio_port_set_scheduler_t* mp) {
+    int rv;
+    vlib_main_t* vm = vlib_get_main();
+    onp_main_t *om = onp_get_main ();
+
+    u32 hw_if_index = ~0;
+    u32 scheduler_profile_id = ONP_PKTIO_SCHEDULER_PROFILE_NONE;
+
+    hw_if_index = ntohl(mp->sw_if_index);
+    scheduler_profile_id = ntohl(mp->profile_id);
+
+    rv = onp_pktio_root_node_scheduler_shaping_update(vm, om, hw_if_index, scheduler_profile_id, true);
+
+    ONP_REPLY_MACRO (VL_API_ONP_PKTIO_PORT_SET_SCHEDULER_REPLY, onp_pktio_port_set_scheduler, );
+}
+
+static void
+vl_api_onp_pktio_port_queue_set_scheduler_t_handler(vl_api_onp_pktio_port_queue_set_scheduler_t* mp) {
+    int rv;
+    vlib_main_t* vm = vlib_get_main();
+    onp_main_t *om = onp_get_main ();
+
+    u32 hw_if_index = ~0;
+    u32 scheduler_profile_id = ONP_PKTIO_SCHEDULER_PROFILE_NONE;
+    u32 queue_id = 0;
+
+    hw_if_index = ntohl(mp->sw_if_index);
+    scheduler_profile_id = ntohl(mp->profile_id);
+    queue_id = ntohl(mp->queue_id);
+
+    rv = onp_pktio_mdq_node_scheduler_update(vm, om, hw_if_index, queue_id, scheduler_profile_id);
+
+    ONP_REPLY_MACRO (VL_API_ONP_PKTIO_PORT_QUEUE_SET_SCHEDULER_REPLY, onp_pktio_port_queue_set_scheduler, );
+}
+
+static void
+vl_api_onp_pktio_scheduler_profile_add_del_t_handler(vl_api_onp_pktio_scheduler_profile_add_del_t* mp) {
+    int rv;
+    vlib_main_t* vm = vlib_get_main();
+    onp_main_t *om = onp_get_main ();
+
+    onp_pktio_scheduler_profile_t profile;
+    clib_memset(&profile, 0, sizeof(profile));
+
+    profile.id = ntohl(mp->profile_id);
+    profile.type = ntohl(mp->type);
+    profile.weight = ntohl(mp->weight);
+
+    profile.shaping_profile.tm_shaper_profile.pkt_mode = mp->pkt_mode;
+
+    profile.shaping_profile.tm_shaper_profile.commit_rate = clib_host_to_net_u64(mp->min_rate);
+    profile.shaping_profile.tm_shaper_profile.commit_sz = clib_host_to_net_u64(mp->min_burst);
+    profile.shaping_profile.tm_shaper_profile.peak_rate = clib_host_to_net_u64(mp->max_rate);
+    profile.shaping_profile.tm_shaper_profile.peak_sz = clib_host_to_net_u64(mp->max_burst);
+
+  if (profile.shaping_profile.tm_shaper_profile.commit_rate ||
+      profile.shaping_profile.tm_shaper_profile.commit_sz ||
+      profile.shaping_profile.tm_shaper_profile.peak_rate ||
+      profile.shaping_profile.tm_shaper_profile.peak_sz )
+  {
+      profile.shaping_flag = true;
+  }
+
+    rv = onp_pktio_scheduler_profile_add_del(vm, om, &profile, mp->is_add ? false : true);
+
+    ONP_REPLY_MACRO (VL_API_ONP_PKTIO_SCHEDULER_PROFILE_ADD_DEL_REPLY, onp_pktio_scheduler_profile_add_del, (
+        {
+            if (mp->is_add)
+                reply->profile_id = ntohl(profile.id);
+            else
+                reply->profile_id = ntohl(ONP_PKTIO_SCHEDULER_PROFILE_NONE);
+        }
+    ));
+}
+
 #include <onp/api/onp.api.c>
 
 static clib_error_t *

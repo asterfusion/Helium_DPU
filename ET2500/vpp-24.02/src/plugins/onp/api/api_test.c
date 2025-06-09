@@ -269,6 +269,71 @@ vl_api_onp_get_port_duplex_reply_t_handler(vl_api_onp_get_port_duplex_reply_t* m
   print(vam->ofp, "duplex %s", mp->duplex ? "enable" : "disable");
   vam->result_ready = 1;
 }
+
+static int
+api_onp_pktio_port_set_scheduler(vat_main_t* vam) {
+  vl_api_onp_pktio_port_set_scheduler_t* mp;
+  u32 msg_size = sizeof(*mp);
+  int ret;
+
+  vam->result_ready = 0;
+  mp = vl_msg_api_alloc_as_if_client(msg_size);
+
+  M(ONP_PKTIO_PORT_SET_SCHEDULER, mp);
+
+  /* send it... */
+  S(mp);
+
+  /* Wait for a reply... */
+  W(ret);
+  return ret;
+}
+
+static int
+api_onp_pktio_port_queue_set_scheduler(vat_main_t* vam) {
+  vl_api_onp_pktio_port_set_scheduler_t* mp;
+  u32 msg_size = sizeof(*mp);
+  int ret;
+
+  vam->result_ready = 0;
+  mp = vl_msg_api_alloc_as_if_client(msg_size);
+
+  M(ONP_PKTIO_PORT_QUEUE_SET_SCHEDULER, mp);
+
+  /* send it... */
+  S(mp);
+
+  /* Wait for a reply... */
+  W(ret);
+  return ret;
+}
+
+static int
+api_onp_pktio_scheduler_profile_add_del(vat_main_t* vam) {
+  vl_api_onp_pktio_port_set_scheduler_t* mp;
+  u32 msg_size = sizeof(*mp);
+  int ret;
+
+  vam->result_ready = 0;
+  mp = vl_msg_api_alloc_as_if_client(msg_size);
+
+  M(ONP_PKTIO_SCHEDULER_PROFILE_ADD_DEL, mp);
+
+  /* send it... */
+  S(mp);
+
+  /* Wait for a reply... */
+  W(ret);
+  return ret;
+}
+
+static void
+vl_api_onp_pktio_scheduler_profile_add_del_reply_t_handler(vl_api_onp_pktio_scheduler_profile_add_del_reply_t* mp) {
+  vat_main_t* vam = onp_test_main.vat_main;
+  print(vam->ofp, "profile %u", mp->profile_id);
+  vam->result_ready = 1;
+}
+
 #include <onp/api/onp.api_test.c>
 
 /*

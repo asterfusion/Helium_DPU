@@ -249,6 +249,9 @@ typedef struct
   /* Startup config */
   onp_config_main_t *onp_conf;
 
+  /* onp scheduler profile */
+  onp_pktio_scheduler_profile_t *scheduler_profile_pool;
+
   /* API message ID base */
   u16 onp_msg_id_base;
 
@@ -322,6 +325,26 @@ clib_error_t *onp_ipsec_reassembly_set (vlib_main_t *vm, u32 sa_index);
 clib_error_t *onp_uuid_parse (char *input, uuid_t uuid);
 
 format_function_t format_onp_sched_rx_trace;
+
+/* TM */
+int onp_pktio_scheduler_profile_add_del(
+        vlib_main_t *vm,
+        onp_main_t *om,
+        onp_pktio_scheduler_profile_t *profile,
+        bool is_delete);
+int onp_pktio_root_node_scheduler_shaping_update(
+        vlib_main_t *vm,
+        onp_main_t *om,
+        u32 sw_if_index,
+        u32 scheduler_profile_id,
+        bool force_update);
+int onp_pktio_mdq_node_scheduler_update(
+        vlib_main_t *vm,
+        onp_main_t *om,
+        u32 sw_if_index,
+        u32 qid,
+        u32 scheduler_profile_id);
+
 
 #endif /* included_onp_onp_h */
 

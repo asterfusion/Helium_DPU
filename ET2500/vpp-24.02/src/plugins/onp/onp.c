@@ -585,6 +585,8 @@ onp_plugin_init (vlib_main_t *vm)
   om->vnet_main = vnet_get_main ();
   om->onp_conf = &onp_config_main;
 
+  pool_alloc(om->scheduler_profile_pool, 512);
+
 #define _(idx, s, str, v)                                                     \
   om->onp_counters.s##_counters.name = str;                                   \
   om->onp_counters.s##_counters.stat_segment_name = "/onp/" str "_counters";  \
