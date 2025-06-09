@@ -304,12 +304,12 @@ set_int_l2_mode (vlib_main_t * vm, vnet_main_t * vnet_main,	/*           */
 	  bd_config->uu_fwd_sw_if_index = ~0;
 	  bd_config->feature_bitmap &= ~L2INPUT_FEAT_UU_FWD;
 	}
-
+#ifndef VPP_PLATFORM_ET2500
       /* Clear MACs learned on the interface */
-        // if ((config->feature_bitmap & L2INPUT_FEAT_LEARN) ||
-	//   (bd_config->feature_bitmap & L2INPUT_FEAT_LEARN))
-	// l2fib_flush_int_mac (vm, sw_if_index);
-
+       if ((config->feature_bitmap & L2INPUT_FEAT_LEARN) ||
+	          (bd_config->feature_bitmap & L2INPUT_FEAT_LEARN))
+	        l2fib_flush_int_mac (vm, sw_if_index);
+#endif
       bd_input_walk (config->bd_index, l2input_recache, NULL);
       l2_if_adjust--;
     }
