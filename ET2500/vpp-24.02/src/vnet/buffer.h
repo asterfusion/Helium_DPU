@@ -496,7 +496,10 @@ typedef struct
   } nat;
 
   union {
+  struct{
   u32 l2_rx_sw_if_index; /* store the orignal if index when bvi */
+  u32 tc_index; /* store the traffic class index*/
+  };
 
   u32 unused[8];
   };

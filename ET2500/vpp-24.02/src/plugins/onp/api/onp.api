@@ -170,6 +170,102 @@ define onp_get_port_duplex_reply
 };
 
 /**
+ * @brief Set port dscp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to set dscp map on
+ * @param[in] dscp              - dscp value
+ * @param[in] tc                - tc value
+ */
+autoreply define onp_set_port_dscp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u8 dscp;
+  u8 tc;
+};
+
+/**
+ * @brief Set port dot1p to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to set dot1p map on
+ * @param[in] dot1p             - dot1p value
+ * @param[in] tc                - tc value
+ */
+autoreply define onp_set_port_dot1p_tc_map
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u8 dot1p;
+  u8 tc;
+};
+
+/**
+ * @brief Set port tc to queue MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to set tc map on
+ * @param[in] tc                - tc value
+ * @param[in] queue             - queue value
+ */
+autoreply define onp_set_port_tc_queue_map
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u8 tc;
+  u8 queue;
+};
+
+/**
+ * @brief remove port dscp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to remove tc map on
+ */
+autoreply define onp_rm_port_dscp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+};
+
+/**
+ * @brief remove port dot1p to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to remove tc map on
+ */
+autoreply define onp_rm_port_dot1p_tc_map
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+};
+
+/**
+ * @brief remove port tc to queue MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to remove tc map on
+ */
+autoreply define onp_rm_port_tc_queue_map
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+};
+
+/**
  * @brief ONP hardware interface statistics structure
  * @param[in] sw_if_index       - index of the interface
  *

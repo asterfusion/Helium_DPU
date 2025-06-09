@@ -101,6 +101,8 @@ VLIB_NODE_FN (lip_punt_node)
 
 	  b0 = vlib_get_buffer (vm, bi0);
 
+	  //set max tc priority
+	  vnet_buffer2(b0)->tc_index = 7;
 	  sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
 	  lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0);
 	  if (PREDICT_FALSE (lipi0 == INDEX_INVALID))

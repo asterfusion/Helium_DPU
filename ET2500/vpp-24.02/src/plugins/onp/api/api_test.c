@@ -334,6 +334,109 @@ vl_api_onp_pktio_scheduler_profile_add_del_reply_t_handler(vl_api_onp_pktio_sche
   vam->result_ready = 1;
 }
 
+
+static int
+api_onp_set_port_dscp_tc_map(vat_main_t* vam)
+{
+  vl_api_onp_set_port_dscp_tc_map_t* mp;
+  u32 msg_size = sizeof(*mp);
+  int ret;
+
+  mp = vl_msg_api_alloc_as_if_client(msg_size);
+
+  M(ONP_SET_PORT_DSCP_TC_MAP, mp);
+
+  S(mp);
+
+  W(ret);
+  return ret;
+}
+
+static int
+api_onp_set_port_dot1p_tc_map(vat_main_t* vam)
+{
+  vl_api_onp_set_port_dot1p_tc_map_t* mp;
+  u32 msg_size = sizeof(*mp);
+  int ret;
+
+  mp = vl_msg_api_alloc_as_if_client(msg_size);
+
+  M(ONP_SET_PORT_DOT1P_TC_MAP, mp);
+
+  S(mp);
+
+  W(ret);
+  return ret;
+}
+
+static int
+api_onp_set_port_tc_queue_map(vat_main_t* vam)
+{
+  vl_api_onp_set_port_tc_queue_map_t* mp;
+  u32 msg_size = sizeof(*mp);
+  int ret;
+
+  mp = vl_msg_api_alloc_as_if_client(msg_size);
+
+  M(ONP_SET_PORT_TC_QUEUE_MAP, mp);
+
+  S(mp);
+
+  W(ret);
+  return ret;
+}
+
+static int
+api_onp_rm_port_dscp_tc_map(vat_main_t* vam)
+{
+  vl_api_onp_rm_port_dscp_tc_map_t* mp;
+  u32 msg_size = sizeof(*mp);
+  int ret;
+
+  mp = vl_msg_api_alloc_as_if_client(msg_size);
+
+  M(ONP_RM_PORT_DSCP_TC_MAP, mp);
+
+  S(mp);
+
+  W(ret);
+  return ret;
+}
+
+static int
+api_onp_rm_port_dot1p_tc_map(vat_main_t* vam)
+{
+  vl_api_onp_rm_port_dot1p_tc_map_t* mp;
+  u32 msg_size = sizeof(*mp);
+  int ret;
+
+  mp = vl_msg_api_alloc_as_if_client(msg_size);
+
+  M(ONP_RM_PORT_DOT1P_TC_MAP, mp);
+
+  S(mp);
+
+  W(ret);
+  return ret;
+}
+
+static int
+api_onp_rm_port_tc_queue_map(vat_main_t* vam)
+{
+  vl_api_onp_rm_port_tc_queue_map_t* mp;
+  u32 msg_size = sizeof(*mp);
+  int ret;
+
+  mp = vl_msg_api_alloc_as_if_client(msg_size);
+
+  M(ONP_RM_PORT_TC_QUEUE_MAP, mp);
+
+  S(mp);
+
+  W(ret);
+  return ret;
+}
+
 #include <onp/api/onp.api_test.c>
 
 /*

@@ -524,6 +524,7 @@ typedef enum vnet_hw_interface_flags_t_
   /* Hardware duplex state */
   VNET_HW_INTERFACE_FLAG_HALF_DUPLEX = (1 << 1),
   VNET_HW_INTERFACE_FLAG_FULL_DUPLEX = (1 << 2),
+  VNET_HW_INTERFACE_FLAG_USE_TC = (1 << 3),
 
   /* non-broadcast multiple access */
   VNET_HW_INTERFACE_FLAG_NBMA = (1 << 19),
@@ -750,6 +751,13 @@ typedef struct vnet_hw_interface_t
   i32 n_trace;
 
   u32 trace_classify_table_index;
+
+  /* Hash table for dscp to tc mapping. */
+  uword* dscp_to_tc;
+  /* Hash table for dot1p to tc mapping. */
+  uword* dot1p_to_tc;
+  /* Hash table for tc to queue mapping. */
+  uword* tc_to_queue;
 } vnet_hw_interface_t;
 
 STATIC_ASSERT_OFFSET_OF (vnet_hw_interface_t, cacheline1,

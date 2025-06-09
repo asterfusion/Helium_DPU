@@ -455,6 +455,110 @@ VLIB_CLI_COMMAND(set_onp_interface_link_info_command, static) = {
   .short_help = "get onp interface info <interface>",
   .function = get_onp_interface_link_info,
 };
+
+static clib_error_t*
+set_onp_port_dscp_tc_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+  u32 dscp, tc;
+
+  if (!unformat(input, "%d %d %U",&dscp, &tc, unformat_vnet_hw_interface,
+    vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_set(hi->dscp_to_tc, dscp, tc);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND(set_onp_port_dscp_tc_map_command, static) = {
+  .path = "set onp port dscp tc",
+  .short_help = "set onp port dscp tc <dscp> <tc> <interface>",
+  .function = set_onp_port_dscp_tc_map,
+};
+
+
+static clib_error_t*
+set_onp_port_dot1p_tc_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+  u32 dot1p, tc;
+
+  if (!unformat(input, "%d %d %U",&dot1p, &tc, unformat_vnet_hw_interface,
+    vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_set(hi->dot1p_to_tc, dot1p, tc);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND(set_onp_port_dot1p_tc_map_command, static) = {
+  .path = "set onp port dot1p tc",
+  .short_help = "set onp port dot1p tc <dot1p> <tc> <interface>",
+  .function = set_onp_port_dot1p_tc_map,
+};
+
+
+static clib_error_t*
+set_onp_port_tc_queue_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+  u32 queue, tc;
+
+  if (!unformat(input, "%d %d %U",&tc, &queue, unformat_vnet_hw_interface,
+    vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_set(hi->tc_to_queue, tc, queue);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND(set_onp_port_tc_queue_map_command, static) = {
+  .path = "set onp port tc queue",
+  .short_help = "set onp port tc queue <tc> <queue> <interface>",
+  .function = set_onp_port_tc_queue_map,
+};
+
+static clib_error_t*
+show_onp_port_tc_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+  u32 key, value;
+
+  if (!unformat(input, "%U",unformat_vnet_hw_interface,
+    vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_foreach(key, value, hi->tc_to_queue, ({
+  vlib_cli_output(vm, "%U tc_to_queue (%d):%d",
+      format_vnet_sw_if_index_name, vnm, hw_if_index,
+      key,value); }));
+  hash_foreach(key, value, hi->dscp_to_tc, ({
+  vlib_cli_output(vm, "%U dscp_to_tc (%d):%d",
+      format_vnet_sw_if_index_name, vnm, hw_if_index,
+      key,value); }));
+  hash_foreach(key, value, hi->dot1p_to_tc, ({
+  vlib_cli_output(vm, "%U dot1p_to_tc (%d):%d",
+      format_vnet_sw_if_index_name, vnm, hw_if_index,
+      key,value); }));
+  return error;
+}
+
+VLIB_CLI_COMMAND(show_onp_port_tc_map_command, static) = {
+  .path = "show onp port tc map",
+  .short_help = "show onp port tc map <interface>",
+  .function = show_onp_port_tc_map,
+};
 /*
  * fd.io coding-style-patch-verification: ON
  *
