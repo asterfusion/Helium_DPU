@@ -528,6 +528,72 @@ VLIB_CLI_COMMAND(set_onp_port_tc_queue_map_command, static) = {
 };
 
 static clib_error_t*
+rm_onp_port_dscp_tc_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+
+  if (!unformat(input, "%U", unformat_vnet_hw_interface,
+    vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_free(hi->dscp_to_tc);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND(rm_onp_port_dscp_tc_map_command, static) = {
+  .path = "rm onp port dscp tc",
+  .short_help = "rm onp port tc <interface>",
+  .function = rm_onp_port_dscp_tc_map,
+};
+
+static clib_error_t*
+rm_onp_port_dot1p_tc_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+
+  if (!unformat(input, "%U", unformat_vnet_hw_interface,
+    vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_free(hi->dot1p_to_tc);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND(rm_onp_port_dot1p_tc_map_command, static) = {
+  .path = "rm onp port dot1p tc",
+  .short_help = "rm onp port dot1p tc <interface>",
+  .function = rm_onp_port_dot1p_tc_map,
+};
+
+static clib_error_t*
+rm_onp_port_tc_queue_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+
+  if (!unformat(input, "%U", unformat_vnet_hw_interface,
+    vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_free(hi->tc_to_queue);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND(rm_onp_port_tc_queue_map_command, static) = {
+  .path = "rm onp port tc queue",
+  .short_help = "rm onp port tc queue <interface>",
+  .function = rm_onp_port_tc_queue_map,
+};
+
+static clib_error_t*
 show_onp_port_tc_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
   clib_error_t* error = 0;
   u32 hw_if_index;

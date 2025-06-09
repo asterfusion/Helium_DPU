@@ -1200,6 +1200,10 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
           sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
 
+          //set max tc priority
+          vnet_buffer2(b0)->tc_index = 7;
+          vnet_buffer2(b1)->tc_index = 7;
+
           vnet_feature_next (&next0, b0);
           vnet_feature_next (&next1, b1);
 
@@ -1297,6 +1301,9 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
           vnet_feature_next (&next0, b0);
 
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
+
+          //set max tc priority
+          vnet_buffer2(b0)->tc_index = 7;
 
 	      lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0); 
           if (lipi0 == INDEX_INVALID)

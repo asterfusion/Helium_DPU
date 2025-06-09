@@ -551,10 +551,10 @@ enqueue_to_tx_node (vlib_main_t *vm, vlib_node_runtime_t *node,
         q1 = p[1] ? hash_get(hi->tc_to_queue, *(u32*)p[1]) : 0;
         q2 = p[2] ? hash_get(hi->tc_to_queue, *(u32*)p[2]) : 0;
         q3 = p[3] ? hash_get(hi->tc_to_queue, *(u32*)p[3]) : 0;
-        qids[0] = q0 ? q0[0] : *(u32*)p[0];
-        qids[1] = q1 ? q1[0] : *(u32*)p[0];
-        qids[2] = q2 ? q2[0] : *(u32*)p[0];
-        qids[3] = q3 ? q3[0] : *(u32*)p[0];
+        qids[0] = q0 ? q0[0] % r->n_queues : (p[0] && *(u32*)p[0]) ? (*(u32*)p[0]) % r->n_queues : 0;
+        qids[1] = q1 ? q1[0] % r->n_queues : (p[1] && *(u32*)p[1]) ? (*(u32*)p[1]) % r->n_queues : 0;
+        qids[2] = q2 ? q2[0] % r->n_queues : (p[2] && *(u32*)p[2]) ? (*(u32*)p[2]) % r->n_queues : 0;
+        qids[3] = q3 ? q3[0] % r->n_queues : (p[3] && *(u32*)p[3]) ? (*(u32*)p[3]) % r->n_queues : 0;
       }
       else
       hash_func_with_mask (p, qids, n_vectors, r->lookup_table,
