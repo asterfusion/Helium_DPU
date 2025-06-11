@@ -405,6 +405,36 @@ hash_func_with_mask (void **p, u32 *hash, u32 n_packets, u32 *lookup_table,
 }
 
 static_always_inline void
+tc_func(void** p, u32* qids, u32 n_packets, u32 n_queues,
+  vnet_hw_interface_t* hi) {
+  u32 n_left_from = n_packets;
+
+  while (n_left_from >= 4) {
+    uword* q0, * q1, * q2, * q3;
+    q0 = p[0] ? hash_get(hi->tc_to_queue, *(u32*)p[0]) : 0;
+    q1 = p[1] ? hash_get(hi->tc_to_queue, *(u32*)p[1]) : 0;
+    q2 = p[2] ? hash_get(hi->tc_to_queue, *(u32*)p[2]) : 0;
+    q3 = p[3] ? hash_get(hi->tc_to_queue, *(u32*)p[3]) : 0;
+    qids[0] = q0 ? q0[0] % n_queues : (p[0] && *(u32*)p[0]) ? (*(u32*)p[0]) % n_queues : 0;
+    qids[1] = q1 ? q1[0] % n_queues : (p[1] && *(u32*)p[1]) ? (*(u32*)p[1]) % n_queues : 0;
+    qids[2] = q2 ? q2[0] % n_queues : (p[2] && *(u32*)p[2]) ? (*(u32*)p[2]) % n_queues : 0;
+    qids[3] = q3 ? q3[0] % n_queues : (p[3] && *(u32*)p[3]) ? (*(u32*)p[3]) % n_queues : 0;
+
+    qids += 4;
+    n_left_from -= 4;
+  }
+
+  while (n_left_from > 0) {
+    uword* q0;
+    q0 = p[0] ? hash_get(hi->tc_to_queue, *(u32*)p[0]) : 0;
+    qids[0] = q0 ? q0[0] % n_queues : (p[0] && *(u32*)p[0]) ? (*(u32*)p[0]) % n_queues : 0;
+
+    qids += 1;
+    n_left_from -= 1;
+  }
+}
+
+static_always_inline void
 store_tx_frame_scalar_data (vnet_hw_if_tx_frame_t *copy_frame,
 			    vnet_hw_if_tx_frame_t *tf)
 {
@@ -545,17 +575,8 @@ enqueue_to_tx_node (vlib_main_t *vm, vlib_node_runtime_t *node,
     {
       u32 qids[VLIB_FRAME_SIZE];
 
-      if (hi->flags & VNET_HW_INTERFACE_FLAG_USE_TC) {
-        uword* q0, *q1, *q2, *q3;
-        q0 = p[0] ? hash_get(hi->tc_to_queue, *(u32*)p[0]) : 0;
-        q1 = p[1] ? hash_get(hi->tc_to_queue, *(u32*)p[1]) : 0;
-        q2 = p[2] ? hash_get(hi->tc_to_queue, *(u32*)p[2]) : 0;
-        q3 = p[3] ? hash_get(hi->tc_to_queue, *(u32*)p[3]) : 0;
-        qids[0] = q0 ? q0[0] % r->n_queues : (p[0] && *(u32*)p[0]) ? (*(u32*)p[0]) % r->n_queues : 0;
-        qids[1] = q1 ? q1[0] % r->n_queues : (p[1] && *(u32*)p[1]) ? (*(u32*)p[1]) % r->n_queues : 0;
-        qids[2] = q2 ? q2[0] % r->n_queues : (p[2] && *(u32*)p[2]) ? (*(u32*)p[2]) % r->n_queues : 0;
-        qids[3] = q3 ? q3[0] % r->n_queues : (p[3] && *(u32*)p[3]) ? (*(u32*)p[3]) % r->n_queues : 0;
-      }
+      if (hi->flags & VNET_HW_INTERFACE_FLAG_USE_TC)
+        tc_func(p, qids, n_vectors, r->n_queues, hi);
       else
       hash_func_with_mask (p, qids, n_vectors, r->lookup_table,
 			   vec_len (r->lookup_table) - 1, hi->hf);
