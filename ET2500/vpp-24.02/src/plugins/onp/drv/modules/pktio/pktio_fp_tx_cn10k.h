@@ -94,14 +94,29 @@ cn10k_pktio_add_sg_desc (union nix_send_sg_s *sg, int n_segs,
     case 3:
       sg[0].seg3_size = seg3->current_length;
       sg[3].u = (u64) vlib_buffer_get_current (seg3);
+      if (!clib_atomic_bool_cmp_and_swap (&seg3->ref_count, 1, 1))
+      {
+          sg[0].i3 = 1;
+          clib_atomic_sub_fetch(&seg3->ref_count, 1);
+      }
       /* Fall through */
     case 2:
       sg[0].seg2_size = seg2->current_length;
       sg[2].u = (u64) vlib_buffer_get_current (seg2);
+      if (!clib_atomic_bool_cmp_and_swap (&seg2->ref_count, 1, 1))
+      {
+          sg[0].i2 = 1;
+          clib_atomic_sub_fetch(&seg2->ref_count, 1);
+      }
       /* Fall through */
     case 1:
       sg[0].seg1_size = seg1->current_length;
       sg[1].u = (u64) vlib_buffer_get_current (seg1);
+      if (!clib_atomic_bool_cmp_and_swap (&seg1->ref_count, 1, 1))
+      {
+          sg[0].i1 = 1;
+          clib_atomic_sub_fetch(&seg1->ref_count, 1);
+      }
       break;
     default:
       ASSERT (0);
