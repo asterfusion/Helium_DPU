@@ -282,6 +282,41 @@ define onp_pktio_scheduler_profile_add_del
   u64 max_burst;
 };
 
+define onp_pktio_tx_queue_stat_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u32 queue_id;
+};
+
+define onp_pktio_tx_queue_stat_details
+{
+  u32 context;
+  u64 tx_pkts;
+  u64 tx_octs;
+  u64 tx_drop_pkts;
+  u64 tx_drop_octs;
+};
+
+define onp_pktio_rx_queue_stat_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u32 queue_id;
+};
+
+define onp_pktio_rx_queue_stat_details
+{
+  u32 context;
+  u64 rx_pkts;
+  u64 rx_octs;
+  u64 rx_drop_pkts;
+  u64 rx_drop_octs;
+  u64 rx_error_pkts;
+};
+
 /*
  * Local Variables:
  * eval: (c-set-style "gnu")

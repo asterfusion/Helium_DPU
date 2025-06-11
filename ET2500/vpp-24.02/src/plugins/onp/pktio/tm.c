@@ -451,3 +451,57 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
 
     return 0;
 }
+
+void onp_pktio_get_tx_queue_stat(vlib_main_t *vm, onp_main_t *om,
+                                u32 sw_if_index, u32 qid,
+                                cnxk_pktio_queue_stats_t *qstats)
+{
+    vnet_hw_interface_t *hw = NULL;
+    onp_pktio_t *od = NULL;
+
+    hw = vnet_get_hw_interface_or_null (om->vnet_main, sw_if_index);
+
+    if (!hw) return;
+
+    od = onp_get_pktio (hw->dev_instance);
+
+    if (qid >= od->n_tx_q)
+    {
+        onp_pktio_warn("invaild qid id %u, tx queue num %u", qid, od->n_tx_q);
+        return;
+    }
+
+    if (cnxk_drv_pktio_queue_stats_get (vm, od->cnxk_pktio_index, qid, qstats, 0))
+    {
+        onp_pktio_warn("cnxk_drv_pktio_queue_stats_get sw_if_index %u tx_qid %u failed", sw_if_index, qid);
+	    return;
+    }
+    return;
+}
+
+void onp_pktio_get_rx_queue_stat(vlib_main_t *vm, onp_main_t *om,
+                                u32 sw_if_index, u32 qid,
+                                cnxk_pktio_queue_stats_t *qstats)
+{
+    vnet_hw_interface_t *hw = NULL;
+    onp_pktio_t *od = NULL;
+
+    hw = vnet_get_hw_interface_or_null (om->vnet_main, sw_if_index);
+
+    if (!hw) return;
+
+    od = onp_get_pktio (hw->dev_instance);
+
+    if (qid >= od->n_rx_q)
+    {
+        onp_pktio_warn("invaild qid id %u, rx queue num %u", qid, od->n_rx_q);
+        return;
+    }
+
+    if (cnxk_drv_pktio_queue_stats_get (vm, od->cnxk_pktio_index, qid, qstats, 1))
+    {
+        onp_pktio_warn("cnxk_drv_pktio_queue_stats_get sw_if_index %u rx_qid %u failed", sw_if_index, qid);
+	    return;
+    }
+    return;
+}
