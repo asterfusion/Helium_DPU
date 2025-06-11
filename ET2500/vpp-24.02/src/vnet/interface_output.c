@@ -411,14 +411,20 @@ tc_func(void** p, u32* qids, u32 n_packets, u32 n_queues,
 
   while (n_left_from >= 4) {
     uword* q0, * q1, * q2, * q3;
-    q0 = p[0] ? hash_get(hi->tc_to_queue, *(u32*)p[0]) : 0;
-    q1 = p[1] ? hash_get(hi->tc_to_queue, *(u32*)p[1]) : 0;
-    q2 = p[2] ? hash_get(hi->tc_to_queue, *(u32*)p[2]) : 0;
-    q3 = p[3] ? hash_get(hi->tc_to_queue, *(u32*)p[3]) : 0;
-    qids[0] = q0 ? q0[0] % n_queues : (p[0] && *(u32*)p[0]) ? (*(u32*)p[0]) % n_queues : 0;
-    qids[1] = q1 ? q1[0] % n_queues : (p[1] && *(u32*)p[1]) ? (*(u32*)p[1]) % n_queues : 0;
-    qids[2] = q2 ? q2[0] % n_queues : (p[2] && *(u32*)p[2]) ? (*(u32*)p[2]) % n_queues : 0;
-    qids[3] = q3 ? q3[0] % n_queues : (p[3] && *(u32*)p[3]) ? (*(u32*)p[3]) % n_queues : 0;
+    u32 tc0 = *(u32 *)p[0];
+    u32 tc1 = *(u32 *)p[1];
+    u32 tc2 = *(u32 *)p[2];
+    u32 tc3 = *(u32 *)p[3];
+
+    q0 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc0) : NULL;
+    q1 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc1) : NULL;
+    q2 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc2) : NULL;
+    q3 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc3) : NULL;
+
+    qids[0] = (q0 ? q0[0] : tc0) % n_queues;
+    qids[1] = (q1 ? q1[0] : tc1) % n_queues;
+    qids[2] = (q2 ? q2[0] : tc2) % n_queues;
+    qids[3] = (q3 ? q3[0] : tc3) % n_queues;
 
     qids += 4;
     n_left_from -= 4;
@@ -426,8 +432,10 @@ tc_func(void** p, u32* qids, u32 n_packets, u32 n_queues,
 
   while (n_left_from > 0) {
     uword* q0;
-    q0 = p[0] ? hash_get(hi->tc_to_queue, *(u32*)p[0]) : 0;
-    qids[0] = q0 ? q0[0] % n_queues : (p[0] && *(u32*)p[0]) ? (*(u32*)p[0]) % n_queues : 0;
+    u32 tc0 = *(u32 *)p[0];
+
+    q0 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc0) : NULL;
+    qids[0] = (q0 ? q0[0] : tc0) % n_queues;
 
     qids += 1;
     n_left_from -= 1;

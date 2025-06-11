@@ -46,6 +46,52 @@ format_qos_record_trace (u8 * s, va_list * args)
   return s;
 }
 
+static inline void
+qos_record_tc(vnet_hw_interface_t *hi, vlib_buffer_t *b0)
+{
+  qos_bits_t qos0;
+  ethernet_header_t *eh;
+  u16 ethertype;
+  u8 *l3;
+
+  eh = (ethernet_header_t *)vlib_buffer_get_current(b0);
+  ethertype = clib_net_to_host_u16(eh->type);
+  l3 = (u8 *) (eh + 1);
+
+  if (ethernet_frame_is_tagged(ethertype))
+  {
+    ethernet_vlan_header_t *vlan0 = (ethernet_vlan_header_t *) l3;
+    if (!hi->dscp_to_tc && hi->dot1p_to_tc)
+    {
+      qos0 = ethernet_vlan_header_get_priority_net_order(vlan0) >> 1;
+      uword *t0 = hash_get(hi->dot1p_to_tc, qos0);
+      vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
+      return;
+    }
+
+    ethertype = clib_net_to_host_u16(vlan0->type);
+    l3 += sizeof(ethernet_vlan_header_t);
+  }
+
+  if (PREDICT_TRUE(ethertype == ETHERNET_TYPE_IP4))
+  {
+    ip4_header_t *ip4h = (ip4_header_t *)l3;
+    qos0 = ip4h->tos;
+    uword *t0 = hash_get(hi->dscp_to_tc, qos0);
+    vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
+  }
+  else
+  {
+    if (PREDICT_TRUE(ethertype == ETHERNET_TYPE_IP6))
+    {
+      ip6_header_t *ip6h = (ip6_header_t *)l3;
+      qos0 = ip6_traffic_class_network_order(ip6h);
+      uword *t0 = hash_get(hi->dscp_to_tc, qos0);
+      vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
+    }
+  }
+}
+
 static inline uword
 qos_record_inline (vlib_main_t * vm,
 		   vlib_node_runtime_t * node,
@@ -89,6 +135,9 @@ qos_record_inline (vlib_main_t * vm,
     vnm = vnet_get_main ();
     sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
     hi = vnet_get_sup_hw_interface(vnm, sw_if_index0);
+
+    qos_record_tc(hi,b0);
+
 	  if (is_l2)
 	    {
 	      l2_len = vnet_buffer (b0)->l2.l2_len;
@@ -114,15 +163,11 @@ qos_record_inline (vlib_main_t * vm,
 	    {
 	      ip6_0 = vlib_buffer_get_current (b0);
 	      qos0 = ip6_traffic_class_network_order (ip6_0);
-        uword* t0 = hash_get(hi->dscp_to_tc, qos0);
-        vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
 	    }
 	  else if (DPO_PROTO_IP4 == dproto)
 	    {
 	      ip4_0 = vlib_buffer_get_current (b0);
 	      qos0 = ip4_0->tos;
-        uword* t0 = hash_get(hi->dscp_to_tc, qos0);
-        vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
 	    }
 	  else if (DPO_PROTO_ETHERNET == dproto)
 	    {
@@ -132,8 +177,6 @@ qos_record_inline (vlib_main_t * vm,
 		       sizeof (ethernet_vlan_header_t));
 
 	      qos0 = ethernet_vlan_header_get_priority_net_order (vlan0);
-        uword* t0 = hash_get(hi->dot1p_to_tc, qos0);
-        vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
 	    }
 	  else if (DPO_PROTO_MPLS)
 	    {
