@@ -615,7 +615,8 @@ onp_api_init (vlib_main_t *vm)
   onp_base_msg_id = setup_message_id_table ();
 
   vl_api_set_msg_thread_safe(am, onp_base_msg_id + VL_API_ONP_INTERFACE_STATS, 1);
-  vl_api_set_msg_thread_safe(am, onp_base_msg_id + VL_API_ONP_INTERFACE_STATS_REPLY, 1);
+  vl_api_set_msg_thread_safe(am, onp_base_msg_id + VL_API_ONP_PKTIO_TX_QUEUE_STAT_DUMP, 1);
+  vl_api_set_msg_thread_safe(am, onp_base_msg_id + VL_API_ONP_PKTIO_RX_QUEUE_STAT_DUMP, 1);
   return NULL;
 }
 
