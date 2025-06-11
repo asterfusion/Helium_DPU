@@ -37,7 +37,20 @@ cnxk_pktio_get_aura_handle (vlib_main_t *vm, cnxk_per_thread_data_t *ptd,
   if (PREDICT_TRUE (*cached_bp_index == b->buffer_pool_index))
     {
       aura_handle = *cached_aura;
-      *refill_counter += n_segs;
+      if (PREDICT_TRUE (n_segs == 1))
+      {
+          *refill_counter += n_segs;
+          return aura_handle;
+      }
+      (*refill_counter)++;
+      do
+      {
+          b = vlib_get_buffer (vm, b->next_buffer);
+          if (clib_atomic_bool_cmp_and_swap (&b->ref_count, 1, 1))
+              (*refill_counter)++;
+
+      }
+      while (b->flags & VLIB_BUFFER_NEXT_PRESENT);
     }
   else
     {
@@ -46,7 +59,19 @@ cnxk_pktio_get_aura_handle (vlib_main_t *vm, cnxk_per_thread_data_t *ptd,
 					 *cached_bp_index);
       *cached_aura = aura_handle;
       *cached_bp_index = b->buffer_pool_index;
-      *refill_counter = n_segs;
+      if (PREDICT_TRUE (n_segs == 1))
+      {
+          *refill_counter = n_segs;
+          return aura_handle;
+      }
+      (*refill_counter) = 1;
+      do
+      {
+          b = vlib_get_buffer (vm, b->next_buffer);
+          if (clib_atomic_bool_cmp_and_swap (&b->ref_count, 1, 1))
+              (*refill_counter)++;
+      }
+      while (b->flags & VLIB_BUFFER_NEXT_PRESENT);
     }
   return aura_handle;
 }

@@ -1241,8 +1241,7 @@ vlib_buffer_clone_256 (vlib_main_t * vm, u32 src_buffer, u32 * buffers,
   ASSERT ((offset + head_end_offset) <
 	  vlib_buffer_get_default_data_size (vm));
 
-  //if (s->current_length <= head_end_offset + CLIB_CACHE_LINE_BYTES * 2)
-    if(1)
+  if (s->current_length <= head_end_offset + CLIB_CACHE_LINE_BYTES * 2)
     {
       buffers[0] = src_buffer;
       if (offset)
