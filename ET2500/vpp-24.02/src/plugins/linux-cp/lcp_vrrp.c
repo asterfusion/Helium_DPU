@@ -17,6 +17,7 @@
 #include <vnet/feature/feature.h>
 #include <vppinfra/error.h>
 #include <linux-cp/lcp.api_enum.h>
+#include <plugins/linux-cp/lcp_interface.h>
 
 #define foreach_lcp_vrrp                                                       \
   _ (PUNT, "linux-cp-punt")                                                   \
@@ -92,8 +93,8 @@ vrrp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
 
           //set max tc priority
-          vnet_buffer2(b0)->tc_index = 7;
-          vnet_buffer2(b1)->tc_index = 7;
+          lcp_set_max_tc(b0);
+          lcp_set_max_tc(b1);
 
           if (is_l2_path)
           {
@@ -180,7 +181,7 @@ vrrp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
 
           //set max tc priority
-          vnet_buffer2(b0)->tc_index = 7;
+          lcp_set_max_tc(b0);
 
           if (is_l2_path)
           {
@@ -279,8 +280,8 @@ vrrp_ip6_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
 
           //set max tc priority
-          vnet_buffer2(b0)->tc_index = 7;
-          vnet_buffer2(b1)->tc_index = 7;
+          lcp_set_max_tc(b0);
+          lcp_set_max_tc(b1);
 
           if (is_l2_path)
           {
@@ -367,7 +368,7 @@ vrrp_ip6_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
 
           //set max tc priority
-          vnet_buffer2(b0)->tc_index = 7;
+          lcp_set_max_tc(b0);
 
           if (is_l2_path)
           {

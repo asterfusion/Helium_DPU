@@ -16,6 +16,7 @@
 #include <vnet/feature/feature.h>
 #include <vppinfra/error.h>
 #include <linux-cp/lcp.api_enum.h>
+#include <plugins/linux-cp/lcp_interface.h>
 
 // 定义 BFD 相关的 UDP 端口号
 #define UDP_DST_PORT_BFD_CONTROL 3784
@@ -98,8 +99,8 @@ lcp_bfd_phy_node_inline (vlib_main_t * vm,
       sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
 
       //set max tc priority
-      vnet_buffer2(b0)->tc_index = 7;
-      vnet_buffer2(b1)->tc_index = 7;
+      lcp_set_max_tc(b0);
+      lcp_set_max_tc(b1);
 
       if (is_ipv6)
       {
@@ -209,7 +210,7 @@ lcp_bfd_phy_node_inline (vlib_main_t * vm,
       sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
 
       //set max tc priority
-      vnet_buffer2(b0)->tc_index = 7;
+      lcp_set_max_tc(b0);
 
       if (is_ipv6)
       {

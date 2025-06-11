@@ -40,6 +40,8 @@ onp_pktio_link_state_update (onp_pktio_t *od)
   if (link_info.is_up)
     flags |= VNET_HW_INTERFACE_FLAG_LINK_UP;
 
+  flags |= VNET_HW_INTERFACE_FLAG_USE_TC;
+
   vnet_hw_interface_set_link_speed (vnm, od->hw_if_index,
 				    /* Convert to Kbps */
 				    link_info.speed * 1000);
