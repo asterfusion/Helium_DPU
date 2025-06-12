@@ -639,6 +639,8 @@ vl_api_onp_traffic_class_t_handler(vl_api_onp_traffic_class_t *mp)
 
   ONP_REPLY_MACRO(VL_API_ONP_TRAFFIC_CLASS_REPLY, onp_traffic_class, );
 }
+
+static void
 send_onp_pktio_tx_queue_stat_detail (vl_api_registration_t * reg,
                                      u32 context,
                                      u32 sw_if_index,
