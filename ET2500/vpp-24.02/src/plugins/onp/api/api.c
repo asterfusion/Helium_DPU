@@ -516,6 +516,94 @@ vl_api_onp_pktio_scheduler_profile_add_del_t_handler(vl_api_onp_pktio_scheduler_
     ));
 }
 
+static void
+send_onp_pktio_tx_queue_stat_detail (vl_api_registration_t * reg,
+                                     u32 context,
+                                     u32 sw_if_index,
+                                     u32 qid)
+{
+    cnxk_pktio_queue_stats_t qstats;
+
+    vlib_main_t* vm = vlib_get_main();
+    onp_main_t *om = onp_get_main ();
+
+    vl_api_onp_pktio_tx_queue_stat_details_t *mp;
+
+    mp = vl_msg_api_alloc (sizeof (*mp));
+    clib_memset (mp, 0, sizeof (*mp));
+    mp->_vl_msg_id = ntohs (VL_API_ONP_PKTIO_TX_QUEUE_STAT_DETAILS + onp_base_msg_id);
+
+    clib_memset(&qstats, 0, sizeof (qstats));
+    onp_pktio_get_tx_queue_stat(vm, om, sw_if_index, qid, &qstats);
+
+    /* fill in the message */
+    mp->context = context;
+    mp->tx_pkts = clib_host_to_net_u64 (qstats.tx_pkts);
+    mp->tx_octs = clib_host_to_net_u64 (qstats.tx_octs);
+    mp->tx_drop_pkts = clib_host_to_net_u64 (qstats.tx_drop_pkts);
+    mp->tx_drop_octs = clib_host_to_net_u64 (qstats.tx_drop_octs);
+
+    vl_api_send_msg (reg, (u8 *) mp);
+}
+
+static void
+vl_api_onp_pktio_tx_queue_stat_dump_t_handler (vl_api_onp_pktio_tx_queue_stat_dump_t * mp)
+{
+    vl_api_registration_t *reg;
+
+    reg = vl_api_client_index_to_registration (mp->client_index);
+    if (!reg)
+        return;
+
+    send_onp_pktio_tx_queue_stat_detail(reg, mp->context, htonl(mp->sw_if_index), htonl(mp->queue_id));
+
+    return;
+}
+
+static void
+send_onp_pktio_rx_queue_stat_detail (vl_api_registration_t * reg,
+                                     u32 context,
+                                     u32 sw_if_index,
+                                     u32 qid)
+{
+    cnxk_pktio_queue_stats_t qstats;
+
+    vlib_main_t* vm = vlib_get_main();
+    onp_main_t *om = onp_get_main ();
+
+    vl_api_onp_pktio_rx_queue_stat_details_t *mp;
+    mp = vl_msg_api_alloc (sizeof (*mp));
+    clib_memset (mp, 0, sizeof (*mp));
+    mp->_vl_msg_id = ntohs (VL_API_ONP_PKTIO_RX_QUEUE_STAT_DETAILS + onp_base_msg_id);
+
+    clib_memset(&qstats, 0, sizeof (qstats));
+    onp_pktio_get_rx_queue_stat(vm, om, sw_if_index, qid, &qstats);
+
+    /* fill in the message */
+    mp->context = context;
+    mp->rx_pkts = clib_host_to_net_u64 (qstats.rx_pkts);
+    mp->rx_octs = clib_host_to_net_u64 (qstats.rx_octs);
+    mp->rx_drop_pkts = clib_host_to_net_u64 (qstats.rx_drop_pkts);
+    mp->rx_drop_octs = clib_host_to_net_u64 (qstats.rx_drop_octs);
+    mp->rx_error_pkts = clib_host_to_net_u64 (qstats.rx_error_pkts);
+
+    vl_api_send_msg (reg, (u8 *) mp);
+}
+
+static void
+vl_api_onp_pktio_rx_queue_stat_dump_t_handler (vl_api_onp_pktio_rx_queue_stat_dump_t * mp)
+{
+    vl_api_registration_t *reg;
+
+    reg = vl_api_client_index_to_registration (mp->client_index);
+    if (!reg)
+        return;
+
+    send_onp_pktio_rx_queue_stat_detail(reg, mp->context, htonl(mp->sw_if_index), htonl(mp->queue_id));
+
+    return;
+}
+
 #include <onp/api/onp.api.c>
 
 static clib_error_t *
@@ -527,7 +615,8 @@ onp_api_init (vlib_main_t *vm)
   onp_base_msg_id = setup_message_id_table ();
 
   vl_api_set_msg_thread_safe(am, onp_base_msg_id + VL_API_ONP_INTERFACE_STATS, 1);
-  vl_api_set_msg_thread_safe(am, onp_base_msg_id + VL_API_ONP_INTERFACE_STATS_REPLY, 1);
+  vl_api_set_msg_thread_safe(am, onp_base_msg_id + VL_API_ONP_PKTIO_TX_QUEUE_STAT_DUMP, 1);
+  vl_api_set_msg_thread_safe(am, onp_base_msg_id + VL_API_ONP_PKTIO_RX_QUEUE_STAT_DUMP, 1);
   return NULL;
 }
 
