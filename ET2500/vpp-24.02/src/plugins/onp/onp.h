@@ -344,6 +344,18 @@ int onp_pktio_mdq_node_scheduler_update(
         u32 sw_if_index,
         u32 qid,
         u32 scheduler_profile_id);
+void onp_pktio_get_tx_queue_stat(
+        vlib_main_t *vm,
+        onp_main_t *om,
+        u32 sw_if_index,
+        u32 qid,
+        cnxk_pktio_queue_stats_t *qstats);
+void onp_pktio_get_rx_queue_stat(
+        vlib_main_t *vm,
+        onp_main_t *om,
+        u32 sw_if_index,
+        u32 qid,
+        cnxk_pktio_queue_stats_t *qstats);
 
 
 #endif /* included_onp_onp_h */

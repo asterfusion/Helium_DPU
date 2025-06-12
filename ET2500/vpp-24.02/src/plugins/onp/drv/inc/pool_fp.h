@@ -99,7 +99,7 @@ cnxk_pktpool_deplete (vlib_main_t *vm, vlib_buffer_pool_t *bp,
   vlib_get_buffer_indices_with_offset (vm, (void **) buffers, bi,
 				       n_buffers_to_deplete,
 				       sizeof (cnxk_pktio_meta_t));
-  vlib_buffer_free (vm, bi, n_buffers_to_deplete);
+  vlib_buffer_free_no_next (vm, bi, n_buffers_to_deplete);
 
   return n_buffers_to_deplete;
 }

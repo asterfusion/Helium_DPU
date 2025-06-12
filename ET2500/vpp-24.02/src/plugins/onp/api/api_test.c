@@ -454,6 +454,67 @@ api_onp_traffic_class(vat_main_t* vam)
   return ret;
 }
 
+static int
+api_onp_pktio_tx_queue_stat_dump (vat_main_t *vam)
+{
+  vl_api_onp_pktio_tx_queue_stat_dump_t *mp;
+  u32 msg_size = sizeof (*mp);
+  int ret;
+
+  vam->result_ready = 0;
+  mp = vl_msg_api_alloc_as_if_client (msg_size);
+
+  M (ONP_PKTIO_TX_QUEUE_STAT_DUMP, mp);
+
+  /* send it... */
+  S (mp);
+
+  /* Wait for a reply... */
+  W (ret);
+  return ret;
+}
+
+static void
+vl_api_onp_pktio_tx_queue_stat_details_t_handler(vl_api_onp_pktio_tx_queue_stat_details_t* mp) {
+  vat_main_t* vam = onp_test_main.vat_main;
+  print(vam->ofp, "tx_pkts:      %lu ", clib_net_to_host_u32(mp->tx_pkts));
+  print(vam->ofp, "tx_octs:      %lu ", clib_net_to_host_u32(mp->tx_octs));
+  print(vam->ofp, "tx_drop_pkts: %lu ", clib_net_to_host_u32(mp->tx_drop_pkts));
+  print(vam->ofp, "tx_drop_octs: %lu ", clib_net_to_host_u32(mp->tx_drop_octs));
+  vam->result_ready = 1;
+}
+
+static int
+api_onp_pktio_rx_queue_stat_dump (vat_main_t *vam)
+{
+  vl_api_onp_pktio_rx_queue_stat_dump_t *mp;
+  u32 msg_size = sizeof (*mp);
+  int ret;
+
+  vam->result_ready = 0;
+  mp = vl_msg_api_alloc_as_if_client (msg_size);
+
+  M (ONP_PKTIO_RX_QUEUE_STAT_DUMP, mp);
+
+  /* send it... */
+  S (mp);
+
+  /* Wait for a reply... */
+  W (ret);
+  return ret;
+}
+
+static void
+vl_api_onp_pktio_rx_queue_stat_details_t_handler(vl_api_onp_pktio_rx_queue_stat_details_t* mp) {
+  vat_main_t* vam = onp_test_main.vat_main;
+  print(vam->ofp, "rx_pkts:       %lu ", clib_net_to_host_u32(mp->rx_pkts));
+  print(vam->ofp, "rx_octs:       %lu ", clib_net_to_host_u32(mp->rx_octs));
+  print(vam->ofp, "rx_drop_pkts:  %lu ", clib_net_to_host_u32(mp->rx_drop_pkts));
+  print(vam->ofp, "rx_drop_octs:  %lu ", clib_net_to_host_u32(mp->rx_drop_octs));
+  print(vam->ofp, "rx_error_pkts: %lu ", clib_net_to_host_u32(mp->rx_error_pkts));
+  vam->result_ready = 1;
+}
+
 #include <onp/api/onp.api_test.c>
 
 /*
