@@ -68,10 +68,16 @@ enum acl_action_e {
   ACL_ACTION_PERMIT,
   ACL_ACTION_PERMIT_REFLECT,
   ACL_ACTION_PERMIT_ALSO_EGRESS,
-  ACL_ACTION_NO_NAT,
   ACL_ACTION_PUNT, //add for punt to cpu/tap port
-  ACL_ACTION_POLICER,
   ACL_N_ACTIONS
+};
+
+/* bitmap position */
+enum acl_action_expand_e {
+  ACL_ACTION_EXPAND_NO_NAT,
+  ACL_ACTION_EXPAND_POLICER,
+  ACL_ACTION_EXPAND_SET_TC,
+  ACL_N_ACTIONS_EXPAND = 64,
 };
 
 typedef struct
