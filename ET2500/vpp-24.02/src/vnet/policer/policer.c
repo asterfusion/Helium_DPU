@@ -1066,7 +1066,32 @@ policer_init (vlib_main_t * vm)
 
 VLIB_INIT_FUNCTION (policer_init);
 
+static clib_error_t *
+policer_check_sw_interface_add_del(vnet_main_t* vnm, u32 sw_if_index, u32 is_add) {
+  vnet_policer_main_t* pm = &vnet_policer_main;
 
+  vnet_sw_interface_t* sw = NULL;
+  u32 sup_sw_if_index;
+  u32 policer_index;
+  vlib_dir_t dir = VLIB_TX;
+
+  sw = vnet_get_sw_interface(pm->vnet_main, sw_if_index);
+
+  sup_sw_if_index = sw->sup_sw_if_index;
+
+  if (sup_sw_if_index == sw_if_index) {
+    return 0;
+  }
+
+  policer_index = pm->policer_index_by_sw_if_index[dir][sup_sw_if_index];
+
+  if (policer_index != UINT32_MAX) {
+    policer_input(policer_index, sw_if_index, dir, is_add);
+  }
+
+  return 0;
+}
+VNET_SW_INTERFACE_ADD_DEL_FUNCTION(policer_check_sw_interface_add_del);
 
 /*
  * fd.io coding-style-patch-verification: ON
