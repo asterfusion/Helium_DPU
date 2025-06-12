@@ -625,6 +625,59 @@ VLIB_CLI_COMMAND(show_onp_port_tc_map_command, static) = {
   .short_help = "show onp port tc map <interface>",
   .function = show_onp_port_tc_map,
 };
+
+static clib_error_t *
+set_onp_traffic_class(vlib_main_t *vm, unformat_input_t *input, vlib_cli_command_t *cmd)
+{
+  clib_error_t *error = 0;
+  u32 hw_if_index = UINT32_MAX;
+  vnet_main_t *vnm = vnet_get_main();
+  u8 enable_disable = 0;
+  u32 flags = 0;
+  unformat_input_t _line_input, *line_input = &_line_input;
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input(line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "%U", unformat_vnet_hw_interface, vnm,
+                 &hw_if_index))
+      ;
+    else if (unformat(line_input, "enable"))
+      enable_disable = 1;
+    else if (unformat(line_input, "disable"))
+      enable_disable = 0;
+    else
+    {
+      error = clib_error_return(0, "unknown input '%U'",
+                                format_unformat_error, line_input);
+      goto done;
+    }
+  }
+
+  if (enable_disable)
+  {
+    flags |= VNET_HW_INTERFACE_FLAG_USE_TC;
+  }
+  else
+  {
+    flags = 0;
+  }
+
+  vnet_hw_interface_set_tc_flags(vnm, hw_if_index, flags);
+
+done:
+  unformat_free(line_input);
+  return error;
+}
+
+VLIB_CLI_COMMAND(set_onp_traffic_command_command, static) = {
+  .path = "set onp traffic",
+  .short_help = "set onp traffic <interface> [enable|disable]",
+  .function = set_onp_traffic_class,
+};
+
 /*
  * fd.io coding-style-patch-verification: ON
  *

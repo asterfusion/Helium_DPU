@@ -615,6 +615,31 @@ vl_api_onp_pktio_scheduler_profile_add_del_t_handler(vl_api_onp_pktio_scheduler_
     ));
 }
 
+static void
+vl_api_onp_traffic_class_t_handler(vl_api_onp_traffic_class_t *mp)
+{
+  int rv = 0;
+  u32 hw_if_index = UINT32_MAX;
+  vnet_main_t *vnm = vnet_get_main();
+  u32 flags = 0;
+
+  bool enable = mp->enable;
+  hw_if_index = ntohl(mp->sw_if_index);
+
+  if (enable)
+  {
+    flags |= VNET_HW_INTERFACE_FLAG_USE_TC;
+  }
+  else
+  {
+    flags = 0;
+  }
+
+  vnet_hw_interface_set_tc_flags(vnm, hw_if_index, flags);
+
+  ONP_REPLY_MACRO(VL_API_ONP_TRAFFIC_CLASS_REPLY, onp_traffic_class, );
+}
+
 #include <onp/api/onp.api.c>
 
 static clib_error_t *

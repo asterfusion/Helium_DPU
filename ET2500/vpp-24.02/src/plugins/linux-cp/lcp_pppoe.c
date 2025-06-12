@@ -1200,9 +1200,6 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
           sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
 
-          //set max tc priority
-          lcp_set_max_tc(b0);
-          lcp_set_max_tc(b1);
 
           vnet_feature_next (&next0, b0);
           vnet_feature_next (&next1, b1);
@@ -1214,6 +1211,9 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               if (lipi0 != INDEX_INVALID)
               {
                   is_host0 = 1;
+                  //set max tc priority
+                  lcp_set_max_tc(b0);
+                  lcp_set_max_tc(b1);
               }
           }
           lip0 = lcp_itf_pair_get (lipi0);
@@ -1302,8 +1302,6 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
 
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
 
-          //set max tc priority
-          lcp_set_max_tc(b0);
 
 	      lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0); 
           if (lipi0 == INDEX_INVALID)
@@ -1312,6 +1310,8 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               if (lipi0 != INDEX_INVALID)
               {
                   is_host0 = 1;
+                  //set max tc priority
+                  lcp_set_max_tc(b0);
               }
           }
           lip0 = lcp_itf_pair_get (lipi0);

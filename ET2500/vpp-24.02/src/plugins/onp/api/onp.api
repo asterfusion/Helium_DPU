@@ -378,6 +378,22 @@ define onp_pktio_scheduler_profile_add_del
   u64 max_burst;
 };
 
+/**
+ * @brief enable the scheduler profile
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] sw_if_index       - index of the interface to set port duplex on
+ * @param[in] enable            - whether to enable or disable onp_traffic_class
+ */
+autoreply define onp_traffic_class
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool enable;
+};
+
 /*
  * Local Variables:
  * eval: (c-set-style "gnu")

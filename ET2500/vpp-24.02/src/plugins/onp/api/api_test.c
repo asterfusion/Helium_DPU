@@ -437,6 +437,23 @@ api_onp_rm_port_tc_queue_map(vat_main_t* vam)
   return ret;
 }
 
+static int
+api_onp_traffic_class(vat_main_t* vam)
+{
+  vl_api_onp_traffic_class_t* mp;
+  u32 msg_size = sizeof(*mp);
+  int ret;
+
+  mp = vl_msg_api_alloc_as_if_client(msg_size);
+
+  M(ONP_TRAFFIC_CLASS, mp);
+
+  S(mp);
+
+  W(ret);
+  return ret;
+}
+
 #include <onp/api/onp.api_test.c>
 
 /*

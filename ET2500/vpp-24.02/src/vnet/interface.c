@@ -303,6 +303,27 @@ call_sw_interface_add_del_callbacks (vnet_main_t * vnm, u32 sw_if_index,
     (vnm, sw_if_index, is_create, vnm->sw_interface_add_del_functions);
 }
 
+clib_error_t *
+vnet_hw_interface_set_tc_flags (vnet_main_t * vnm, u32 hw_if_index,
+				    vnet_hw_interface_flags_t flags)
+{
+  vnet_hw_interface_t *hi = vnet_get_hw_interface (vnm, hw_if_index);
+  u32 mask;
+  clib_error_t *error = 0;
+
+  mask = VNET_HW_INTERFACE_FLAG_USE_TC;
+  flags &= mask;
+  if ((hi->flags & mask) == flags)
+    goto done;
+  hi->flags &= ~mask;
+  hi->flags |= flags;
+
+  done:
+  if (error)
+    log_err ("hw_set_flags_helper: %U", format_clib_error, error);
+  return error;
+}
+
 static clib_error_t *
 vnet_hw_interface_set_flags_helper (vnet_main_t * vnm, u32 hw_if_index,
 				    vnet_hw_interface_flags_t flags,
@@ -318,7 +339,7 @@ vnet_hw_interface_set_flags_helper (vnet_main_t * vnm, u32 hw_if_index,
     (helper_flags & VNET_INTERFACE_SET_FLAGS_HELPER_IS_CREATE) != 0;
 
   mask =
-    (VNET_HW_INTERFACE_FLAG_LINK_UP | VNET_HW_INTERFACE_FLAG_DUPLEX_MASK | VNET_HW_INTERFACE_FLAG_USE_TC);
+    (VNET_HW_INTERFACE_FLAG_LINK_UP | VNET_HW_INTERFACE_FLAG_DUPLEX_MASK);
   flags &= mask;
 
   /* Call hardware interface add/del callbacks. */

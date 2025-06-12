@@ -93,9 +93,6 @@ VLIB_NODE_FN (lcp_lldp_punt_node) (vlib_main_t * vm,
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
           sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
 
-          //set max tc priority
-          lcp_set_max_tc(b0);
-          lcp_set_max_tc(b1);
 
           //vnet_feature_next (&next0, b0);
           //vnet_feature_next (&next1, b1);
@@ -117,6 +114,9 @@ VLIB_NODE_FN (lcp_lldp_punt_node) (vlib_main_t * vm,
               if (lipi0 != INDEX_INVALID)
               {
                   is_host0 = 1;
+                  //set max tc priority
+                  lcp_set_max_tc(b0);
+                  lcp_set_max_tc(b1);
               }
           }
           lip0 = lcp_itf_pair_get (lipi0);
@@ -205,8 +205,6 @@ VLIB_NODE_FN (lcp_lldp_punt_node) (vlib_main_t * vm,
 
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
 
-          //set max tc priority
-          lcp_set_max_tc(b0);
 
           if (vnet_buffer2(b0)->l2_rx_sw_if_index > 0)
           {
@@ -222,6 +220,8 @@ VLIB_NODE_FN (lcp_lldp_punt_node) (vlib_main_t * vm,
               if (lipi0 != INDEX_INVALID)
               {
                   is_host0 = 1;
+                  //set max tc priority
+                  lcp_set_max_tc(b0);
               }
           }
           lip0 = lcp_itf_pair_get (lipi0);
