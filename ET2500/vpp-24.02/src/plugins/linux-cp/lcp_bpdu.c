@@ -249,8 +249,6 @@ VLIB_NODE_FN (lcp_bpdu_punt_node) (vlib_main_t * vm,
 
           next0 = LCP_BPDU_NEXT_DROP;
 
- 
-
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
 
 

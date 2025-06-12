@@ -92,10 +92,6 @@ lcp_dhcp_phy_node_inline (vlib_main_t * vm,
 	  sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
 	  sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
 
-    //set max tc priority
-    lcp_set_max_tc(b0);
-    lcp_set_max_tc(b1);
-
       if (is_ipv6)
       {
           ip60 = vlib_buffer_get_current (b0);
@@ -202,9 +198,6 @@ lcp_dhcp_phy_node_inline (vlib_main_t * vm,
 	  vnet_feature_next (&next0, b0);
 
 	  sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
-
-    //set max tc priority
-    lcp_set_max_tc(b0);
 
 	  if (is_ipv6)
       {

@@ -92,10 +92,6 @@ vrrp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
           sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
 
-          //set max tc priority
-          lcp_set_max_tc(b0);
-          lcp_set_max_tc(b1);
-
           if (is_l2_path)
           {
               ip40 = vlib_buffer_get_current (b0) + vnet_buffer (b0)->l2.l2_len;
@@ -179,9 +175,6 @@ vrrp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           vnet_feature_next (&next0, b0);
 
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
-
-          //set max tc priority
-          lcp_set_max_tc(b0);
 
           if (is_l2_path)
           {
@@ -279,10 +272,6 @@ vrrp_ip6_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
           sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
 
-          //set max tc priority
-          lcp_set_max_tc(b0);
-          lcp_set_max_tc(b1);
-
           if (is_l2_path)
           {
               ip60 = vlib_buffer_get_current (b0) + vnet_buffer (b0)->l2.l2_len;
@@ -366,9 +355,6 @@ vrrp_ip6_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           vnet_feature_next (&next0, b0);
 
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
-
-          //set max tc priority
-          lcp_set_max_tc(b0);
 
           if (is_l2_path)
           {
