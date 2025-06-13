@@ -424,6 +424,8 @@ VLIB_NODE_FN (l2output_node) (vlib_main_t * vm,
       count = clib_count_equal_u32 (sw_if_index, n_left);
       n_left -= count;
 
+      if(sw_if_index[0] != ~0)
+      {
       config = vec_elt_at_index (msm->configs, sw_if_index[0]);
       feature_bitmap = config->feature_bitmap;
       if (PREDICT_FALSE ((feature_bitmap & ~L2OUTPUT_FEAT_OUTPUT) != 0))
@@ -432,9 +434,15 @@ VLIB_NODE_FN (l2output_node) (vlib_main_t * vm,
       else
 	new_next = vec_elt (l2output_main.output_node_index_vec,
 			    sw_if_index[0]);
+      }
+      else
+      {
+	new_next = L2OUTPUT_NEXT_DROP;
+	config = NULL;
+      }
       clib_memset_u16 (nexts + off, new_next, count);
 
-      if (new_next == L2OUTPUT_NEXT_DROP)
+      if (new_next == L2OUTPUT_NEXT_DROP || config == NULL)
 	{
 	  l2output_set_buffer_error
 	    (b, count, node->errors[L2OUTPUT_ERROR_MAPPING_DROP]);
