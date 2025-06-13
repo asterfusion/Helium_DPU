@@ -579,7 +579,7 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       r->rule_id = rules[i].rule_id;
 
       r->action_expand_bitmap = rules[i].action_expand_bitmap;
-      r->policer_index = rules[i].policer_index;
+      r->policer_index = ntohl(rules[i].policer_index);
       r->set_tc_value = rules[i].set_tc_value;
     }
 
@@ -3357,7 +3357,7 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
 	{
 	  vec_validate_acl_rules (rules, rule_idx);
 	  rules[rule_idx].action_expand_bitmap |= (1 << ACL_ACTION_EXPAND_POLICER);
-	  rules[rule_idx].policer_index = policer_index;
+	  rules[rule_idx].policer_index = htonl(policer_index);
 	}
     else if (unformat (line_input, "tc %d", &set_tc_value))
     {
