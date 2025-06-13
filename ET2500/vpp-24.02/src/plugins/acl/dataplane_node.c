@@ -326,7 +326,7 @@ acl_fa_node_common_prepare_fn (vlib_main_t * vm,
     }
 }
 
-always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, u32 *rule_index, u32 *policer_index, u8 *action)
+always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, u32 *rule_index, u8 *action, match_rule_expand_t *action_expand)
 {
     for (int i = 0; i < match_acl_info->acl_match_count; i++)
     {
@@ -335,7 +335,9 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             *action = ACL_ACTION_DENY;
             *acl_index = match_acl_info->acl_index[i];
             *rule_index = match_acl_info->rule_index[i];
-            *policer_index = match_acl_info->policer_index[i];
+            action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
+            action_expand->policer_index = match_acl_info->policer_index[i];
+            action_expand->set_tc_value = match_acl_info->set_tc_value[i];
             break;
         }
 
@@ -344,7 +346,9 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             *action = match_acl_info->action[i];
             *acl_index = match_acl_info->acl_index[i];
             *rule_index = match_acl_info->rule_index[i];
-            *policer_index = match_acl_info->policer_index[i];
+            action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
+            action_expand->policer_index = match_acl_info->policer_index[i];
+            action_expand->set_tc_value = match_acl_info->set_tc_value[i];
         }
     }
 
@@ -414,6 +418,32 @@ always_inline void acl_calc_acl_match(vlib_buffer_t *b, match_acl_t *match_acl_i
     return;
 }
 
+always_inline void 
+acl_action_expand_proc(vlib_main_t *vm, vlib_buffer_t *b, u16 *next, const match_rule_expand_t *action_expand)
+{
+    if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_NO_NAT))
+    {
+        b->no_nat = 1;
+    }
+
+    if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_POLICER))
+    {
+        u8 policer_act;
+        u64 time_in_policer_periods = clib_cpu_time_now () >> POLICER_TICKS_PER_PERIOD_SHIFT;
+        policer_act = vnet_policer_police(vm, b, action_expand->policer_index, time_in_policer_periods, POLICE_CONFORM, false);
+        if (policer_act == QOS_ACTION_DROP)
+        {
+            *next = 0;
+        }
+    }
+
+    if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_SET_TC))
+    {
+        vnet_buffer2(b)->tc_index = action_expand->set_tc_value;
+    }
+    return;
+}
+
 always_inline uword
 acl_fa_inner_node_fn (vlib_main_t * vm,
 		      vlib_node_runtime_t * node, vlib_frame_t * frame,
@@ -475,10 +505,11 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
       int acl_check_needed = 1;
       u32 match_acl_in_index = ~0;
       u32 match_rule_index = ~0;
-      u32 policer_index = ~0;
       match_acl_t match_acl_info;
+      match_rule_expand_t action_expand;
 
       memset(&match_acl_info, 0, sizeof(match_acl_t));
+      memset(&action_expand, 0, sizeof(match_rule_expand_t));
 
       next[0] = 0;		/* drop by default */
 
@@ -602,7 +633,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
               
           }
 
-          acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &policer_index, &action);
+          acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &action, &action_expand);
 		}
 
 	      b[0]->error = error_node->errors[action];
@@ -670,22 +701,10 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
             next[0] = ACL_FA_PUNT;
         }
 
-        if (ACL_ACTION_POLICER == action)
-        {
-            u8 policer_act;
-            u64 time_in_policer_periods = clib_cpu_time_now () >> POLICER_TICKS_PER_PERIOD_SHIFT;
-            policer_act = vnet_policer_police(vm, b[0], policer_index, time_in_policer_periods, POLICE_CONFORM, false);
-            if (policer_act == QOS_ACTION_DROP)
-            {
-                next[0] = 0;
-            }
-        }
+        /* Proc action expand */
+        acl_action_expand_proc(vm, b[0], &next[0], &action_expand);
 
-            if (ACL_ACTION_NO_NAT == action)
-            {
-                b[0]->no_nat = 1;
-            }
-            b[0]->acl_index = match_acl_in_index;
+        b[0]->acl_index = match_acl_in_index;
 	  }
 
 	  if (node_trace_on)	// PREDICT_FALSE (node->flags & VLIB_NODE_FLAG_TRACE))

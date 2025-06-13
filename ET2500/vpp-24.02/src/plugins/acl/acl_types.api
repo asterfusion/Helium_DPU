@@ -24,6 +24,15 @@ enum acl_action : u8
   ACL_ACTION_API_DENY = 0,
   ACL_ACTION_API_PERMIT = 1,
   ACL_ACTION_API_PERMIT_REFLECT = 2,
+  ACL_ACTION_API_PERMIT_ALSO_EGRESS = 3,
+  ACL_ACTION_API_PUNT = 4,
+};
+
+enum acl_action_expand : u8
+{
+  ACL_ACTION_API_EXPAND_NO_NAT = 0,
+  ACL_ACTION_API_EXPAND_POLICER = 1,
+  ACL_ACTION_API_EXPAND_SET_TC = 2,
 };
 
 /** \brief Access List Rule entry
@@ -49,7 +58,15 @@ typedef acl_rule
   u8 dst_mac_len;
   vl_api_prefix_t src_prefix;
   vl_api_prefix_t dst_prefix;
+
+/*
+ * Independent and action extension actions.
+ * It can be executed simultaneously with actions without affecting each other
+ */
+  u64 action_expand_bitmap;
   u32 policer_index;
+  u8 set_tc_value;
+
 /*
  * L4 protocol. IANA number. 1 = ICMP, 58 = ICMPv6, 6 = TCP, 17 = UDP.
  * 0 => ignore L4 and ignore the ports/tcpflags when matching.

@@ -29,8 +29,11 @@ typedef struct {
 
   u32 base_mask_type_index;
 
-  u32 policer_index;
   u8 action;
+
+  u64 action_expand_bitmap;
+  u32 policer_index;
+  u8 set_tc_value;
 } hash_ace_info_t;
 
 /*
@@ -51,7 +54,6 @@ typedef struct {
   u32 ace_index;
   u32 acl_position;
   u32 applied_entry_index;
-  u32 policer_index;
 } collision_match_rule_t;
 
 typedef struct {
@@ -83,7 +85,12 @@ typedef struct {
    */
   u8 action;
 
+  /*
+   * Action expend of this applied ACE
+   */
+  u64 action_expand_bitmap;
   u32 policer_index;
+  u8 set_tc_value;
 } applied_hash_ace_entry_t;
 
 typedef struct {

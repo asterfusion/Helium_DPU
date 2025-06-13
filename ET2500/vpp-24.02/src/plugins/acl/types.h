@@ -38,7 +38,10 @@ typedef struct
   u8 tcp_flags_value;
   u8 tcp_flags_mask;
   u16 rule_id;
+
+  u64 action_expand_bitmap; 
   u32 policer_index;
+  u8  set_tc_value;
 } acl_rule_t;
 
 

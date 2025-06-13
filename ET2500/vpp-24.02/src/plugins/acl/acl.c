@@ -574,11 +574,13 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       r->src_port_or_type_last = ntohs (rules[i].srcport_or_icmptype_last);
       r->dst_port_or_code_first = ntohs (rules[i].dstport_or_icmpcode_first);
       r->dst_port_or_code_last = ntohs (rules[i].dstport_or_icmpcode_last);
-      if (r->is_permit == ACL_ACTION_POLICER)
-        r->policer_index = ntohl(rules[i].policer_index);
       r->tcp_flags_value = rules[i].tcp_flags_value;
       r->tcp_flags_mask = rules[i].tcp_flags_mask;
       r->rule_id = rules[i].rule_id;
+
+      r->action_expand_bitmap = rules[i].action_expand_bitmap;
+      r->policer_index = ntohl(rules[i].policer_index);
+      r->set_tc_value = rules[i].set_tc_value;
     }
 
   if (~0 == *acl_list_index)
@@ -1551,7 +1553,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index,
 
 	  /* add session to table mvec[match_type_index].table_index; */
 	  vnet_classify_add_del_session (cm, tag_table,
-					 mask, a->rules[i].is_permit ? (a->rules[i].is_permit == ACL_ACTION_NO_NAT ? (~0 - 1) : ~0) : 0,
+					 mask, a->rules[i].is_permit ? ~0 : 0,
 					 i, 0, action, metadata, 1, macip_acl_index, a->count);
 
 	  clib_memset (&mask[12], 0, sizeof (mask) - 12);
@@ -1598,7 +1600,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index,
 	      memcpy (&mask[l3_src_offs + 14], &a->rules[i].src_ip_addr.ip4,
 		      4);
 	      vnet_classify_add_del_session (cm, tag_table, mask,
-					     a->rules[i].is_permit ? (a->rules[i].is_permit == ACL_ACTION_NO_NAT ? (~0 - 1) : ~0) : 0,
+					     a->rules[i].is_permit ? ~0 : 0,
 					     i, 0, action, metadata, 1, macip_acl_index, a->count);
 	    }
 	}
@@ -1651,7 +1653,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index,
 	      /* add session to table mvec[match_type_index].table_index; */
 	      vnet_classify_add_del_session (cm, tag_table,
 					     mask,
-					     a->rules[i].is_permit ? (a->rules[i].is_permit == ACL_ACTION_NO_NAT ? (~0 - 1) : ~0) : 0,
+					     a->rules[i].is_permit ? ~0 : 0,
 					     i, 0, action, metadata, 1, macip_acl_index, a->count);
 	      // clib_memset (&mask[12], 0, sizeof (mask) - 12);
 	    }
@@ -1693,7 +1695,7 @@ macip_create_classify_tables (acl_main_t * am, u32 macip_acl_index,
 		  vnet_classify_add_del_session (cm, tag_table,
 						 mask,
 						 a->rules[i].
-						 is_permit ? (a->rules[i].is_permit == ACL_ACTION_NO_NAT ? (~0 - 1) : ~0) : 0, i, 0,
+						 is_permit ? ~0 : 0, i, 0,
 						 action, metadata, 1, macip_acl_index, a->count);
 		}
 	    }
@@ -3255,6 +3257,7 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
   u32 action = 0;
   u32 policer_index = 0;
   u32 tcpflags, tcpmask;
+  u8  set_tc_value;
   ip_prefix_t src, dst;
   u8 *tag = 0;
 
@@ -3345,11 +3348,23 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
 	  vec_validate_acl_rules (rules, rule_idx);
 	  rules[rule_idx].proto = proto;
 	}
+      else if (unformat (line_input, "no-nat"))
+	{
+	  vec_validate_acl_rules (rules, rule_idx);
+	  rules[rule_idx].action_expand_bitmap |= (1 << ACL_ACTION_EXPAND_NO_NAT);
+	}
       else if (unformat (line_input, "policer %d", &policer_index))
 	{
 	  vec_validate_acl_rules (rules, rule_idx);
+	  rules[rule_idx].action_expand_bitmap |= (1 << ACL_ACTION_EXPAND_POLICER);
 	  rules[rule_idx].policer_index = htonl(policer_index);
 	}
+    else if (unformat (line_input, "tc %d", &set_tc_value))
+    {
+	  vec_validate_acl_rules (rules, rule_idx);
+	  rules[rule_idx].action_expand_bitmap |= (1 << ACL_ACTION_EXPAND_SET_TC);
+	  rules[rule_idx].set_tc_value = set_tc_value & 0xff;
+    }
       else if (unformat (line_input, "tag %s", &tag))
 	{
 	}

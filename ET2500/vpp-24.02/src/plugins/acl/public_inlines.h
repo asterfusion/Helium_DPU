@@ -482,10 +482,17 @@ single_acl_match_5tuple (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5tupl
   return 0;
 }
 
+typedef struct match_rule_expand
+{
+    u64 action_expand_bitmap;
+    u32 policer_index;
+    u8  set_tc_value;
+} match_rule_expand_t;
+
 always_inline int
 single_acl_match_5tuple_sai (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5tuple,
 		  int is_ip6, u8 * r_action, u32 * r_acl_match_p,
-		  u32 * r_rule_match_p, u32 * trace_bitmap, u32 * r_policer_index)
+		  u32 * r_rule_match_p, u32 * trace_bitmap, match_rule_expand_t *r_expand)
 {
   int i;
   acl_rule_t *r;
@@ -554,12 +561,15 @@ single_acl_match_5tuple_sai (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5
             /* non-initial fragment with frag match configured - match this rule */
             *trace_bitmap |= 0x80000000;
             *r_action = r->is_permit;
-            if (r_policer_index)
-              *r_policer_index = r->policer_index;
             if (r_acl_match_p)
 	      *r_acl_match_p = acl_index;
             if (r_rule_match_p)
 	      *r_rule_match_p = i;
+            if (r_expand)
+            {
+                r_expand->policer_index = r->policer_index;
+                r_expand->set_tc_value = r->set_tc_value;
+            }
             return 1;
           }
 
@@ -607,12 +617,15 @@ single_acl_match_5tuple_sai (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5
 		    acl_index, i, r->is_permit);
 #endif
       *r_action = r->is_permit;
-      if (r_policer_index)
-        *r_policer_index = r->policer_index;
       if (r_acl_match_p)
 	*r_acl_match_p = acl_index;
       if (r_rule_match_p)
 	*r_rule_match_p = i;
+      if (r_expand)
+      {
+        r_expand->policer_index = r->policer_index;
+        r_expand->set_tc_value = r->set_tc_value;
+      }
       return 1;
     }
   return 0;
@@ -670,6 +683,8 @@ linear_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt
 typedef struct match_acl{
     u8  acl_match_count;
     u8  action[64];
+    u64 action_expand_bitmap[64];
+    u8  set_tc_value[64];
     u32 acl_index[64];
     u32 rule_index[64];
     u32 acl_pos[64];
@@ -688,14 +703,18 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
     u8 action = 0;
     u32 acl_match = 0;
     u32 rule_match = 0;
-    u32 policer_index = 0;
+
+    match_rule_expand_t expand;
+
     acl_lookup_context_t *acontext = pool_elt_at_index(am->acl_lookup_contexts, lc_index);
 
     acl_vector = acontext->acl_indices;
 
+    clib_memset(&expand, 0, sizeof(match_rule_expand_t));
+
     for (i = 0; i < vec_len (acl_vector); i++)
     {
-        if (single_acl_match_5tuple_sai(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap, &policer_index))
+        if (single_acl_match_5tuple_sai(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap, &expand))
         {
             if (j > 64)
             {
@@ -705,7 +724,10 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
             match_acl_info->action[j] = action;
             match_acl_info->rule_index[j] = rule_match;
             match_acl_info->acl_pos[j] = i;
-            match_acl_info->policer_index[j] = i;
+
+            match_acl_info->action_expand_bitmap[j] = expand.action_expand_bitmap;
+            match_acl_info->policer_index[j] = expand.policer_index;
+            match_acl_info->set_tc_value[j] = expand.set_tc_value;
             j++;
             match_acl_info->acl_match_count = j;
             j++;
@@ -1013,8 +1035,11 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
                         match_acl_info->rule_index[j] = pae->ace_index;
                         match_acl_info->action[j] = pae->action;
                         match_acl_info->acl_pos[j] = pae->acl_position;
-                        match_acl_info->policer_index[j] = pae->policer_index;
                         match_acl_info->curr_match_index[j] = match_index;
+
+                        match_acl_info->action_expand_bitmap[j] = pae->action_expand_bitmap;
+                        match_acl_info->policer_index[j] = pae->policer_index;
+                        match_acl_info->set_tc_value[j] = pae->set_tc_value;
                     }
 
                     break;
@@ -1027,8 +1052,11 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
                 match_acl_info->rule_index[acl_match_count] = pae->ace_index;
                 match_acl_info->action[acl_match_count] = pae->action;
                 match_acl_info->acl_pos[acl_match_count] = pae->acl_position;
-                match_acl_info->policer_index[acl_match_count] = pae->policer_index;
                 match_acl_info->curr_match_index[acl_match_count] = match_index;
+
+                match_acl_info->action_expand_bitmap[j] = pae->action_expand_bitmap;
+                match_acl_info->policer_index[acl_match_count] = pae->policer_index;
+                match_acl_info->set_tc_value[j] = pae->set_tc_value;
                 acl_match_count++;
             }
         }
