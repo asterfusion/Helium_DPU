@@ -91,3 +91,7 @@ add_vpp_plugin(linux_nl
   ${LIBNL3_XFRM_LIB}
   lcp
 )
+
+if (${ASROUTER_NAME} MATCHES "octeon10")
+  add_compile_definitions(ET2500_SET_TC)
+endif()

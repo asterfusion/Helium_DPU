@@ -384,6 +384,9 @@ vnet_hw_interface_set_link_speed (vnet_main_t * vnm, u32 hw_if_index,
 clib_error_t *vnet_hw_interface_set_flags (vnet_main_t * vnm, u32 hw_if_index,
 					   vnet_hw_interface_flags_t flags);
 
+clib_error_t *vnet_hw_interface_set_tc_flags (vnet_main_t * vnm, u32 hw_if_index,
+				    vnet_hw_interface_flags_t flags);
+
 /* Change interface flags (e.g. up, down, enable, disable). */
 clib_error_t *vnet_sw_interface_set_flags (vnet_main_t * vnm, u32 sw_if_index,
 					   vnet_sw_interface_flags_t flags);

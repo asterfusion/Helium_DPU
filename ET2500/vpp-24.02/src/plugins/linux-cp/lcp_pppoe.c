@@ -1210,6 +1210,9 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               if (lipi0 != INDEX_INVALID)
               {
                   is_host0 = 1;
+                  //set max tc priority
+                  lcp_set_max_tc(b0);
+                  lcp_set_max_tc(b1);
               }
           }
           lip0 = lcp_itf_pair_get (lipi0);
@@ -1305,6 +1308,8 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               if (lipi0 != INDEX_INVALID)
               {
                   is_host0 = 1;
+                  //set max tc priority
+                  lcp_set_max_tc(b0);
               }
           }
           lip0 = lcp_itf_pair_get (lipi0);

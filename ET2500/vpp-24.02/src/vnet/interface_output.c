@@ -181,7 +181,8 @@ vnet_interface_output_node_inline (vlib_main_t *vm, u32 sw_if_index,
 				   vlib_combined_counter_main_t *ccm,
 				   vlib_buffer_t **b, void **p,
 				   u32 config_index, u8 arc, u32 n_left,
-				   int processing_level)
+				   int processing_level,
+				   vnet_hw_interface_t *hi)
 {
   u32 n_bytes = 0;
   u32 n_bytes0, n_bytes1, n_bytes2, n_bytes3;
@@ -214,10 +215,18 @@ vnet_interface_output_node_inline (vlib_main_t *vm, u32 sw_if_index,
 
       if (processing_level >= 3)
 	{
+    if (hi->flags & VNET_HW_INTERFACE_FLAG_USE_TC) {
+      p[0] = &vnet_buffer2(b[0])->tc_index;
+      p[1] = &vnet_buffer2(b[1])->tc_index;
+      p[2] = &vnet_buffer2(b[2])->tc_index;
+      p[3] = &vnet_buffer2(b[3])->tc_index;
+    }
+    else {
 	  p[0] = vlib_buffer_get_current (b[0]);
 	  p[1] = vlib_buffer_get_current (b[1]);
 	  p[2] = vlib_buffer_get_current (b[2]);
 	  p[3] = vlib_buffer_get_current (b[3]);
+    }
 	  p += 4;
 	}
 
@@ -277,7 +286,10 @@ vnet_interface_output_node_inline (vlib_main_t *vm, u32 sw_if_index,
 
       if (processing_level >= 3)
 	{
-	  p[0] = vlib_buffer_get_current (b[0]);
+    if (hi->flags & VNET_HW_INTERFACE_FLAG_USE_TC)
+      p[0] = &vnet_buffer2(b[0])->tc_index;
+    else
+	    p[0] = vlib_buffer_get_current (b[0]);
 	  p += 1;
 	}
 
@@ -390,6 +402,51 @@ hash_func_with_mask (void **p, u32 *hash, u32 n_packets, u32 *lookup_table,
       hash += 1;
       n_left_from -= 1;
     }
+}
+
+static_always_inline void
+tc_func(void** p, u32* qids, u32 n_packets, u32 n_queues,
+  vnet_hw_interface_t* hi) {
+  u32 n_left_from = n_packets;
+
+  while (n_left_from >= 4) {
+    uword* q0, * q1, * q2, * q3;
+    u32 tc0 = *(u32 *)p[0];
+    u32 tc1 = *(u32 *)p[1];
+    u32 tc2 = *(u32 *)p[2];
+    u32 tc3 = *(u32 *)p[3];
+
+    *(u32 *)p[0] = 0;
+    *(u32 *)p[1] = 0;
+    *(u32 *)p[2] = 0;
+    *(u32 *)p[3] = 0;
+
+    q0 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc0) : NULL;
+    q1 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc1) : NULL;
+    q2 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc2) : NULL;
+    q3 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc3) : NULL;
+
+    qids[0] = (q0 ? q0[0] : tc0) % n_queues;
+    qids[1] = (q1 ? q1[0] : tc1) % n_queues;
+    qids[2] = (q2 ? q2[0] : tc2) % n_queues;
+    qids[3] = (q3 ? q3[0] : tc3) % n_queues;
+
+    qids += 4;
+    n_left_from -= 4;
+  }
+
+  while (n_left_from > 0) {
+    uword* q0;
+    u32 tc0 = *(u32 *)p[0];
+
+    *(u32 *)p[0] = 0;
+
+    q0 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc0) : NULL;
+    qids[0] = (q0 ? q0[0] : tc0) % n_queues;
+
+    qids += 1;
+    n_left_from -= 1;
+  }
 }
 
 static_always_inline void
@@ -533,6 +590,9 @@ enqueue_to_tx_node (vlib_main_t *vm, vlib_node_runtime_t *node,
     {
       u32 qids[VLIB_FRAME_SIZE];
 
+      if (hi->flags & VNET_HW_INTERFACE_FLAG_USE_TC)
+        tc_func(p, qids, n_vectors, r->n_queues, hi);
+      else
       hash_func_with_mask (p, qids, n_vectors, r->lookup_table,
 			   vec_len (r->lookup_table) - 1, hi->hf);
 
@@ -646,20 +706,20 @@ VLIB_NODE_FN (vnet_interface_output_node)
 
   // basic processing
   if (do_tx_offloads == 0 && arc_or_subif == 0 && is_parr == 0)
-    n_bytes = vnet_interface_output_node_inline (
-      vm, sw_if_index, ccm, bufs, NULL, config_index, arc, n_buffers, 0);
+    n_bytes = vnet_interface_output_node_inline(
+      vm, sw_if_index, ccm, bufs, NULL, config_index, arc, n_buffers, 0, hi);
   // basic processing + tx offloads
   else if (do_tx_offloads == 1 && arc_or_subif == 0 && is_parr == 0)
     n_bytes = vnet_interface_output_node_inline (
-      vm, sw_if_index, ccm, bufs, NULL, config_index, arc, n_buffers, 1);
+      vm, sw_if_index, ccm, bufs, NULL, config_index, arc, n_buffers, 1, hi);
   // basic processing + tx offloads + vlans + arcs
   else if (do_tx_offloads == 1 && arc_or_subif == 1 && is_parr == 0)
     n_bytes = vnet_interface_output_node_inline (
-      vm, sw_if_index, ccm, bufs, NULL, config_index, arc, n_buffers, 2);
+      vm, sw_if_index, ccm, bufs, NULL, config_index, arc, n_buffers, 2, hi);
   // basic processing + tx offloads + vlans + arcs + multi-txqs
   else
     n_bytes = vnet_interface_output_node_inline (
-      vm, sw_if_index, ccm, bufs, p, config_index, arc, n_buffers, 3);
+      vm, sw_if_index, ccm, bufs, p, config_index, arc, n_buffers, 3, hi);
 
   from = vlib_frame_vector_args (frame);
   if (PREDICT_TRUE (next_index == VNET_INTERFACE_OUTPUT_NEXT_TX))

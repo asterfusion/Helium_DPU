@@ -1070,6 +1070,9 @@ VLIB_NODE_FN (lcp_arp_host_node)
 	  /* Send to the phy */
 	  vnet_buffer (b0)->sw_if_index[VLIB_TX] = lip0->lip_phy_sw_if_index;
 
+	  //set max tc priority
+	  lcp_set_max_tc(b0);
+
 	  len0 = ((u8 *) vlib_buffer_get_current (b0) -
 		  (u8 *) ethernet_buffer_get_header (b0));
 	  vlib_buffer_advance (b0, -len0);

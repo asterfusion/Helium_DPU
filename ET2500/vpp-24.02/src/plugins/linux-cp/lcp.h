@@ -60,6 +60,7 @@ u8 lcp_get_del_dynamic_on_link_down (void);
  */
 void lcp_set_netlink_processing_active (u8 is_processing);
 u8 lcp_get_netlink_processing_active (void);
+void lcp_set_max_tc(vlib_buffer_t* b0);
 
 #endif
 

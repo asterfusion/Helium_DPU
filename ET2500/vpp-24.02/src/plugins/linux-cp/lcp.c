@@ -161,6 +161,17 @@ lcp_get_netlink_processing_active (void)
   return lcpm->netlink_processing_active;
 }
 
+#ifdef ET2500_SET_TC
+  #define MAX_TC 7
+#else
+  #define MAX_TC 7
+#endif
+
+void
+lcp_set_max_tc(vlib_buffer_t* b0)
+{
+  vnet_buffer2(b0)->tc_index = MAX_TC;
+}
 /*
  * fd.io coding-style-patch-verification: ON
  *
