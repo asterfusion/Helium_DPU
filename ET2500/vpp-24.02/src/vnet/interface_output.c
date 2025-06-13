@@ -182,7 +182,7 @@ vnet_interface_output_node_inline (vlib_main_t *vm, u32 sw_if_index,
 				   vlib_buffer_t **b, void **p,
 				   u32 config_index, u8 arc, u32 n_left,
 				   int processing_level,
-           vnet_hw_interface_t *hi)
+				   vnet_hw_interface_t *hi)
 {
   u32 n_bytes = 0;
   u32 n_bytes0, n_bytes1, n_bytes2, n_bytes3;

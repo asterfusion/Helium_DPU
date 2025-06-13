@@ -17,7 +17,6 @@
 #include <vnet/feature/feature.h>
 #include <vppinfra/error.h>
 #include <linux-cp/lcp.api_enum.h>
-#include <plugins/linux-cp/lcp_interface.h>
 
 #define foreach_lcp_vrrp                                                       \
   _ (PUNT, "linux-cp-punt")                                                   \

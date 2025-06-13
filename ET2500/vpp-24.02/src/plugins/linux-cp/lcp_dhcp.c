@@ -16,7 +16,6 @@
 #include <vnet/feature/feature.h>
 #include <vppinfra/error.h>
 #include <linux-cp/lcp.api_enum.h>
-#include <plugins/linux-cp/lcp_interface.h>
 
 #define foreach_lcp_dhcp                                                       \
   _ (PUNT, "linux-cp-punt")                                                   \

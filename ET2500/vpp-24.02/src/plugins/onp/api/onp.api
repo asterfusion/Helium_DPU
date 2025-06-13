@@ -428,6 +428,7 @@ define onp_pktio_rx_queue_stat_details
   u64 rx_drop_octs;
   u64 rx_error_pkts;
 };
+
 /*
  * Local Variables:
  * eval: (c-set-style "gnu")

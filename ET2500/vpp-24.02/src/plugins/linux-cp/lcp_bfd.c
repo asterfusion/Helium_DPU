@@ -16,7 +16,6 @@
 #include <vnet/feature/feature.h>
 #include <vppinfra/error.h>
 #include <linux-cp/lcp.api_enum.h>
-#include <plugins/linux-cp/lcp_interface.h>
 
 // 定义 BFD 相关的 UDP 端口号
 #define UDP_DST_PORT_BFD_CONTROL 3784

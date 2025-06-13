@@ -54,6 +54,9 @@ qos_record_tc(vnet_hw_interface_t *hi, vlib_buffer_t *b0)
   u16 ethertype;
   u8 *l3;
 
+  if(!(hi->flags &VNET_HW_INTERFACE_FLAG_USE_TC))
+    return;
+
   eh = (ethernet_header_t *)vlib_buffer_get_current(b0);
   ethertype = clib_net_to_host_u16(eh->type);
   l3 = (u8 *) (eh + 1);
@@ -76,7 +79,7 @@ qos_record_tc(vnet_hw_interface_t *hi, vlib_buffer_t *b0)
   if (PREDICT_TRUE(ethertype == ETHERNET_TYPE_IP4))
   {
     ip4_header_t *ip4h = (ip4_header_t *)l3;
-    qos0 = ip4h->tos;
+    qos0 = ip4h->tos >> 2;
     uword *t0 = hash_get(hi->dscp_to_tc, qos0);
     vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
   }
