@@ -416,6 +416,11 @@ tc_func(void** p, u32* qids, u32 n_packets, u32 n_queues,
     u32 tc2 = *(u32 *)p[2];
     u32 tc3 = *(u32 *)p[3];
 
+    *(u32 *)p[0] = 0;
+    *(u32 *)p[1] = 0;
+    *(u32 *)p[2] = 0;
+    *(u32 *)p[3] = 0;
+
     q0 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc0) : NULL;
     q1 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc1) : NULL;
     q2 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc2) : NULL;
@@ -433,6 +438,8 @@ tc_func(void** p, u32* qids, u32 n_packets, u32 n_queues,
   while (n_left_from > 0) {
     uword* q0;
     u32 tc0 = *(u32 *)p[0];
+
+    *(u32 *)p[0] = 0;
 
     q0 = hi->tc_to_queue ? hash_get(hi->tc_to_queue, tc0) : NULL;
     qids[0] = (q0 ? q0[0] : tc0) % n_queues;
