@@ -42,6 +42,21 @@ qos_record_feature_config (u32 sw_if_index,
 				 sw_if_index, enable, NULL, 0);
       l2input_intf_bitmap_enable (sw_if_index, L2INPUT_FEAT_L2_IP_QOS_RECORD,
 				  enable);
+
+      /* Enable for sub_interface start*/
+      u32 id, foreach_sw_if_index;
+      vnet_main_t *vnet_main = vnet_get_main();
+      vnet_hw_interface_t *hw = vnet_get_hw_interface_or_null(vnet_main, sw_if_index);
+
+      if (!hw)
+        break;
+
+      hash_foreach(id, foreach_sw_if_index, hw->sub_interface_sw_if_index_by_id, {
+        l2input_intf_bitmap_enable(foreach_sw_if_index, L2INPUT_FEAT_L2_IP_QOS_RECORD,
+                                   enable);
+      });
+      /* Enable for sub_interface end*/
+
       break;
     case QOS_SOURCE_MPLS:
       vnet_feature_enable_disable ("mpls-input", "mpls-qos-record",
@@ -292,6 +307,46 @@ VLIB_CLI_COMMAND (qos_record_show_command, static) = {
   .function = qos_record_show,
   .is_mp_safe = 1,
 };
+
+static clib_error_t *
+qos_check_sw_interface_add_del(vnet_main_t *vnm, u32 sw_if_index, u32 is_add)
+{
+  vnet_sw_interface_t *sw = NULL;
+  u32 sup_sw_if_index;
+
+  sw = vnet_get_sw_interface_or_null(vnm, sw_if_index);
+
+  if (!sw)
+    return 0;
+
+  sup_sw_if_index = sw->sup_sw_if_index;
+
+  if (sup_sw_if_index == sw_if_index)
+  {
+    return 0;
+  }
+
+  if (vec_len(qos_record_configs[QOS_SOURCE_IP]) <= sup_sw_if_index)
+    return 0;
+
+  if (qos_record_configs[QOS_SOURCE_IP][sup_sw_if_index])
+  {
+    if (is_add)
+    {
+      l2input_intf_bitmap_enable(sw_if_index, L2INPUT_FEAT_L2_IP_QOS_RECORD,
+                                 1);
+    }
+    else
+    {
+      l2input_intf_bitmap_enable(sw_if_index, L2INPUT_FEAT_L2_IP_QOS_RECORD,
+                                 0);
+    }
+  }
+
+  return 0;
+}
+VNET_SW_INTERFACE_ADD_DEL_FUNCTION(qos_check_sw_interface_add_del);
+
 /* *INDENT-ON* */
 
 /*
