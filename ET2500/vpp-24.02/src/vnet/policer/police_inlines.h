@@ -42,13 +42,13 @@ vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp)
   
   if (type == ETHERNET_TYPE_VLAN)
   {
+    vlanh = (ethernet_vlan_header_t *)(eh + 1);
     if (pcp != UINT8_MAX) {
-      vlanh = (ethernet_vlan_header_t *)(eh + 1);
       vlanh->priority_cfi_and_id &= clib_host_to_net_u16(VLAN_NO_PCP_BITS);
       vlanh->priority_cfi_and_id |= clib_host_to_net_u16(pcp << VLAN_PCP_SHIFT);
-      type = clib_net_to_host_u16(vlanh->type);
     }
     l3 += sizeof(ethernet_vlan_header_t);
+    type = clib_net_to_host_u16(vlanh->type);
   }
 
   if (PREDICT_TRUE (type == ETHERNET_TYPE_IP4 && dscp != IP_DSCP_INVALID))

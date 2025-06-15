@@ -92,6 +92,6 @@ add_vpp_plugin(linux_nl
   lcp
 )
 
-if (${ASROUTER_NAME} MATCHES "octeon10")
+if (${VPP_PLATFORM_NAME} MATCHES "octeon10")
   add_compile_definitions(ET2500_SET_TC)
 endif()
