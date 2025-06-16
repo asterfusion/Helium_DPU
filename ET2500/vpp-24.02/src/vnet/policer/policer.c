@@ -1078,7 +1078,7 @@ policer_check_sw_interface_add_del(vnet_main_t* vnm, u32 sw_if_index, u32 is_add
   if(pm->vnet_main == NULL) {
      return 0;
   }
-  sw = vnet_get_sw_interface(vnm, sw_if_index);
+  sw = vnet_get_sw_interface(pm->vnet_main, sw_if_index);
 
   sup_sw_if_index = sw->sup_sw_if_index;
 
