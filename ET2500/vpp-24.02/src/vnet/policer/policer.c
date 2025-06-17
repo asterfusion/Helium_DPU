@@ -1086,6 +1086,9 @@ policer_check_sw_interface_add_del(vnet_main_t* vnm, u32 sw_if_index, u32 is_add
     return 0;
   }
 
+  if (vec_len(pm->policer_index_by_sw_if_index[dir]) <= sup_sw_if_index)
+    return 0;
+
   policer_index = pm->policer_index_by_sw_if_index[dir][sup_sw_if_index];
 
   if (policer_index != UINT32_MAX) {
