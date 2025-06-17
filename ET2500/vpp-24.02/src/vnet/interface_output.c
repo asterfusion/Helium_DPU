@@ -433,6 +433,7 @@ tc_func(void** p, u32* qids, u32 n_packets, u32 n_queues,
 
     qids += 4;
     n_left_from -= 4;
+    p += 4;
   }
 
   while (n_left_from > 0) {
@@ -446,6 +447,7 @@ tc_func(void** p, u32* qids, u32 n_packets, u32 n_queues,
 
     qids += 1;
     n_left_from -= 1;
+    p += 1;
   }
 }
 
