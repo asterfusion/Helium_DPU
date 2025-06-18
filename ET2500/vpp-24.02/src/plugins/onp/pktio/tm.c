@@ -243,7 +243,8 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
     cnxk_pktio_ops_map_t *ops_map = NULL;
     cnxk_pktio_t *pktio = NULL;
 
-    u32 mdq_node_id, i;
+    u32 mdq_node_id;
+    i32 i;
     struct roc_nix *nix = NULL;
 
     onp_pktio_scheduler_profile_t *profile = NULL;
@@ -253,8 +254,9 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
     struct nix_tm_node **tm_node_list = NULL;;
     uint32_t *tm_node_priority = NULL;
     uint8_t *tm_node_sq = NULL;
-    uint32_t current_sq_priority = 1;
+    uint32_t current_sq_priority = 0;
 
+    uint64_t txq_mode_bitmap = 0;
     uint32_t priority_bitmap = 0, dwrr_num = 0;
 
     CLIB_UNUSED(uint32_t) new_weight;
@@ -275,22 +277,12 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
     pktio = &ops_map->pktio;
     nix = &pktio->nix;
 
-    //get current all mdq node
-    tm_node_list = vec_new(struct nix_tm_node *, pktio->n_tx_queues);
-    tm_node_priority = vec_new(uint32_t, pktio->n_tx_queues);
-    tm_node_sq = vec_new(uint8_t, pktio->n_tx_queues);
-    vec_foreach_index(i, tm_node_list)
-    {
-        mdq_node_id = ONP_PKTIO_TM_USER_TREE_MDQ_NODE_ID(pktio->n_tx_queues, i);
-        tm_node_list[i] = (struct nix_tm_node *)roc_nix_tm_node_get(nix, mdq_node_id);
-        if (tm_node_list[i]->priority > 0) tm_node_sq[i] = 1;
-    }
-
     /*
      * In nix scheduler prio following rules need to be followed:
      * 1. Priority must start from 0
      * 2. Only one set of DWRR is allowed
      * 3. The priority must be continuous and there should be no loopholes
+     * 4. The lower the priority value, the higher the priority
      *
      * if default node mode is SP, and the priority is consistent with qid.
      * if default node mode is DWRR, and the priority is 0.
@@ -300,20 +292,29 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
      *
      */
 
+    tm_node_list = vec_new(struct nix_tm_node *, pktio->n_tx_queues);
+    tm_node_priority = vec_new(uint32_t, pktio->n_tx_queues);
+    tm_node_sq = vec_new(uint8_t, pktio->n_tx_queues);
+
+    //get current txq mode
+    txq_mode_bitmap = od->txq_mode_bitmap;
+
+    //get current all mdq node priority
+    vec_foreach_index(i, tm_node_list)
+    {
+        mdq_node_id = ONP_PKTIO_TM_USER_TREE_MDQ_NODE_ID(pktio->n_tx_queues, i);
+        tm_node_list[i] = (struct nix_tm_node *)roc_nix_tm_node_get(nix, mdq_node_id);
+        tm_node_sq[i] = (txq_mode_bitmap & (1ULL << i)) ? 1 : 0;
+    }
+
+    //update tm_node mode
     if (scheduler_profile_id == ONP_PKTIO_SCHEDULER_PROFILE_NONE)
     {
         new_shaping_profile_id = ONP_PKTIO_SHAPER_PROFILE_NONE;
         new_weight = NIX_TM_DFLT_RR_WT;
 
         tm_node_sq[qid] = 0;
-        //Need to calculate new all tm_node_priority
-        vec_foreach_index(i, tm_node_sq)
-        {
-            if (tm_node_sq[i] > 0)
-                tm_node_priority[i] = current_sq_priority++;
-            else
-                tm_node_priority[i] = 0;
-        }
+        txq_mode_bitmap &= ~(1ULL << qid);
     }
     else
     {
@@ -327,22 +328,27 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
         if (profile->type == ONP_PKTIO_SCHEDULER_STRICT)
         {
             tm_node_sq[qid] = 1;
+            txq_mode_bitmap |= (1ULL << qid);
             new_weight = NIX_TM_DFLT_RR_WT;
         }
         else //DWRR
         {
             tm_node_sq[qid] = 0;
+            txq_mode_bitmap &= ~(1ULL << qid);
             new_weight = NIX_TM_DFLT_RR_WT * profile->weight;
         }
+    }
 
-        //Need to calculate new all tm_node_priority
-        vec_foreach_index(i, tm_node_sq)
-        {
-            if (tm_node_sq[i] > 0)
-                tm_node_priority[i] = current_sq_priority++;
-            else
-                tm_node_priority[i] = 0;
-        }
+    //Need to calculate new all tm_node_priority
+    vec_foreach_index_backwards(i, tm_node_sq)
+    {
+        if (tm_node_sq[i] > 0)
+            tm_node_priority[i] = current_sq_priority++;
+    }
+    vec_foreach_index_backwards(i, tm_node_sq)
+    {
+        if (tm_node_sq[i] == 0)
+            tm_node_priority[i] = current_sq_priority;
     }
 
     /* validate new all node prio */
@@ -356,6 +362,9 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
     //check priority_bitmap
     if ((priority_bitmap & (priority_bitmap + 1)) != 0)
     {
+        vec_free(tm_node_list);
+        vec_free(tm_node_priority);
+        vec_free(tm_node_sq);
         onp_pktio_warn("scheduler mdq priority invaild. priority_bitmap 0x%x", priority_bitmap);
         return -1;
     }
@@ -367,6 +376,9 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
     }
     if (dwrr_num > 1)
     {
+        vec_free(tm_node_list);
+        vec_free(tm_node_priority);
+        vec_free(tm_node_sq);
         onp_pktio_warn("scheduler mdq dwrr exceeds one.");
         return -1;
     }
@@ -421,6 +433,9 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
     {
         tm_node_list[i]->priority = tm_node_priority[i];
     }
+
+    //update current txq mode
+    od->txq_mode_bitmap = txq_mode_bitmap;
 
     rv = roc_nix_tm_hierarchy_disable(nix);
     if (rv)
