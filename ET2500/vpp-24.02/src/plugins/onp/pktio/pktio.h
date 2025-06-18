@@ -235,6 +235,8 @@ typedef struct
 
   u32 xstats_count;
 
+  u64 txq_mode_bitmap;
+
   u8 txq_init_done;
   u8 numa_node;
   u8 name[ONP_INTF_NAME_MAX_SIZE];
