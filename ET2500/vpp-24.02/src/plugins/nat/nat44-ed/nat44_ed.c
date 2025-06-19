@@ -879,6 +879,15 @@ nat44_ed_get_resolve_record (ip4_address_t l_addr, u16 l_port, u16 e_port,
 		      continue;
 		    }
 		}
+#ifdef SUPPORT_NAT_PROTO
+          if (is_sm_keep_proto(rp->flags) && is_sm_keep_proto(flags))
+          {
+              if(rp->proto != proto)
+              {
+                  continue;
+              }
+          }
+#endif
 	    }
 	  else
 	    {
@@ -1051,7 +1060,16 @@ nat44_ed_add_static_mapping_internal (ip4_address_t l_addr,
 
   if (is_sm_addr_only (flags))
     {
-      e_port = l_port = proto = 0;
+#ifdef SUPPORT_NAT_PROTO
+        if (is_sm_keep_proto(flags))
+        {
+            e_port = l_port = 0;
+        }
+        else
+#endif
+        {
+            e_port = l_port = proto = 0;
+        }
     }
 
   if (is_sm_identity_nat (flags))
@@ -1130,6 +1148,12 @@ nat44_ed_add_static_mapping_internal (ip4_address_t l_addr,
       m->external_port = e_port;
       m->proto = proto;
     }
+#ifdef SUPPORT_NAT_PROTO
+  if (is_sm_keep_proto(flags))
+  {
+      m->proto = proto;
+  }
+#endif
 
   if (is_sm_identity_nat (flags))
     {
@@ -1184,7 +1208,16 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
 
   if (is_sm_addr_only (flags))
     {
-      e_port = l_port = proto = 0;
+#ifdef SUPPORT_NAT_PROTO
+        if (is_sm_keep_proto(flags))
+        {
+            e_port = l_port = 0;
+        }
+        else
+#endif
+        {
+            e_port = l_port = proto = 0;
+        }
     }
 
   if (is_sm_identity_nat (flags))
@@ -2758,6 +2791,12 @@ nat44_ed_sm_match (snat_main_t *sm, ip4_address_t match_addr, u16 match_port,
       if (m)
 	return m;
 
+#ifdef SUPPORT_NAT_PROTO
+      // try address+proto only mapping
+      m = nat44_ed_sm_i2o_lookup (sm, match_addr, 0, match_fib_index, match_protocol);
+      if (m)
+          return m;
+#endif
       // try address only mapping
       m = nat44_ed_sm_i2o_lookup (sm, match_addr, 0, match_fib_index, 0);
       if (m)
@@ -2771,6 +2810,13 @@ nat44_ed_sm_match (snat_main_t *sm, ip4_address_t match_addr, u16 match_port,
 	  if (m)
 	    return m;
 
+#ifdef SUPPORT_NAT_PROTO
+	  // try address+proto only mapping
+	  m = nat44_ed_sm_i2o_lookup (sm, match_addr, 0, sm->inside_fib_index,
+				      match_protocol);
+	  if (m)
+	    return m;
+#endif
 	  // try address only mapping
 	  m = nat44_ed_sm_i2o_lookup (sm, match_addr, 0, sm->inside_fib_index,
 				      0);
@@ -2785,6 +2831,13 @@ nat44_ed_sm_match (snat_main_t *sm, ip4_address_t match_addr, u16 match_port,
 	  if (m)
 	    return m;
 
+#ifdef SUPPORT_NAT_PROTO
+	  // try address+proto only mapping
+	  m = nat44_ed_sm_i2o_lookup (sm, match_addr, 0, sm->outside_fib_index,
+				      match_protocol);
+	  if (m)
+	    return m;
+#endif
 	  // try address only mapping
 	  m = nat44_ed_sm_i2o_lookup (sm, match_addr, 0, sm->outside_fib_index,
 				      0);
@@ -2798,6 +2851,13 @@ nat44_ed_sm_match (snat_main_t *sm, ip4_address_t match_addr, u16 match_port,
 	nat44_ed_sm_o2i_lookup (sm, match_addr, match_port, 0, match_protocol);
       if (m)
 	return m;
+
+#ifdef SUPPORT_NAT_PROTO
+      // try address+proto mapping
+      m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, 0, match_protocol);
+      if (m)
+          return m;
+#endif
 
       // try address only mapping
       m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, 0, 0);

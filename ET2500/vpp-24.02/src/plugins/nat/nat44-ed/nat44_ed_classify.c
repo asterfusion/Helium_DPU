@@ -129,6 +129,16 @@ nat44_handoff_classify_node_fn_inline (vlib_main_t * vm,
 		    next0 = NAT_NEXT_OUT2IN_CLASSIFY;
 		  goto enqueue0;
 		}
+#ifdef SUPPORT_NAT_PROTO
+	      /* try to classify the fragment based on IP header alone */
+	      m = nat44_ed_sm_o2i_lookup (sm, ip0->dst_address, 0, 0, ip0->protocol);
+          if (m)
+          {
+              if (m->local_addr.as_u32 != m->external_addr.as_u32)
+                  next0 = NAT_NEXT_OUT2IN_CLASSIFY;
+              goto enqueue0;
+          }
+#endif
 	      m = nat44_ed_sm_o2i_lookup (
 		sm, ip0->dst_address, vnet_buffer (b0)->ip.reass.l4_dst_port,
 		0, ip0->protocol);
@@ -274,6 +284,15 @@ nat44_ed_classify_node_fn_inline (vlib_main_t * vm,
 		    next0 = NAT_NEXT_OUT2IN_ED_FAST_PATH;
 		  goto enqueue0;
 		}
+#ifdef SUPPORT_NAT_PROTO
+	      m = nat44_ed_sm_o2i_lookup (sm, ip0->dst_address, 0, 0, ip0->protocol);
+          if (m)
+          {
+              if (m->local_addr.as_u32 != m->external_addr.as_u32)
+                  next0 = NAT_NEXT_OUT2IN_ED_FAST_PATH;
+              goto enqueue0;
+          }
+#endif
 	      m = nat44_ed_sm_o2i_lookup (
 		sm, ip0->dst_address, vnet_buffer (b0)->ip.reass.l4_dst_port,
 		0, ip0->protocol);

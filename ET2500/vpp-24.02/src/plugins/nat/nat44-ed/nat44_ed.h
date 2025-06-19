@@ -183,6 +183,7 @@ format_function_t format_nat44_ed_tcp_state;
 #define NAT_SM_FLAG_OUT2IN_ONLY	   (1 << 6)
 #define NAT_SM_FLAG_LB		   (1 << 7)
 #define NAT_SM_FLAG_SWITCH_ADDRESS (1 << 8)
+#define NAT_SM_FLAG_KEEP_PROTO     (1 << 9)
 
 typedef CLIB_PACKED(struct
 {
@@ -780,6 +781,12 @@ always_inline bool
 is_sm_addr_only (u32 f)
 {
   return (f & NAT_SM_FLAG_ADDR_ONLY);
+}
+
+always_inline bool
+is_sm_keep_proto (u32 f)
+{
+  return (f & NAT_SM_FLAG_KEEP_PROTO);
 }
 
 always_inline bool

@@ -582,6 +582,7 @@ autoreply define nat44_add_del_static_mapping {
                                   used)
     @param vfr_id - VRF ID
     @param tag - opaque string tag
+    @param port_count - port range number
 */
 autoreply define nat44_add_del_static_mapping_v2 {
   u32 client_index;
@@ -598,6 +599,7 @@ autoreply define nat44_add_del_static_mapping_v2 {
   vl_api_interface_index_t external_sw_if_index;
   u32 vrf_id;
   string tag[64];
+  u16 port_count;
 };
 
 /** \brief Dump NAT44 static mappings

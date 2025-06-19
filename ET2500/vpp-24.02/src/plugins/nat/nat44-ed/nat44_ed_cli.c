@@ -830,6 +830,7 @@ add_static_mapping_command_fn (vlib_main_t * vm,
   u32 flags = 0;
   u32 sw_if_index = ~0;
   ip_protocol_t proto = 0;
+  u8 proto_set = 0;
 
   if (!unformat_user (input, unformat_line_input, line_input))
     return clib_error_return (0, NAT44_ED_EXPECTED_ARGUMENT);
@@ -872,7 +873,9 @@ add_static_mapping_command_fn (vlib_main_t * vm,
       else if (unformat (line_input, "vrf %u", &vrf_id))
 	;
       else if (unformat (line_input, "%U", unformat_ip_protocol, &proto))
-	;
+      {
+          proto_set = 1;
+      }
       else if (unformat (line_input, "self-twice-nat"))
 	{
 	  flags |= NAT_SM_FLAG_SELF_TWICE_NAT;
@@ -906,6 +909,10 @@ add_static_mapping_command_fn (vlib_main_t * vm,
   if (!l_port_set)
     {
       flags |= NAT_SM_FLAG_ADDR_ONLY;
+      if (proto_set)
+      {
+          flags |= NAT_SM_FLAG_KEEP_PROTO;
+      }
     }
   else
     {

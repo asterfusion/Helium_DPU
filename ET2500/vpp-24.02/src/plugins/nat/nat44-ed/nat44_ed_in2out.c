@@ -421,10 +421,18 @@ nat44_ed_external_sm_lookup (snat_main_t *sm, ip4_address_t match_addr,
     nat44_ed_sm_o2i_lookup (sm, match_addr, match_port, 0, match_protocol);
   if (!m)
     {
-      /* Try address only mapping */
-      m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, 0, 0);
-      if (!m)
-	return 0;
+#ifdef SUPPORT_NAT_PROTO
+        m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, 0, match_protocol);
+        if (!m)
+        {
+#endif
+            /* Try address only mapping */
+            m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, 0, 0);
+            if (!m)
+                return 0;
+#ifdef SUPPORT_NAT_PROTO
+        }
+#endif
     }
   *daddr = m->local_addr;
   if (dport)

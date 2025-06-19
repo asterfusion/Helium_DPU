@@ -128,6 +128,20 @@ format_snat_static_mapping (u8 * s, va_list * args)
     }
 
   if (is_sm_addr_only (m->flags))
+#ifdef SUPPORT_NAT_PROTO
+  {
+      if (is_sm_keep_proto(m->flags))
+          s =
+              format (s, "%U local %U external %U vrf %d %s %s", 
+                      format_ip_protocol, m->proto,
+                      format_ip4_address, &m->local_addr, 
+                      format_ip4_address, &m->external_addr, m->vrf_id,
+                      is_sm_twice_nat (m->flags) ?
+                      "twice-nat" :
+                      is_sm_self_twice_nat (m->flags) ? "self-twice-nat" : "",
+                      is_sm_out2in_only (m->flags) ? "out2in-only" : "");
+      else
+#endif
     s =
       format (s, "local %U external %U vrf %d %s %s", format_ip4_address,
 	      &m->local_addr, format_ip4_address, &m->external_addr, m->vrf_id,
@@ -135,6 +149,9 @@ format_snat_static_mapping (u8 * s, va_list * args)
 		"twice-nat" :
 		is_sm_self_twice_nat (m->flags) ? "self-twice-nat" : "",
 	      is_sm_out2in_only (m->flags) ? "out2in-only" : "");
+#ifdef SUPPORT_NAT_PROTO
+  }
+#endif
   else
     {
       if (is_sm_lb (m->flags))
