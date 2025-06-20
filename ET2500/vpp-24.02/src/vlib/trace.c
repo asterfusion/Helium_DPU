@@ -40,6 +40,9 @@
 #include <vlib/vlib.h>
 #include <vlib/threads.h>
 #include <vnet/classify/vnet_classify.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 u8 *vnet_trace_placeholder;
 
@@ -364,6 +367,132 @@ VLIB_CLI_COMMAND (show_trace_cli,static) = {
   .function = cli_show_trace_buffer,
 };
 /* *INDENT-ON* */
+
+static int
+file_exists (u8 *fname)
+{
+  FILE *fp = 0;
+  fp = fopen ((char *) fname, "r");
+  if (fp)
+    {
+      fclose (fp);
+      return 1;
+    }
+  return 0;
+}
+
+static clib_error_t *
+cli_dump_trace_buffer (vlib_main_t * vm,
+		       unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  vlib_trace_main_t *tm;
+  unformat_input_t _line_input, *line_input = &_line_input;
+  vlib_trace_header_t **h, **traces;
+  u32 i, idx = 0;
+  char *fmt;
+  u8 *s = 0;
+  u32 max;
+  u8 *filename = 0;
+  u8 *chroot_filename = 0;
+  FILE *fp;
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+      return 0;
+
+  /* default all to file*/
+  max = (u32)-1;
+  while (unformat_check_input (line_input) != (uword) UNFORMAT_END_OF_INPUT)
+  {
+      if (unformat (line_input, "file %s", &filename))
+          ;
+      else if (unformat (line_input, "max %d", &max))
+          ;
+      else
+          return clib_error_create ("expected 'max COUNT', got `%U'",
+                  format_unformat_error, input);
+  }
+
+  if (strstr ((char *) filename, "..") ||
+          index ((char *) filename, '/'))
+  {
+      vlib_cli_output (vm, "illegal characters in filename '%s'",
+              filename);
+      goto out;
+  }
+
+  chroot_filename = format (0, "/%s%c", filename, 0);
+
+  vec_free (filename);
+
+  if (file_exists (chroot_filename))
+  {
+      vlib_cli_output (vm, "file exists: %s\n", chroot_filename);
+      goto out;
+  }
+
+  fp = fopen ((char *) chroot_filename, "w");
+  if (fp == NULL)
+  {
+      vlib_cli_output (vm, "Couldn't create %s\n", chroot_filename);
+      goto out;
+  }
+  //dump trace
+  foreach_vlib_main ()
+  {
+      fmt = "------------------- Start of thread %d %s -------------------\n";
+      s = format (s, fmt, idx, vlib_worker_threads[idx].name);
+
+      tm = &this_vlib_main->trace_main;
+
+      trace_apply_filter (this_vlib_main);
+
+      traces = 0;
+      pool_foreach (h, tm->trace_buffer_pool)
+      {
+          vec_add1 (traces, h[0]);
+      }
+
+      if (vec_len (traces) == 0)
+      {
+          s = format (s, "No packets in trace buffer\n");
+          goto done;
+      }
+
+      /* Sort them by increasing time. */
+      vec_sort_with_function (traces, trace_time_cmp);
+
+      for (i = 0; i < vec_len (traces); i++)
+      {
+          if (i == max)
+          {
+              char *warn = "Limiting display to %d packets."
+                  " To display more specify max.";
+              vlib_cli_output (vm, warn, max);
+              s = format (s, warn, max);
+              goto done;
+          }
+
+          s = format (s, "Packet %d\n%U\n\n", i + 1, format_vlib_trace, vm,
+                  traces[i]);
+      }
+
+done:
+      fwrite(s, 1, vec_len(s), fp);
+
+      vec_free (traces);
+      idx++;
+      vec_free(s);
+  }
+  fclose (fp);
+out:
+  return 0;
+}
+
+VLIB_CLI_COMMAND (dump_trace_cli,static) = {
+  .path = "trace dump",
+  .short_help = "trace dump file <file> [max COUNT]",
+  .function = cli_dump_trace_buffer,
+};
 
 int vlib_enable_disable_pkt_trace_filter (int enable) __attribute__ ((weak));
 
