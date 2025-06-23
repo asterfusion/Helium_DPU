@@ -238,22 +238,43 @@ ip4_arp_inline (vlib_main_t * vm,
 	      p0->error = node->errors[IP4_NEIGHBOR_ERROR_NON_ARP_ADJ];
 	      continue;
 	    }
+#ifdef ARP_FAIL_PUNT
+	  if (!is_glean)
+	  {
+		/* Send ARP request. */
+		b0 = ip4_neighbor_probe (vm, vnm, adj0, &src0, &resolve0);
 
-	  /* Send ARP request. */
-	  b0 = ip4_neighbor_probe (vm, vnm, adj0, &src0, &resolve0);
-
-	  if (PREDICT_TRUE (NULL != b0))
-	    {
-	      /* copy the persistent fields from the original */
-	      clib_memcpy_fast (b0->opaque2, p0->opaque2,
+		if (PREDICT_TRUE (NULL != b0))
+		{
+		/* copy the persistent fields from the original */
+		clib_memcpy_fast (b0->opaque2, p0->opaque2,
 				sizeof (p0->opaque2));
-	      p0->error = node->errors[IP4_NEIGHBOR_ERROR_REQUEST_SENT];
-	    }
-	  else
-	    {
-	      p0->error = node->errors[IP4_NEIGHBOR_ERROR_NO_BUFFERS];
-	      continue;
-	    }
+		p0->error = node->errors[IP4_NEIGHBOR_ERROR_REQUEST_SENT];
+		}
+		else
+		{
+		p0->error = node->errors[IP4_NEIGHBOR_ERROR_NO_BUFFERS];
+		continue;
+		}
+	  }
+#else
+	  /* Send ARP request. */
+		b0 = ip4_neighbor_probe (vm, vnm, adj0, &src0, &resolve0);
+
+		if (PREDICT_TRUE (NULL != b0))
+		{
+		/* copy the persistent fields from the original */
+		clib_memcpy_fast (b0->opaque2, p0->opaque2,
+				sizeof (p0->opaque2));
+		p0->error = node->errors[IP4_NEIGHBOR_ERROR_REQUEST_SENT];
+		}
+		else
+		{
+		p0->error = node->errors[IP4_NEIGHBOR_ERROR_NO_BUFFERS];
+		continue;
+		}
+#endif
+	  
 	}
 
       vlib_put_next_frame (vm, node, IP4_ARP_NEXT_DROP, n_left_to_next_drop);
@@ -288,6 +309,20 @@ VLIB_REGISTER_NODE (ip4_arp_node) =
   },
 };
 
+#ifdef ARP_FAIL_PUNT
+VLIB_REGISTER_NODE (ip4_glean_node) =
+{
+  .name = "ip4-glean",
+  .vector_size = sizeof (u32),
+  .format_trace = format_ip4_forward_next_trace,
+  .n_errors = IP4_NEIGHBOR_N_ERROR,
+  .error_counters = ip4_neighbor_error_counters,
+  .n_next_nodes = IP4_ARP_N_NEXT,
+  .next_nodes = {
+    [IP4_ARP_NEXT_DROP] = "linux-cp-punt",
+  },
+};
+#else
 VLIB_REGISTER_NODE (ip4_glean_node) =
 {
   .name = "ip4-glean",
@@ -300,6 +335,7 @@ VLIB_REGISTER_NODE (ip4_glean_node) =
     [IP4_ARP_NEXT_DROP] = "ip4-drop",
   },
 };
+#endif
 /* *INDENT-ON* */
 
 #define foreach_notrace_ip4_arp_error           \
