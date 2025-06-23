@@ -20,6 +20,7 @@
 #include <vnet/qos/qos_types.h>
 #include <vnet/l2/l2_input.h>
 #include <vnet/l2/feat_bitmap.h>
+#include <vnet/ethernet/ethernet.h>
 
 extern u8 *qos_record_configs[QOS_N_SOURCES];
 extern u32 l2_qos_input_next[QOS_N_SOURCES][32];
@@ -52,18 +53,16 @@ qos_record_tc(vnet_hw_interface_t *hi, vlib_buffer_t *b0)
   qos_bits_t qos0;
   ethernet_header_t *eh;
   u16 ethertype;
-  u8 *l3;
 
   if(!(hi->flags &VNET_HW_INTERFACE_FLAG_USE_TC))
     return;
 
-  eh = (ethernet_header_t *)vlib_buffer_get_current(b0);
+  eh = ethernet_buffer_get_header(b0);
   ethertype = clib_net_to_host_u16(eh->type);
-  l3 = (u8 *) (eh + 1);
 
   if (ethernet_frame_is_tagged(ethertype))
   {
-    ethernet_vlan_header_t *vlan0 = (ethernet_vlan_header_t *) l3;
+    ethernet_vlan_header_t *vlan0 = (ethernet_vlan_header_t *) (eh + 1);
     if (!hi->dscp_to_tc && hi->dot1p_to_tc)
     {
       qos0 = ethernet_vlan_header_get_priority_net_order(vlan0) >> 1;
@@ -71,27 +70,24 @@ qos_record_tc(vnet_hw_interface_t *hi, vlib_buffer_t *b0)
       vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
       return;
     }
-
     ethertype = clib_net_to_host_u16(vlan0->type);
-    l3 += sizeof(ethernet_vlan_header_t);
   }
 
-  if (PREDICT_TRUE(ethertype == ETHERNET_TYPE_IP4))
+  if (ethertype == ETHERNET_TYPE_IP4)
   {
-    ip4_header_t *ip4h = (ip4_header_t *)l3;
+    i16 l3_hdr_offset = vnet_buffer(b0)->l3_hdr_offset;
+    ip4_header_t *ip4h = (ip4_header_t *)(b0->data + l3_hdr_offset);
     qos0 = ip4h->tos >> 2;
     uword *t0 = hash_get(hi->dscp_to_tc, qos0);
     vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
   }
-  else
+  else if (ethertype == ETHERNET_TYPE_IP6)
   {
-    if (PREDICT_TRUE(ethertype == ETHERNET_TYPE_IP6))
-    {
-      ip6_header_t *ip6h = (ip6_header_t *)l3;
-      qos0 = ip6_traffic_class_network_order(ip6h);
-      uword *t0 = hash_get(hi->dscp_to_tc, qos0);
-      vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
-    }
+    i16 l3_hdr_offset = vnet_buffer(b0)->l3_hdr_offset;
+    ip6_header_t *ip6h = (ip6_header_t *)(b0->data + l3_hdr_offset);
+    qos0 = ip6_traffic_class_network_order(ip6h);
+    uword *t0 = hash_get(hi->dscp_to_tc, qos0);
+    vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
   }
 }
 
