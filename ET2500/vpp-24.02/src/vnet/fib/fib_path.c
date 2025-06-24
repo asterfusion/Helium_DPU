@@ -1648,33 +1648,33 @@ fib_path_cmp_i (const fib_path_t *path1,
     return (res);
 }
 
-/*
- * fib_path_cmp_for_sort
- *
- * Compare two paths for equivalence. Used during path sorting.
- * As usual 0 means equal.
- */
-int
-fib_path_cmp_for_sort (void * v1,
-		       void * v2)
-{
-    fib_node_index_t *pi1 = v1, *pi2 = v2;
-    fib_path_t *path1, *path2;
+// /*
+//  * fib_path_cmp_for_sort
+//  *
+//  * Compare two paths for equivalence. Used during path sorting.
+//  * As usual 0 means equal.
+//  */
+// int
+// fib_path_cmp_for_sort (void * v1,
+// 		       void * v2)
+// {
+//     fib_node_index_t *pi1 = v1, *pi2 = v2;
+//     fib_path_t *path1, *path2;
 
-    path1 = fib_path_get(*pi1);
-    path2 = fib_path_get(*pi2);
+//     path1 = fib_path_get(*pi1);
+//     path2 = fib_path_get(*pi2);
 
-    /*
-     * when sorting paths we want the highest preference paths
-     * first, so that the choices set built is in prefernce order
-     */
-    if (path1->fp_preference != path2->fp_preference)
-    {
-	return (path1->fp_preference - path2->fp_preference);
-    }
+//     /*
+//      * when sorting paths we want the highest preference paths
+//      * first, so that the choices set built is in prefernce order
+//      */
+//     if (path1->fp_preference != path2->fp_preference)
+//     {
+// 	return (path1->fp_preference - path2->fp_preference);
+//     }
 
-    return (fib_path_cmp_i(path1, path2));
-}
+//     return (fib_path_cmp_i(path1, path2));
+// }
 
 /*
  * fib_path_cmp
