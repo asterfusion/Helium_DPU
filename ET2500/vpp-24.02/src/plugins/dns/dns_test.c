@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <vnet/ip/ip.h>
 
+#include <vnet/ip/ip_format_fns.h>
 uword unformat_sw_if_index (unformat_input_t * input, va_list * args);
 
 /* Declare message IDs */
@@ -50,6 +51,35 @@ static void vl_api_dns_resolve_name_reply_t_handler
 	clib_warning ("resolved: %U", format_ip4_address, mp->ip4_address);
       if (mp->ip6_set)
 	clib_warning ("resolved: %U", format_ip6_address, mp->ip6_address);
+    }
+  if (vam->async_mode)
+    vam->async_errors += (retval < 0);
+  else
+    {
+      vam->retval = retval;
+      vam->result_ready = 1;
+    }
+}
+
+static void vl_api_dns_resolve_name_v2_reply_t_handler
+  (vl_api_dns_resolve_name_v2_reply_t * mp)
+{
+  vat_main_t *vam = dns_test_main.vat_main;
+  i32 i;
+  i32 retval = (i32) clib_net_to_host_u32 (mp->retval);
+
+  if (retval == 0)
+    {
+	for(i=0; i<ntohl(mp->count); i++) {
+		if (mp->address[i].af)
+		{
+			clib_warning ("resolved: %U", format_ip6_address, (u8*)&(mp->address[i].un));
+		}
+		else
+		{
+			clib_warning ("resolved: %U", format_ip4_address, (u8*)&(mp->address[i].un));
+		}
+	}
     }
   if (vam->async_mode)
     vam->async_errors += (retval < 0);
@@ -137,6 +167,46 @@ api_dns_resolve_name (vat_main_t * vam)
 
   /* Construct the API message */
   M (DNS_RESOLVE_NAME, mp);
+  memcpy (mp->name, name, vec_len (name));
+  vec_free (name);
+
+  /* send it... */
+  S (mp);
+  /* Wait for the reply */
+  W (ret);
+  return ret;
+}
+
+static int
+api_dns_resolve_name_v2 (vat_main_t * vam)
+{
+  unformat_input_t *line_input = vam->input;
+  vl_api_dns_resolve_name_v2_t *mp;
+  u8 *name = 0;
+  int ret;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (line_input, "%s", &name))
+	;
+      else
+	break;
+    }
+
+  if (name == 0)
+    {
+      errmsg ("missing name to resolve");
+      return -99;
+    }
+
+  if (vec_len (name) > 127)
+    {
+      errmsg ("name too long");
+      return -99;
+    }
+
+  /* Construct the API message */
+  M (DNS_RESOLVE_NAME_V2, mp);
   memcpy (mp->name, name, vec_len (name));
   vec_free (name);
 
