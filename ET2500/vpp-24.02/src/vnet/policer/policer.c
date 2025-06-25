@@ -226,16 +226,6 @@ policer_input (u32 policer_index, u32 sw_if_index, vlib_dir_t dir, bool apply)
 {
   vnet_policer_main_t *pm = &vnet_policer_main;
 
-  if (apply)
-    {
-      vec_validate (pm->policer_index_by_sw_if_index[dir], sw_if_index);
-      pm->policer_index_by_sw_if_index[dir][sw_if_index] = policer_index;
-    }
-  else
-    {
-      pm->policer_index_by_sw_if_index[dir][sw_if_index] = ~0;
-    }
-
   if (dir == VLIB_RX)
     {
       vnet_feature_enable_disable ("device-input", "policer-input",
@@ -246,6 +236,17 @@ policer_input (u32 policer_index, u32 sw_if_index, vlib_dir_t dir, bool apply)
       vnet_feature_enable_disable ("interface-output", "policer-output", sw_if_index,
 				   apply, 0, 0);
     }
+
+  if (apply)
+    {
+      vec_validate (pm->policer_index_by_sw_if_index[dir], sw_if_index);
+      pm->policer_index_by_sw_if_index[dir][sw_if_index] = policer_index;
+    }
+  else
+    {
+      pm->policer_index_by_sw_if_index[dir][sw_if_index] = ~0;
+    }
+
   return 0;
 }
 
