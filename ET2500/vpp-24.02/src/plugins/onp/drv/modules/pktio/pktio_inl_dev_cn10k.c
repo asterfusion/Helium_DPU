@@ -311,8 +311,14 @@ cn10k_pktio_inl_dev_mac_addr_set (vlib_main_t *vm, cnxk_pktio_t *dev,
   return 0;
 }
 
+#ifdef VPP_PLATFORM_ET2500
+static_always_inline i32
+cn10k_pktio_inl_dev_mac_addr_del (vlib_main_t *vm, cnxk_pktio_t *dev,
+				  char *addr)
+#else
 static_always_inline i32
 cn10k_pktio_inl_dev_mac_addr_del (vlib_main_t *vm, cnxk_pktio_t *dev)
+#endif
 {
   return 0;
 }

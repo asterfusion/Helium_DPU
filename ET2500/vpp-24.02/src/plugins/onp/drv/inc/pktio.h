@@ -304,7 +304,11 @@ i32 cnxk_drv_pktio_mac_addr_get (vlib_main_t *vm, u16 pktio_idx, char *addr);
 
 i32 cnxk_drv_pktio_mac_addr_add (vlib_main_t *vm, u16 pktio_idx, char *addr);
 
+#ifdef VPP_PLATFORM_ET2500
+i32 cnxk_drv_pktio_mac_addr_del (vlib_main_t *vm, u16 pktio_idx, char *addr);
+#else
 i32 cnxk_drv_pktio_mac_addr_del (vlib_main_t *vm, u16 pktio_idx);
+#endif
 
 i32 cnxk_drv_pktio_is_inl_dev_enabled (vlib_main_t *vm);
 
