@@ -429,6 +429,32 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
             return rv;
         }
     }
+    else
+    {
+        if (new_shaping_profile_id != ONP_PKTIO_SHAPER_PROFILE_NONE)
+        {
+            //update profile_id for nix
+            rv = onp_pktio_shaping_profile_add(nix, &profile->shaping_profile);
+            if (rv)
+            {
+                vec_free(tm_node_list);
+                vec_free(tm_node_priority);
+                vec_free(tm_node_sq);
+                onp_pktio_warn("onp_pktio_shaping_profile_add profile_id %u failed", new_shaping_profile_id);
+                return rv;
+            }
+            //attch profile
+            rv = roc_nix_tm_node_shaper_update(nix, tm_node_list[qid]->id, new_shaping_profile_id, true);
+            if (rv)
+            {
+                onp_pktio_warn("roc_nix_tm_node_shaper_update mdq_node(%u) %u profile_id %u failed", qid, tm_node_list[qid]->id, new_shaping_profile_id);
+                vec_free(tm_node_list);
+                vec_free(tm_node_priority);
+                vec_free(tm_node_sq);
+                return rv;
+            }
+        }
+    }
 
     /* There is an exception in the handling here now */
     //update current node
