@@ -207,11 +207,28 @@ onp_pktio_mac_addr_add_del (vnet_hw_interface_t *hi, const u8 *addr, u8 is_add)
   onp_pktio_t *od = vec_elt_at_index (om->onp_pktios, hi->dev_instance);
   int rv;
 
+#ifdef VPP_PLATFORM_ET2500
+  if (is_add)
+  {
+  rv = cnxk_drv_pktio_mac_addr_add (vlib_get_main (), od->cnxk_pktio_index,
+				    (char *) addr);
+  if (rv < 0)
+    onp_pktio_notice ("mac address add failed");
+  }
+  else
+  {
+  rv = cnxk_drv_pktio_mac_addr_del (vlib_get_main (), od->cnxk_pktio_index,
+				    (char *) addr);
+  if (rv < 0)
+    onp_pktio_notice ("mac address del failed");
+  }
+#else
   rv = cnxk_drv_pktio_mac_addr_add (vlib_get_main (), od->cnxk_pktio_index,
 				    (char *) addr);
   if (rv < 0)
     onp_pktio_notice ("mac address add failed");
 
+#endif
   return NULL;
 }
 
