@@ -182,14 +182,14 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
                             }
                             ra = a;
                         }
-			ja = a;
+                        ja = a;
                     }
                     else if (a->fib_index == ~0) {
                         ba = a;
                     }
                 }
-		else if (a->acl_index == ~0)
-		{
+                else if (a->acl_index == ~0)
+                {
                     if (a->fib_index == rx_fib_index)
                     {
                         if (a->sw_if_index == tx_sw_if_index)
@@ -199,15 +199,16 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
                                      (d_addr.as_u32 & ip4_main.fib_masks[a->addr_len])))
 
                             {
-			    }
-                            ra = a;
-			}
-			ja = a;
-		    }
+                            }
+                            if(ra == NULL)
+                                ra = a;
+                        }
+                        ja = a;
+                    }
                     else if (a->fib_index == ~0) {
                         ba = a;
                     }
-		}
+                }
             }
             if (ra)
             {
@@ -241,36 +242,36 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
                         ba = a;
                     }
                 }
-		else if (a->acl_index == ~0)
-		{
+                else if (a->acl_index == ~0)
+                {
                     if (a->fib_index == rx_fib_index)
                     {
-			    if ((a->addr_len != ~0) &&
-					    (a->net.as_u32 ==
-					     (d_addr.as_u32 & ip4_main.fib_masks[a->addr_len])))
+                        if ((a->addr_len != ~0) &&
+                                (a->net.as_u32 ==
+                                 (d_addr.as_u32 & ip4_main.fib_masks[a->addr_len])))
 
-			    {
-				    return nat_ed_alloc_addr_and_port_with_snat_address (
-						    sm, nat_proto, thread_index, a,
-						    sm->port_per_thread, snat_thread_index, s,
-						    outside_addr, outside_port);
-			    }
-			ja = a;
-		    }
+                        {
+                            return nat_ed_alloc_addr_and_port_with_snat_address (
+                                    sm, nat_proto, thread_index, a,
+                                    sm->port_per_thread, snat_thread_index, s,
+                                    outside_addr, outside_port);
+                        }
+                        ja = a;
+                    }
                     else if (a->fib_index == ~0) {
                         ba = a;
                     }
-		}
+                }
             }
         }
 
-	if (ja || ba)
-	{
-		a = ja ? ja : ba;
-		return nat_ed_alloc_addr_and_port_with_snat_address (
-				sm, nat_proto, thread_index, a, sm->port_per_thread,
-				snat_thread_index, s, outside_addr, outside_port);
-	}
+        if (ja || ba)
+        {
+            a = ja ? ja : ba;
+            return nat_ed_alloc_addr_and_port_with_snat_address (
+                    sm, nat_proto, thread_index, a, sm->port_per_thread,
+                    snat_thread_index, s, outside_addr, outside_port);
+        }
     }
     //no acl index match packets
     else if (vec_len (sm->addresses) > 0)
