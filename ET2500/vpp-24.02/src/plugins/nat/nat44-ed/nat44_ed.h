@@ -982,6 +982,8 @@ nat_translation_error_e nat_6t_flow_buf_translate_o2i (
   vlib_main_t *vm, snat_main_t *sm, vlib_buffer_t *b, ip4_header_t *ip,
   nat_6t_flow_t *f, ip_protocol_t proto, int is_output_feature);
 
+void
+nat44_ed_update_outside_if_addresses (snat_address_t *ap);
 #endif /* __included_nat44_ed_h__ */
 /*
  * fd.io coding-style-patch-verification: ON

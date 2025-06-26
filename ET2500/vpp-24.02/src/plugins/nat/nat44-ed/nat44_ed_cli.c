@@ -628,6 +628,8 @@ nat44_show_addresses_command_fn (vlib_main_t * vm, unformat_input_t * input,
 
       if (ap->addr_len != ~0)
 	vlib_cli_output (vm, "  synced with interface address");
+      if (ap->sw_if_index != ~0)
+          vlib_cli_output(vm, "  tx sw_if_index: %u", ap->sw_if_index);
     }
   vlib_cli_output (vm, "NAT44 twice-nat pool addresses:");
   vec_foreach (ap, sm->twice_nat_addresses)

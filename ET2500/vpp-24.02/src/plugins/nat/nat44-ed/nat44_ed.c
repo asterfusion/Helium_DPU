@@ -299,7 +299,7 @@ nat44_ed_resolve_nat_addr_len (snat_address_t *ap,
   return 1;
 }
 
-static void
+void
 nat44_ed_update_outside_if_addresses (snat_address_t *ap)
 {
   snat_main_t *sm = &snat_main;

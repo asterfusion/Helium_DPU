@@ -168,6 +168,10 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
                 {
                     if (a->fib_index == rx_fib_index)
                     {
+                        if (PREDICT_FALSE(a->addr_len == ~0))
+                        {
+                            nat44_ed_update_outside_if_addresses(a);
+                        }
                         if (a->sw_if_index == tx_sw_if_index)
                         {
                             if ((a->addr_len != ~0) &&
@@ -192,6 +196,10 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
                 {
                     if (a->fib_index == rx_fib_index)
                     {
+                        if (PREDICT_FALSE(a->addr_len == ~0))
+                        {
+                            nat44_ed_update_outside_if_addresses(a);
+                        }
                         if (a->sw_if_index == tx_sw_if_index)
                         {
                             if ((a->addr_len != ~0) &&
@@ -294,6 +302,10 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
 
 	      if (a->fib_index == rx_fib_index)
 		{
+            if (PREDICT_FALSE(a->addr_len == ~0))
+            {
+                nat44_ed_update_outside_if_addresses(a);
+            }
 		  if (a->sw_if_index == tx_sw_if_index)
 		    {
 		      if ((a->addr_len != ~0) &&
@@ -323,6 +335,10 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
 
 	      if (a->fib_index == rx_fib_index)
 		{
+            if (PREDICT_FALSE(a->addr_len == ~0))
+            {
+                nat44_ed_update_outside_if_addresses(a);
+            }
 		  if (a->sw_if_index == tx_sw_if_index)
 		    {
 		      if ((a->addr_len != ~0) &&
