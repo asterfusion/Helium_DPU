@@ -1104,12 +1104,15 @@ pol_logical_2_physical (const qos_pol_cfg_params_st *cfg, policer_t *phys)
   phys->action[POLICE_CONFORM] = cfg->conform_action.action_type;
   phys->mark_dscp[POLICE_CONFORM] = cfg->conform_action.dscp;
   phys->mark_pcp[POLICE_CONFORM] = cfg->conform_action.pcp;
+  phys->mark_tc[POLICE_CONFORM] = cfg->conform_action.tc;
   phys->action[POLICE_EXCEED] = cfg->exceed_action.action_type;
   phys->mark_dscp[POLICE_EXCEED] = cfg->exceed_action.dscp;
   phys->mark_pcp[POLICE_EXCEED] = cfg->exceed_action.pcp;
+  phys->mark_tc[POLICE_EXCEED] = cfg->exceed_action.tc;
   phys->action[POLICE_VIOLATE] = cfg->violate_action.action_type;
   phys->mark_dscp[POLICE_VIOLATE] = cfg->violate_action.dscp;
   phys->mark_pcp[POLICE_VIOLATE] = cfg->violate_action.pcp;
+  phys->mark_tc[POLICE_VIOLATE] = cfg->violate_action.tc;
 
   phys->color_aware = cfg->color_aware;
 

@@ -27,7 +27,7 @@
 #define VLAN_PCP_SHIFT    13
 
 static_always_inline void
-vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp)
+vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp, u8 tc)
 {
   ethernet_header_t *eh;
   ip4_header_t *ip4h;
@@ -69,6 +69,9 @@ vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp)
 	    clib_host_to_net_u32 (dscp << IP6_DSCP_SHIFT);
 	}
     }
+
+  if(tc != UINT8_MAX)
+    vnet_buffer2(b)->tc_index = tc;
 }
 
 static_always_inline u8
@@ -110,7 +113,7 @@ vnet_policer_police (vlib_main_t *vm, vlib_buffer_t *b, u32 policer_index,
   vlib_increment_combined_counter (&policer_counters[col], vm->thread_index,
 				   policer_index, 1, len);
   if (PREDICT_TRUE (act == QOS_ACTION_MARK_AND_TRANSMIT))
-    vnet_policer_mark (b, pol->mark_dscp[col], pol->mark_pcp[col]);
+    vnet_policer_mark (b, pol->mark_dscp[col], pol->mark_pcp[col], pol->mark_tc[col]);
 
   return act;
 }
