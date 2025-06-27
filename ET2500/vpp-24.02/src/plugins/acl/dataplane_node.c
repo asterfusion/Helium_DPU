@@ -341,7 +341,17 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             break;
         }
 
-        if (match_acl_info->action[i] > *action)
+	else if (match_acl_info->action[i] > *action)
+        {
+            *action = match_acl_info->action[i];
+            *acl_index = match_acl_info->acl_index[i];
+            *rule_index = match_acl_info->rule_index[i];
+            action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
+            action_expand->policer_index = match_acl_info->policer_index[i];
+            action_expand->set_tc_value = match_acl_info->set_tc_value[i];
+        }
+
+        else if (match_acl_info->action[i] == *action && match_acl_info->acl_index[i] > *acl_index)
         {
             *action = match_acl_info->action[i];
             *acl_index = match_acl_info->acl_index[i];
