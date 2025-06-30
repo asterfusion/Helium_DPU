@@ -63,8 +63,17 @@ arp_mk_reply (vnet_main_t * vnm,
 
   arp0->ip4_over_ethernet[1] = arp0->ip4_over_ethernet[0];
 
-  mac_address_from_bytes (&arp0->ip4_over_ethernet[0].mac,
-			  hw_if0->hw_address);
+  if(rewrite0_len)
+  {
+      ethernet_header_t *re_h = (ethernet_header_t*)rewrite0;
+      mac_address_from_bytes (&arp0->ip4_over_ethernet[0].mac,
+              re_h->src_address);
+  }
+  else
+  {
+      mac_address_from_bytes (&arp0->ip4_over_ethernet[0].mac,
+              hw_if0->hw_address);
+  }
   clib_mem_unaligned (&arp0->ip4_over_ethernet[0].ip4.data_u32, u32) =
     if_addr0->data_u32;
 

@@ -815,8 +815,12 @@ typedef struct
 	u16 default_sub:1;
 	u16 outer_vlan_id_any:1;
 	u16 inner_vlan_id_any:1;
+	u16 change_mac:1;
       } flags;
     };
+
+    /* Ethernet (MAC) address for sub interface. */
+    u8 address[6];
   } eth;
 } vnet_sub_interface_t;
 

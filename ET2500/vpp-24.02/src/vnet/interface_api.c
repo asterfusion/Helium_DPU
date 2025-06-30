@@ -974,8 +974,76 @@ static void vl_api_sw_interface_set_mac_address_t_handler
 
   si = vnet_get_sw_interface (vnm, sw_if_index);
   mac_address_decode (mp->mac_address, &mac);
-  error =
-    vnet_hw_interface_change_mac_address (vnm, si->hw_if_index, (u8 *) & mac);
+
+  //for sub interface
+  if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
+  {
+      vnet_hw_interface_t *hi;
+      u8 match_hw = 0;
+      error = NULL;
+      hi = vnet_get_sup_hw_interface (vnm, sw_if_index);
+      if(ethernet_mac_address_equal(hi->hw_address, (u8*)&mac))
+      {
+          match_hw = 1;
+      }
+      if(si->sub.eth.flags.change_mac == 0)
+      {
+          if(!match_hw)
+          {
+              error = vnet_hw_interface_add_del_mac_address (vnm, hi->hw_if_index,
+                                                            (u8*)&mac, 1);
+              if(!error)
+              {
+                  si->sub.eth.flags.change_mac = 1;
+                  clib_memcpy(si->sub.eth.address, (u8*)&mac, sizeof(mac));
+              }
+          }
+          else
+          {
+              //same with hw, do not add new
+          }
+      }
+      else
+      {
+          if(match_hw)
+          {
+              //delete old one
+              error = vnet_hw_interface_add_del_mac_address (vnm, hi->hw_if_index,
+                                                            si->sub.eth.address, 0);
+              if(!error)
+              {
+                  si->sub.eth.flags.change_mac = 0;
+                  clib_memset(si->sub.eth.address, 0, sizeof(mac));
+              }
+          }
+          else
+          {
+              if(ethernet_mac_address_equal(si->sub.eth.address, (u8*)&mac))
+              {
+                  //set same mac, do nothing
+              }
+              else
+              {
+                  //delete old
+                  error = vnet_hw_interface_add_del_mac_address (vnm, hi->hw_if_index,
+                           si->sub.eth.address, 0);
+                  //then add new
+                  error = vnet_hw_interface_add_del_mac_address (vnm, hi->hw_if_index,
+                          (u8*)&mac, 1);
+                  if(!error)
+                  {
+                      si->sub.eth.flags.change_mac = 1;
+                      clib_memcpy(si->sub.eth.address, (u8*)&mac, sizeof(mac));
+                  }
+              }
+          }
+      }
+  }
+  else
+  {
+      error =
+          vnet_hw_interface_change_mac_address (vnm, si->hw_if_index, (u8 *) & mac);
+  }
   if (error)
     {
       rv = VNET_API_ERROR_UNIMPLEMENTED;
