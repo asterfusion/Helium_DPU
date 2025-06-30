@@ -82,6 +82,9 @@ vnet_policer_police (vlib_main_t *vm, vlib_buffer_t *b, u32 policer_index,
   policer_t *pol;
   vnet_policer_main_t *pm = &vnet_policer_main;
 
+  if (policer_index == UINT32_MAX)
+    return QOS_ACTION_TRANSMIT;
+
   /* Speculative prefetch assuming a conform result */
   vlib_prefetch_combined_counter (&policer_counters[POLICE_CONFORM],
 				  vm->thread_index, policer_index);
