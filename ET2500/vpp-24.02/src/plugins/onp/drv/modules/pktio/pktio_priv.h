@@ -139,6 +139,17 @@ typedef struct
   struct roc_npc_flow *npc_flow;
 } cnxk_pktio_flow_t;
 
+#ifdef VPP_PLATFORM_ET2500
+typedef struct 
+{
+    char mac_address[CNXK_MAC_ADDRESS_LEN];
+
+    u32 index;
+    /* Internal flow object */
+    struct roc_npc_flow *npc_flow;
+} cnxk_pktio_second_mac_t;
+#endif
+
 typedef struct
 {
   CLIB_CACHE_LINE_ALIGN_MARK (cacheline0);
@@ -163,6 +174,10 @@ typedef struct
   u32 pktio_mtu;
   cnxk_pktio_link_type_t pktio_link_type; /* CGX, LBK, PCI */
   char mac_address[CNXK_MAC_ADDRESS_LEN];
+#ifdef VPP_PLATFORM_ET2500
+  /* secondary_addrs pool */
+  cnxk_pktio_second_mac_t *second_mac_entries;
+#endif
   u8 is_inline;
   u8 pktio_index;
   u8 is_used;
@@ -241,7 +256,11 @@ typedef struct cnxk_pktio_ops
 
   i32 (*pktio_mac_addr_add) (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr);
 
+#ifdef VPP_PLATFORM_ET2500
+  i32 (*pktio_mac_addr_del) (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr);
+#else
   i32 (*pktio_mac_addr_del) (vlib_main_t *vm, cnxk_pktio_t *dev);
+#endif
 
   i32 (*pktio_queue_stats_get) (vlib_main_t *vm, cnxk_pktio_t *dev, u16 qid,
 				cnxk_pktio_queue_stats_t *qstats, bool is_rxq);
@@ -388,7 +407,11 @@ i32 cnxk_pktio_mtu_get (vlib_main_t *vm, cnxk_pktio_t *dev, u32 *mtu);
 i32 cnxk_pktio_mac_addr_set (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr);
 i32 cnxk_pktio_mac_addr_get (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr);
 i32 cnxk_pktio_mac_addr_add (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr);
+#ifdef VPP_PLATFORM_ET2500
+i32 cnxk_pktio_mac_addr_del (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr);
+#else
 i32 cnxk_pktio_mac_addr_del (vlib_main_t *vm, cnxk_pktio_t *dev);
+#endif
 i32 cnxk_pktio_stats_get (vlib_main_t *vm, cnxk_pktio_t *dev,
 			  cnxk_pktio_stats_t *stats);
 i32 cnxk_pktio_queue_stats_get (vlib_main_t *vm, cnxk_pktio_t *dev, u16 qid,
