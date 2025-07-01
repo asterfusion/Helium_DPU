@@ -98,7 +98,7 @@ VLIB_NODE_FN (l2_uu_policer_node) (vlib_main_t * vm,
             u32 next0, next1;
             u32 sw_if_index0, sw_if_index1;
             ethernet_header_t *eth0, *eth1;
-            u32 policer_index0, policer_index1;
+            u32 policer_index0 = UINT32_MAX, policer_index1 = UINT32_MAX;
             u8 act0, act1;
             u8 is_uu0 = 0, is_uu1 = 0;
 
@@ -189,7 +189,7 @@ VLIB_NODE_FN (l2_uu_policer_node) (vlib_main_t * vm,
             u32 next0;
             u32 sw_if_index0;
             ethernet_header_t *eth0;
-            u32 policer_index0;
+            u32 policer_index0 = UINT32_MAX;
             u8 act0;
             u8 is_uu0 = 0;
 
