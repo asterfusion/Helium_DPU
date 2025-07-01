@@ -226,6 +226,9 @@ policer_input (u32 policer_index, u32 sw_if_index, vlib_dir_t dir, bool apply)
 {
   vnet_policer_main_t *pm = &vnet_policer_main;
 
+  if (pool_is_free_index (pm->policers, policer_index))
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
   if (dir == VLIB_RX)
     {
       vnet_feature_enable_disable ("device-input", "policer-input",
