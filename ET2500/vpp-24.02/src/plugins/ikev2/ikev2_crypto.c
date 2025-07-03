@@ -915,6 +915,62 @@ ikev2_crypto_init (ikev2_main_t * km)
   tr->block_size = 128 / 8;
   tr->cipher = EVP_aes_128_gcm ();
 
+  vec_add2 (km->supported_transforms, tr, 1);
+  tr->type = IKEV2_TRANSFORM_TYPE_ENCR;
+  tr->encr_type = IKEV2_TRANSFORM_ENCR_TYPE_AES_CTR;
+  tr->key_len = 128 / 8;
+  tr->block_size = 128 / 8;
+  tr->cipher = EVP_aes_128_ctr ();
+
+  vec_add2 (km->supported_transforms, tr, 1);
+  tr->type = IKEV2_TRANSFORM_TYPE_ENCR;
+  tr->encr_type = IKEV2_TRANSFORM_ENCR_TYPE_AES_CTR;
+  tr->key_len = 192 / 8;
+  tr->block_size = 128 / 8;
+  tr->cipher = EVP_aes_192_ctr ();
+
+  vec_add2 (km->supported_transforms, tr, 1);
+  tr->type = IKEV2_TRANSFORM_TYPE_ENCR;
+  tr->encr_type = IKEV2_TRANSFORM_ENCR_TYPE_AES_CTR;
+  tr->key_len = 256 / 8;
+  tr->block_size = 128 / 8;
+  tr->cipher = EVP_aes_256_ctr ();
+
+  vec_add2 (km->supported_transforms, tr, 1);
+  tr->type = IKEV2_TRANSFORM_TYPE_ENCR;
+  tr->encr_type = IKEV2_TRANSFORM_ENCR_TYPE_DES;
+  tr->key_len = 56 / 8;
+  tr->block_size = 64 / 8;
+  tr->cipher = EVP_des_cbc ();
+
+  vec_add2 (km->supported_transforms, tr, 1);
+  tr->type = IKEV2_TRANSFORM_TYPE_ENCR;
+  tr->encr_type = IKEV2_TRANSFORM_ENCR_TYPE_3DES;
+  tr->key_len = 192 / 8;
+  tr->block_size = 64 / 8;
+  tr->cipher = EVP_des_ede3_cbc ();
+
+  vec_add2 (km->supported_transforms, tr, 1);
+  tr->type = IKEV2_TRANSFORM_TYPE_ENCR;
+  tr->encr_type = IKEV2_TRANSFORM_ENCR_TYPE_DES_IV64;
+  tr->key_len = 64 / 8;
+  tr->block_size = 64 / 8;
+  tr->cipher = EVP_des_cbc ();
+
+  vec_add2 (km->supported_transforms, tr, 1);
+  tr->type = IKEV2_TRANSFORM_TYPE_ENCR;
+  tr->encr_type = IKEV2_TRANSFORM_ENCR_TYPE_DES_IV32;
+  tr->key_len = 64 / 8;
+  tr->block_size = 32 / 8;
+  tr->cipher = EVP_des_cfb ();
+
+  vec_add2 (km->supported_transforms, tr, 1);
+  tr->type = IKEV2_TRANSFORM_TYPE_ENCR;
+  tr->encr_type = IKEV2_TRANSFORM_ENCR_TYPE_CAST;
+  tr->key_len = 128 / 8;
+  tr->block_size = 64 / 8;
+  tr->cipher = EVP_cast5_cbc ();
+
   //PRF
   vec_add2 (km->supported_transforms, tr, 1);
   tr->type = IKEV2_TRANSFORM_TYPE_PRF;
@@ -980,6 +1036,12 @@ ikev2_crypto_init (ikev2_main_t * km)
   tr->key_trunc = 96 / 8;
   tr->md = EVP_sha1 ();
 
+  vec_add2 (km->supported_transforms, tr, 1);
+  tr->type = IKEV2_TRANSFORM_TYPE_INTEG;
+  tr->integ_type = IKEV2_TRANSFORM_INTEG_TYPE_AUTH_HMAC_MD5_96;
+  tr->key_len = 128 / 8;
+  tr->key_trunc = 96 / 8;
+  tr->md = EVP_md5 ();
 
 #if defined(OPENSSL_NO_CISCO_FECDH)
   vec_add2 (km->supported_transforms, tr, 1);

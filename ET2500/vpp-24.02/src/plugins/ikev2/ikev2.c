@@ -2317,6 +2317,51 @@ ikev2_create_tunnel_interface (vlib_main_t *vm, ikev2_sa_t *sa,
 	    }
 	  is_aead = 1;
 	}
+      else if (tr->encr_type == IKEV2_TRANSFORM_ENCR_TYPE_AES_CTR && tr->key_len)
+	{
+	  switch (tr->key_len)
+	    {
+	    case 16:
+	      encr_type = IPSEC_CRYPTO_ALG_AES_CTR_128;
+	      break;
+	    case 24:
+	      encr_type = IPSEC_CRYPTO_ALG_AES_CTR_192;
+	      break;
+	    case 32:
+	      encr_type = IPSEC_CRYPTO_ALG_AES_CTR_256;
+	      break;
+	    default:
+	      ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
+	      return 1;
+	      break;
+	    }
+	}
+      else if (tr->encr_type == IKEV2_TRANSFORM_ENCR_TYPE_DES && tr->key_len)
+	{
+	  switch (tr->key_len)
+	    {
+	    case 7:
+	      encr_type = IPSEC_CRYPTO_ALG_DES_CBC;
+	      break;
+	    default:
+	      ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
+	      return 1;
+	      break;
+	    }
+	}
+      else if (tr->encr_type == IKEV2_TRANSFORM_ENCR_TYPE_3DES && tr->key_len)
+	{
+	  switch (tr->key_len)
+	    {
+	    case 24:
+	      encr_type = IPSEC_CRYPTO_ALG_3DES_CBC;
+	      break;
+	    default:
+	      ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
+	      return 1;
+	      break;
+	    }
+	}
       else
 	{
 	  ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
@@ -2348,6 +2393,9 @@ ikev2_create_tunnel_interface (vlib_main_t *vm, ikev2_sa_t *sa,
 	      break;
 	    case IKEV2_TRANSFORM_INTEG_TYPE_AUTH_HMAC_SHA1_96:
 	      integ_type = IPSEC_INTEG_ALG_SHA1_96;
+	      break;
+	    case IKEV2_TRANSFORM_INTEG_TYPE_AUTH_HMAC_MD5_96:
+	      integ_type = IPSEC_INTEG_ALG_MD5_96;
 	      break;
 	    default:
 	      ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
