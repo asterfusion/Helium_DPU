@@ -2317,6 +2317,51 @@ ikev2_create_tunnel_interface (vlib_main_t *vm, ikev2_sa_t *sa,
 	    }
 	  is_aead = 1;
 	}
+      else if (tr->encr_type == IKEV2_TRANSFORM_ENCR_TYPE_AES_CTR && tr->key_len)
+	{
+	  switch (tr->key_len)
+	    {
+	    case 16:
+	      encr_type = IPSEC_CRYPTO_ALG_AES_CTR_128;
+	      break;
+	    case 24:
+	      encr_type = IPSEC_CRYPTO_ALG_AES_CTR_192;
+	      break;
+	    case 32:
+	      encr_type = IPSEC_CRYPTO_ALG_AES_CTR_256;
+	      break;
+	    default:
+	      ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
+	      return 1;
+	      break;
+	    }
+	}
+      else if (tr->encr_type == IKEV2_TRANSFORM_ENCR_TYPE_DES && tr->key_len)
+	{
+	  switch (tr->key_len)
+	    {
+	    case 7:
+	      encr_type = IPSEC_CRYPTO_ALG_DES_CBC;
+	      break;
+	    default:
+	      ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
+	      return 1;
+	      break;
+	    }
+	}
+      else if (tr->encr_type == IKEV2_TRANSFORM_ENCR_TYPE_3DES && tr->key_len)
+	{
+	  switch (tr->key_len)
+	    {
+	    case 24:
+	      encr_type = IPSEC_CRYPTO_ALG_3DES_CBC;
+	      break;
+	    default:
+	      ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
+	      return 1;
+	      break;
+	    }
+	}
       else
 	{
 	  ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
@@ -2348,6 +2393,9 @@ ikev2_create_tunnel_interface (vlib_main_t *vm, ikev2_sa_t *sa,
 	      break;
 	    case IKEV2_TRANSFORM_INTEG_TYPE_AUTH_HMAC_SHA1_96:
 	      integ_type = IPSEC_INTEG_ALG_SHA1_96;
+	      break;
+	    case IKEV2_TRANSFORM_INTEG_TYPE_AUTH_HMAC_MD5_96:
+	      integ_type = IPSEC_INTEG_ALG_MD5_96;
 	      break;
 	    default:
 	      ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
@@ -2853,7 +2901,7 @@ ikev2_generate_message (vlib_buffer_t *b, ikev2_sa_t *sa, ike_header_t *ike,
       ike->nextpayload = chain->first_payload_type;
       ike->length = clib_host_to_net_u32 (tlen);
 
-      if (tlen + b->current_length + b->current_data > buffer_data_size)
+      if (tlen + IKEV2_L2_L3_L4_TOTAL_LEN + b->current_data > buffer_data_size)
 	{
 	  tlen = ~0;
 	  goto done;
@@ -2944,6 +2992,7 @@ ikev2_retransmit_sa_init_one (ikev2_sa_t * sa, ike_header_t * ike,
   int p = 0;
   ike_header_t *tmp;
   u8 payload = ike->nextpayload;
+  ikev2_main_per_thread_data_t *ptd = ikev2_get_per_thread_data ();
 
   if (sa->ispi != clib_net_to_host_u64 (ike->ispi) ||
       ip_address_cmp (&sa->iaddr, &iaddr) ||
@@ -2968,6 +3017,11 @@ ikev2_retransmit_sa_init_one (ikev2_sa_t * sa, ike_header_t * ike,
 	    {
 	      sa->stats.n_init_retransmit++;
 	      tmp = (ike_header_t *) sa->last_sa_init_res_packet_data;
+	      if (NULL == sa->last_sa_init_res_packet_data)
+	      {
+		  ikev2_delete_sa(ptd, sa);
+		  return 0;
+	      }
 	      u32 slen = clib_net_to_host_u32 (tmp->length);
 	      ike->ispi = tmp->ispi;
 	      ike->rspi = tmp->rspi;
@@ -3003,6 +3057,7 @@ ikev2_retransmit_sa_init_one (ikev2_sa_t * sa, ike_header_t * ike,
       p += plen;
     }
 
+  ikev2_delete_sa(ptd, sa);
   return 0;
 }
 
