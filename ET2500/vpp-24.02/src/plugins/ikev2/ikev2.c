@@ -2901,7 +2901,7 @@ ikev2_generate_message (vlib_buffer_t *b, ikev2_sa_t *sa, ike_header_t *ike,
       ike->nextpayload = chain->first_payload_type;
       ike->length = clib_host_to_net_u32 (tlen);
 
-      if (tlen + b->current_length + b->current_data > buffer_data_size)
+      if (tlen + IKEV2_L2_L3_L4_TOTAL_LEN + b->current_data > buffer_data_size)
 	{
 	  tlen = ~0;
 	  goto done;
@@ -2992,6 +2992,7 @@ ikev2_retransmit_sa_init_one (ikev2_sa_t * sa, ike_header_t * ike,
   int p = 0;
   ike_header_t *tmp;
   u8 payload = ike->nextpayload;
+  ikev2_main_per_thread_data_t *ptd = ikev2_get_per_thread_data ();
 
   if (sa->ispi != clib_net_to_host_u64 (ike->ispi) ||
       ip_address_cmp (&sa->iaddr, &iaddr) ||
@@ -3016,6 +3017,11 @@ ikev2_retransmit_sa_init_one (ikev2_sa_t * sa, ike_header_t * ike,
 	    {
 	      sa->stats.n_init_retransmit++;
 	      tmp = (ike_header_t *) sa->last_sa_init_res_packet_data;
+	      if (NULL == sa->last_sa_init_res_packet_data)
+	      {
+		  ikev2_delete_sa(ptd, sa);
+		  return 0;
+	      }
 	      u32 slen = clib_net_to_host_u32 (tmp->length);
 	      ike->ispi = tmp->ispi;
 	      ike->rspi = tmp->rspi;
@@ -3051,6 +3057,7 @@ ikev2_retransmit_sa_init_one (ikev2_sa_t * sa, ike_header_t * ike,
       p += plen;
     }
 
+  ikev2_delete_sa(ptd, sa);
   return 0;
 }
 
