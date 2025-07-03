@@ -34,11 +34,13 @@ vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp)
   ip4_header_t *ip4h;
   ip6_header_t *ip6h;
   ethernet_vlan_header_t* vlanh;
+  i16 l3_hdr_offset;
   u16 type;
 
   eh = ethernet_buffer_get_header(b);
   type = clib_net_to_host_u16 (eh->type);
-  
+  l3_hdr_offset = sizeof(ethernet_header_t);
+
   if (type == ETHERNET_TYPE_VLAN)
   {
     vlanh = (ethernet_vlan_header_t *)(eh + 1);
@@ -47,11 +49,16 @@ vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp)
       vlanh->priority_cfi_and_id |= clib_host_to_net_u16(pcp << VLAN_PCP_SHIFT);
     }
     type = clib_net_to_host_u16(vlanh->type);
+    l3_hdr_offset += sizeof(ethernet_vlan_header_t);
+  }
+
+  if (b->flags & VNET_BUFFER_F_L3_HDR_OFFSET_VALID)
+  {
+    l3_hdr_offset = vnet_buffer (b)->l3_hdr_offset;
   }
 
   if (PREDICT_TRUE (type == ETHERNET_TYPE_IP4 && dscp != IP_DSCP_INVALID))
     {
-      i16 l3_hdr_offset = vnet_buffer (b)->l3_hdr_offset;
       ip4h = (ip4_header_t *) (b->data + l3_hdr_offset);
       ip4h->tos &= IP4_NON_DSCP_BITS;
       ip4h->tos |= dscp << IP4_DSCP_SHIFT;
@@ -61,7 +68,6 @@ vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp)
     {
       if (PREDICT_TRUE (type == ETHERNET_TYPE_IP6 && dscp != IP_DSCP_INVALID))
 	{
-    i16 l3_hdr_offset = vnet_buffer (b)->l3_hdr_offset;
 	  ip6h = (ip6_header_t *) (b->data + l3_hdr_offset);
 	  ip6h->ip_version_traffic_class_and_flow_label &=
 	    clib_host_to_net_u32 (IP6_NON_DSCP_BITS);
