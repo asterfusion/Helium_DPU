@@ -1038,7 +1038,7 @@ ikev2_crypto_init (ikev2_main_t * km)
 
   vec_add2 (km->supported_transforms, tr, 1);
   tr->type = IKEV2_TRANSFORM_TYPE_INTEG;
-  tr->integ_type = IKEV2_TRANSFORM_INTEG_TYPE_AUTH_MD5_96;
+  tr->integ_type = IKEV2_TRANSFORM_INTEG_TYPE_AUTH_HMAC_MD5_96;
   tr->key_len = 128 / 8;
   tr->key_trunc = 96 / 8;
   tr->md = EVP_md5 ();
