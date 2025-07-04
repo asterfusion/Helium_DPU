@@ -2528,6 +2528,7 @@ ikev2_flip_alternate_sa_bit (u32 id)
   return id | mask;
 }
 
+#if 0
 static void
 ikev2_del_tunnel_from_main (ikev2_del_ipsec_tunnel_args_t * a)
 {
@@ -2570,11 +2571,13 @@ ikev2_del_tunnel_from_main (ikev2_del_ipsec_tunnel_args_t * a)
   if (ipip)
     ipip_del_tunnel (ipip->sw_if_index);
 }
+#endif
 
 static int
 ikev2_delete_tunnel_interface (vnet_main_t * vnm, ikev2_sa_t * sa,
 			       ikev2_child_sa_t * child)
 {
+#if 0
   ikev2_del_ipsec_tunnel_args_t a;
 
   clib_memset (&a, 0, sizeof (a));
@@ -2596,6 +2599,7 @@ ikev2_delete_tunnel_interface (vnet_main_t * vnm, ikev2_sa_t * sa,
 
   vl_api_rpc_call_main_thread (ikev2_del_tunnel_from_main, (u8 *) & a,
 			       sizeof (a));
+#endif
   return 0;
 }
 
@@ -3280,35 +3284,23 @@ ikev2_node_internal (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  next[0] = is_ip4 ? IKEV2_NEXT_IP4_HANDOFF : IKEV2_NEXT_IP6_HANDOFF;
 	  goto out;
       }
-      if (natt)
-	{
-	  u8 *ptr = vlib_buffer_get_current (b0);
-	  ip40 = (ip4_header_t *) ptr;
-	  ptr += sizeof (*ip40);
-	  udp0 = (udp_header_t *) ptr;
-	  ptr += sizeof (*udp0);
-	  ike0 = (ike_header_t *) ptr;
-	  ip_hdr_sz = sizeof (*ip40);
-	}
-      else
-	{
-	  u8 *ipx_hdr = b0->data + vnet_buffer (b0)->l3_hdr_offset;
-	  ike0 = vlib_buffer_get_current (b0);
-	  vlib_buffer_advance (b0, -sizeof (*udp0));
-	  udp0 = vlib_buffer_get_current (b0);
 
-	  if (is_ip4)
-	    {
-	      ip40 = (ip4_header_t *) ipx_hdr;
-	      ip_hdr_sz = sizeof (*ip40);
-	    }
-	  else
-	    {
-	      ip60 = (ip6_header_t *) ipx_hdr;
-	      ip_hdr_sz = sizeof (*ip60);
-	    }
-	  vlib_buffer_advance (b0, -ip_hdr_sz);
-	}
+      u8 *ipx_hdr = b0->data + vnet_buffer (b0)->l3_hdr_offset;
+      ike0 = vlib_buffer_get_current (b0);
+      vlib_buffer_advance (b0, -sizeof (*udp0));
+      udp0 = vlib_buffer_get_current (b0);
+
+      if (is_ip4)
+      {
+	  ip40 = (ip4_header_t *) ipx_hdr;
+	  ip_hdr_sz = sizeof (*ip40);
+      }
+      else
+      {
+	  ip60 = (ip6_header_t *) ipx_hdr;
+	  ip_hdr_sz = sizeof (*ip60);
+      }
+      vlib_buffer_advance (b0, -ip_hdr_sz);
 
       rlen = b0->current_length - ip_hdr_sz - sizeof (*udp0);
 
@@ -4286,7 +4278,7 @@ ikev2_bind (vlib_main_t *vm, ikev2_main_t *km)
     {
       udp_register_dst_port (vm, IKEV2_PORT, ikev2_node_ip4.index, 1);
       udp_register_dst_port (vm, IKEV2_PORT, ikev2_node_ip6.index, 0);
-      udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip4.index, 1);
+      udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip4_natt.index, 1);
       udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip6.index, 0);
 
       vlib_punt_register (km->punt_hdl,
