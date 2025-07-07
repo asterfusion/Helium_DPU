@@ -155,8 +155,8 @@ onp_pktio_intf_admin_up_down (vnet_main_t *vnm, u32 hw_if_index, u32 flags)
 
   if (is_up)
     {
-      vnet_hw_interface_set_flags (vnm, od->hw_if_index,
-				   VNET_HW_INTERFACE_FLAG_LINK_UP);
+      // vnet_hw_interface_set_flags (vnm, od->hw_if_index,
+			// 	   VNET_HW_INTERFACE_FLAG_LINK_UP);
       od->pktio_flags |= ONP_DEVICE_F_ADMIN_UP;
       if (cnxk_drv_pktio_start (vm, od->cnxk_pktio_index) < 0)
 	return clib_error_return (0, "device start failed");
@@ -165,7 +165,7 @@ onp_pktio_intf_admin_up_down (vnet_main_t *vnm, u32 hw_if_index, u32 flags)
     {
       if (cnxk_drv_pktio_stop (vm, od->cnxk_pktio_index) < 0)
 	return clib_error_return (0, "device stop failed");
-      vnet_hw_interface_set_flags (vnm, od->hw_if_index, 0);
+      // vnet_hw_interface_set_flags (vnm, od->hw_if_index, 0);
       od->pktio_flags &= ~ONP_DEVICE_F_ADMIN_UP;
     }
 
