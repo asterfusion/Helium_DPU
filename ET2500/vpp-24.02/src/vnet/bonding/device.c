@@ -171,6 +171,41 @@ bond_add_del_mac_address (vnet_hw_interface_t * hi, const u8 * address,
   return 0;
 }
 
+static clib_error_t *
+bond_mac_address_change (vnet_hw_interface_t *hi,
+                         const u8 *old_address, const u8 *new_address)
+{
+  vnet_main_t *vnm = vnet_get_main ();
+  bond_if_t *bif;
+  clib_error_t *error = 0;
+  vnet_hw_interface_t *s_hi;
+  int i;
+
+  bif = bond_get_bond_if_by_sw_if_index (hi->sw_if_index);
+  if (!bif)
+    {
+      return clib_error_return (0,
+                "No bond interface found for sw_if_index %u",
+                hi->sw_if_index);
+    }
+
+  clib_memcpy(bif->hw_address, new_address, 6);
+
+  vec_foreach_index (i, bif->members)
+    {
+      s_hi = vnet_get_sup_hw_interface (vnm, vec_elt (bif->members, i));
+
+      error = vnet_hw_interface_change_mac_address (vnm, s_hi->hw_if_index,
+                                                new_address);
+      if(!error)
+        continue;
+
+      return error;
+    }
+
+  return (NULL);
+}
+
 static_always_inline void
 bond_tx_add_to_queue (bond_per_thread_data_t * ptd, u32 port, u32 bi)
 {
@@ -627,6 +662,7 @@ VNET_DEVICE_CLASS (bond_dev_class) = {
   .admin_up_down_function = bond_interface_admin_up_down,
   .format_tx_trace = format_bond_tx_trace,
   .mac_addr_add_del_function = bond_add_del_mac_address,
+  .mac_addr_change_function = bond_mac_address_change,
 };
 
 /* *INDENT-ON* */
