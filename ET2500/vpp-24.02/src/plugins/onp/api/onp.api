@@ -359,6 +359,7 @@ define onp_pktio_scheduler_profile_add_del
 
   vl_api_onp_pktio_scheduler_type_t type;
   u32 weight;
+  i16 adjust;
   bool pkt_mode;
   u64 min_rate;
   u64 min_burst;

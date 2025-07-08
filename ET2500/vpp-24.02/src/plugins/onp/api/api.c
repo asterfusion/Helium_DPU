@@ -527,6 +527,7 @@ vl_api_onp_pktio_scheduler_profile_add_del_t_handler(vl_api_onp_pktio_scheduler_
     profile.type = ntohl(mp->type);
     profile.weight = ntohl(mp->weight);
 
+    profile.shaping_profile.tm_shaper_profile.pkt_len_adj = ntohs(mp->adjust);
     profile.shaping_profile.tm_shaper_profile.pkt_mode = mp->pkt_mode;
 
     profile.shaping_profile.tm_shaper_profile.commit_rate = clib_host_to_net_u64(mp->min_rate);
