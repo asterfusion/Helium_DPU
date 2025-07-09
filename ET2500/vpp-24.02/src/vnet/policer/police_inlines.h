@@ -26,6 +26,7 @@
 #define IP6_DSCP_SHIFT    22
 #define VLAN_NO_PCP_BITS  0x1FFF
 #define VLAN_PCP_SHIFT    13
+#define VPP_POLICER_DEFAULT_ADJUST 24 //Preamble + SFD + IFG + FCS
 
 static_always_inline void
 vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp)
@@ -114,6 +115,7 @@ vnet_policer_police (vlib_main_t *vm, vlib_buffer_t *b, u32 policer_index,
     }
 
   len = vlib_buffer_length_in_chain (vm, b);
+  len += VPP_POLICER_DEFAULT_ADJUST;
   col = vnet_police_packet (pol, len, packet_color, time_in_policer_periods);
   act = pol->action[col];
   vlib_increment_combined_counter (&policer_counters[col], vm->thread_index,
