@@ -602,7 +602,7 @@ abf_input_inline (vlib_main_t * vm,
 	      tr->next = next0;
 	      tr->index = vnet_buffer (b0)->ip.adj_index[VLIB_TX];
 	    }
-
+      vnet_buffer (b0)->ip.flow_hash = 0;
 	  /* verify speculative enqueue, maybe switch current next frame */
 	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
 					   to_next, n_left_to_next, bi0,
