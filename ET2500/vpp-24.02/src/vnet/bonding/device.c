@@ -197,10 +197,20 @@ bond_mac_address_change (vnet_hw_interface_t *hi,
 
       error = vnet_hw_interface_change_mac_address (vnm, s_hi->hw_if_index,
                                                 new_address);
-      if(!error)
-        continue;
+      if (error)
+      {
+	      int j;
 
-      return error;
+	      /* undo any that were completed before the failure */
+	      for (j = i - 1; j > -1; j--)
+	      {
+	        s_hi = vnet_get_sup_hw_interface (vnm, vec_elt (bif->members, j));
+	        vnet_hw_interface_change_mac_address (vnm, s_hi->hw_if_index,
+                                                old_address);
+	      }
+
+	      return error;
+      }
     }
 
   return (NULL);
