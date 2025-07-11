@@ -311,113 +311,6 @@ VLIB_CLI_COMMAND (onp_show_version_command, static) = {
 };
 
 static clib_error_t*
-set_onp_interface_speed(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
-  clib_error_t* error = 0;
-  u32 hw_if_index;
-  u32 speed = 0;
-  onp_pktio_t* pktio;
-  onp_main_t* om = onp_get_main();
-  vnet_main_t* vnm = vnet_get_main();
-
-  if (!unformat(input, "%d %U", &speed,
-    unformat_vnet_hw_interface, vnm, &hw_if_index)) {
-    return clib_error_return(0, "Please specify a speed and interface.");
-  }
-
-  for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios) ? __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
-    if (pktio->hw_if_index == hw_if_index) {
-      break;
-    }
-  }
-
-  cnxk_pktio_link_info_t link_info = {0};
-  cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
-  if (!link_info.is_autoneg && link_info.speed != speed) {
-    link_info.speed = speed;
-    cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
-  }
-
-  return error;
-}
-
-/* CLI command registration */
-VLIB_CLI_COMMAND(set_onp_interface_speed_command, static) = {
-  .path = "set onp interface speed",
-  .short_help = "set onp interface speed <speed> <interface>",
-  .function = set_onp_interface_speed,
-};
-
-static clib_error_t*
-set_onp_interface_an(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
-  clib_error_t* error = 0;
-  u32 hw_if_index;
-  bool an = 0;
-  onp_pktio_t* pktio;
-  onp_main_t* om = onp_get_main();
-  vnet_main_t* vnm = vnet_get_main();
-
-  if (!unformat(input, "%d %U", &an,
-    unformat_vnet_hw_interface, vnm, &hw_if_index)) {
-    return clib_error_return(0, "Please specify autoneg on interface.");
-  }
-
-  for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios)
-    ? __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
-    if (pktio->hw_if_index == hw_if_index) {
-      break;
-    }
-  }
-
-  cnxk_pktio_link_info_t link_info = { 0 };
-  cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
-  link_info.is_autoneg = an;
-  cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
-
-  return error;
-}
-
-VLIB_CLI_COMMAND(set_onp_interface_an_command, static) = {
-  .path = "set onp interface an",
-  .short_help = "set onp interface an <an> <interface> ",
-  .function = set_onp_interface_an,
-};
-
-static clib_error_t*
-set_onp_interface_duplex(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
-  clib_error_t* error = 0;
-  u32 hw_if_index;
-  bool duplex = 0;
-  onp_pktio_t* pktio;
-  onp_main_t* om = onp_get_main();
-  vnet_main_t* vnm = vnet_get_main();
-
-  if (!unformat(input, "%d %U", &duplex,
-    unformat_vnet_hw_interface, vnm, &hw_if_index)) {
-    return clib_error_return(0, "Please specify duplex on interface.");
-  }
-
-  for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios)
-    ? __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
-    if (pktio->hw_if_index == hw_if_index) {
-      break;
-    }
-  }
-
-  cnxk_pktio_link_info_t link_info = { 0 };
-  cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
-  link_info.is_full_duplex = duplex;
-  cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
-
-  return error;
-}
-
-VLIB_CLI_COMMAND(set_onp_interface_duplex_command, static) = {
-  .path = "set onp interface duplex",
-  .short_help = "set onp interface duplex <duplex> <interface>",
-  .function = set_onp_interface_duplex,
-};
-
-static clib_error_t*
 get_onp_interface_link_info(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
   clib_error_t* error = 0;
   u32 hw_if_index;
@@ -450,10 +343,61 @@ get_onp_interface_link_info(vlib_main_t* vm, unformat_input_t* input, vlib_cli_c
   return error;
 }
 
-VLIB_CLI_COMMAND(set_onp_interface_link_info_command, static) = {
+VLIB_CLI_COMMAND(get_onp_interface_link_info_command, static) = {
   .path = "get onp interface link info",
-  .short_help = "get onp interface info <interface>",
+  .short_help = "get onp interface link info <interface>",
   .function = get_onp_interface_link_info,
+};
+
+static clib_error_t*
+set_onp_interface_link_info(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  onp_pktio_t* pktio = NULL;
+  onp_main_t* om = onp_get_main();
+  vnet_main_t* vnm = vnet_get_main();
+  cnxk_pktio_link_info_t link_info = { 0 };
+  u32 speed = 0;
+
+  while (unformat_check_input(input) != UNFORMAT_END_OF_INPUT) {
+    if (unformat(input, "%U", unformat_vnet_hw_interface, vnm, &hw_if_index)) {
+      for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios)
+        ? __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
+        if (pktio->hw_if_index == hw_if_index) {
+          break;
+        }
+      }
+      // cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
+    } else if (unformat(input, "an enable")) {
+      link_info.is_autoneg = 1;
+    } else if (unformat(input, "an disable")) {
+      link_info.is_autoneg = 0;
+    } else if (unformat(input, "duplex full")) {
+      link_info.is_full_duplex = 1;
+    } else if (unformat(input, "duplex half")) {
+      link_info.is_full_duplex = 0;
+    } else if (unformat(input, "speed %u", &speed)) {
+      link_info.speed = speed;
+    } else {
+      return clib_error_return(0, "Invalid input '%U'", format_unformat_error,
+                               input);
+    }
+  }
+
+  if (!pktio) {
+    return clib_error_return(0, "Please specify a valid interface.");
+  }
+
+  cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND(set_onp_interface_link_info_command, static) = {
+  .path = "set onp interface link info",
+  .short_help = "set onp interface link info <interface> [an <enable | disable>] "
+                "[duplex <full | half>] | speed <speed>]",
+  .function = set_onp_interface_link_info,
 };
 
 static clib_error_t*

@@ -152,6 +152,15 @@ ethernet_build_rewrite (vnet_main_t * vnm,
     }
   else
     {
+        //find sub address rewrite the src_address
+        if (sub_sw->type == VNET_SW_INTERFACE_TYPE_SUB )
+        {
+            if (sub_sw->sub.eth.flags.change_mac)
+            {
+                clib_memcpy(h->src_address, sub_sw->sub.eth.address, sizeof(h->src_address));
+            }
+        }
+
       if (dst_address)
 	clib_memcpy (h->dst_address, dst_address, sizeof (h->dst_address));
       else

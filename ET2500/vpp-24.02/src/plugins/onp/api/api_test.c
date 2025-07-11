@@ -140,25 +140,26 @@ vl_api_onp_show_counters_reply_t_handler (vl_api_onp_show_counters_reply_t *mp)
 
   vam->result_ready = 1;
 }
-
 static int
-api_onp_set_port_speed(vat_main_t* vam) {
-  vl_api_onp_set_port_speed_t* mp;
-  u32 msg_size = sizeof(*mp);
+api_onp_set_port_link_info (vat_main_t *vam)
+{
+  vl_api_onp_set_port_link_info_t *mp;
+  u32 msg_size = sizeof (*mp);
   int ret;
 
   vam->result_ready = 0;
-  mp = vl_msg_api_alloc_as_if_client(msg_size);
+  mp = vl_msg_api_alloc_as_if_client (msg_size);
 
-  M(ONP_SET_PORT_SPEED, mp);
+  M (ONP_SET_PORT_LINK_INFO, mp);
 
   /* send it... */
-  S(mp);
+  S (mp);
 
   /* Wait for a reply... */
-  W(ret);
+  W (ret);
   return ret;
 }
+
 static int
 api_onp_interface_stats (vat_main_t *vam)
 {
@@ -189,23 +190,6 @@ vl_api_onp_interface_stats_reply_t_handler(vl_api_onp_interface_stats_reply_t* m
 }
 
 static int
-api_onp_set_port_autoneg(vat_main_t* vam)
-{
-  vl_api_onp_set_port_autoneg_t* mp;
-  u32 msg_size = sizeof(*mp);
-  int ret;
-
-  mp = vl_msg_api_alloc_as_if_client(msg_size);
-
-  M(ONP_SET_PORT_AUTONEG, mp);
-
-  S(mp);
-
-  W(ret);
-  return ret;
-}
-
-static int
 api_onp_get_port_autoneg(vat_main_t* vam)
 {
   vl_api_onp_get_port_autoneg_t* mp;
@@ -227,23 +211,6 @@ vl_api_onp_get_port_autoneg_reply_t_handler(vl_api_onp_get_port_autoneg_reply_t*
   vat_main_t* vam = onp_test_main.vat_main;
   print(vam->ofp, "autoneg %s", mp->autoneg ? "enable" : "disable");
   vam->result_ready = 1;
-}
-
-static int
-api_onp_set_port_duplex(vat_main_t* vam)
-{
-  vl_api_onp_set_port_duplex_t* mp;
-  u32 msg_size = sizeof(*mp);
-  int ret;
-
-  mp = vl_msg_api_alloc_as_if_client(msg_size);
-
-  M(ONP_SET_PORT_DUPLEX, mp);
-
-  S(mp);
-
-  W(ret);
-  return ret;
 }
 
 static int

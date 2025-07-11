@@ -228,11 +228,15 @@ policer_input (u32 policer_index, u32 sw_if_index, vlib_dir_t dir, bool apply)
 
   if (apply)
     {
+      if (pool_is_free_index (pm->policers, policer_index))
+        return VNET_API_ERROR_NO_SUCH_ENTRY;
+
       vec_validate (pm->policer_index_by_sw_if_index[dir], sw_if_index);
       pm->policer_index_by_sw_if_index[dir][sw_if_index] = policer_index;
     }
   else
     {
+      vec_validate (pm->policer_index_by_sw_if_index[dir], sw_if_index);
       pm->policer_index_by_sw_if_index[dir][sw_if_index] = ~0;
     }
 

@@ -2317,6 +2317,51 @@ ikev2_create_tunnel_interface (vlib_main_t *vm, ikev2_sa_t *sa,
 	    }
 	  is_aead = 1;
 	}
+      else if (tr->encr_type == IKEV2_TRANSFORM_ENCR_TYPE_AES_CTR && tr->key_len)
+	{
+	  switch (tr->key_len)
+	    {
+	    case 16:
+	      encr_type = IPSEC_CRYPTO_ALG_AES_CTR_128;
+	      break;
+	    case 24:
+	      encr_type = IPSEC_CRYPTO_ALG_AES_CTR_192;
+	      break;
+	    case 32:
+	      encr_type = IPSEC_CRYPTO_ALG_AES_CTR_256;
+	      break;
+	    default:
+	      ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
+	      return 1;
+	      break;
+	    }
+	}
+      else if (tr->encr_type == IKEV2_TRANSFORM_ENCR_TYPE_DES && tr->key_len)
+	{
+	  switch (tr->key_len)
+	    {
+	    case 7:
+	      encr_type = IPSEC_CRYPTO_ALG_DES_CBC;
+	      break;
+	    default:
+	      ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
+	      return 1;
+	      break;
+	    }
+	}
+      else if (tr->encr_type == IKEV2_TRANSFORM_ENCR_TYPE_3DES && tr->key_len)
+	{
+	  switch (tr->key_len)
+	    {
+	    case 24:
+	      encr_type = IPSEC_CRYPTO_ALG_3DES_CBC;
+	      break;
+	    default:
+	      ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
+	      return 1;
+	      break;
+	    }
+	}
       else
 	{
 	  ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
@@ -2348,6 +2393,9 @@ ikev2_create_tunnel_interface (vlib_main_t *vm, ikev2_sa_t *sa,
 	      break;
 	    case IKEV2_TRANSFORM_INTEG_TYPE_AUTH_HMAC_SHA1_96:
 	      integ_type = IPSEC_INTEG_ALG_SHA1_96;
+	      break;
+	    case IKEV2_TRANSFORM_INTEG_TYPE_AUTH_HMAC_MD5_96:
+	      integ_type = IPSEC_INTEG_ALG_MD5_96;
 	      break;
 	    default:
 	      ikev2_set_state (sa, IKEV2_STATE_NO_PROPOSAL_CHOSEN);
@@ -2480,6 +2528,7 @@ ikev2_flip_alternate_sa_bit (u32 id)
   return id | mask;
 }
 
+#if 0
 static void
 ikev2_del_tunnel_from_main (ikev2_del_ipsec_tunnel_args_t * a)
 {
@@ -2522,11 +2571,13 @@ ikev2_del_tunnel_from_main (ikev2_del_ipsec_tunnel_args_t * a)
   if (ipip)
     ipip_del_tunnel (ipip->sw_if_index);
 }
+#endif
 
 static int
 ikev2_delete_tunnel_interface (vnet_main_t * vnm, ikev2_sa_t * sa,
 			       ikev2_child_sa_t * child)
 {
+#if 0
   ikev2_del_ipsec_tunnel_args_t a;
 
   clib_memset (&a, 0, sizeof (a));
@@ -2548,6 +2599,7 @@ ikev2_delete_tunnel_interface (vnet_main_t * vnm, ikev2_sa_t * sa,
 
   vl_api_rpc_call_main_thread (ikev2_del_tunnel_from_main, (u8 *) & a,
 			       sizeof (a));
+#endif
   return 0;
 }
 
@@ -2853,7 +2905,7 @@ ikev2_generate_message (vlib_buffer_t *b, ikev2_sa_t *sa, ike_header_t *ike,
       ike->nextpayload = chain->first_payload_type;
       ike->length = clib_host_to_net_u32 (tlen);
 
-      if (tlen + b->current_length + b->current_data > buffer_data_size)
+      if (tlen + IKEV2_L2_L3_L4_TOTAL_LEN + b->current_data > buffer_data_size)
 	{
 	  tlen = ~0;
 	  goto done;
@@ -2944,6 +2996,7 @@ ikev2_retransmit_sa_init_one (ikev2_sa_t * sa, ike_header_t * ike,
   int p = 0;
   ike_header_t *tmp;
   u8 payload = ike->nextpayload;
+  ikev2_main_per_thread_data_t *ptd = ikev2_get_per_thread_data ();
 
   if (sa->ispi != clib_net_to_host_u64 (ike->ispi) ||
       ip_address_cmp (&sa->iaddr, &iaddr) ||
@@ -2968,6 +3021,11 @@ ikev2_retransmit_sa_init_one (ikev2_sa_t * sa, ike_header_t * ike,
 	    {
 	      sa->stats.n_init_retransmit++;
 	      tmp = (ike_header_t *) sa->last_sa_init_res_packet_data;
+	      if (NULL == sa->last_sa_init_res_packet_data)
+	      {
+		  ikev2_delete_sa(ptd, sa);
+		  return 0;
+	      }
 	      u32 slen = clib_net_to_host_u32 (tmp->length);
 	      ike->ispi = tmp->ispi;
 	      ike->rspi = tmp->rspi;
@@ -3003,6 +3061,7 @@ ikev2_retransmit_sa_init_one (ikev2_sa_t * sa, ike_header_t * ike,
       p += plen;
     }
 
+  ikev2_delete_sa(ptd, sa);
   return 0;
 }
 
@@ -3225,35 +3284,23 @@ ikev2_node_internal (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  next[0] = is_ip4 ? IKEV2_NEXT_IP4_HANDOFF : IKEV2_NEXT_IP6_HANDOFF;
 	  goto out;
       }
-      if (natt)
-	{
-	  u8 *ptr = vlib_buffer_get_current (b0);
-	  ip40 = (ip4_header_t *) ptr;
-	  ptr += sizeof (*ip40);
-	  udp0 = (udp_header_t *) ptr;
-	  ptr += sizeof (*udp0);
-	  ike0 = (ike_header_t *) ptr;
-	  ip_hdr_sz = sizeof (*ip40);
-	}
-      else
-	{
-	  u8 *ipx_hdr = b0->data + vnet_buffer (b0)->l3_hdr_offset;
-	  ike0 = vlib_buffer_get_current (b0);
-	  vlib_buffer_advance (b0, -sizeof (*udp0));
-	  udp0 = vlib_buffer_get_current (b0);
 
-	  if (is_ip4)
-	    {
-	      ip40 = (ip4_header_t *) ipx_hdr;
-	      ip_hdr_sz = sizeof (*ip40);
-	    }
-	  else
-	    {
-	      ip60 = (ip6_header_t *) ipx_hdr;
-	      ip_hdr_sz = sizeof (*ip60);
-	    }
-	  vlib_buffer_advance (b0, -ip_hdr_sz);
-	}
+      u8 *ipx_hdr = b0->data + vnet_buffer (b0)->l3_hdr_offset;
+      ike0 = vlib_buffer_get_current (b0);
+      vlib_buffer_advance (b0, -sizeof (*udp0));
+      udp0 = vlib_buffer_get_current (b0);
+
+      if (is_ip4)
+      {
+	  ip40 = (ip4_header_t *) ipx_hdr;
+	  ip_hdr_sz = sizeof (*ip40);
+      }
+      else
+      {
+	  ip60 = (ip6_header_t *) ipx_hdr;
+	  ip_hdr_sz = sizeof (*ip60);
+      }
+      vlib_buffer_advance (b0, -ip_hdr_sz);
 
       rlen = b0->current_length - ip_hdr_sz - sizeof (*udp0);
 
@@ -4231,7 +4278,7 @@ ikev2_bind (vlib_main_t *vm, ikev2_main_t *km)
     {
       udp_register_dst_port (vm, IKEV2_PORT, ikev2_node_ip4.index, 1);
       udp_register_dst_port (vm, IKEV2_PORT, ikev2_node_ip6.index, 0);
-      udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip4.index, 1);
+      udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip4_natt.index, 1);
       udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip6.index, 0);
 
       vlib_punt_register (km->punt_hdl,

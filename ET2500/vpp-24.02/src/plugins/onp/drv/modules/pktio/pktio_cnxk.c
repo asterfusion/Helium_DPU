@@ -522,14 +522,110 @@ cnxk_pktio_mac_addr_set (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr)
 i32
 cnxk_pktio_mac_addr_add (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr)
 {
+#ifdef VPP_PLATFORM_ET2500
+  struct roc_npc_item_info item_info[ROC_NPC_ITEM_TYPE_END] = { 0 };
+  struct roc_npc_action actions[ROC_NPC_ITEM_TYPE_END] = { 0 };
+  struct roc_npc_action_rss rss_conf = { 0 };
+  struct roc_npc_flow *npc_flow;
+  struct roc_npc_attr attr = { 0 };
+  struct roc_npc *npc = &dev->npc;
+
+  cnxk_pktio_second_mac_t *second_entry;
+
+  int layer = 0, index = 0, rv = 0;
+  u16 action = 0;
+  u16 *queues = NULL;
+  ethernet_header_t eth_spec = { 0 }, eth_mask = { 0 };
+
+  eth_spec.type = 0;
+  eth_mask.type = 0;
+
+  memset(eth_spec.src_address, 0, CNXK_MAC_ADDRESS_LEN);
+  memset(eth_mask.src_address, 0, CNXK_MAC_ADDRESS_LEN);
+
+  memcpy(eth_spec.dst_address, addr, CNXK_MAC_ADDRESS_LEN);
+  memset(eth_mask.dst_address, 0xff, CNXK_MAC_ADDRESS_LEN);
+
+  item_info[layer].spec = (void *) &eth_spec;
+  item_info[layer].mask = (void *) &eth_mask;
+  item_info[layer].size = sizeof (ethernet_header_t);
+  item_info[layer].type = ROC_NPC_ITEM_TYPE_ETH;
+  layer++;
+
+  item_info[layer].type = ROC_NPC_ITEM_TYPE_END;
+
+  //action
+  queues = clib_mem_alloc (sizeof (u16) * dev->n_rx_queues);
+
+  for (index = 0; index < dev->n_rx_queues; index++)
+      queues[index] = index;
+
+  npc->flowkey_cfg_state = CNXK_DEFAULT_RSS_FLOW_KEY;
+  rss_conf.queue_num = dev->n_rx_queues;
+  rss_conf.queue = queues;
+
+  actions[action].type = ROC_NPC_ACTION_TYPE_RSS;
+  actions[action].conf = &rss_conf;
+  action++;
+
+  /* make count as default action */
+  actions[action].type = ROC_NPC_ACTION_TYPE_COUNT;
+  actions[action + 1].type = ROC_NPC_ACTION_TYPE_END;
+
+  attr.priority = 1;
+  attr.ingress = 1;
+
+  npc_flow = roc_npc_flow_create (npc, &attr, item_info, actions, npc->pf_func, &rv);
+  if (rv)
+  {
+      cnxk_pktio_warn ("roc_npc_flow_create failed with '%s' error", roc_error_msg_get (rv));
+      return CNXK_UNSUPPORTED_OPERATION;
+  }
+  roc_npc_mcam_clear_counter (npc, npc_flow->ctr_id);
+
+  pool_get_zero (dev->second_mac_entries, second_entry);
+  memcpy(second_entry->mac_address, addr, CNXK_MAC_ADDRESS_LEN);
+  second_entry->index = second_entry - dev->second_mac_entries;
+  second_entry->npc_flow = npc_flow;
+
+  if (queues)
+    clib_mem_free (queues);
+
+  return rv;
+#else
   return 0;
+#endif
 }
 
 i32
-cnxk_pktio_mac_addr_del (vlib_main_t *vm, cnxk_pktio_t *dev)
+cnxk_pktio_mac_addr_del (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr)
 {
+#ifdef VPP_PLATFORM_ET2500
+  struct roc_npc *npc = &dev->npc;
+  struct roc_npc_flow *npc_flow;
+  cnxk_pktio_second_mac_t *second_entry;
+  int rv = 0;
+
+  pool_foreach(second_entry, dev->second_mac_entries)
+  {
+	if (memcmp(second_entry->mac_address, addr, CNXK_MAC_ADDRESS_LEN) != 0)
+        continue;
+
+    npc_flow = second_entry->npc_flow;
+    rv = roc_npc_flow_destroy (npc, npc_flow);
+    if (rv)
+    {
+        cnxk_pktio_err ("roc_npc_flow_destroy failed with '%s' error", roc_error_msg_get (rv));
+        return CNXK_UNSUPPORTED_OPERATION;
+    }
+    break;
+  }
+  pool_put (dev->second_mac_entries, second_entry);
+  return 0;
+#else
   cnxk_pktio_notice ("mac address del is not supported");
   return -1;
+#endif
 }
 
 i32
@@ -1037,6 +1133,17 @@ cnxk_drv_pktio_mac_addr_add (vlib_main_t *vm, u16 pktio_index, char *mac_addr)
   return ops_map->fops.pktio_mac_addr_add (vm, &ops_map->pktio, mac_addr);
 }
 
+#ifdef VPP_PLATFORM_ET2500
+i32
+cnxk_drv_pktio_mac_addr_del (vlib_main_t *vm, u16 pktio_index, char *mac_addr)
+{
+  cnxk_pktio_ops_map_t *ops_map = cnxk_pktio_get_pktio_ops (pktio_index);
+
+  ASSERT (vm->thread_index == 0);
+
+  return ops_map->fops.pktio_mac_addr_del (vm, &ops_map->pktio, mac_addr);
+}
+#else
 i32
 cnxk_drv_pktio_mac_addr_del (vlib_main_t *vm, u16 pktio_index)
 {
@@ -1046,6 +1153,7 @@ cnxk_drv_pktio_mac_addr_del (vlib_main_t *vm, u16 pktio_index)
 
   return ops_map->fops.pktio_mac_addr_del (vm, &ops_map->pktio);
 }
+#endif
 
 i32
 cnxk_drv_pktio_mtu_set (vlib_main_t *vm, u16 pktio_index, u32 mtu)
