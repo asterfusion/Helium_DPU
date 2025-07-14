@@ -36,8 +36,6 @@ ip4_neighbor_probe (vlib_main_t * vm,
   ethernet_arp_header_t *h0;
   vlib_buffer_t *b0;
   u32 bi0;
-  vnet_sw_interface_t *sub_sw = vnet_get_sw_interface (vnm, adj0->rewrite_header.sw_if_index);
-  vnet_sw_interface_t *sup_sw = vnet_get_sup_sw_interface (vnm, adj0->rewrite_header.sw_if_index);
 
   hw_if0 = vnet_get_sup_hw_interface (vnm, adj0->rewrite_header.sw_if_index);
 
@@ -59,10 +57,6 @@ ip4_neighbor_probe (vlib_main_t * vm,
 
   /* Src ethernet address in ARP header. */
   mac_address_from_bytes (&h0->ip4_over_ethernet[0].mac, hw_if0->hw_address);
-  if (sub_sw != sup_sw)
-  {
-      h0->ip4_over_ethernet[0].mac.bytes[5] = (u8)(adj0->rewrite_header.sw_if_index);
-  }
 
   h0->ip4_over_ethernet[0].ip4 = *src;
   h0->ip4_over_ethernet[1].ip4 = *dst;
