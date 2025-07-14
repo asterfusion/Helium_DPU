@@ -2528,7 +2528,6 @@ ikev2_flip_alternate_sa_bit (u32 id)
   return id | mask;
 }
 
-#if 0
 static void
 ikev2_del_tunnel_from_main (ikev2_del_ipsec_tunnel_args_t * a)
 {
@@ -2568,16 +2567,14 @@ ikev2_del_tunnel_from_main (ikev2_del_ipsec_tunnel_args_t * a)
   ipsec_sa_unlock_id (a->local_sa_id);
   ipsec_sa_unlock_id (ikev2_flip_alternate_sa_bit (a->remote_sa_id));
 
-  if (ipip)
-    ipip_del_tunnel (ipip->sw_if_index);
+  //if (ipip)
+  //  ipip_del_tunnel (ipip->sw_if_index);
 }
-#endif
 
 static int
 ikev2_delete_tunnel_interface (vnet_main_t * vnm, ikev2_sa_t * sa,
 			       ikev2_child_sa_t * child)
 {
-#if 0
   ikev2_del_ipsec_tunnel_args_t a;
 
   clib_memset (&a, 0, sizeof (a));
@@ -2599,7 +2596,6 @@ ikev2_delete_tunnel_interface (vnet_main_t * vnm, ikev2_sa_t * sa,
 
   vl_api_rpc_call_main_thread (ikev2_del_tunnel_from_main, (u8 *) & a,
 			       sizeof (a));
-#endif
   return 0;
 }
 
@@ -4278,8 +4274,8 @@ ikev2_bind (vlib_main_t *vm, ikev2_main_t *km)
     {
       udp_register_dst_port (vm, IKEV2_PORT, ikev2_node_ip4.index, 1);
       udp_register_dst_port (vm, IKEV2_PORT, ikev2_node_ip6.index, 0);
-      udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip4_natt.index, 1);
-      udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip6.index, 0);
+      udp_register_dst_port (vm, IKEV2_PORT_NATT + 1, ikev2_node_ip4_natt.index, 1);
+      udp_register_dst_port (vm, IKEV2_PORT_NATT + 1, ikev2_node_ip6.index, 0);
 
       vlib_punt_register (km->punt_hdl,
 			  ipsec_punt_reason[IPSEC_PUNT_IP4_SPI_UDP_0],
@@ -4299,8 +4295,8 @@ ikev2_unbind (vlib_main_t *vm, ikev2_main_t *km)
 			    ipsec_punt_reason[IPSEC_PUNT_IP4_SPI_UDP_0],
 			    "ikev2-ip4-natt");
 
-      udp_unregister_dst_port (vm, IKEV2_PORT_NATT, 0);
-      udp_unregister_dst_port (vm, IKEV2_PORT_NATT, 1);
+      udp_unregister_dst_port (vm, IKEV2_PORT_NATT + 1, 0);
+      udp_unregister_dst_port (vm, IKEV2_PORT_NATT + 1, 1);
       udp_unregister_dst_port (vm, IKEV2_PORT, 0);
       udp_unregister_dst_port (vm, IKEV2_PORT, 1);
     }
