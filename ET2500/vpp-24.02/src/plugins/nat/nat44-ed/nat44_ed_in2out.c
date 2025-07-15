@@ -291,6 +291,17 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
       snat_address_t *a, *ja = 0, *ra = 0, *ba = 0;
       int i;
 
+      vnet_main_t *vnm;
+      const vnet_hw_interface_t *hw;
+      vnm = vnet_get_main ();
+      int sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
+      hw = vnet_get_sup_hw_interface (vnm, sw_if_index);
+      bool is_tap = false;
+      if (hw && strncmp((const char*)(hw->name), "tap", 3) == 0)
+      {
+          is_tap = true;
+      }
+
       // output feature
       if (tx_sw_if_index != ~0)
 	{
@@ -298,7 +309,7 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
 	    {
 	      a = sm->addresses + i;
 	      //if have bind acl, must match acl
-	      if (a->acl_index != ~0) continue;
+	      if (a->acl_index != ~0 && !is_tap) continue;
 
 	      if (a->fib_index == rx_fib_index)
 		{
@@ -331,7 +342,7 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
 	    {
 	      a = sm->addresses + i;
 	      //if have bind acl, must match acl
-	      if (a->acl_index != ~0) continue;
+	      if (a->acl_index != ~0 && !is_tap) continue;
 
 	      if (a->fib_index == rx_fib_index)
 		{
