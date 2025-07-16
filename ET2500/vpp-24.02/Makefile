@@ -85,7 +85,16 @@ DEB_DEPENDS += tshark
 
 LIBFFI=libffi6 # works on all but 20.04 and debian-testing
 
-ifeq ($(OS_VERSION_ID),24.04)
+ifeq ($(OS_VERSION_ID),24.10)
+	DEB_DEPENDS += python3-virtualenv
+	DEB_DEPENDS += libssl-dev
+	DEB_DEPENDS += clang-14 clang-format-14
+	DEB_DEPENDS += gcc-12 g++-12
+	# for extras/scripts/checkstyle.sh
+	export CLANG_FORMAT_VER=14
+	LIBFFI=libffi8
+	DEB_DEPENDS += enchant-2  # for docs
+else ifeq ($(OS_VERSION_ID),24.04)
 	DEB_DEPENDS += python3-virtualenv
 	DEB_DEPENDS += libssl-dev
 	DEB_DEPENDS += clang-14 clang-format-14

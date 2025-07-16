@@ -21,7 +21,7 @@ fi
 
 # Install necessary packages
 echo "Installing necessary packages..."
-apt install bzip2 git cmake -y
+apt install bzip2 git cmake sudo -y
 if [ $? -ne 0 ]; then
     echo "Failed to install packages."
     exit 1
@@ -61,18 +61,35 @@ fi
 OS_NAME=$(lsb_release -is)
 OS_VERSION=$(lsb_release -rs)
 
-# Check if the OS is Ubuntu 24.04
-if [ "$OS_NAME" = "Ubuntu" ] && [ "$OS_VERSION" = "24.04" ]; then
-    echo "Detected Ubuntu 24.04. Setting GCC and G++ to version 12..."
-    export CC=gcc-12     
-    export CXX=g++-12     
+# Extract major and minor version components
+OS_MAJOR=${OS_VERSION%%.*}  # Get part before first dot (e.g., "24")
+OS_MINOR=${OS_VERSION#*.}   # Get part after first dot (e.g., "04" or "10")
+
+# Check if the OS is Ubuntu 24.04 or 24.10
+if [ "$OS_NAME" = "Ubuntu" ] && [ "$OS_MAJOR" = "24" ] && { [ "$OS_MINOR" = "04" ] || [ "$OS_MINOR" = "10" ]; }; then
+    echo "Detected Ubuntu 24.04/24.10. Setting GCC and G++ to version 12..."
+    export CC=gcc-12
+    export CXX=g++-12
     echo "GCC and G++ are now set to version 12."
 else
-    echo "This is not Ubuntu 24.04. No changes made."
+    echo "This is not Ubuntu 24.04/24.10. No changes made."
 fi
 
-# Set environment variable
-export VPP_PLATFORM=octeon10
+if [ -z "$2" ]; then
+    echo "Error: Platform not specified. Usage: $0 <args> octeon10|octeon9"
+    exit 1
+fi
+
+case "$2" in
+    octeon10|octeon9)
+        export VPP_PLATFORM="$2"
+        echo "Setting VPP_PLATFORM to $2"
+        ;;
+    *)
+        echo "Error: Invalid platform specified. Supported values: octeon10, octeon9"
+        exit 1
+        ;;
+esac
 
 # Run the appropriate build command
 echo "Running $BUILD_CMD..."
