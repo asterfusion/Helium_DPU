@@ -796,7 +796,7 @@ nat44_ed_out2in_fast_path_node_fn_inline (vlib_main_t * vm,
 
       lookup.fib_index = rx_fib_index0;
 
-      if (b0->no_nat)
+      if ((b0->flags & VLIB_BUFFER_NO_NAT_VALID) && b0->no_nat)
       {
           b0->no_nat = 0;
           goto trace0;
@@ -1093,7 +1093,7 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
       rx_fib_index0 =
 	fib_table_get_index_for_sw_if_index (FIB_PROTOCOL_IP4, sw_if_index0);
 
-      if (b0->no_nat)
+      if ((b0->flags & VLIB_BUFFER_NO_NAT_VALID) && b0->no_nat)
       {
           b0->no_nat = 0;
           goto trace0;

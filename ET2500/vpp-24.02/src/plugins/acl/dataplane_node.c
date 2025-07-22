@@ -371,6 +371,7 @@ acl_action_expand_proc(vlib_main_t *vm, vlib_buffer_t *b, u16 *next, const match
     if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_NO_NAT))
     {
         b->no_nat = 1;
+        b->flags |= VLIB_BUFFER_NO_NAT_VALID;
     }
 
     if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_POLICER))
@@ -647,6 +648,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
         acl_action_expand_proc(vm, b[0], &next[0], &action_expand);
 
         b[0]->acl_index = match_acl_in_index;
+        b[0]->flags |= VLIB_BUFFER_ACL_INDEX_VALID;
 	  }
 
 	  if (node_trace_on)	// PREDICT_FALSE (node->flags & VLIB_NODE_FLAG_TRACE))
