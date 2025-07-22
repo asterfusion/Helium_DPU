@@ -99,6 +99,7 @@ typedef enum
 {
   IKEV2_NEXT_IP4_LOOKUP,
   IKEV2_NEXT_IP4_HANDOFF,
+  IKEV2_NEXT_IP4_IPSEC,
   IKEV2_NEXT_IP4_ERROR_DROP,
   IKEV2_IP4_N_NEXT,
 } ikev2_ip4_next_t;
@@ -107,6 +108,7 @@ typedef enum
 {
   IKEV2_NEXT_IP6_LOOKUP,
   IKEV2_NEXT_IP6_HANDOFF,
+  IKEV2_NEXT_IP6_IPSEC,
   IKEV2_NEXT_IP6_ERROR_DROP,
   IKEV2_IP6_N_NEXT,
 } ikev2_ip6_next_t;
@@ -2528,7 +2530,6 @@ ikev2_flip_alternate_sa_bit (u32 id)
   return id | mask;
 }
 
-#if 0
 static void
 ikev2_del_tunnel_from_main (ikev2_del_ipsec_tunnel_args_t * a)
 {
@@ -2568,16 +2569,14 @@ ikev2_del_tunnel_from_main (ikev2_del_ipsec_tunnel_args_t * a)
   ipsec_sa_unlock_id (a->local_sa_id);
   ipsec_sa_unlock_id (ikev2_flip_alternate_sa_bit (a->remote_sa_id));
 
-  if (ipip)
-    ipip_del_tunnel (ipip->sw_if_index);
+  //if (ipip)
+  //  ipip_del_tunnel (ipip->sw_if_index);
 }
-#endif
 
 static int
 ikev2_delete_tunnel_interface (vnet_main_t * vnm, ikev2_sa_t * sa,
 			       ikev2_child_sa_t * child)
 {
-#if 0
   ikev2_del_ipsec_tunnel_args_t a;
 
   clib_memset (&a, 0, sizeof (a));
@@ -2599,7 +2598,6 @@ ikev2_delete_tunnel_interface (vnet_main_t * vnm, ikev2_sa_t * sa,
 
   vl_api_rpc_call_main_thread (ikev2_del_tunnel_from_main, (u8 *) & a,
 			       sizeof (a));
-#endif
   return 0;
 }
 
@@ -3287,6 +3285,13 @@ ikev2_node_internal (vlib_main_t *vm, vlib_node_runtime_t *node,
 
       u8 *ipx_hdr = b0->data + vnet_buffer (b0)->l3_hdr_offset;
       ike0 = vlib_buffer_get_current (b0);
+
+      if (natt && (*((u32 *) ike0) != 0))
+      {
+        next[0] = IKEV2_NEXT_IP4_IPSEC;
+        goto out;
+      }
+
       vlib_buffer_advance (b0, -sizeof (*udp0));
       udp0 = vlib_buffer_get_current (b0);
 
@@ -3837,6 +3842,7 @@ VLIB_REGISTER_NODE (ikev2_node_ip4,static) = {
   .next_nodes = {
     [IKEV2_NEXT_IP4_LOOKUP] = "ip4-lookup",
     [IKEV2_NEXT_IP4_HANDOFF] = "ikev2-ip4-handoff",
+    [IKEV2_NEXT_IP4_IPSEC] = "ipsec4-tun-input",
     [IKEV2_NEXT_IP4_ERROR_DROP] = "error-drop",
   },
 };
@@ -3855,6 +3861,7 @@ VLIB_REGISTER_NODE (ikev2_node_ip4_natt,static) = {
   .next_nodes = {
     [IKEV2_NEXT_IP4_LOOKUP] = "ip4-lookup",
     [IKEV2_NEXT_IP4_HANDOFF] = "ikev2-ip4-natt-handoff",
+    [IKEV2_NEXT_IP4_IPSEC] = "ipsec4-tun-input",
     [IKEV2_NEXT_IP4_ERROR_DROP] = "error-drop",
   },
 };
@@ -3872,7 +3879,8 @@ VLIB_REGISTER_NODE (ikev2_node_ip6,static) = {
   .n_next_nodes = IKEV2_IP6_N_NEXT,
   .next_nodes = {
     [IKEV2_NEXT_IP6_LOOKUP] = "ip6-lookup",
-    [IKEV2_NEXT_IP4_HANDOFF] = "ikev2-ip6-handoff",
+    [IKEV2_NEXT_IP6_HANDOFF] = "ikev2-ip6-handoff",
+    [IKEV2_NEXT_IP6_IPSEC] = "ipsec6-tun-input",
     [IKEV2_NEXT_IP6_ERROR_DROP] = "error-drop",
   },
 };
