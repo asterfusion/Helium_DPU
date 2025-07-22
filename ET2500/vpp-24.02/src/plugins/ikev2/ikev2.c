@@ -99,6 +99,7 @@ typedef enum
 {
   IKEV2_NEXT_IP4_LOOKUP,
   IKEV2_NEXT_IP4_HANDOFF,
+  IKEV2_NEXT_IP4_IPSEC,
   IKEV2_NEXT_IP4_ERROR_DROP,
   IKEV2_IP4_N_NEXT,
 } ikev2_ip4_next_t;
@@ -107,6 +108,7 @@ typedef enum
 {
   IKEV2_NEXT_IP6_LOOKUP,
   IKEV2_NEXT_IP6_HANDOFF,
+  IKEV2_NEXT_IP6_IPSEC,
   IKEV2_NEXT_IP6_ERROR_DROP,
   IKEV2_IP6_N_NEXT,
 } ikev2_ip6_next_t;
@@ -3283,6 +3285,13 @@ ikev2_node_internal (vlib_main_t *vm, vlib_node_runtime_t *node,
 
       u8 *ipx_hdr = b0->data + vnet_buffer (b0)->l3_hdr_offset;
       ike0 = vlib_buffer_get_current (b0);
+
+      if (natt && (*((u32 *) ike0) != 0))
+      {
+        next[0] = IKEV2_NEXT_IP4_IPSEC;
+        goto out;
+      }
+
       vlib_buffer_advance (b0, -sizeof (*udp0));
       udp0 = vlib_buffer_get_current (b0);
 
@@ -3833,6 +3842,7 @@ VLIB_REGISTER_NODE (ikev2_node_ip4,static) = {
   .next_nodes = {
     [IKEV2_NEXT_IP4_LOOKUP] = "ip4-lookup",
     [IKEV2_NEXT_IP4_HANDOFF] = "ikev2-ip4-handoff",
+    [IKEV2_NEXT_IP4_IPSEC] = "ipsec4-tun-input",
     [IKEV2_NEXT_IP4_ERROR_DROP] = "error-drop",
   },
 };
@@ -3851,6 +3861,7 @@ VLIB_REGISTER_NODE (ikev2_node_ip4_natt,static) = {
   .next_nodes = {
     [IKEV2_NEXT_IP4_LOOKUP] = "ip4-lookup",
     [IKEV2_NEXT_IP4_HANDOFF] = "ikev2-ip4-natt-handoff",
+    [IKEV2_NEXT_IP4_IPSEC] = "ipsec4-tun-input",
     [IKEV2_NEXT_IP4_ERROR_DROP] = "error-drop",
   },
 };
@@ -3868,7 +3879,8 @@ VLIB_REGISTER_NODE (ikev2_node_ip6,static) = {
   .n_next_nodes = IKEV2_IP6_N_NEXT,
   .next_nodes = {
     [IKEV2_NEXT_IP6_LOOKUP] = "ip6-lookup",
-    [IKEV2_NEXT_IP4_HANDOFF] = "ikev2-ip6-handoff",
+    [IKEV2_NEXT_IP6_HANDOFF] = "ikev2-ip6-handoff",
+    [IKEV2_NEXT_IP6_IPSEC] = "ipsec6-tun-input",
     [IKEV2_NEXT_IP6_ERROR_DROP] = "error-drop",
   },
 };
@@ -4274,8 +4286,8 @@ ikev2_bind (vlib_main_t *vm, ikev2_main_t *km)
     {
       udp_register_dst_port (vm, IKEV2_PORT, ikev2_node_ip4.index, 1);
       udp_register_dst_port (vm, IKEV2_PORT, ikev2_node_ip6.index, 0);
-      udp_register_dst_port (vm, IKEV2_PORT_NATT + 1, ikev2_node_ip4_natt.index, 1);
-      udp_register_dst_port (vm, IKEV2_PORT_NATT + 1, ikev2_node_ip6.index, 0);
+      udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip4_natt.index, 1);
+      udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip6.index, 0);
 
       vlib_punt_register (km->punt_hdl,
 			  ipsec_punt_reason[IPSEC_PUNT_IP4_SPI_UDP_0],
@@ -4295,8 +4307,8 @@ ikev2_unbind (vlib_main_t *vm, ikev2_main_t *km)
 			    ipsec_punt_reason[IPSEC_PUNT_IP4_SPI_UDP_0],
 			    "ikev2-ip4-natt");
 
-      udp_unregister_dst_port (vm, IKEV2_PORT_NATT + 1, 0);
-      udp_unregister_dst_port (vm, IKEV2_PORT_NATT + 1, 1);
+      udp_unregister_dst_port (vm, IKEV2_PORT_NATT, 0);
+      udp_unregister_dst_port (vm, IKEV2_PORT_NATT, 1);
       udp_unregister_dst_port (vm, IKEV2_PORT, 0);
       udp_unregister_dst_port (vm, IKEV2_PORT, 1);
     }
