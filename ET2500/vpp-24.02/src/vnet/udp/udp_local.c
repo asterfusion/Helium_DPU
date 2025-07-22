@@ -206,20 +206,7 @@ udp46_local_inline (vlib_main_t * vm,
 	  if (PREDICT_TRUE (next0 == UDP_LOCAL_NEXT_PUNT &&
 			    next1 == UDP_LOCAL_NEXT_PUNT))
 	    {
-              u32 *udp_encap_of_ipsec0 = (u32 *)(((u8 *)h0) + sizeof(udp_header_t));
-              u32 *udp_encap_of_ipsec1 = (u32 *)(((u8 *)h1) + sizeof(udp_header_t));
-              u16 dst_port0 = h0->dst_port;
-              u16 dst_port1 = h1->dst_port;
-
-              if (PREDICT_FALSE(UDP_DST_PORT_ipsec == clib_net_to_host_u16 (h0->dst_port) && *udp_encap_of_ipsec0 == 0))
-              {
-                  dst_port0 = clib_host_to_net_u16(UDP_DST_PORT_ipsec + 1);
-              }
-              if (PREDICT_FALSE(UDP_DST_PORT_ipsec == clib_net_to_host_u16 (h1->dst_port) && *udp_encap_of_ipsec1 == 0))
-              {
-                  dst_port1 = clib_host_to_net_u16(UDP_DST_PORT_ipsec + 1);
-              }
-	      sparse_vec_index2 (next_by_dst_port, dst_port0, dst_port1,
+	      sparse_vec_index2 (next_by_dst_port, h0->dst_port, h1->dst_port,
 				 &i0, &i1);
 	      next0 = vec_elt (next_by_dst_port, i0);
 	      next1 = vec_elt (next_by_dst_port, i1);
@@ -250,14 +237,7 @@ udp46_local_inline (vlib_main_t * vm,
 	    }
 	  else if (next0 == UDP_LOCAL_NEXT_PUNT)
 	    {
-              u32 *udp_encap_of_ipsec0 = (u32 *)(((u8 *)h0) + sizeof(udp_header_t));
-              u16 dst_port0 = h0->dst_port;
-
-              if (PREDICT_FALSE(UDP_DST_PORT_ipsec == clib_net_to_host_u16 (h0->dst_port) && *udp_encap_of_ipsec0 == 0))
-              {
-                  dst_port0 = clib_host_to_net_u16(UDP_DST_PORT_ipsec + 1);
-              }
-	      i0 = sparse_vec_index (next_by_dst_port, dst_port0);
+	      i0 = sparse_vec_index (next_by_dst_port, h0->dst_port);
 	      next0 = vec_elt (next_by_dst_port, i0);
 
 	      if (PREDICT_FALSE (i0 == SPARSE_VEC_INVALID_INDEX ||
@@ -274,14 +254,7 @@ udp46_local_inline (vlib_main_t * vm,
 	    }
 	  else if (next1 == UDP_LOCAL_NEXT_PUNT)
 	    {
-              u32 *udp_encap_of_ipsec1 = (u32 *)(((u8 *)h1) + sizeof(udp_header_t));
-              u16 dst_port1 = h1->dst_port;
-
-              if (PREDICT_FALSE(UDP_DST_PORT_ipsec == clib_net_to_host_u16 (h1->dst_port) && *udp_encap_of_ipsec1 == 0))
-              {
-                  dst_port1 = clib_host_to_net_u16(UDP_DST_PORT_ipsec + 1);
-              }
-	      i1 = sparse_vec_index (next_by_dst_port, dst_port1);
+	      i1 = sparse_vec_index (next_by_dst_port, h1->dst_port);
 	      next1 = vec_elt (next_by_dst_port, i1);
 
 	      if (PREDICT_FALSE (i1 == SPARSE_VEC_INVALID_INDEX ||
@@ -362,14 +335,7 @@ udp46_local_inline (vlib_main_t * vm,
 	  if (PREDICT_TRUE (clib_net_to_host_u16 (h0->length) <=
 			    vlib_buffer_length_in_chain (vm, b0)))
 	    {
-              u32 *udp_encap_of_ipsec = (u32 *)(((u8 *)h0) + sizeof(udp_header_t));
-              u16 dst_port = h0->dst_port;
-
-              if (PREDICT_FALSE(UDP_DST_PORT_ipsec == clib_net_to_host_u16 (h0->dst_port) && *udp_encap_of_ipsec == 0))
-              {
-                  dst_port = clib_host_to_net_u16(UDP_DST_PORT_ipsec + 1);
-              }
-	      i0 = sparse_vec_index (next_by_dst_port, dst_port);
+	      i0 = sparse_vec_index (next_by_dst_port, h0->dst_port);
 	      next0 = vec_elt (next_by_dst_port, i0);
 
 	      if (PREDICT_FALSE ((i0 == SPARSE_VEC_INVALID_INDEX) ||
@@ -675,3 +641,4 @@ VLIB_INIT_FUNCTION (udp_local_init);
  * eval: (c-set-style "gnu")
  * End:
  */
+
