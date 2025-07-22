@@ -154,7 +154,7 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
 			    u16 *outside_port, vlib_buffer_t *b)
 {
     //find address with packets acl_index
-    if(b->acl_index && vec_len(sm->addresses) > 0)
+    if((b->flags & VLIB_BUFFER_ACL_INDEX_VALID) && b->acl_index && vec_len(sm->addresses) > 0)
     {
         int i;
         snat_address_t *a, *ja = 0, *ra = 0, *ba = 0;
@@ -1270,7 +1270,7 @@ nat44_ed_in2out_fast_path_node_fn_inline (vlib_main_t *vm,
 							   rx_sw_if_index0);
       lookup.fib_index = rx_fib_index0;
 
-      if (b0->no_nat)
+      if ((b0->flags & VLIB_BUFFER_NO_NAT_VALID) && b0->no_nat)
       {
           b0->no_nat = 0;
           goto trace0;
@@ -1551,7 +1551,7 @@ nat44_ed_in2out_slow_path_node_fn_inline (vlib_main_t *vm,
       rx_fib_index0 = fib_table_get_index_for_sw_if_index (FIB_PROTOCOL_IP4,
 							   rx_sw_if_index0);
 
-      if (b0->no_nat)
+      if ((b0->flags & VLIB_BUFFER_NO_NAT_VALID) && b0->no_nat)
       {
           b0->no_nat = 0;
           goto trace0;
