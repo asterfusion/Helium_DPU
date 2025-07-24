@@ -1154,7 +1154,9 @@ lcp_itf_pair_create (u32 phy_sw_if_index, u8 *host_if_name,
   LCP_ITF_PAIR_INFO ("pair create: %U sw-flags %u hw-flags %u",
 		     format_lcp_itf_pair, lip, sw->flags, hw->flags);
   vnet_sw_interface_admin_up (vnm, host_sw_if_index);
+#ifndef ET2500_NO_NETLINK
   lcp_itf_set_link_state (lip, sw->flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP);
+#endif /* ET2500_NO_NETLINK */
 
   /*
    * Reflect current link state and link speed of the hardware interface on the
