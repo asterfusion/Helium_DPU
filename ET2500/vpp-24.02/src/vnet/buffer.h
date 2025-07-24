@@ -467,7 +467,13 @@ typedef struct
   } qos;
 
   u8 loop_counter;
-  u8 __unused[5];
+
+  /* SPI  */
+  struct
+  {
+      u8  cached_session_thread;
+      u32 cached_session_index;
+  } __attribute__ ((packed)) spi;
 
   /**
    * The L4 payload size set on input on GSO enabled interfaces
