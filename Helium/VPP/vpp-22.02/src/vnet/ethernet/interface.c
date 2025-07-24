@@ -99,7 +99,6 @@ ethernet_build_rewrite (vnet_main_t * vnm,
       (sub_sw->type == VNET_SW_INTERFACE_TYPE_PIPE))
     is_p2p = 1;
 
-#if 0
   if (sub_sw != sup_sw)
     {
       if (sub_sw->sub.eth.flags.one_tag && !(sub_sw->sub.eth.flags.dpdk_hw_tag))
@@ -130,7 +129,6 @@ ethernet_build_rewrite (vnet_main_t * vnm,
 	  n_bytes = sizeof (ethernet_header_t);
 	}
     }
-#endif
   switch (link_type)
     {
 #define _(a,b) case VNET_LINK_##a: type = ETHERNET_TYPE_##b; break
@@ -147,10 +145,6 @@ ethernet_build_rewrite (vnet_main_t * vnm,
   h = (ethernet_header_t *) rewrite;
   ei = pool_elt_at_index (em->interfaces, hw->hw_instance);
   clib_memcpy (h->src_address, &ei->address, sizeof (h->src_address));
-  if (sub_sw != sup_sw && PREDICT_FALSE (!is_p2p))
-  {
-      h->src_address[5] = (u8)(sw_if_index);
-  }
   if (is_p2p)
     {
       clib_memcpy (h->dst_address, sub_sw->p2p.client_mac,
@@ -163,7 +157,6 @@ ethernet_build_rewrite (vnet_main_t * vnm,
       else
 	clib_memset (h->dst_address, ~0, sizeof (h->dst_address));	/* broadcast */
     }
-#if 0
   if (PREDICT_FALSE (!is_p2p) && sub_sw->sub.eth.flags.one_tag && !(sub_sw->sub.eth.flags.dpdk_hw_tag))
     {
       ethernet_vlan_header_t *outer = (void *) (h + 1);
@@ -193,7 +186,6 @@ ethernet_build_rewrite (vnet_main_t * vnm,
 
     }
   else
-#endif
     {
       h->type = clib_host_to_net_u16 (type);
     }
