@@ -24,8 +24,10 @@
 #include <spi/spi.h>
 
 #include <vnet/ethernet/ethernet.h>
+#include <vnet/ip/ip.h>
 #include <vnet/ip/ip4.h>
 #include <vnet/ip/ip6.h>
+#include <vnet/ip/ip6_to_ip4.h>
 #include <vnet/ip/icmp46_packet.h>
 #include <vnet/tcp/tcp_packet.h>
 #include <vnet/udp/udp_local.h>
@@ -649,8 +651,17 @@ spi_create_session(f64 now,
         type = SPI_SESSION_TYPE_TCP;
         break;
     case IP_PROTOCOL_ICMP:
+        if (pkt->pkt_info.icmp_o_tcp_flags != ICMP4_echo_request)
+        {
+            return SPI_NODE_ERROR_BAD_ICMP_TYPE;
+        }
+        type = SPI_SESSION_TYPE_ICMP;
+        break;
     case IP_PROTOCOL_ICMP6:
-        //TODO
+        if (pkt->pkt_info.icmp_o_tcp_flags != ICMP6_echo_request)
+        {
+            return SPI_NODE_ERROR_BAD_ICMP_TYPE;
+        }
         type = SPI_SESSION_TYPE_ICMP;
         break;
     case IP_PROTOCOL_UDP:
@@ -802,6 +813,8 @@ spi_delete_session(spi_main_t *spim,
     /* del session to session table */
     clib_bihash_add_del_with_hash_48_8(&spim->session_table, &kv, session->hash, 0);
 
+    session->session_is_free = 1;
+
     pool_put_index (tspi->sessions, session->index);
 
     vlib_set_simple_counter (&spim->total_sessions_counter, tspi->thread_index, 0, pool_elts (tspi->sessions));
@@ -944,8 +957,27 @@ spi_proc_session_fn(vlib_main_t *vm,
         }
         break;
     case IP_PROTOCOL_ICMP:
+        if (!spim->icmp_enable)
+        {
+            skip_spi = 1;
+            goto spi_trace;
+        }
+
+        if (pkt->pkt_info.icmp_o_tcp_flags != ICMP4_echo_request &&
+            pkt->pkt_info.icmp_o_tcp_flags != ICMP4_echo_reply)
+        {
+            skip_spi = 1;
+            goto spi_trace;
+        }
+        break;
     case IP_PROTOCOL_ICMP6:
         if (!spim->icmp_enable)
+        {
+            skip_spi = 1;
+            goto spi_trace;
+        }
+        if (pkt->pkt_info.icmp_o_tcp_flags != ICMP6_echo_request &&
+            pkt->pkt_info.icmp_o_tcp_flags != ICMP6_echo_reply)
         {
             skip_spi = 1;
             goto spi_trace;
@@ -1054,6 +1086,132 @@ spi_get_sw_if_index_x4 (int is_output,
     }
 }
 
+/**
+ * @brief Get L4 information like port number or ICMP id from IPv6 packet.
+ *
+ * @param ip6        IPv6 header.
+ * @param buffer_len Buffer length.
+ * @param ip_protocol L4 protocol
+ * @param src_port L4 src port or icmp id
+ * @param dst_post L4 dst port or icmp id
+ * @param icmp_type_or_tcp_flags ICMP type or TCP flags, if applicable
+ * @param tcp_ack_number TCP ack number, if applicable
+ * @param tcp_seq_number TCP seq number, if applicable
+ *
+ * @returns 0 on success, -1 parse fail, -2 not first fragment.
+ */
+static_always_inline int
+spi_ip6_get_port (vlib_main_t * vm, vlib_buffer_t * b, ip6_header_t * ip6,
+	      u16 buffer_len, u8 * ip_protocol, u16 * src_port,
+	      u16 * dst_port, u8 * icmp_type_or_tcp_flags,
+	      u32 * tcp_ack_number, u32 * tcp_seq_number)
+{
+    u8 l4_protocol;
+    u16 l4_offset;
+    u16 frag_offset;
+    u8 *l4;
+
+    if (ip6_parse (vm, b, ip6, buffer_len, &l4_protocol, &l4_offset,
+                &frag_offset))
+    {
+        return -1;
+    }
+    if (frag_offset &&
+            ip6_frag_hdr_offset (((ip6_frag_hdr_t *) u8_ptr_add (ip6, frag_offset))))
+        return -2;			//Can't deal with non-first fragment for now
+
+    if (ip_protocol)
+    {
+        *ip_protocol = l4_protocol;
+    }
+    l4 = u8_ptr_add (ip6, l4_offset);
+    if (l4_protocol == IP_PROTOCOL_TCP || l4_protocol == IP_PROTOCOL_UDP)
+    {
+        if (src_port)
+            *src_port = ((udp_header_t *) (l4))->src_port;
+        if (dst_port)
+            *dst_port = ((udp_header_t *) (l4))->dst_port;
+        if (icmp_type_or_tcp_flags && l4_protocol == IP_PROTOCOL_TCP)
+            *icmp_type_or_tcp_flags = ((tcp_header_t *) (l4))->flags;
+        if (tcp_ack_number && l4_protocol == IP_PROTOCOL_TCP)
+            *tcp_ack_number = ((tcp_header_t *) (l4))->ack_number;
+        if (tcp_seq_number && l4_protocol == IP_PROTOCOL_TCP)
+            *tcp_seq_number = ((tcp_header_t *) (l4))->seq_number;
+    }
+    else if (l4_protocol == IP_PROTOCOL_ICMP6)
+    {
+        icmp46_header_t *icmp = (icmp46_header_t *) (l4);
+        if (icmp_type_or_tcp_flags)
+            *icmp_type_or_tcp_flags = ((icmp46_header_t *) (l4))->type;
+        if (icmp->type == ICMP6_echo_request)
+        {
+            if (src_port)
+                *src_port = ((u16 *) (icmp))[2];
+            if (dst_port)
+                *dst_port = ((u16 *) (icmp))[2];
+        }
+        else if (icmp->type == ICMP6_echo_reply)
+        {
+            if (src_port)
+                *src_port = ((u16 *) (icmp))[2];
+            if (dst_port)
+                *dst_port = ((u16 *) (icmp))[2];
+        }
+        else if (clib_net_to_host_u16 (ip6->payload_length) >= 64)
+        {
+            u16 ip6_pay_len;
+            ip6_header_t *inner_ip6;
+            u8 inner_l4_protocol;
+            u16 inner_l4_offset;
+            u16 inner_frag_offset;
+            u8 *inner_l4;
+
+            ip6_pay_len = clib_net_to_host_u16 (ip6->payload_length);
+            inner_ip6 = (ip6_header_t *) u8_ptr_add (icmp, 8);
+
+            if (ip6_parse (vm, b, inner_ip6, ip6_pay_len - 8,
+                        &inner_l4_protocol, &inner_l4_offset,
+                        &inner_frag_offset))
+                return -1;
+
+            if (inner_frag_offset &&
+                    ip6_frag_hdr_offset (((ip6_frag_hdr_t *)
+                            u8_ptr_add (inner_ip6,
+                                inner_frag_offset))))
+                return -2;
+
+            inner_l4 = u8_ptr_add (inner_ip6, inner_l4_offset);
+            if (inner_l4_protocol == IP_PROTOCOL_TCP ||
+                    inner_l4_protocol == IP_PROTOCOL_UDP)
+            {
+                if (src_port)
+                    *src_port = ((udp_header_t *) (inner_l4))->dst_port;
+                if (dst_port)
+                    *dst_port = ((udp_header_t *) (inner_l4))->src_port;
+            }
+            else if (inner_l4_protocol == IP_PROTOCOL_ICMP6)
+            {
+                icmp46_header_t *inner_icmp = (icmp46_header_t *) (inner_l4);
+                if (inner_icmp->type == ICMP6_echo_request)
+                {
+                    if (src_port)
+                        *src_port = ((u16 *) (inner_icmp))[2];
+                    if (dst_port)
+                        *dst_port = ((u16 *) (inner_icmp))[2];
+                }
+                else if (inner_icmp->type == ICMP6_echo_reply)
+                {
+                    if (src_port)
+                        *src_port = ((u16 *) (inner_icmp))[2];
+                    if (dst_port)
+                        *dst_port = ((u16 *) (inner_icmp))[2];
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 static_always_inline void
 spi_fill_pkt (vlib_main_t * vm,
               int is_ip6, int is_output,
@@ -1061,6 +1219,7 @@ spi_fill_pkt (vlib_main_t * vm,
               spi_pkt_info_t * pkt)
 {
     int l3_offset;
+    int rv = 0;
 
     clib_memset(pkt, 0, sizeof(spi_pkt_info_t));
 
@@ -1078,30 +1237,61 @@ spi_fill_pkt (vlib_main_t * vm,
         ip6_header_t *ip6 = vlib_buffer_get_current (b0) + l3_offset;
         pkt->pkt_l3l4.is_ip6 = 1;
 
-        if (clib_memcmp(&ip6->src_address, &ip6->dst_address, sizeof(ip6_address_t)))
+        if (is_output)
         {
-            pkt->pkt_l3l4.ip6.addr[0].as_u128 = ip6->src_address.as_u128;
-            pkt->pkt_l3l4.ip6.addr[1].as_u128 = ip6->dst_address.as_u128;
-
-            pkt->pkt_l3l4.proto = vnet_buffer(b0)->ip.reass.ip_proto;
-            pkt->pkt_l3l4.port[0] = vnet_buffer(b0)->ip.reass.l4_src_port;
-            pkt->pkt_l3l4.port[1] = vnet_buffer(b0)->ip.reass.l4_dst_port;
+            if (clib_memcmp(&ip6->src_address, &ip6->dst_address, sizeof(ip6_address_t)) >= 0)
+            {
+                pkt->pkt_l3l4.ip6.addr[0].as_u128 = ip6->src_address.as_u128;
+                pkt->pkt_l3l4.ip6.addr[1].as_u128 = ip6->dst_address.as_u128;
+                rv = spi_ip6_get_port (vm, b0, ip6, b0->current_length,
+                            &pkt->pkt_l3l4.proto,
+                            &pkt->pkt_l3l4.port[0],
+                            &pkt->pkt_l3l4.port[1],
+                            &pkt->pkt_info.icmp_o_tcp_flags,
+                            &pkt->pkt_info.tcp_ack_number,
+                            &pkt->pkt_info.tcp_seq_number);
+                if (rv == -2 )
+                    pkt->pkt_info.is_nonfirst_fragment = vnet_buffer(b0)->ip.reass.is_non_first_fragment;
+            }
+            else
+            {
+                pkt->pkt_info.exchanged_tuple = 1;
+                pkt->pkt_l3l4.ip6.addr[1].as_u128 = ip6->src_address.as_u128;
+                pkt->pkt_l3l4.ip6.addr[0].as_u128 = ip6->dst_address.as_u128;
+                rv = spi_ip6_get_port (vm, b0, ip6, b0->current_length,
+                            &pkt->pkt_l3l4.proto,
+                            &pkt->pkt_l3l4.port[1],
+                            &pkt->pkt_l3l4.port[0],
+                            &pkt->pkt_info.icmp_o_tcp_flags,
+                            &pkt->pkt_info.tcp_ack_number,
+                            &pkt->pkt_info.tcp_seq_number);
+                if (rv == -2 )
+                    pkt->pkt_info.is_nonfirst_fragment = vnet_buffer(b0)->ip.reass.is_non_first_fragment;
+            }
         }
         else
         {
-            pkt->pkt_l3l4.ip6.addr[1].as_u128 = ip6->src_address.as_u128;
-            pkt->pkt_l3l4.ip6.addr[0].as_u128 = ip6->dst_address.as_u128;
-
+            if (clib_memcmp(&ip6->src_address, &ip6->dst_address, sizeof(ip6_address_t)) >= 0)
+            {
+                pkt->pkt_l3l4.ip6.addr[0].as_u128 = ip6->src_address.as_u128;
+                pkt->pkt_l3l4.ip6.addr[1].as_u128 = ip6->dst_address.as_u128;
+                pkt->pkt_l3l4.port[0] = vnet_buffer(b0)->ip.reass.l4_src_port;
+                pkt->pkt_l3l4.port[1] = vnet_buffer(b0)->ip.reass.l4_dst_port;
+            }
+            else
+            {
+                pkt->pkt_info.exchanged_tuple = 1;
+                pkt->pkt_l3l4.ip6.addr[1].as_u128 = ip6->src_address.as_u128;
+                pkt->pkt_l3l4.ip6.addr[0].as_u128 = ip6->dst_address.as_u128;
+                pkt->pkt_l3l4.port[1] = vnet_buffer(b0)->ip.reass.l4_src_port;
+                pkt->pkt_l3l4.port[0] = vnet_buffer(b0)->ip.reass.l4_dst_port;
+            }
             pkt->pkt_l3l4.proto = vnet_buffer(b0)->ip.reass.ip_proto;
-            pkt->pkt_l3l4.port[1] = vnet_buffer(b0)->ip.reass.l4_src_port;
-            pkt->pkt_l3l4.port[0] = vnet_buffer(b0)->ip.reass.l4_dst_port;
-            pkt->pkt_info.exchanged_tuple = 1;
+            pkt->pkt_info.icmp_o_tcp_flags = vnet_buffer(b0)->ip.reass.icmp_type_or_tcp_flags;
+            pkt->pkt_info.tcp_ack_number = vnet_buffer(b0)->ip.reass.tcp_ack_number;
+            pkt->pkt_info.tcp_seq_number = vnet_buffer(b0)->ip.reass.tcp_seq_number;
+            pkt->pkt_info.is_nonfirst_fragment = vnet_buffer(b0)->ip.reass.is_non_first_fragment;
         }
-        pkt->pkt_info.icmp_o_tcp_flags = vnet_buffer(b0)->ip.reass.icmp_type_or_tcp_flags;
-        pkt->pkt_info.tcp_ack_number = vnet_buffer(b0)->ip.reass.tcp_ack_number;
-        pkt->pkt_info.tcp_seq_number = vnet_buffer(b0)->ip.reass.tcp_seq_number;
-        pkt->pkt_info.l4_valid = vnet_buffer(b0)->ip.reass.l4_layer_truncated ? 0 : 1;
-        pkt->pkt_info.is_nonfirst_fragment = vnet_buffer(b0)->ip.reass.is_non_first_fragment;
 
         pkt->pkt_info.pkt_len = vlib_buffer_length_in_chain(vm, b0);
     }
@@ -1114,23 +1304,21 @@ spi_fill_pkt (vlib_main_t * vm,
         {
             pkt->pkt_l3l4.ip4.addr[0].as_u32 = ip4->src_address.as_u32;
             pkt->pkt_l3l4.ip4.addr[1].as_u32 = ip4->dst_address.as_u32;
-            pkt->pkt_l3l4.proto = vnet_buffer(b0)->ip.reass.ip_proto;
             pkt->pkt_l3l4.port[0] = vnet_buffer(b0)->ip.reass.l4_src_port;
             pkt->pkt_l3l4.port[1] = vnet_buffer(b0)->ip.reass.l4_dst_port;
         }
         else
         {
-            pkt->pkt_l3l4.ip4.addr[0].as_u32 = ip4->dst_address.as_u32;
+            pkt->pkt_info.exchanged_tuple = 1;
             pkt->pkt_l3l4.ip4.addr[1].as_u32 = ip4->src_address.as_u32;
-            pkt->pkt_l3l4.proto = vnet_buffer(b0)->ip.reass.ip_proto;
+            pkt->pkt_l3l4.ip4.addr[0].as_u32 = ip4->dst_address.as_u32;
             pkt->pkt_l3l4.port[1] = vnet_buffer(b0)->ip.reass.l4_src_port;
             pkt->pkt_l3l4.port[0] = vnet_buffer(b0)->ip.reass.l4_dst_port;
-            pkt->pkt_info.exchanged_tuple = 1;
         }
+        pkt->pkt_l3l4.proto = vnet_buffer(b0)->ip.reass.ip_proto;
         pkt->pkt_info.icmp_o_tcp_flags = vnet_buffer(b0)->ip.reass.icmp_type_or_tcp_flags;
         pkt->pkt_info.tcp_ack_number = vnet_buffer(b0)->ip.reass.tcp_ack_number;
         pkt->pkt_info.tcp_seq_number = vnet_buffer(b0)->ip.reass.tcp_seq_number;
-        pkt->pkt_info.l4_valid = vnet_buffer(b0)->ip.reass.l4_layer_truncated ? 0 : 1;
         pkt->pkt_info.is_nonfirst_fragment = vnet_buffer(b0)->ip.reass.is_non_first_fragment;
 
         pkt->pkt_info.pkt_len = vlib_buffer_length_in_chain(vm, b0);

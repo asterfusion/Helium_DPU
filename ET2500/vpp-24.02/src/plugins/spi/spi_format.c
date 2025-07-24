@@ -227,6 +227,7 @@ format_spi_session (u8 * s, va_list * args)
     }
 
     s = format (s, "\n\tSession duration %.2lfs", now - session->create_timestamp);
+    s = format (s, "\n\tSession transmit_timeout %ds", session->transmit_timeout);
     s = format (s, "\n\tUplink : total pkts %lu, total bytes %llu", session->total_pkts[SPI_FLOW_DIR_UPLINK], session->total_bytes[SPI_FLOW_DIR_UPLINK]);
     s = format (s, "\n\tUplink : drop  pkts %lu, drop  bytes %llu", session->drop_pkts[SPI_FLOW_DIR_UPLINK], session->drop_bytes[SPI_FLOW_DIR_UPLINK]);
     s = format (s, "\n\tDownlink : total pkts %lu, total bytes %llu", session->total_pkts[SPI_FLOW_DIR_DOWNLINK], session->total_bytes[SPI_FLOW_DIR_DOWNLINK]);

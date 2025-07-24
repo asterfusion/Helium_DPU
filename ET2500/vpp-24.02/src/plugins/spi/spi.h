@@ -225,9 +225,8 @@ typedef union {
 
             struct {
                 u8 is_nonfirst_fragment:1;
-                u8 l4_valid:1;
                 u8 exchanged_tuple:1; //if fill session exchanged set 1
-                u8 flags_reserved:5;
+                u8 flags_reserved:6;
 
                 u8 icmp_o_tcp_flags;
                 u8 u8_padding[2];
@@ -274,6 +273,7 @@ typedef struct
     u32 hash;
 
     u8 thread_index;
+    u8 session_is_free;
     u8 create_by_output;
     u8 exchanged_tuple;
     u8 associated_session_valid;
@@ -488,5 +488,9 @@ int spi_exact_3tuple_timeout_add_del(ip46_address_t *ip, ip46_type_t type, u8 pr
 int spi_get_session_number(counter_t *totol_session, 
                            counter_t *ip4_session, counter_t ip4_proto_session[SPI_SESSION_TYPE_MAX], 
                            counter_t *ip6_session, counter_t ip6_proto_session[SPI_SESSION_TYPE_MAX]);
+
+/* external call */
+spi_session_t *vlib_buffer_spi_get_session(vlib_buffer_t *b);
+spi_session_t *vlib_buffer_spi_get_associated_session(vlib_buffer_t *b);
 
 #endif /* included_spi_h */

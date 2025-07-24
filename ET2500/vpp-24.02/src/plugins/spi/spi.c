@@ -464,7 +464,7 @@ int spi_feature_enable (spi_config_t *config)
             node = vlib_get_node_by_name (vm, (u8 *) "spi-ip6-input-node");
             spim->fq_ip6_input_index = vlib_frame_queue_main_init (node->index, 0);
         }
-        if (spim->fq_ip4_output_index == ~0)
+        if (spim->fq_ip6_output_index == ~0)
         {
             node = vlib_get_node_by_name (vm, (u8 *) "spi-ip6-output-node");
             spim->fq_ip6_output_index = vlib_frame_queue_main_init (node->index, 0);
@@ -723,3 +723,42 @@ VLIB_REGISTER_NODE (spi_default_node) = {
       [0] = "error-drop",
   },
 };
+
+/* external call */
+spi_session_t *vlib_buffer_spi_get_session(vlib_buffer_t *b)
+{
+    spi_main_t *spim = &spi_main;
+    spi_per_thread_data_t *tspi = NULL;
+    spi_session_t *session = NULL;
+    if (!(b->flags & VLIB_BUFFER_SPI_SESSION_VALID))
+        return NULL;
+
+    tspi = &spim->per_thread_data[vnet_buffer2(b)->spi.cached_session_thread];
+    session =  pool_elt_at_index (tspi->sessions, vnet_buffer2(b)->spi.cached_session_index);
+
+    return session->session_is_free ? NULL : session;
+}
+
+spi_session_t *vlib_buffer_spi_get_associated_session(vlib_buffer_t *b)
+{
+    spi_main_t *spim = &spi_main;
+    spi_per_thread_data_t *tspi = NULL;
+    spi_session_t *session = NULL;
+    spi_session_t *associated_session = NULL;
+    if (!(b->flags & VLIB_BUFFER_SPI_SESSION_VALID))
+        return NULL;
+
+    tspi = &spim->per_thread_data[vnet_buffer2(b)->spi.cached_session_thread];
+    session =  pool_elt_at_index (tspi->sessions, vnet_buffer2(b)->spi.cached_session_index);
+
+    if (session->session_is_free)
+        return NULL;
+
+    if (!session->associated_session_valid)
+        return NULL;
+
+    tspi = &spim->per_thread_data[session->associated_session.session_thread];
+    associated_session =  pool_elt_at_index (tspi->sessions, session->associated_session.session_index);
+
+    return associated_session->session_is_free ? NULL : session;
+}
