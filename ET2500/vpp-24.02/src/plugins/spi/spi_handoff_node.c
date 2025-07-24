@@ -258,7 +258,8 @@ VNET_FEATURE_INIT (spi_ip4_output_worker_handoff_feature) = {
   .arc_name = "ip4-output",
   .node_name = "spi-ip4-output-worker-handoff",
   .runs_after = VNET_FEATURES ("acl-plugin-out-ip4-fa", "ip4-outacl", 
-                               "ipsec4-output-feature", "ip4-sv-reassembly-output-feature"),
+                               "ipsec4-output-feature", "ip4-sv-reassembly-output-feature", 
+                               "nat44-ed-in2out-output", "nat44-in2out-output-worker-handoff", "nat-pre-in2out-output"),
 };
 
 VNET_FEATURE_INIT (spi_ip6_output_worker_handoff_feature) = {

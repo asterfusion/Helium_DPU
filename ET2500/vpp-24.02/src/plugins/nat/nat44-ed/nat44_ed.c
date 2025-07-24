@@ -3823,6 +3823,10 @@ nat_6t_flow_ip4_translate (snat_main_t *sm, vlib_buffer_t *b, ip4_header_t *ip,
 	  ip->dst_address = f->rewrite.daddr;
 	  udp->src_port = f->rewrite.sport;
 	  udp->dst_port = f->rewrite.dport;
+#ifdef OUTPUT_NAT_REWRITE_VLIB
+      vnet_buffer (b)->ip.reass.l4_src_port = f->rewrite.sport;
+      vnet_buffer (b)->ip.reass.l4_dst_port = f->rewrite.dport;
+#endif
 	}
       else
 	{ // icmp inner ip4 - reversed saddr/daddr
@@ -3830,6 +3834,10 @@ nat_6t_flow_ip4_translate (snat_main_t *sm, vlib_buffer_t *b, ip4_header_t *ip,
 	  ip->dst_address = f->rewrite.saddr;
 	  udp->src_port = f->rewrite.dport;
 	  udp->dst_port = f->rewrite.sport;
+#ifdef OUTPUT_NAT_REWRITE_VLIB
+      vnet_buffer (b)->ip.reass.l4_src_port = f->rewrite.dport;
+      vnet_buffer (b)->ip.reass.l4_dst_port = f->rewrite.sport;
+#endif
 	}
 
       if (IP_PROTOCOL_TCP == proto)
@@ -3916,6 +3924,10 @@ nat_6t_flow_icmp_translate (vlib_main_t *vm, snat_main_t *sm, vlib_buffer_t *b,
 				    nat_icmp_echo_header_t,
 				    identifier /* changed member */);
 	      echo->identifier = f->rewrite.icmp_id;
+#ifdef OUTPUT_NAT_REWRITE_VLIB
+          vnet_buffer (b)->ip.reass.l4_src_port = f->rewrite.icmp_id;
+          vnet_buffer (b)->ip.reass.l4_dst_port = f->rewrite.icmp_id;
+#endif
 	      icmp->checksum = ip_csum_fold (sum);
 	    }
 	}
@@ -4020,6 +4032,10 @@ nat_6t_flow_icmp_translate (vlib_main_t *vm, snat_main_t *sm, vlib_buffer_t *b,
 			identifier /* changed member */);
 		      inner_icmp->checksum = ip_csum_fold (inner_sum);
 		      inner_echo->identifier = f->rewrite.icmp_id;
+#ifdef OUTPUT_NAT_REWRITE_VLIB
+		      vnet_buffer (b)->ip.reass.l4_src_port = f->rewrite.icmp_id;
+		      vnet_buffer (b)->ip.reass.l4_dst_port = f->rewrite.icmp_id;
+#endif
 		    }
 		}
 	      break;

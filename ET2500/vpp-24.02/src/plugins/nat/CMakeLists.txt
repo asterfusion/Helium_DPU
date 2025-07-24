@@ -233,4 +233,5 @@ endif()
 
 if (${ASROUTER_NAME} MATCHES "octeon10")
     add_compile_definitions(SUPPORT_NAT_PROTO)
+    add_compile_definitions(OUTPUT_NAT_REWRITE_VLIB)
 endif()
