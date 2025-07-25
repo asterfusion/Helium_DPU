@@ -539,7 +539,7 @@ onp_process (vlib_main_t *vm, vlib_node_runtime_t *rt, vlib_frame_t *f)
 {
   onp_main_t *om = onp_get_main ();
   onp_pktio_t *pktio;
-  f64 timeout = 5.0;
+  f64 timeout = 1.0;
   clib_error_t *error;
 
   error = onp_init (vm, rt, f);
