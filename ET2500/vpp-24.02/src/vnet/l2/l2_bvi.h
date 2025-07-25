@@ -122,6 +122,7 @@ l2_to_bvi (vlib_main_t * vlib_main,
   if(!find_bond_by_sw_if_index(vnet_buffer (b0)->sw_if_index[VLIB_RX]))
   {
     vnet_buffer2 (b0)->l2_rx_sw_if_index = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+    b0->flags |= VLIB_BUFFER_NOT_PHY_INTF;
   }
 
   /* Set the input interface to be the BVI interface */
