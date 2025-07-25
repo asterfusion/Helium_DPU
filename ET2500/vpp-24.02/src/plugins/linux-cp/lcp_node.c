@@ -386,14 +386,7 @@ lcp_xc_inline (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame,
           len0 = lip->lip_rewrite_len;
       }
 
-	  if (len0 != lip->lip_rewrite_len)
-	  {
-		  vlib_buffer_advance (b0, -len0);
-	  }
-	  else
-	  {
-		  vlib_buffer_advance (b0, -lip->lip_rewrite_len);
-	  }
+	  vlib_buffer_advance (b0, -len0);
 	  eth = vlib_buffer_get_current (b0);
 
 	  ai = ADJ_INDEX_INVALID;
@@ -406,7 +399,7 @@ lcp_xc_inline (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame,
 	  adj = adj_get (ai);
 	  vnet_buffer (b0)->ip.adj_index[VLIB_TX] = ai;
 	  next0 = adj->rewrite_header.next_index;
-	  vnet_buffer (b0)->ip.save_rewrite_length = lip->lip_rewrite_len;
+	  vnet_buffer (b0)->ip.save_rewrite_length = len0;
 
 	  if (PREDICT_FALSE (adj->rewrite_header.flags &
 			     VNET_REWRITE_HAS_FEATURES))
