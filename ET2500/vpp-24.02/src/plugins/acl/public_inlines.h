@@ -76,7 +76,7 @@ acl_fill_5tuple_l2_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
     if (is_ip6)
     {
         int ii;
-        for(ii = 0; ii < 3; ii++)
+        for(ii = 0; ii < 2; ii++)
         {
             p5tuple_pkt->l3_zero_pad_1[ii] = 0;
         }
@@ -87,7 +87,7 @@ acl_fill_5tuple_l2_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
     else
     {
         int ii;
-        for(ii = 0; ii < 9; ii++)
+        for(ii = 0; ii < 8; ii++)
         {
             p5tuple_pkt->l3_zero_pad[ii] = 0;
         }
@@ -765,6 +765,11 @@ match_portranges(acl_main_t *am, fa_5tuple_t *match, u32 index)
 always_inline int
 single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
 {
+  if(r->src_sw_if_index)
+  {
+      if(pkt_5tuple->src_sw_if_index != r->src_sw_if_index)
+          return 0;
+  }
   if (is_ip6 != r->is_ipv6)
     {
       return 0;

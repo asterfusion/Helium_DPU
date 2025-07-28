@@ -16,6 +16,8 @@
 #include <plugins/abf/abf_itf_attach.h>
 #include <vnet/fib/fib_path_list.h>
 #include <plugins/acl/exports.h>
+#include <plugins/spi/spi.h>
+#include <plugins/acl/fa_node.h>
 
 /**
  * Forward declarations;
@@ -52,6 +54,8 @@ static u32 abf_acl_user_id;
  */
 
 static acl_plugin_methods_t acl_plugin;
+
+static void *spi_get_associated_session_ptr;
 
 /**
  * A DB of attachments; key={abf_index,sw_if_index}
@@ -490,6 +494,9 @@ typedef struct abf_input_trace_t_
 {
   abf_next_t next;
   index_t index;
+  u32 src_sw_if_index;
+  u32 acl_index;
+  u32 acl_rule;
 } abf_input_trace_t;
 
 typedef enum
@@ -529,6 +536,7 @@ abf_input_inline (vlib_main_t * vm,
 	  u32 match_acl_index = ~0;
 	  u32 match_acl_pos = ~0;
 	  u32 match_rule_index = ~0;
+      u32 match_src_sw_if_index = 0;
 	  u32 trace_bitmap = 0;
 	  u32 lc_index;
 	  u8 action;
@@ -567,6 +575,14 @@ abf_input_inline (vlib_main_t * vm,
 					 (FIB_PROTOCOL_IP6 == fproto), 1, 0,
 					 &fa_5tuple0);
 
+      spi_session_t *spi_sess = ((__typeof__ (vlib_buffer_spi_get_associated_session) *)spi_get_associated_session_ptr) (b0);
+      if(spi_sess != NULL)
+      {
+          fa_5tuple_t *fa_5tuple_p = (fa_5tuple_t*)&fa_5tuple0;
+          fa_5tuple_p->src_sw_if_index = spi_sess->flow[SPI_FLOW_DIR_UPLINK].in_sw_if_index;;
+          match_src_sw_if_index = fa_5tuple_p->src_sw_if_index;
+      }
+
 	  if (acl_plugin_match_5tuple_inline (
 		acl_plugin.p_acl_main, lc_index, &fa_5tuple0,
 		(FIB_PROTOCOL_IP6 == fproto), &action, &match_acl_pos,
@@ -601,6 +617,9 @@ abf_input_inline (vlib_main_t * vm,
 	      tr = vlib_add_trace (vm, node, b0, sizeof (*tr));
 	      tr->next = next0;
 	      tr->index = vnet_buffer (b0)->ip.adj_index[VLIB_TX];
+          tr->src_sw_if_index = match_src_sw_if_index;
+          tr->acl_index = match_acl_index;
+          tr->acl_rule = match_rule_index;
 	    }
       vnet_buffer (b0)->ip.flow_hash = 0;
 	  /* verify speculative enqueue, maybe switch current next frame */
@@ -648,6 +667,8 @@ format_abf_input_trace (u8 * s, va_list * args)
   abf_input_trace_t *t = va_arg (*args, abf_input_trace_t *);
 
   s = format (s, " next %d index %d", t->next, t->index);
+  s = format (s, " src_sw_if_index %d match acl_index %d rule %d", 
+          t->src_sw_if_index, t->acl_index, t->acl_rule);
   return s;
 }
 
@@ -768,6 +789,14 @@ abf_itf_bond_init (vlib_main_t * vm)
 
   abf_acl_user_id =
     acl_plugin.register_user_module ("ABF plugin", "sw_if_index", NULL);
+
+  spi_get_associated_session_ptr = 
+    vlib_get_plugin_symbol ("spi_plugin.so", "vlib_buffer_spi_get_associated_session");
+  if(spi_get_associated_session_ptr == NULL)
+  {
+      return clib_error_return (0, "spi_plugin.so is not loaded");
+  }
+
 
   return (NULL);
 }

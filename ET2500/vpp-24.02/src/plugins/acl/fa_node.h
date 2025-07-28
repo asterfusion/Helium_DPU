@@ -76,16 +76,18 @@ typedef union {
            after padding so we can still
            use them as (shorter) key together with
            L4 info */
-        u32 l3_zero_pad[9];
+        u32 l3_zero_pad[8];
         mac_address_t mac4_addr[2];
         ip4_address_t ip4_addr[2];
       };
       struct {
-        u32 l3_zero_pad_1[3];
+        u32 l3_zero_pad_1[2];
         mac_address_t mac6_addr[2];
         ip6_address_t ip6_addr[2];
       };
     };
+    u32 src_sw_if_index;
+
     fa_session_l4_key_t l4;
     /* This field should align with u64 value in bihash_40_8 and bihash_16_8 keyvalue struct */
     fa_packet_info_t pkt;

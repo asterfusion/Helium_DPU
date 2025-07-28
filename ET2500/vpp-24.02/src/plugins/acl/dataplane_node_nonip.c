@@ -33,6 +33,7 @@
 #include <vppinfra/bihash_64_8.h>
 #include <vppinfra/bihash_template.h>
 
+#if 0
 typedef struct
 {
   u32 next_index;
@@ -44,6 +45,7 @@ typedef struct
   u32 trace_bitmap;
   u8 action;
 } acl_fa_trace_t;
+#endif
 
 /* *INDENT-OFF* */
 #define foreach_acl_fa_error \

@@ -725,6 +725,7 @@ VLIB_REGISTER_NODE (spi_default_node) = {
 };
 
 /* external call */
+__clib_export
 spi_session_t *vlib_buffer_spi_get_session(vlib_buffer_t *b)
 {
     spi_main_t *spim = &spi_main;
@@ -738,7 +739,7 @@ spi_session_t *vlib_buffer_spi_get_session(vlib_buffer_t *b)
 
     return session->session_is_free ? NULL : session;
 }
-
+__clib_export
 spi_session_t *vlib_buffer_spi_get_associated_session(vlib_buffer_t *b)
 {
     spi_main_t *spim = &spi_main;
