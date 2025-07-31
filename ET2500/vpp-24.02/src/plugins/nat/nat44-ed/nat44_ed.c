@@ -879,6 +879,15 @@ nat44_ed_get_resolve_record (ip4_address_t l_addr, u16 l_port, u16 e_port,
 		      continue;
 		    }
 		}
+#ifdef SUPPORT_NAT_PROTO
+          if (is_sm_keep_proto(rp->flags) && is_sm_keep_proto(flags))
+          {
+              if(rp->proto != proto)
+              {
+                  continue;
+              }
+          }
+#endif
 	    }
 	  else
 	    {
@@ -1051,7 +1060,16 @@ nat44_ed_add_static_mapping_internal (ip4_address_t l_addr,
 
   if (is_sm_addr_only (flags))
     {
-      e_port = l_port = proto = 0;
+#ifdef SUPPORT_NAT_PROTO
+        if (is_sm_keep_proto(flags))
+        {
+            e_port = l_port = 0;
+        }
+        else
+#endif
+        {
+            e_port = l_port = proto = 0;
+        }
     }
 
   if (is_sm_identity_nat (flags))
@@ -1130,6 +1148,12 @@ nat44_ed_add_static_mapping_internal (ip4_address_t l_addr,
       m->external_port = e_port;
       m->proto = proto;
     }
+#ifdef SUPPORT_NAT_PROTO
+  if (is_sm_keep_proto(flags))
+  {
+      m->proto = proto;
+  }
+#endif
 
   if (is_sm_identity_nat (flags))
     {
@@ -1184,7 +1208,16 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
 
   if (is_sm_addr_only (flags))
     {
-      e_port = l_port = proto = 0;
+#ifdef SUPPORT_NAT_PROTO
+        if (is_sm_keep_proto(flags))
+        {
+            e_port = l_port = 0;
+        }
+        else
+#endif
+        {
+            e_port = l_port = proto = 0;
+        }
     }
 
   if (is_sm_identity_nat (flags))
@@ -2758,6 +2791,12 @@ nat44_ed_sm_match (snat_main_t *sm, ip4_address_t match_addr, u16 match_port,
       if (m)
 	return m;
 
+#ifdef SUPPORT_NAT_PROTO
+      // try address+proto only mapping
+      m = nat44_ed_sm_i2o_lookup (sm, match_addr, 0, match_fib_index, match_protocol);
+      if (m)
+          return m;
+#endif
       // try address only mapping
       m = nat44_ed_sm_i2o_lookup (sm, match_addr, 0, match_fib_index, 0);
       if (m)
@@ -2771,6 +2810,13 @@ nat44_ed_sm_match (snat_main_t *sm, ip4_address_t match_addr, u16 match_port,
 	  if (m)
 	    return m;
 
+#ifdef SUPPORT_NAT_PROTO
+	  // try address+proto only mapping
+	  m = nat44_ed_sm_i2o_lookup (sm, match_addr, 0, sm->inside_fib_index,
+				      match_protocol);
+	  if (m)
+	    return m;
+#endif
 	  // try address only mapping
 	  m = nat44_ed_sm_i2o_lookup (sm, match_addr, 0, sm->inside_fib_index,
 				      0);
@@ -2785,6 +2831,13 @@ nat44_ed_sm_match (snat_main_t *sm, ip4_address_t match_addr, u16 match_port,
 	  if (m)
 	    return m;
 
+#ifdef SUPPORT_NAT_PROTO
+	  // try address+proto only mapping
+	  m = nat44_ed_sm_i2o_lookup (sm, match_addr, 0, sm->outside_fib_index,
+				      match_protocol);
+	  if (m)
+	    return m;
+#endif
 	  // try address only mapping
 	  m = nat44_ed_sm_i2o_lookup (sm, match_addr, 0, sm->outside_fib_index,
 				      0);
@@ -2798,6 +2851,13 @@ nat44_ed_sm_match (snat_main_t *sm, ip4_address_t match_addr, u16 match_port,
 	nat44_ed_sm_o2i_lookup (sm, match_addr, match_port, 0, match_protocol);
       if (m)
 	return m;
+
+#ifdef SUPPORT_NAT_PROTO
+      // try address+proto mapping
+      m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, 0, match_protocol);
+      if (m)
+          return m;
+#endif
 
       // try address only mapping
       m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, 0, 0);
@@ -3763,6 +3823,10 @@ nat_6t_flow_ip4_translate (snat_main_t *sm, vlib_buffer_t *b, ip4_header_t *ip,
 	  ip->dst_address = f->rewrite.daddr;
 	  udp->src_port = f->rewrite.sport;
 	  udp->dst_port = f->rewrite.dport;
+#ifdef OUTPUT_NAT_REWRITE_VLIB
+      vnet_buffer (b)->ip.reass.l4_src_port = f->rewrite.sport;
+      vnet_buffer (b)->ip.reass.l4_dst_port = f->rewrite.dport;
+#endif
 	}
       else
 	{ // icmp inner ip4 - reversed saddr/daddr
@@ -3770,6 +3834,10 @@ nat_6t_flow_ip4_translate (snat_main_t *sm, vlib_buffer_t *b, ip4_header_t *ip,
 	  ip->dst_address = f->rewrite.saddr;
 	  udp->src_port = f->rewrite.dport;
 	  udp->dst_port = f->rewrite.sport;
+#ifdef OUTPUT_NAT_REWRITE_VLIB
+      vnet_buffer (b)->ip.reass.l4_src_port = f->rewrite.dport;
+      vnet_buffer (b)->ip.reass.l4_dst_port = f->rewrite.sport;
+#endif
 	}
 
       if (IP_PROTOCOL_TCP == proto)
@@ -3856,6 +3924,10 @@ nat_6t_flow_icmp_translate (vlib_main_t *vm, snat_main_t *sm, vlib_buffer_t *b,
 				    nat_icmp_echo_header_t,
 				    identifier /* changed member */);
 	      echo->identifier = f->rewrite.icmp_id;
+#ifdef OUTPUT_NAT_REWRITE_VLIB
+          vnet_buffer (b)->ip.reass.l4_src_port = f->rewrite.icmp_id;
+          vnet_buffer (b)->ip.reass.l4_dst_port = f->rewrite.icmp_id;
+#endif
 	      icmp->checksum = ip_csum_fold (sum);
 	    }
 	}
@@ -3960,6 +4032,10 @@ nat_6t_flow_icmp_translate (vlib_main_t *vm, snat_main_t *sm, vlib_buffer_t *b,
 			identifier /* changed member */);
 		      inner_icmp->checksum = ip_csum_fold (inner_sum);
 		      inner_echo->identifier = f->rewrite.icmp_id;
+#ifdef OUTPUT_NAT_REWRITE_VLIB
+		      vnet_buffer (b)->ip.reass.l4_src_port = f->rewrite.icmp_id;
+		      vnet_buffer (b)->ip.reass.l4_dst_port = f->rewrite.icmp_id;
+#endif
 		    }
 		}
 	      break;

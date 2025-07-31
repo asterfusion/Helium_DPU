@@ -22,6 +22,8 @@
 #include <vlibmemory/api.h>
 #include <vpp/app/version.h>
 #include <stdbool.h>
+#include <vnet/ip/ip_types_api.h>
+#include <vnet/ip/ip_format_fns.h>
 
 /* define message IDs */
 #include <dns/dns.api_enum.h>
@@ -1592,6 +1594,7 @@ dns_resolve_name_ex (u8 *name, dns_cache_entry_t **ep, dns_pending_request_t *t0
 {
   dns_main_t *dm = &dns_main;
   vlib_main_t *vm = vlib_get_main ();
+  dns_resolve_name_t *v6_rn = NULL;
 
   int rv = vnet_dns_resolve_name (vm, dm, name, t0, ep);
 
@@ -1603,7 +1606,17 @@ dns_resolve_name_ex (u8 *name, dns_cache_entry_t **ep, dns_pending_request_t *t0
   if (ep[0] == 0)
     return 0;
 
-  return vnet_dns_response_to_reply (ep[0]->dns_response, rn, 0 /* ttl-ptr */);
+  rv = vnet_dns_response_to_reply (ep[0]->dns_response, rn, 0 /* ttl-ptr */);
+  if (ep[0]->dns_response6)
+  {
+      vnet_dns_response_to_reply (ep[0]->dns_response6, &v6_rn, 0 /* ttl-ptr */);
+      if(v6_rn && *rn)
+      {
+          vec_append(*rn, v6_rn);
+          vec_free(v6_rn);
+      }
+  }
+  return rv;
 }
 
 static void
@@ -1622,6 +1635,7 @@ vl_api_dns_resolve_name_t_handler (vl_api_dns_resolve_name_t * mp)
   t0->request_type = DNS_API_PENDING_NAME_TO_IP;
   t0->client_index = mp->client_index;
   t0->client_context = mp->context;
+  t0->qp_type = DNS_TYPE_A;
 
   rv = dns_resolve_name_ex (mp->name, &ep, t0, &rn);
 
@@ -1633,19 +1647,66 @@ vl_api_dns_resolve_name_t_handler (vl_api_dns_resolve_name_t * mp)
     }
 
   /* Resolution pending? Don't reply... */
-  if (ep == 0 || rn == NULL)
+  if (ep == 0 || rn == NULL || vec_len(rn) == 0)
     return;
 
   /* *INDENT-OFF* */
   REPLY_MACRO2 (VL_API_DNS_RESOLVE_NAME_REPLY, ({
-		  ip_address_copy_addr (rmp->ip4_address, &rn->address);
-		  if (ip_addr_version (&rn->address) == AF_IP4)
-		    rmp->ip4_set = 1;
-		  else
-		    rmp->ip6_set = 1;
+                 ip_address_copy_addr (rmp->ip4_address, &rn->address);
+                 if (ip_addr_version (&rn->address) == AF_IP4)
+                   rmp->ip4_set = 1;
+                 else
+                   rmp->ip6_set = 1;
           vec_free(rn);
 		}));
   /* *INDENT-ON* */
+}
+
+static void
+vl_api_dns_resolve_name_v2_t_handler (vl_api_dns_resolve_name_v2_t * mp)
+{
+  dns_main_t *dm = &dns_main;
+  vl_api_dns_resolve_name_v2_reply_t *rmp;
+  dns_cache_entry_t *ep = 0;
+  dns_pending_request_t _t0 = { 0 }, *t0 = &_t0;
+  int rv;
+  dns_resolve_name_t *rn = NULL;
+  dns_resolve_name_t *_rn;
+
+  /* Sanitize the name slightly */
+  mp->name[ARRAY_LEN (mp->name) - 1] = 0;
+
+  t0->request_type = DNS_API_PENDING_NAME_TO_IP;
+  t0->client_index = mp->client_index;
+  t0->client_context = mp->context;
+  t0->qp_type = DNS_TYPE_A;
+
+  rv = dns_resolve_name_ex (mp->name, &ep, t0, &rn);
+
+  /* Error, e.g. not enabled? Tell the user */
+  if (rv < 0)
+    {
+      REPLY_MACRO3_ZERO (VL_API_DNS_RESOLVE_NAME_V2_REPLY, 0, );
+      return;
+    }
+
+  /* Resolution pending? Don't reply... */
+  if (ep == 0 || rn == NULL || vec_len(rn) == 0)
+    return;
+
+  /* *INDENT-OFF* */
+  REPLY_MACRO3_ZERO (VL_API_DNS_RESOLVE_NAME_V2_REPLY,
+          vec_len(rn)*sizeof(vl_api_address_t),
+          ({
+           rmp->count = htonl(vec_len(rn));
+           for(int i=0; i< vec_len(rn); i++)
+           {
+              _rn = &rn[i];
+              ip_address_encode(&_rn->address.ip, IP46_TYPE_ANY, &rmp->address[i]);
+           }
+		}));
+  /* *INDENT-ON* */
+  vec_free(rn);
 }
 
 static void

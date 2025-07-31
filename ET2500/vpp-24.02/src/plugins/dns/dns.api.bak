@@ -13,9 +13,18 @@
  * limitations under the License.
  */
 
+/*
 option version = "1.0.0";
+*/
+option version = "1.1.1";
 
+import "vnet/interface_types.api";
 import "vnet/ip/ip_types.api";
+/*
+import "vnet/interface_types.api";
+import "vnet/ip/ip_types.api";
+import "vnet/ethernet/ethernet_types.api";
+*/
 
 /** \brief enable/disable name resolution
 
@@ -85,12 +94,14 @@ define dns_resolve_name_reply {
     @param context - sender context, to match reply w/ request
     @param name - the name to resolve
 */
-define dns_resolve_name_v2 {
+/*
+autoreply define dns_resolve_name_v2 {
     u32 client_index;
     u32 context;
     u8 name[256];
     option vat_help = "<hostname>";
  };
+ */
 
 /** \brief DNS name resolution v2 reply
 
@@ -100,12 +111,15 @@ define dns_resolve_name_v2 {
     @param count - the ip list count
     @param address - the ip4 or ip6 name resolution reply
 */
+/*
 define dns_resolve_name_v2_reply {
     u32 context;
     i32 retval;
     u32 count;
     vl_api_address_t address[count];
 };
+*/
+
 
 /** \brief DNS IP -> name resolution request
 

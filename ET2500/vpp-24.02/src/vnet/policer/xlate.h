@@ -82,6 +82,7 @@ typedef struct qos_pol_action_params_st_
   qos_action_type_en action_type;
   ip_dscp_t dscp;
   u8 pcp;
+  u8 tc;    /* traffic class */
 } qos_pol_action_params_st;
 
 /*

@@ -102,7 +102,7 @@ maybe_trace_buffer (vlib_main_t * vm, vlib_node_runtime_t * node,
       t->packet_info[2] = fa_5tuple->kv_64_8.key[2];
       t->packet_info[3] = fa_5tuple->kv_64_8.key[3];
       t->packet_info[4] = fa_5tuple->kv_64_8.key[4];
-      t->packet_info[6] = fa_5tuple->kv_64_8.key[5];
+      t->packet_info[5] = fa_5tuple->kv_64_8.key[5];
       t->packet_info[6] = fa_5tuple->kv_64_8.key[6];
       t->packet_info[7] = fa_5tuple->kv_64_8.key[7];
       t->packet_info[8] = fa_5tuple->kv_64_8.value;
@@ -774,6 +774,8 @@ format_fa_5tuple (u8 * s, va_list * args)
   s =
     format (s, "lc_index %d l3 %s%s ", p5t->pkt.lc_index, ip_af, ip_frag_txt);
   s =
+    format (s, "src_sw_if_index %d ", p5t->src_sw_if_index);
+  s =
     format (s, "%U -> %U ", format_address_func, paddr0, format_address_func,
 	    paddr1);
   s = format (s, "%U ", format_fa_session_l4_key, &p5t->l4);
@@ -802,11 +804,13 @@ format_acl_plugin_trace (u8 * s, va_list * args)
   s =
     format (s,
 	    "acl-plugin: lc_index: %d, sw_if_index %d, next index %d, action: %d, match: acl %d rule %d trace_bits %08x\n"
-	    "  pkt info %016llx %016llx %016llx %016llx %016llx %016llx",
+	    "  pkt info %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx",
 	    t->lc_index, t->sw_if_index, t->next_index, t->action,
 	    t->match_acl_in_index, t->match_rule_index, t->trace_bitmap,
 	    t->packet_info[0], t->packet_info[1], t->packet_info[2],
-	    t->packet_info[3], t->packet_info[4], t->packet_info[5]);
+	    t->packet_info[3], t->packet_info[4], t->packet_info[5],
+	    t->packet_info[6], t->packet_info[7], t->packet_info[8]
+        );
 
   /* Now also print out the packet_info in a form usable by humans */
   s = format (s, "\n   %U", format_fa_5tuple, t->packet_info);

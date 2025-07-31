@@ -18,6 +18,7 @@ option version = "1.0.0";
 
 import "vnet/ip/ip_types.api";
 import "vnet/ethernet/ethernet_types.api";
+import "vnet/interface_types.api";
 
 enum acl_action : u8
 {
@@ -37,6 +38,7 @@ enum acl_action_expand : u8
 
 /** \brief Access List Rule entry
     @param is_permit - deny (0), permit (1), or permit+reflect(2) action on this rule.
+    @param src_sw_if_index - The input sw_if_index of first packet when nat and spi is enabled
     @param src_prefix - Source prefix
     @param dst_prefix - Destination prefix
     @param policer_index - Index of policer to use(applicable in action mode ACL_ACTION_POLICER only)
@@ -52,6 +54,7 @@ enum acl_action_expand : u8
 typedef acl_rule
 {
   vl_api_acl_action_t is_permit;
+  vl_api_interface_index_t src_sw_if_index;
   vl_api_mac_address_t src_mac;
   u8 src_mac_len;
   vl_api_mac_address_t dst_mac;

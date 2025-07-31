@@ -171,6 +171,7 @@ acl_print_acl_x (acl_vector_print_func_t vpr, vlib_main_t * vm,
       r = &acl_rules[j];
       out0 = format (out0, "  %9d: %s ", j, r->is_ipv6 ? "ipv6" : "ipv4");
       out0 = format_acl_action (out0, r->is_permit);
+      out0 = format (out0, " src_sw_if_index %u ", r->src_sw_if_index);
       out0 = format (out0, " smac %02x:%02x:%02x:%02x:%02x:%02x ",
         r->src_mac[0], r->src_mac[1], r->src_mac[2], r->src_mac[3], r->src_mac[4], r->src_mac[5]);
       out0 = format (out0, " dmac %02x:%02x:%02x:%02x:%02x:%02x ",
@@ -577,6 +578,7 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       r->tcp_flags_value = rules[i].tcp_flags_value;
       r->tcp_flags_mask = rules[i].tcp_flags_mask;
       r->rule_id = rules[i].rule_id;
+      r->src_sw_if_index = ntohl(rules[i].src_sw_if_index);
 
       r->action_expand_bitmap = rules[i].action_expand_bitmap;
       r->policer_index = ntohl(rules[i].policer_index);
@@ -3145,6 +3147,7 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
   u32 tcpflags, tcpmask;
   u8  set_tc_value;
   ip_prefix_t src, dst;
+  u32 src_sw_if_index = 0;
   u8 *tag = 0;
 
   if (!unformat_user (input, unformat_line_input, line_input))
@@ -3250,6 +3253,11 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
 	  vec_validate_acl_rules (rules, rule_idx);
 	  rules[rule_idx].action_expand_bitmap |= (1 << ACL_ACTION_EXPAND_SET_TC);
 	  rules[rule_idx].set_tc_value = set_tc_value & 0xff;
+    }
+    else if (unformat (line_input, "src_sw_if_index %d", &src_sw_if_index))
+    {
+	  vec_validate_acl_rules (rules, rule_idx);
+      rules[rule_idx].src_sw_if_index = htonl(src_sw_if_index);
     }
       else if (unformat (line_input, "tag %s", &tag))
 	{
@@ -3930,7 +3938,7 @@ VLIB_CLI_COMMAND (aclplugin_set_acl_command, static) = {
   .short_help =
     "set acl-plugin acl [index <idx>] <permit|deny|permit+reflect> src "
     "<PREFIX> dst <PREFIX> [proto X] [sport X[-Y]] [dport X[-Y]] [tcpflags "
-    "<int> mask <int>] [tag FOO] {use comma separated list for multiple "
+    "<int> mask <int>] [src_sw_if_index <idx>] [tag FOO] {use comma separated list for multiple "
     "rules}",
   .function = acl_set_aclplugin_acl_fn,
 };

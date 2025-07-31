@@ -38,6 +38,7 @@ typedef struct
   u8 tcp_flags_value;
   u8 tcp_flags_mask;
   u16 rule_id;
+  u32 src_sw_if_index;
 
   u64 action_expand_bitmap; 
   u32 policer_index;

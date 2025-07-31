@@ -1,0 +1,17 @@
+---
+name: Statful Packet Inspection 
+maintainer: Bochen Ji <jibochen@asterfusion.com>
+features:
+  - Stateful session management:
+      - Based on 5-tuple(IP,PORT,PROTO)
+  - Stateful Packet Inspection:
+      - Packet forwarding control based on state machine
+  - Support Tunnel and NAT:
+      - Vxlan\Ipsec\Gre Tunnel 
+      - NAT44\NAT64\NAT66\Dslite
+
+description: |-
+        The spi plugin allows to implement spi
+
+state: experimental
+properties: [API, CLI, MULTITHREAD]

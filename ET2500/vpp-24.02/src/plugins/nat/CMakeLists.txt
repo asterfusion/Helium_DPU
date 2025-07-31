@@ -230,3 +230,8 @@ if(VPP_BUILD_TESTS_WITH_COVERAGE)
     COMMENT "Open ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${TARGET_NAME}-llvm-cov/index.html in your browser to view the coverage report."
 )
 endif()
+
+if (${ASROUTER_NAME} MATCHES "octeon10")
+    add_compile_definitions(SUPPORT_NAT_PROTO)
+    add_compile_definitions(OUTPUT_NAT_REWRITE_VLIB)
+endif()

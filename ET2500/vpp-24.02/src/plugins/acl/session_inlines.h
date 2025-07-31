@@ -270,7 +270,7 @@ is_ip6_5tuple (fa_5tuple_t * p5t)
 {
   return (p5t->l3_zero_pad[0] | p5t->l3_zero_pad[1] | p5t->l3_zero_pad[2] | p5t->l3_zero_pad[3] |
 	  p5t->l3_zero_pad[4] | p5t->l3_zero_pad[5] | p5t->l3_zero_pad[6] | 
-	  p5t->l3_zero_pad[7] | p5t->l3_zero_pad[8]) != 0;
+	  p5t->l3_zero_pad[7]) != 0;
 }
 
 always_inline u8

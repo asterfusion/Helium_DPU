@@ -351,7 +351,7 @@ format_policer_action_type (u8 * s, va_list * va)
   else if (a->action_type == QOS_ACTION_TRANSMIT)
     s = format (s, "transmit");
   else if (a->action_type == QOS_ACTION_MARK_AND_TRANSMIT)
-    s = format (s, "mark-and-transmit dscp:%U pcp:%u", format_ip_dscp, a->dscp, a->pcp);
+    s = format (s, "mark-and-transmit dscp:%U pcp:%u tc:%u", format_ip_dscp, a->dscp, a->pcp, a->tc);
   else
     s = format (s, "ILLEGAL");
   return s;
@@ -483,9 +483,15 @@ unformat_policer_action_type (unformat_input_t * input, va_list * va)
     a->action_type = QOS_ACTION_DROP;
   else if (unformat (input, "transmit"))
     a->action_type = QOS_ACTION_TRANSMIT;
-  else if (unformat (input, "mark-and-transmit %U %u", unformat_ip_dscp,
-		     &a->dscp, &a->pcp))
+  else if (unformat(input, "mark-and-transmit")){
     a->action_type = QOS_ACTION_MARK_AND_TRANSMIT;
+    a->dscp = IP_DSCP_INVALID;
+    a->pcp = UINT8_MAX;
+    a->tc = UINT8_MAX;
+    unformat(input, "dscp %U", unformat_ip_dscp, &a->dscp);
+    unformat(input, "pcp %u", &a->pcp);
+    unformat(input, "tc %u", &a->tc);
+  }
   else
     return 0;
   return 1;
@@ -562,14 +568,14 @@ policer_add_command_fn (vlib_main_t *vm, unformat_input_t *input,
 			vlib_cli_command_t *cmd)
 {
   vnet_policer_main_t *pm = &vnet_policer_main;
-  qos_pol_cfg_params_st c = {
-    .conform_action.dscp = IP_DSCP_INVALID,
-    .conform_action.pcp = UINT8_MAX,
-    .exceed_action.dscp = IP_DSCP_INVALID,
-    .exceed_action.pcp = UINT8_MAX,
-    .violate_action.dscp = IP_DSCP_INVALID,
-    .violate_action.pcp = UINT8_MAX
-  };
+  qos_pol_cfg_params_st c;
+  clib_memset(&c, 0, sizeof(c));
+  c.conform_action.dscp = IP_DSCP_INVALID;
+  c.conform_action.pcp = UINT8_MAX;
+  c.exceed_action.dscp = IP_DSCP_INVALID;
+  c.exceed_action.pcp = UINT8_MAX;
+  c.violate_action.dscp = IP_DSCP_INVALID;
+  c.violate_action.pcp = UINT8_MAX;
   unformat_input_t _line_input, *line_input = &_line_input;
   u8 *name = 0;
   uword *p;
@@ -895,9 +901,9 @@ VLIB_CLI_COMMAND (configure_policer_command, static) = {
 		"1r3c | 2r3c-2698 "
 		"| 2r3c-4115] [color-aware] [cir <cir>] [cb <cb>] [eir <eir>] "
 		"[eb <eb>] [rate kbps | pps] [round closest | up | down] "
-		"[conform-action drop | transmit | mark-and-transmit <dscp> <pcp>] "
-		"[exceed-action drop | transmit | mark-and-transmit <dscp> <pcp>] "
-		"[violate-action drop | transmit | mark-and-transmit <dscp> <pcp>]",
+		"[conform-action drop | transmit | mark-and-transmit [dscp <dscp>] [pcp <pcp>] [tc <tc>]] "
+		"[exceed-action drop | transmit | mark-and-transmit [dscp <dscp>] [pcp <pcp>] [tc <tc>]] "
+		"[violate-action drop | transmit | mark-and-transmit [dscp <dscp>] [pcp <pcp>] [tc <tc>]]",
   .function = policer_add_command_fn,
   .function_arg = 1
 };
@@ -907,9 +913,9 @@ VLIB_CLI_COMMAND (policer_add_command, static) = {
   .short_help = "policer add name <name> [type 1r2c | 1r3c | 2r3c-2698 | "
 		"2r3c-4115] [color-aware] [cir <cir>] [cb <cb>] [eir <eir>] "
 		"[eb <eb>] [rate kbps | pps] [round closest | up | down] "
-		"[conform-action drop | transmit | mark-and-transmit <dscp> <pcp>] "
-		"[exceed-action drop | transmit | mark-and-transmit <dscp> <pcp>] "
-		"[violate-action drop | transmit | mark-and-transmit <dscp> <pcp>]",
+		"[conform-action drop | transmit | mark-and-transmit [dscp <dscp>] [pcp <pcp>] [tc <tc>]] "
+		"[exceed-action drop | transmit | mark-and-transmit [dscp <dscp>] [pcp <pcp>] [tc <tc>]] "
+		"[violate-action drop | transmit | mark-and-transmit [dscp <dscp>] [pcp <pcp>] [tc <tc>]]",
   .function = policer_add_command_fn,
   .function_arg = 0
 };

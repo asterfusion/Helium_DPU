@@ -611,6 +611,10 @@ static void
   u16 l_port = 0, e_port = 0;
   ip_protocol_t proto;
   u8 *tag = 0;
+  u16 port_count = 0;
+  u16 i = 0;
+  u16 l_port_host = 0;
+  u16 e_port_host = 0;
 
   memcpy (&l_addr.as_u8, mp->local_ip_address, 4);
   memcpy (&pool_addr.as_u8, mp->pool_ip_address, 4);
@@ -623,11 +627,16 @@ static void
   if (mp->flags & NAT_API_IS_ADDR_ONLY)
     {
       flags |= NAT_SM_FLAG_ADDR_ONLY;
+      if(mp->protocol)
+          flags |= NAT_SM_FLAG_KEEP_PROTO;
     }
   else
     {
       l_port = mp->local_port;
       e_port = mp->external_port;
+      port_count = clib_net_to_host_u16(mp->port_count);
+      l_port_host = clib_net_to_host_u16(mp->local_port);
+      e_port_host = clib_net_to_host_u16(mp->external_port);
     }
 
   if (mp->flags & NAT_API_IS_TWICE_NAT)
@@ -658,6 +667,10 @@ static void
   proto = mp->protocol;
   vrf_id = clib_net_to_host_u32 (mp->vrf_id);
 
+  do
+  {
+      l_port = clib_host_to_net_u16(l_port_host + i);
+      e_port = clib_host_to_net_u16(e_port_host + i);
   if (mp->is_add)
     {
       mp->tag[sizeof (mp->tag) - 1] = 0;
@@ -674,6 +687,9 @@ static void
       rv = nat44_ed_del_static_mapping (l_addr, e_addr, l_port, e_port, proto,
 					vrf_id, sw_if_index, flags);
     }
+    i++;
+  }while(i < port_count);
+
   REPLY_MACRO (VL_API_NAT44_ADD_DEL_STATIC_MAPPING_V2_REPLY);
 }
 

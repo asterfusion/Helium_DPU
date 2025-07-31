@@ -77,7 +77,8 @@
   _ (4, DPU_TO_HOST_HDR_VALID, "dpu-to-host-hdr-valid")                       \
   _ (5, NO_NAT_VALID, "no-nat-valid")                                         \
   _ (6, ACL_INDEX_VALID, "acl-index-valid")                                   \
-  _ (7, NOT_PHY_INTF, "not-phy-intf")
+  _ (7, NOT_PHY_INTF, "not-phy-intf")                                         \
+  _ (8, SPI_SESSION_VALID, "spi-session-valid")
 
 /* NOTE: only buffer generic flags should be defined here, please consider
    using user flags. i.e. src/vnet/buffer.h */
