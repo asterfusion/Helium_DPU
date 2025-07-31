@@ -349,6 +349,11 @@ i32 cnxk_drv_pktio_xstats_names_get (vlib_main_t *vm, u16 pktio_idx,
 i32 cnxk_drv_pktio_link_advertise_set (vlib_main_t *vm, u16 pktio_idx,
 				  cnxk_pktio_link_info_t *link_info);
 
+#ifdef VPP_PLATFORM_ET2500
+i32 cnxk_drv_pktio_link_state_set (vlib_main_t *vm, u16 pktio_idx,
+          bool is_up);
+#endif
+
 i32 cnxk_drv_pktio_link_info_set (vlib_main_t *vm, u16 pktio_idx,
 				  cnxk_pktio_link_info_t *link_info);
 

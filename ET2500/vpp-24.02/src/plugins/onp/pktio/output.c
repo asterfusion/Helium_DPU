@@ -83,64 +83,6 @@ onp_pktio_tx_pkts_trace (vlib_main_t *vm, vlib_node_runtime_t *node,
     }
 }
 
-#ifdef VPP_PLATFORM_ET2500
-#define ETH_CMD_LINK_BRING_UP 0x0000000000000015
-#define ETH_CMD_LINK_BRING_DOWN 0x0000000000000019
-#define ET2500_PORT_NUM 16
-#define SFP_SYSFS_BASE_PATH "/sys/bus/i2c/devices/3-0040/ET2500_SFP"
-#define SFP_TX_CTRL_PREFIX  "SFP_tx_ctrl_"
-#define GPIO_OFFSET(hw_if_index) ((hw_if_index) - 9)
-typedef struct {
-  int a_param;
-  int b_param;
-} port_mapping_t;
-
-void
-onp_pktio_intf_link_up_down(u32 hw_if_index, uword up) {
-  static const port_mapping_t port_mappings[] = {
-    {-1,-1},
-    {0, 3}, //index 1
-    {0, 0}, //index 2
-    {0, 2}, //index 3
-    {0, 1}, //index 4
-    {0, 7}, //index 5
-    {0, 4}, //index 6
-    {0, 6}, //index 7
-    {0, 5}, //index 8
-    {1, 3}, //index 9
-    {1, 0}, //index 10
-    {1, 2}, //index 11
-    {1, 1}  //index 12
-  };
-  if (hw_if_index < sizeof(port_mappings) / sizeof(port_mappings[0])) {
-    u8 a_param = port_mappings[hw_if_index].a_param;
-    u8 b_param = port_mappings[hw_if_index].b_param;
-
-    u64 cmd_value = up ? ETH_CMD_LINK_BRING_UP : ETH_CMD_LINK_BRING_DOWN;
-
-    char cmd[256];
-    snprintf(cmd, sizeof(cmd), "txcsr RPMX_CMRX_SCRATCHX -a %d -b %d -c 1 0x%016lx",
-      a_param, b_param, cmd_value);
-    int __attribute__((unused)) ret = system(cmd);
-  }
-  else if (hw_if_index <= ET2500_PORT_NUM) {
-    char path[256];
-    snprintf(path, sizeof(path), SFP_SYSFS_BASE_PATH "/" SFP_TX_CTRL_PREFIX "%d",
-      hw_if_index);
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "echo %d > %s", up ? 0 : 1, path);
-    printf("%s\n", cmd);
-    int __attribute__((unused)) ret = system(cmd);
-    if (!up) {
-      char cmd[256];
-      snprintf(cmd, sizeof(cmd), "gpioset gpiochip0 %d=0", GPIO_OFFSET(hw_if_index));
-      int __attribute__((unused)) ret = system(cmd);
-    }
-  }
-}
-#endif
-
-
 static clib_error_t *
 onp_pktio_intf_admin_up_down (vnet_main_t *vnm, u32 hw_if_index, u32 flags)
 {
@@ -170,7 +112,7 @@ onp_pktio_intf_admin_up_down (vnet_main_t *vnm, u32 hw_if_index, u32 flags)
     }
 
 #ifdef VPP_PLATFORM_ET2500
-      onp_pktio_intf_link_up_down(hw_if_index, is_up);
+    cnxk_drv_pktio_link_state_set(vm, od->cnxk_pktio_index, is_up);
 #endif
   return 0;
 }

@@ -312,21 +312,15 @@ static void
 vl_api_onp_set_port_link_info_t_handler(vl_api_onp_set_port_link_info_t* mp) {
   onp_main_t *om = onp_get_main();
   vlib_main_t *vm = vlib_get_main();
+  vnet_main_t *vnm = vnet_get_main();
 
   u32 sw_if_index = ntohl(mp->sw_if_index);
-  onp_pktio_t* pktio;
+  vnet_hw_interface_t *hi = vnet_get_hw_interface (vnm, sw_if_index);
+  vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, sw_if_index);
+  onp_pktio_t* pktio = vec_elt_at_index (om->onp_pktios, hi->dev_instance);
   int rv = 1;
 
   VALIDATE_SW_IF_INDEX(mp);
-
-  for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios) ?
-    __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
-    if (pktio->sw_if_index == sw_if_index)
-    {
-      rv = 0;
-      break;
-    }
-  }
 
   cnxk_pktio_link_info_t link_info = {};
   link_info.is_full_duplex = mp->is_full_duplex;
@@ -334,7 +328,8 @@ vl_api_onp_set_port_link_info_t_handler(vl_api_onp_set_port_link_info_t* mp) {
   link_info.speed = ntohl(mp->speed);
 
   cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
-
+  if(si->flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP)
+    cnxk_drv_pktio_link_state_set(vm, pktio->cnxk_pktio_index, true);
   BAD_SW_IF_INDEX_LABEL;
 
   ONP_REPLY_MACRO(VL_API_ONP_SET_PORT_LINK_INFO_REPLY, onp_set_port_link_info,);
