@@ -865,6 +865,62 @@ cnxk_pktio_link_advertise_set(vlib_main_t* vm, cnxk_pktio_t* dev,
   return 0;
 }
 
+#ifdef VPP_PLATFORM_ET2500
+#define ETH_CMD_LINK_BRING_UP    0x15
+#define ETH_CMD_LINK_BRING_DOWN  0x19
+#define ET2500_PORT_NUM          16
+#define SFP_SYSFS_BASE_PATH      "/sys/bus/i2c/devices/3-0040/ET2500_SFP"
+#define SFP_TX_CTRL_PREFIX       "SFP_tx_ctrl_"
+#define GPIO_OFFSET(index)       ((index) - 8)
+#define MAX_PORT_MAPPING_INDEX   12
+typedef struct {
+  int a_param;
+  int b_param;
+} port_mapping_t;
+
+static const port_mapping_t port_mappings[] = {
+  {0, 3}, {0, 0}, {0, 2}, {0, 1},
+  {0, 7}, {0, 4}, {0, 6}, {0, 5},
+  {1, 3}, {1, 0}, {1, 2}, {1, 1}
+};
+
+static void copper_command(int a, int b, u64 value) {
+  char cmd[256];
+  snprintf(cmd, sizeof(cmd),
+           "txcsr RPMX_CMRX_SCRATCHX -a %d -b %d -c 1 0x%016lx",
+           a, b, value);
+  int ret =system(cmd);
+  (void)ret;
+}
+
+static void sfp_command(u32 index, uword up) {
+  char path[256];
+  char cmd[256];
+  snprintf(path, sizeof(path), SFP_SYSFS_BASE_PATH "/" SFP_TX_CTRL_PREFIX "%d", index + 1);
+  clib_sysfs_write(path, up ? "0" : "1");
+
+  if (!up) {
+    snprintf(cmd, sizeof(cmd), "gpioset gpiochip0 %d=0", GPIO_OFFSET(index));
+    int ret =system(cmd);
+    (void)ret;
+  }
+}
+
+i32
+cnxk_pktio_link_state_set(vlib_main_t *vm, cnxk_pktio_t *dev,
+			  bool is_up)
+{
+  if (dev->pktio_index < sizeof(port_mappings) / sizeof(port_mappings[0])) {
+    u64 cmd_value = is_up ? ETH_CMD_LINK_BRING_UP : ETH_CMD_LINK_BRING_DOWN;
+    copper_command(port_mappings[dev->pktio_index].a_param,
+                       port_mappings[dev->pktio_index].b_param,
+                       cmd_value);
+  } else if (dev->pktio_index <= ET2500_PORT_NUM) {
+    sfp_command(dev->pktio_index, is_up);
+  }
+  return 0;
+}
+#endif
 i32
 cnxk_pktio_link_info_get (vlib_main_t *vm, cnxk_pktio_t *dev,
 			  cnxk_pktio_link_info_t *link_info)
@@ -1290,6 +1346,19 @@ cnxk_drv_pktio_link_advertise_set(vlib_main_t* vm, u16 pktio_index,
 #endif
   return ops_map->fops.pktio_link_advertise_set(vm, &ops_map->pktio, link_info, rpm_id);
 }
+
+#ifdef VPP_PLATFORM_ET2500
+i32
+cnxk_drv_pktio_link_state_set(vlib_main_t* vm, u16 pktio_index,
+            bool is_up)
+{
+  cnxk_pktio_ops_map_t* ops_map = cnxk_pktio_get_pktio_ops(pktio_index);
+
+  ASSERT(vm->thread_index == 0);
+
+  return ops_map->fops.pktio_link_state_set(vm, &ops_map->pktio, is_up);
+}
+#endif
 
 i32
 cnxk_drv_pktio_link_info_set(vlib_main_t* vm, u16 pktio_index,

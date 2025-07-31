@@ -242,7 +242,10 @@ typedef struct cnxk_pktio_ops
 
   i32(*pktio_link_advertise_set) (vlib_main_t* vm, cnxk_pktio_t* dev,
     cnxk_pktio_link_info_t* link_info, int rpm_id);
-
+#ifdef VPP_PLATFORM_ET2500
+  i32(*pktio_link_state_set) (vlib_main_t* vm, cnxk_pktio_t* dev,
+    bool is_up);
+#endif
   i32 (*pktio_mtu_set) (vlib_main_t *vm, cnxk_pktio_t *dev, u32 mtu);
 
   i32 (*pktio_link_info_get) (vlib_main_t *vm, cnxk_pktio_t *dev,
@@ -428,6 +431,10 @@ i32 cnxk_pktio_queue_stats_clear (vlib_main_t *vm, cnxk_pktio_t *dev, u16 qid,
 u8 cn10k_pktio_is_inl_dev (vlib_main_t *vm, cnxk_pktio_t *dev);
 i32 cnxk_pktio_link_advertise_set (vlib_main_t *vm, cnxk_pktio_t *dev,
 			      cnxk_pktio_link_info_t *link_info,int rpm_id);
+#ifdef VPP_PLATFORM_ET2500
+i32 cnxk_pktio_link_state_set (vlib_main_t *vm, cnxk_pktio_t *dev,
+            bool is_up);
+#endif /* VPP_PLATFORM_ET2500 */
 i32 cnxk_pktio_link_info_set (vlib_main_t *vm, cnxk_pktio_t *dev,
 			      cnxk_pktio_link_info_t *link_info);
 i32 cnxk_pktio_link_info_get (vlib_main_t *vm, cnxk_pktio_t *dev,

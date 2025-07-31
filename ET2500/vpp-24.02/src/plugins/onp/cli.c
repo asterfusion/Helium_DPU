@@ -357,16 +357,15 @@ set_onp_interface_link_info(vlib_main_t* vm, unformat_input_t* input, vlib_cli_c
   onp_main_t* om = onp_get_main();
   vnet_main_t* vnm = vnet_get_main();
   cnxk_pktio_link_info_t link_info = { 0 };
+  vnet_hw_interface_t *hi;
+  vnet_sw_interface_t *si;
   u32 speed = 0;
 
   while (unformat_check_input(input) != UNFORMAT_END_OF_INPUT) {
     if (unformat(input, "%U", unformat_vnet_hw_interface, vnm, &hw_if_index)) {
-      for (pktio = (om->onp_pktios); pktio < ((om->onp_pktios) + ((om->onp_pktios)
-        ? __vec_len((void*)(om->onp_pktios)) : 0)); pktio++) {
-        if (pktio->hw_if_index == hw_if_index) {
-          break;
-        }
-      }
+        hi = vnet_get_hw_interface (vnm, hw_if_index);
+        si = vnet_get_sw_interface (vnm, hw_if_index);
+        pktio = vec_elt_at_index (om->onp_pktios, hi->dev_instance);
       // cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
     } else if (unformat(input, "an enable")) {
       link_info.is_autoneg = 1;
@@ -389,6 +388,8 @@ set_onp_interface_link_info(vlib_main_t* vm, unformat_input_t* input, vlib_cli_c
   }
 
   cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
+  if(si->flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP)
+    cnxk_drv_pktio_link_state_set(vm, pktio->cnxk_pktio_index, true);
 
   return error;
 }
