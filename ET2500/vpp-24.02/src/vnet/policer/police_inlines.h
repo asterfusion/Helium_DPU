@@ -26,6 +26,7 @@
 #define IP6_DSCP_SHIFT    22
 #define VLAN_NO_PCP_BITS  0x1FFF
 #define VLAN_PCP_SHIFT    13
+#define VPP_POLICER_DEFAULT_ADJUST 24 //Preamble + SFD + IFG + FCS
 
 static_always_inline void
 vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp, u8 tc)
@@ -34,11 +35,13 @@ vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp, u8 tc)
   ip4_header_t *ip4h;
   ip6_header_t *ip6h;
   ethernet_vlan_header_t* vlanh;
+  i16 l3_hdr_offset;
   u16 type;
 
   eh = ethernet_buffer_get_header(b);
   type = clib_net_to_host_u16 (eh->type);
-  
+  l3_hdr_offset = sizeof(ethernet_header_t);
+
   if (type == ETHERNET_TYPE_VLAN)
   {
     vlanh = (ethernet_vlan_header_t *)(eh + 1);
@@ -47,11 +50,16 @@ vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp, u8 tc)
       vlanh->priority_cfi_and_id |= clib_host_to_net_u16(pcp << VLAN_PCP_SHIFT);
     }
     type = clib_net_to_host_u16(vlanh->type);
+    l3_hdr_offset += sizeof(ethernet_vlan_header_t);
+  }
+
+  if (b->flags & VNET_BUFFER_F_L3_HDR_OFFSET_VALID)
+  {
+    l3_hdr_offset = vnet_buffer (b)->l3_hdr_offset;
   }
 
   if (PREDICT_TRUE (type == ETHERNET_TYPE_IP4 && dscp != IP_DSCP_INVALID))
     {
-      i16 l3_hdr_offset = vnet_buffer (b)->l3_hdr_offset;
       ip4h = (ip4_header_t *) (b->data + l3_hdr_offset);
       ip4h->tos &= IP4_NON_DSCP_BITS;
       ip4h->tos |= dscp << IP4_DSCP_SHIFT;
@@ -61,7 +69,6 @@ vnet_policer_mark (vlib_buffer_t *b, ip_dscp_t dscp, u8 pcp, u8 tc)
     {
       if (PREDICT_TRUE (type == ETHERNET_TYPE_IP6 && dscp != IP_DSCP_INVALID))
 	{
-    i16 l3_hdr_offset = vnet_buffer (b)->l3_hdr_offset;
 	  ip6h = (ip6_header_t *) (b->data + l3_hdr_offset);
 	  ip6h->ip_version_traffic_class_and_flow_label &=
 	    clib_host_to_net_u32 (IP6_NON_DSCP_BITS);
@@ -84,6 +91,9 @@ vnet_policer_police (vlib_main_t *vm, vlib_buffer_t *b, u32 policer_index,
   u32 col;
   policer_t *pol;
   vnet_policer_main_t *pm = &vnet_policer_main;
+
+  if (policer_index == UINT32_MAX)
+    return QOS_ACTION_TRANSMIT;
 
   /* Speculative prefetch assuming a conform result */
   vlib_prefetch_combined_counter (&policer_counters[POLICE_CONFORM],
@@ -108,6 +118,7 @@ vnet_policer_police (vlib_main_t *vm, vlib_buffer_t *b, u32 policer_index,
     }
 
   len = vlib_buffer_length_in_chain (vm, b);
+  len += VPP_POLICER_DEFAULT_ADJUST;
   col = vnet_police_packet (pol, len, packet_color, time_in_policer_periods);
   act = pol->action[col];
   vlib_increment_combined_counter (&policer_counters[col], vm->thread_index,

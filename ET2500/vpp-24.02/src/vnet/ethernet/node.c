@@ -555,6 +555,7 @@ eth_input_tag_lookup (vlib_main_t * vm, vnet_main_t * vnm,
 					   vif, qif, &new_sw_if_index,
 					   &l->err, &is_l2);
       vnet_buffer2 (b)->l2_rx_sw_if_index = vnet_buffer(b)->sw_if_index[VLIB_RX];
+      b->flags |= VLIB_BUFFER_NOT_PHY_INTF;
    
             }
 	}

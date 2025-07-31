@@ -242,6 +242,7 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
     onp_pktio_t *od = NULL;
     cnxk_pktio_ops_map_t *ops_map = NULL;
     cnxk_pktio_t *pktio = NULL;
+    cnxk_pktio_link_info_t link_info;
 
     u32 mdq_node_id;
     i32 i;
@@ -257,7 +258,7 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
     uint32_t current_sq_priority = 0;
 
     uint64_t txq_mode_bitmap = 0;
-    uint32_t priority_bitmap = 0, dwrr_num = 0;
+    uint32_t dwrr_priority = UINT32_MAX, dwrr_num = 0;
 
     CLIB_UNUSED(uint32_t) new_weight;
 	uint8_t priorities[NIX_TM_TLX_SP_PRIO_MAX];
@@ -286,7 +287,7 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
      *
      * if default node mode is SP, and the priority is consistent with qid.
      * if default node mode is DWRR, and the priority is 0.
-     * if qid is greater than NIX_TM_TLX_SP_PRIO-MAX, perform MOD operation
+     * if qid is greater than NIX_TM_TLX_SP_PRIO-MAX, Now not support.
      *
      * now default node mode is DWRR
      *
@@ -343,30 +344,36 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
     vec_foreach_index_backwards(i, tm_node_sq)
     {
         if (tm_node_sq[i] > 0)
-            tm_node_priority[i] = current_sq_priority++;
-    }
-    vec_foreach_index_backwards(i, tm_node_sq)
-    {
-        if (tm_node_sq[i] == 0)
+        {
             tm_node_priority[i] = current_sq_priority;
+        }
+        else
+        {
+            if (dwrr_priority == UINT32_MAX)
+            {
+                dwrr_priority = current_sq_priority;
+            }
+            tm_node_priority[i] = dwrr_priority;
+        }
+        current_sq_priority++;
     }
 
     /* validate new all node prio */
+    //Check sq prioroty max
+    if (current_sq_priority >= NIX_TM_TLX_SP_PRIO_MAX)
+    {
+        vec_free(tm_node_list);
+        vec_free(tm_node_priority);
+        vec_free(tm_node_sq);
+        onp_pktio_warn("scheduler mdq sq exceeds max.");
+        return -1;
+    }
+
     //foreach all node
     memset(priorities, 0, sizeof(priorities));
     vec_foreach_index(i, tm_node_list)
     {
         priorities[tm_node_priority[i]]++;
-        priority_bitmap |= (1 << tm_node_priority[i]);
-    }
-    //check priority_bitmap
-    if ((priority_bitmap & (priority_bitmap + 1)) != 0)
-    {
-        vec_free(tm_node_list);
-        vec_free(tm_node_priority);
-        vec_free(tm_node_sq);
-        onp_pktio_warn("scheduler mdq priority invaild. priority_bitmap 0x%x", priority_bitmap);
-        return -1;
     }
     //Check if there is only one DWRR
     for (i = 0; i < NIX_TM_TLX_SP_PRIO_MAX; i++)
@@ -422,6 +429,32 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
             return rv;
         }
     }
+    else
+    {
+        if (new_shaping_profile_id != ONP_PKTIO_SHAPER_PROFILE_NONE)
+        {
+            //update profile_id for nix
+            rv = onp_pktio_shaping_profile_add(nix, &profile->shaping_profile);
+            if (rv)
+            {
+                vec_free(tm_node_list);
+                vec_free(tm_node_priority);
+                vec_free(tm_node_sq);
+                onp_pktio_warn("onp_pktio_shaping_profile_add profile_id %u failed", new_shaping_profile_id);
+                return rv;
+            }
+            //attch profile
+            rv = roc_nix_tm_node_shaper_update(nix, tm_node_list[qid]->id, new_shaping_profile_id, true);
+            if (rv)
+            {
+                onp_pktio_warn("roc_nix_tm_node_shaper_update mdq_node(%u) %u profile_id %u failed", qid, tm_node_list[qid]->id, new_shaping_profile_id);
+                vec_free(tm_node_list);
+                vec_free(tm_node_priority);
+                vec_free(tm_node_sq);
+                return rv;
+            }
+        }
+    }
 
     /* There is an exception in the handling here now */
     //update current node
@@ -437,26 +470,52 @@ int onp_pktio_mdq_node_scheduler_update(vlib_main_t *vm, onp_main_t *om, u32 sw_
     //update current txq mode
     od->txq_mode_bitmap = txq_mode_bitmap;
 
-    rv = roc_nix_tm_hierarchy_disable(nix);
+    //update HW
+    clib_memset(&link_info, 0, sizeof(cnxk_pktio_link_info_t));
+    rv = cnxk_drv_pktio_link_info_get (vm, od->cnxk_pktio_index, &link_info);
     if (rv)
     {
         vec_free(tm_node_list);
         vec_free(tm_node_priority);
         vec_free(tm_node_sq);
-        onp_pktio_warn("roc_nix_tm_hierarchy_disable sw_if_index %u failed", sw_if_index);
+        onp_pktio_warn("cnxk_drv_pktio_link_info_get sw_if_index %u failed", sw_if_index);
         return rv;
     }
-
-    rv = roc_nix_tm_hierarchy_enable(nix, ROC_NIX_TM_USER, false);
-    if (rv)
+    if (link_info.is_up)
     {
-        vec_free(tm_node_list);
-        vec_free(tm_node_priority);
-        vec_free(tm_node_sq);
-        onp_pktio_warn("roc_nix_tm_hierarchy_enable sw_if_index %u failed", sw_if_index);
-        return rv;
-    }
+        rv = roc_nix_tm_hierarchy_disable(nix);
+        if (rv)
+        {
+            vec_free(tm_node_list);
+            vec_free(tm_node_priority);
+            vec_free(tm_node_sq);
+            onp_pktio_warn("roc_nix_tm_hierarchy_disable sw_if_index %u failed", sw_if_index);
+            return rv;
+        }
 
+        rv = roc_nix_tm_hierarchy_enable(nix, ROC_NIX_TM_USER, true);
+        if (rv)
+        {
+            vec_free(tm_node_list);
+            vec_free(tm_node_priority);
+            vec_free(tm_node_sq);
+            onp_pktio_warn("roc_nix_tm_hierarchy_enable sw_if_index %u failed", sw_if_index);
+            return rv;
+        }
+    }
+    else
+    {
+        nix_tm_update_parent_info(roc_nix_to_nix_priv(nix), ROC_NIX_TM_USER);
+        rv = nix_tm_txsch_reg_config(roc_nix_to_nix_priv(nix), ROC_NIX_TM_USER);
+        if (rv)
+        {
+            vec_free(tm_node_list);
+            vec_free(tm_node_priority);
+            vec_free(tm_node_sq);
+            onp_pktio_warn("nix_tm_txsch_reg_config sw_if_index %u failed", sw_if_index);
+            return rv;
+        }
+    }
     //Flush all smq queue
     roc_nix_smq_flush(nix);
 

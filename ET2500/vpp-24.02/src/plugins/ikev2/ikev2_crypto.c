@@ -1043,7 +1043,6 @@ ikev2_crypto_init (ikev2_main_t * km)
   tr->key_trunc = 96 / 8;
   tr->md = EVP_md5 ();
 
-
 #if defined(OPENSSL_NO_CISCO_FECDH)
   vec_add2 (km->supported_transforms, tr, 1);
   tr->type = IKEV2_TRANSFORM_TYPE_DH;

@@ -82,35 +82,23 @@ define onp_show_counters
 };
 
 /**
- * @brief Set the port speed
+ * @brief Set the port link_info
  *
  * @param[in] client_index      - opaque cookie to identify the sender
  * @param[in] context           - sender context, to match reply w/ request
- * @param[in] sw_if_index       - index of the interface to set port speed on
- * @param[in] port_speed        - port_speed (Mbps)
+ * @param[in] sw_if_index       - index of the interface to set link info on
+ * @param[in] is_autoneg        - autoneg enable if non-zero; disable otherwise
+ * @param[in] is_full_duplex    - full duplex if non-zero; half otherwise
+ * @param[in] speed             - speed in Mbps;
  */
-autoreply define onp_set_port_speed
+autoreply define onp_set_port_link_info
 {
   u32 client_index;
   u32 context;
   vl_api_interface_index_t sw_if_index;
-  u32 port_speed;
-};
-
-/**
- * @brief Set the port autoneg
- *
- * @param[in] client_index      - opaque cookie to identify the sender
- * @param[in] context           - sender context, to match reply w/ request
- * @param[in] sw_if_index       - index of the interface to set port autoneg on
- * @param[in] autoneg           - antoneg enable if non-zero; disable otherwise
- */
-autoreply define onp_set_port_autoneg
-{
-  u32 client_index;
-  u32 context;
-  vl_api_interface_index_t sw_if_index;
-  bool autoneg;
+  bool is_autoneg;
+  bool is_full_duplex;
+  u32 speed; /* in Mbps */
 };
 
 /**
@@ -131,22 +119,6 @@ define onp_get_port_autoneg_reply
   u32 context;
   bool autoneg;
   u32 retval;
-};
-
-/**
- * @brief Set the port duplex
- *
- * @param[in] client_index      - opaque cookie to identify the sender
- * @param[in] context           - sender context, to match reply w/ request
- * @param[in] sw_if_index       - index of the interface to set port duplex on
- * @param[in] duplex            - duplex enable if non-zero; disable otherwise
- */
-autoreply define onp_set_port_duplex
-{
-  u32 client_index;
-  u32 context;
-  vl_api_interface_index_t sw_if_index;
-  bool duplex;
 };
 
 /**
@@ -387,6 +359,7 @@ define onp_pktio_scheduler_profile_add_del
 
   vl_api_onp_pktio_scheduler_type_t type;
   u32 weight;
+  i16 adjust;
   bool pkt_mode;
   u64 min_rate;
   u64 min_burst;

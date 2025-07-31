@@ -107,6 +107,7 @@ bond_sw_if_idx_rewrite (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  vnet_buffer2 (b)->l2_rx_sw_if_index = vnet_buffer(b)->sw_if_index[VLIB_RX];
 	  /* Change the physical interface to bond interface */
 	  vnet_buffer (b)->sw_if_index[VLIB_RX] = bond_sw_if_index;
+    b->flags |= VLIB_BUFFER_NOT_PHY_INTF;
 	  return;
 	}
     }

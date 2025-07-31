@@ -99,6 +99,7 @@ typedef enum
 {
   IKEV2_NEXT_IP4_LOOKUP,
   IKEV2_NEXT_IP4_HANDOFF,
+  IKEV2_NEXT_IP4_IPSEC,
   IKEV2_NEXT_IP4_ERROR_DROP,
   IKEV2_IP4_N_NEXT,
 } ikev2_ip4_next_t;
@@ -107,6 +108,7 @@ typedef enum
 {
   IKEV2_NEXT_IP6_LOOKUP,
   IKEV2_NEXT_IP6_HANDOFF,
+  IKEV2_NEXT_IP6_IPSEC,
   IKEV2_NEXT_IP6_ERROR_DROP,
   IKEV2_IP6_N_NEXT,
 } ikev2_ip6_next_t;
@@ -2567,8 +2569,8 @@ ikev2_del_tunnel_from_main (ikev2_del_ipsec_tunnel_args_t * a)
   ipsec_sa_unlock_id (a->local_sa_id);
   ipsec_sa_unlock_id (ikev2_flip_alternate_sa_bit (a->remote_sa_id));
 
-  if (ipip)
-    ipip_del_tunnel (ipip->sw_if_index);
+  //if (ipip)
+  //  ipip_del_tunnel (ipip->sw_if_index);
 }
 
 static int
@@ -3280,35 +3282,30 @@ ikev2_node_internal (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  next[0] = is_ip4 ? IKEV2_NEXT_IP4_HANDOFF : IKEV2_NEXT_IP6_HANDOFF;
 	  goto out;
       }
-      if (natt)
-	{
-	  u8 *ptr = vlib_buffer_get_current (b0);
-	  ip40 = (ip4_header_t *) ptr;
-	  ptr += sizeof (*ip40);
-	  udp0 = (udp_header_t *) ptr;
-	  ptr += sizeof (*udp0);
-	  ike0 = (ike_header_t *) ptr;
-	  ip_hdr_sz = sizeof (*ip40);
-	}
-      else
-	{
-	  u8 *ipx_hdr = b0->data + vnet_buffer (b0)->l3_hdr_offset;
-	  ike0 = vlib_buffer_get_current (b0);
-	  vlib_buffer_advance (b0, -sizeof (*udp0));
-	  udp0 = vlib_buffer_get_current (b0);
 
-	  if (is_ip4)
-	    {
-	      ip40 = (ip4_header_t *) ipx_hdr;
-	      ip_hdr_sz = sizeof (*ip40);
-	    }
-	  else
-	    {
-	      ip60 = (ip6_header_t *) ipx_hdr;
-	      ip_hdr_sz = sizeof (*ip60);
-	    }
-	  vlib_buffer_advance (b0, -ip_hdr_sz);
-	}
+      u8 *ipx_hdr = b0->data + vnet_buffer (b0)->l3_hdr_offset;
+      ike0 = vlib_buffer_get_current (b0);
+
+      if (natt && (*((u32 *) ike0) != 0))
+      {
+        next[0] = IKEV2_NEXT_IP4_IPSEC;
+        goto out;
+      }
+
+      vlib_buffer_advance (b0, -sizeof (*udp0));
+      udp0 = vlib_buffer_get_current (b0);
+
+      if (is_ip4)
+      {
+	  ip40 = (ip4_header_t *) ipx_hdr;
+	  ip_hdr_sz = sizeof (*ip40);
+      }
+      else
+      {
+	  ip60 = (ip6_header_t *) ipx_hdr;
+	  ip_hdr_sz = sizeof (*ip60);
+      }
+      vlib_buffer_advance (b0, -ip_hdr_sz);
 
       rlen = b0->current_length - ip_hdr_sz - sizeof (*udp0);
 
@@ -3845,6 +3842,7 @@ VLIB_REGISTER_NODE (ikev2_node_ip4,static) = {
   .next_nodes = {
     [IKEV2_NEXT_IP4_LOOKUP] = "ip4-lookup",
     [IKEV2_NEXT_IP4_HANDOFF] = "ikev2-ip4-handoff",
+    [IKEV2_NEXT_IP4_IPSEC] = "ipsec4-tun-input",
     [IKEV2_NEXT_IP4_ERROR_DROP] = "error-drop",
   },
 };
@@ -3863,6 +3861,7 @@ VLIB_REGISTER_NODE (ikev2_node_ip4_natt,static) = {
   .next_nodes = {
     [IKEV2_NEXT_IP4_LOOKUP] = "ip4-lookup",
     [IKEV2_NEXT_IP4_HANDOFF] = "ikev2-ip4-natt-handoff",
+    [IKEV2_NEXT_IP4_IPSEC] = "ipsec4-tun-input",
     [IKEV2_NEXT_IP4_ERROR_DROP] = "error-drop",
   },
 };
@@ -3880,7 +3879,8 @@ VLIB_REGISTER_NODE (ikev2_node_ip6,static) = {
   .n_next_nodes = IKEV2_IP6_N_NEXT,
   .next_nodes = {
     [IKEV2_NEXT_IP6_LOOKUP] = "ip6-lookup",
-    [IKEV2_NEXT_IP4_HANDOFF] = "ikev2-ip6-handoff",
+    [IKEV2_NEXT_IP6_HANDOFF] = "ikev2-ip6-handoff",
+    [IKEV2_NEXT_IP6_IPSEC] = "ipsec6-tun-input",
     [IKEV2_NEXT_IP6_ERROR_DROP] = "error-drop",
   },
 };
@@ -4286,7 +4286,7 @@ ikev2_bind (vlib_main_t *vm, ikev2_main_t *km)
     {
       udp_register_dst_port (vm, IKEV2_PORT, ikev2_node_ip4.index, 1);
       udp_register_dst_port (vm, IKEV2_PORT, ikev2_node_ip6.index, 0);
-      udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip4.index, 1);
+      udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip4_natt.index, 1);
       udp_register_dst_port (vm, IKEV2_PORT_NATT, ikev2_node_ip6.index, 0);
 
       vlib_punt_register (km->punt_hdl,
