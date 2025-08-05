@@ -14,6 +14,10 @@
 static const char *ul = "====================================================="
 			"=========================";
 
+#ifdef VPP_PLATFORM_ET2500
+extern void onp_pktio_intf_link_up_down(u32 hw_if_index, uword up);
+#endif
+
 static clib_error_t *
 onp_ipsec_reassembly_set_fn (vlib_main_t *vm, unformat_input_t *input,
 			     vlib_cli_command_t *cmd)
@@ -358,6 +362,7 @@ set_onp_interface_link_info(vlib_main_t* vm, unformat_input_t* input, vlib_cli_c
   vnet_main_t* vnm = vnet_get_main();
   cnxk_pktio_link_info_t link_info = { 0 };
   u32 speed = 0;
+  vnet_sw_interface_t *si;
 
   while (unformat_check_input(input) != UNFORMAT_END_OF_INPUT) {
     if (unformat(input, "%U", unformat_vnet_hw_interface, vnm, &hw_if_index)) {
@@ -367,6 +372,7 @@ set_onp_interface_link_info(vlib_main_t* vm, unformat_input_t* input, vlib_cli_c
           break;
         }
       }
+      si = vnet_get_sw_interface(vnm, hw_if_index);
       // cnxk_drv_pktio_link_info_get(vm, pktio->cnxk_pktio_index, &link_info);
     } else if (unformat(input, "an enable")) {
       link_info.is_autoneg = 1;
@@ -389,6 +395,11 @@ set_onp_interface_link_info(vlib_main_t* vm, unformat_input_t* input, vlib_cli_c
   }
 
   cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
+
+#ifdef VPP_PLATFORM_ET2500
+  if (si->flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP)
+    onp_pktio_intf_link_up_down(hw_if_index, true);
+#endif
 
   return error;
 }

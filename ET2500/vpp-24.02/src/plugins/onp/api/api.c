@@ -28,6 +28,10 @@ static u32 onp_base_msg_id;
 
 #include <vlibapi/api_helper_macros.h>
 
+#ifdef VPP_PLATFORM_ET2500
+extern void onp_pktio_intf_link_up_down(u32 hw_if_index, uword up);
+#endif
+
 #define mp_be_to_cpu(x, bits)                                                 \
   do                                                                          \
     {                                                                         \
@@ -312,9 +316,11 @@ static void
 vl_api_onp_set_port_link_info_t_handler(vl_api_onp_set_port_link_info_t* mp) {
   onp_main_t *om = onp_get_main();
   vlib_main_t *vm = vlib_get_main();
+  vnet_main_t *vnm = vnet_get_main();
 
   u32 sw_if_index = ntohl(mp->sw_if_index);
   onp_pktio_t* pktio;
+  vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, sw_if_index);
   int rv = 1;
 
   VALIDATE_SW_IF_INDEX(mp);
@@ -334,6 +340,11 @@ vl_api_onp_set_port_link_info_t_handler(vl_api_onp_set_port_link_info_t* mp) {
   link_info.speed = ntohl(mp->speed);
 
   cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
+
+#ifdef VPP_PLATFORM_ET2500
+  if (si->flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP)
+    onp_pktio_intf_link_up_down(sw_if_index, true);
+#endif
 
   BAD_SW_IF_INDEX_LABEL;
 
