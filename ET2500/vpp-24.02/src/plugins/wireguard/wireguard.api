@@ -32,7 +32,7 @@ typedef wireguard_interface
 {
   u32 user_instance [default=0xffffffff];
   vl_api_interface_index_t sw_if_index;
-  u8 private_key[32];
+  u8 private_key[64];
   u8 public_key[32];
   u16 port;
   vl_api_address_t src_ip;
@@ -101,7 +101,7 @@ enum wireguard_peer_flags : u8
 typedef wireguard_peer
 {
   u32 peer_index;
-  u8 public_key[32];
+  u8 public_key[64];
   u16 port;
   u16 persistent_keepalive;
   u32 table_id;

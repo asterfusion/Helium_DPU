@@ -323,6 +323,72 @@ wg_peer_if_delete (index_t peeri, void *data)
   return (WALK_CONTINUE);
 }
 
+static int wg_peer_set_allowed_ips(wg_peer_t *peer, const fib_prefix_t *allowed_ips, u32 wg_sw_if_index)
+{
+    u32 ii;
+    index_t perri = peer - wg_peer_pool;
+
+    vec_validate (peer->allowed_ips, vec_len (allowed_ips) - 1);
+    vec_set_len(peer->allowed_ips, vec_len (allowed_ips));
+    vec_foreach_index (ii, allowed_ips)
+    {
+      peer->allowed_ips[ii] = allowed_ips[ii];
+    }
+
+    fib_protocol_t proto;
+    FOR_EACH_FIB_IP_PROTOCOL (proto)
+    {
+      adj_nbr_walk (wg_sw_if_index, proto, wg_peer_adj_walk, &perri);
+    }
+
+    return 0;
+}
+
+void wg_peer_src_init(wg_peer_t *peer, ip_adjacency_t *adj, const wg_if_t *wgi)
+{
+    u32 out_sw_if_index = adj->rewrite_header.sw_if_index;
+    u8 is_ip4 = ip46_address_is_ip4 (&wgi->src_ip.ip);
+
+    if (is_ip4)
+    {
+        ip4_main_t *im4 = &ip4_main;
+        ip_lookup_main_t *lm4 = &im4->lookup_main;
+        ip_interface_address_t *ia = NULL;
+        ip4_address_t *r4 = NULL;
+
+        foreach_ip_interface_address (lm4, ia, out_sw_if_index, 1,
+        ({
+          r4 = ip_interface_address_get_address (lm4, ia);
+         }));
+
+        if (r4)
+        {
+            peer->src.addr.ip4.data_u32 = r4->data_u32;
+        }
+    }
+
+    else
+    {
+        ip6_main_t *im6 = &ip6_main;
+        ip_lookup_main_t *lm6 = &im6->lookup_main;
+        ip_interface_address_t *ia = NULL;
+        ip6_address_t *r6 = NULL;
+
+        foreach_ip_interface_address (lm6, ia, out_sw_if_index, 1,
+        ({
+         r6 = ip_interface_address_get_address (lm6, ia);
+         }));
+
+        if (r6)
+        {
+            peer->src.addr.ip6.as_u64[0] = r6->as_u64[0];
+            peer->src.addr.ip6.as_u64[1] = r6->as_u64[1];
+        }
+    }
+
+    peer->src.port = wgi->port;
+}
+
 static int
 wg_peer_fill (vlib_main_t *vm, wg_peer_t *peer, u32 table_id,
 	      const ip46_address_t *dst, u16 port,
@@ -345,7 +411,11 @@ wg_peer_fill (vlib_main_t *vm, wg_peer_t *peer, u32 table_id,
     return (VNET_API_ERROR_INVALID_INTERFACE);
 
   ip_address_to_46 (&wgi->src_ip, &peer->src.addr);
-  peer->src.port = wgi->port;
+  ip_adjacency_t *adj = adj_get (perri);
+
+  wg_peer_src_init(peer, adj, wgi);
+
+  //peer->src.port = wgi->port;
 
   u8 is_ip4 = ip46_address_is_ip4 (&peer->dst.addr);
   peer->rewrite = wg_build_rewrite (&peer->src.addr, peer->src.port,
@@ -462,7 +532,13 @@ wg_peer_add (u32 tun_sw_if_index, const u8 public_key[NOISE_PUBLIC_KEY_LEN],
    {
     if (!memcmp (peer->remote.r_public, public_key, NOISE_PUBLIC_KEY_LEN))
     {
-      return (VNET_API_ERROR_ENTRY_ALREADY_EXISTS);
+        if (tun_sw_if_index != peer->wg_sw_if_index)
+        {
+            return (VNET_API_ERROR_ENTRY_ALREADY_EXISTS);
+        }
+
+        *peer_index = peer - wg_peer_pool;
+        return wg_peer_set_allowed_ips(peer, allowed_ips, tun_sw_if_index);
     }
   }
   /* *INDENT-ON* */
