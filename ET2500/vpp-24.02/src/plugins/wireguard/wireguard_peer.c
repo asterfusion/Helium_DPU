@@ -16,6 +16,10 @@
 
 #include <vnet/adj/adj_midchain.h>
 #include <vnet/fib/fib_table.h>
+#include <vnet/fib/ip4_fib.h>
+#include <vnet/fib/ip6_fib.h>
+#include <vnet/dpo/load_balance.h>
+#include <vnet/dpo/load_balance_map.h>
 #include <wireguard/wireguard_peer.h>
 #include <wireguard/wireguard_if.h>
 #include <wireguard/wireguard_messages.h>
@@ -344,11 +348,43 @@ static int wg_peer_set_allowed_ips(wg_peer_t *peer, const fib_prefix_t *allowed_
     return 0;
 }
 
-void wg_peer_src_init(wg_peer_t *peer, ip_adjacency_t *adj, const wg_if_t *wgi)
+u32 wg_peer_get_output_interface(wg_peer_t *peer)
 {
-    u32 out_sw_if_index = adj->rewrite_header.sw_if_index;
-    u8 is_ip4 = ip46_address_is_ip4 (&wgi->src_ip.ip);
+    ip4_address_t dst_addr_v4;
+    ip6_address_t dst_addr_v6;
+    const load_balance_t *lb;
+    u32 lbi;
+    const dpo_id_t *dpo;
+    ip_adjacency_t *adj;
+    u8 is_ip4 = ip46_address_is_ip4 (&peer->dst.addr);
 
+    if (is_ip4)
+    {
+        dst_addr_v4.data_u32 = peer->dst.addr.ip4.data_u32;
+        lbi = ip4_fib_forwarding_lookup (0, &dst_addr_v4);
+    }
+
+    else
+    {
+        dst_addr_v6.as_u64[0] = peer->dst.addr.ip6.as_u64[0];
+        dst_addr_v6.as_u64[1] = peer->dst.addr.ip6.as_u64[1];
+        lbi = ip6_fib_table_fwding_lookup (0, &dst_addr_v6);
+    }
+    lb = load_balance_get (lbi);
+
+    dpo = load_balance_get_bucket_i (lb, 0);
+
+    adj = adj_get (dpo->dpoi_index);
+
+    return adj->rewrite_header.sw_if_index;
+}
+
+void wg_peer_src_init(wg_peer_t *peer)
+{
+    u32 out_sw_if_index;
+    u8 is_ip4 = ip46_address_is_ip4(&peer->dst.addr);
+
+    out_sw_if_index = wg_peer_get_output_interface(peer);
     if (is_ip4)
     {
         ip4_main_t *im4 = &ip4_main;
@@ -386,7 +422,7 @@ void wg_peer_src_init(wg_peer_t *peer, ip_adjacency_t *adj, const wg_if_t *wgi)
         }
     }
 
-    peer->src.port = wgi->port;
+    return;
 }
 
 static int
@@ -411,11 +447,10 @@ wg_peer_fill (vlib_main_t *vm, wg_peer_t *peer, u32 table_id,
     return (VNET_API_ERROR_INVALID_INTERFACE);
 
   ip_address_to_46 (&wgi->src_ip, &peer->src.addr);
-  ip_adjacency_t *adj = adj_get (perri);
 
-  wg_peer_src_init(peer, adj, wgi);
+  wg_peer_src_init(peer);
 
-  //peer->src.port = wgi->port;
+  peer->src.port = wgi->port;
 
   u8 is_ip4 = ip46_address_is_ip4 (&peer->dst.addr);
   peer->rewrite = wg_build_rewrite (&peer->src.addr, peer->src.port,
@@ -458,6 +493,7 @@ wg_peer_update_endpoint (index_t peeri, const ip46_address_t *addr, u16 port)
     return;
 
   wg_peer_endpoint_init (&peer->dst, addr, port);
+  wg_peer_src_init(peer);
 
   u8 is_ip4 = ip46_address_is_ip4 (&peer->dst.addr);
   vec_free (peer->rewrite);
