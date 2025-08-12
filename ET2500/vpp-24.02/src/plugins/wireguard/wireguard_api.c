@@ -38,7 +38,7 @@ static void
 {
   vl_api_wireguard_interface_create_reply_t *rmp;
   wg_main_t *wmp = &wg_main;
-  u8 private_key[NOISE_PUBLIC_KEY_LEN];
+  u8 private_key[NOISE_PUBLIC_KEY_LEN + 1];
   ip_address_t src;
   u32 sw_if_index = ~0;
   int rv = 0;
@@ -47,10 +47,12 @@ static void
 
   ip_address_decode2 (&mp->interface.src_ip, &src);
 
+  key_from_base64 (mp->interface.private_key, NOISE_KEY_LEN_BASE64, private_key);
+
   if (mp->generate_key)
-    curve25519_gen_secret (private_key);
-  else
-    clib_memcpy (private_key, mp->interface.private_key, NOISE_PUBLIC_KEY_LEN);
+  {
+      curve25519_gen_secret (private_key);
+  }
 
   rv = wg_if_create (ntohl (mp->interface.user_instance), private_key,
 		     ntohs (mp->interface.port), &src, &sw_if_index);
@@ -159,6 +161,7 @@ vl_api_wireguard_peer_add_t_handler (vl_api_wireguard_peer_add_t * mp)
 
   ip_address_t endpoint;
   fib_prefix_t *allowed_ips = NULL;
+  u8 public_key[NOISE_PUBLIC_KEY_LEN + 1];
 
   VALIDATE_SW_IF_INDEX (&(mp->peer));
 
@@ -176,7 +179,8 @@ vl_api_wireguard_peer_add_t_handler (vl_api_wireguard_peer_add_t * mp)
   for (ii = 0; ii < mp->peer.n_allowed_ips; ii++)
     ip_prefix_decode (&mp->peer.allowed_ips[ii], &allowed_ips[ii]);
 
-  rv = wg_peer_add (ntohl (mp->peer.sw_if_index), mp->peer.public_key,
+  key_from_base64 (mp->peer.public_key, NOISE_KEY_LEN_BASE64, public_key);
+  rv = wg_peer_add (ntohl (mp->peer.sw_if_index), public_key,
 		    ntohl (mp->peer.table_id), &ip_addr_46 (&endpoint),
 		    allowed_ips, ntohs (mp->peer.port),
 		    ntohs (mp->peer.persistent_keepalive), &peeri);
