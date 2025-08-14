@@ -1692,7 +1692,14 @@ vl_api_dns_resolve_name_v2_t_handler (vl_api_dns_resolve_name_v2_t * mp)
 
   /* Resolution pending? Don't reply... */
   if (ep == 0 || rn == NULL || vec_len(rn) == 0)
+  {
+    if (rn)
+    {
+      vec_free(rn);
+    } 
     return;
+  }
+
 
   /* *INDENT-OFF* */
   REPLY_MACRO3_ZERO (VL_API_DNS_RESOLVE_NAME_V2_REPLY,
