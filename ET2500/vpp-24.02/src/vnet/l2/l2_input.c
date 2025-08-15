@@ -31,6 +31,7 @@
 #include <vnet/l2/l2_bvi.h>
 #include <vnet/l2/l2_fib.h>
 #include <vnet/l2/l2_bd.h>
+#include <vnet/l2/l2_in_out_feat_arc.h>
 
 #include <vppinfra/error.h>
 #include <vppinfra/hash.h>
@@ -382,6 +383,11 @@ set_int_l2_mode (vlib_main_t * vm, vnet_main_t * vnet_main,	/*           */
 	  /* Make sure xconnect is disabled */
 	  config->feature_bitmap &= ~L2INPUT_FEAT_XCONNECT;
 
+      /* Make sure input_feat_arc */
+      if (l2_has_features(sw_if_index, 0)) {
+          config->feature_bitmap |= L2INPUT_FEAT_INPUT_FEAT_ARC;
+      }
+
 	  /* Set up bridge domain */
 	  bd_config = l2input_bd_config (bd_index);
 	  bd_validate (bd_config);
@@ -449,6 +455,12 @@ set_int_l2_mode (vlib_main_t * vm, vnet_main_t * vnet_main,	/*           */
 	    ~(L2INPUT_FEAT_LEARN | L2INPUT_FEAT_FWD | L2INPUT_FEAT_FLOOD);
 
 	  config->feature_bitmap |= L2INPUT_FEAT_XCONNECT;
+
+      /* Make sure input_feat_arc output_feature_arc */
+      if (l2_has_features(sw_if_index, 0)) {
+          config->feature_bitmap |= L2INPUT_FEAT_INPUT_FEAT_ARC;
+      }
+
 	  shg = 0;		/* not used in xconnect */
 	}
       else if (mode == MODE_L2_CLASSIFY)
@@ -463,6 +475,12 @@ set_int_l2_mode (vlib_main_t * vm, vnet_main_t * vnet_main,	/*           */
 	  /* Make sure bridging features are disabled */
 	  config->feature_bitmap &=
 	    ~(L2INPUT_FEAT_LEARN | L2INPUT_FEAT_FWD | L2INPUT_FEAT_FLOOD);
+
+      /* Make sure input_feat_arc */
+      if (l2_has_features(sw_if_index, 0)) {
+          config->feature_bitmap |= L2INPUT_FEAT_INPUT_FEAT_ARC;
+      }
+
 	  shg = 0;		/* not used in xconnect */
 	}
 
@@ -471,6 +489,11 @@ set_int_l2_mode (vlib_main_t * vm, vnet_main_t * vnet_main,	/*           */
       out_config = l2output_intf_config (sw_if_index);
       out_config->shg = shg;
       out_config->feature_bitmap |= L2OUTPUT_FEAT_OUTPUT;
+
+      /* Make sure output_feature_arc */
+      if (l2_has_features(sw_if_index, 1)) {
+          out_config->feature_bitmap |= L2OUTPUT_FEAT_OUTPUT_FEAT_ARC;
+      }
 
       /*
        * Test: remove this when non-IP features can be configured.
