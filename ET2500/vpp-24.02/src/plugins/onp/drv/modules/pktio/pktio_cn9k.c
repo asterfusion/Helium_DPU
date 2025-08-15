@@ -331,6 +331,9 @@ cn9k_pktio_txq_setup (vlib_main_t *vm, cnxk_pktio_t *dev,
   else
     max_sqe_sz = NIX_MAXSQESZ_W8;
 
+  pool_alloc(dev->sqs, dev->n_tx_queues);
+  pool_alloc(dev->fpsqs, dev->n_tx_queues);
+
   for (i = 0; i < dev->n_tx_queues; i++)
     {
 

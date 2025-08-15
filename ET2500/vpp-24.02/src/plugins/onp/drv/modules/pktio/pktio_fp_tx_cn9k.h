@@ -142,6 +142,29 @@ cn9k_pktio_add_send_hdr (struct nix_send_hdr_s *hdr, vlib_buffer_t *b,
   return CNXK_PKTIO_SEND_HDR_DWORDS;
 }
 
+static_always_inline u64
+cn9k_pktio_add_send_ext (struct nix_send_ext_s *ext, cnxk_pktio_t *pktio)
+{
+  if(ext == NULL)
+    return 0;
+
+  ext->w0.u = 0;
+  ext->w1.u = 0;
+  ext->w0.subdc = NIX_SUBDC_NOP;
+
+  /* Only set VLAN configuration for VF */
+  if (pktio->pci_device_id == PCI_DEVID_CNXK_RVU_VF)
+    {
+      ext->w0.subdc = NIX_SUBDC_EXT;
+
+      ext->w1.cn9k.vlan0_ins_ena = 1;
+      ext->w1.cn9k.vlan0_ins_tci = roc_nix_get_vf(&pktio->nix) + 1;
+      ext->w1.cn9k.vlan0_ins_ptr = 12;
+    }
+
+  return CNXK_PKTIO_SEND_HDR_DWORDS;
+}
+
 i32 static_always_inline
 cn9k_pkts_send (vlib_main_t *vm, vlib_node_runtime_t *node, u32 txq,
 		u16 tx_pkts, cnxk_per_thread_data_t *ptd, const u32 desc_sz,
@@ -152,6 +175,8 @@ cn9k_pkts_send (vlib_main_t *vm, vlib_node_runtime_t *node, u32 txq,
   u64 cached_aura = ~0, io_addr, sq_handle, n_dwords[4];
   struct nix_send_hdr_s *send_hdr0, *send_hdr1;
   struct nix_send_hdr_s *send_hdr2, *send_hdr3;
+  struct nix_send_ext_s *send_ext0 = NULL, *send_ext1 = NULL;
+  struct nix_send_ext_s *send_ext2 = NULL, *send_ext3 = NULL;
   union nix_send_sg_s *sg0, *sg1, *sg2, *sg3;
   cnxk_pktio_ops_map_t *pktio_ops;
   u8 cached_bp_index = ~0;
@@ -198,10 +223,26 @@ cn9k_pkts_send (vlib_main_t *vm, vlib_node_runtime_t *node, u32 txq,
   send_hdr2 = (struct nix_send_hdr_s *) &desc2[0];
   send_hdr3 = (struct nix_send_hdr_s *) &desc3[0];
 
-  sg0 = (union nix_send_sg_s *) &desc0[2];
-  sg1 = (union nix_send_sg_s *) &desc1[2];
-  sg2 = (union nix_send_sg_s *) &desc2[2];
-  sg3 = (union nix_send_sg_s *) &desc3[2];
+  if (pktio->pci_device_id == PCI_DEVID_CNXK_RVU_VF)
+  {
+
+    send_ext0 = (struct nix_send_ext_s *) &desc0[2];
+    send_ext1 = (struct nix_send_ext_s *) &desc1[2];
+    send_ext2 = (struct nix_send_ext_s *) &desc2[2];
+    send_ext3 = (struct nix_send_ext_s *) &desc3[2];
+
+    sg0 = (union nix_send_sg_s *) &desc0[4];
+    sg1 = (union nix_send_sg_s *) &desc1[4];
+    sg2 = (union nix_send_sg_s *) &desc2[4];
+    sg3 = (union nix_send_sg_s *) &desc3[4];
+  }
+  else
+  {
+    sg0 = (union nix_send_sg_s *) &desc0[2];
+    sg1 = (union nix_send_sg_s *) &desc1[2];
+    sg2 = (union nix_send_sg_s *) &desc2[2];
+    sg3 = (union nix_send_sg_s *) &desc3[2];
+  }
 
   n_packets = tx_pkts;
 
@@ -239,6 +280,14 @@ cn9k_pkts_send (vlib_main_t *vm, vlib_node_runtime_t *node, u32 txq,
       n_dwords[2] = cn9k_pktio_add_sg_list (sg2, b[2], n_segs[2], off_flags);
       n_dwords[3] = cn9k_pktio_add_sg_list (sg3, b[3], n_segs[3], off_flags);
 
+      if (pktio->pci_device_id == PCI_DEVID_CNXK_RVU_VF)
+      {
+        n_dwords[0] += cn9k_pktio_add_send_ext(send_ext0, pktio);
+        n_dwords[1] += cn9k_pktio_add_send_ext(send_ext1, pktio);
+        n_dwords[2] += cn9k_pktio_add_send_ext(send_ext2, pktio);
+        n_dwords[3] += cn9k_pktio_add_send_ext(send_ext3, pktio);
+      }
+
       n_dwords[0] += cn9k_pktio_add_send_hdr (
 	send_hdr0, b[0], aura_handle[0], sq_handle, n_dwords[0], off_flags);
       n_dwords[1] += cn9k_pktio_add_send_hdr (
@@ -268,6 +317,8 @@ cn9k_pkts_send (vlib_main_t *vm, vlib_node_runtime_t *node, u32 txq,
 				    &cached_bp_index, &refill_counter);
 
       n_dwords[0] = cn9k_pktio_add_sg_list (sg0, b[0], n_segs[0], off_flags);
+      if (pktio->pci_device_id == PCI_DEVID_CNXK_RVU_VF)
+        n_dwords[0] += cn9k_pktio_add_send_ext(send_ext0, pktio);
       n_dwords[0] += cn9k_pktio_add_send_hdr (
 	send_hdr0, b[0], aura_handle[0], sq_handle, n_dwords[0], off_flags);
 

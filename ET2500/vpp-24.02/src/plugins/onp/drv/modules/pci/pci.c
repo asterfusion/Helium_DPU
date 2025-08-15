@@ -5,6 +5,7 @@
  */
 
 #include <onp/drv/modules/pci/pci.h>
+#include <onp/drv/modules/pktio/pktio_priv.h>
 
 struct roc_model cnxk_model;
 cnxk_plt_pci_device_t *cnxk_drv_roc_pci_devs;
@@ -96,6 +97,7 @@ cnxk_pci_dev_probe (vlib_main_t *vm, vlib_pci_addr_t *addr, uuid_t uuid_token,
       goto free_pci_device_info;
     }
 
+  pool_alloc(cnxk_drv_roc_pci_devs, CNXK_PKTIO_MAX_DEVICES);
   pool_get_zero (cnxk_drv_roc_pci_devs, dev);
 
   dev->index = dev - cnxk_drv_roc_pci_devs;

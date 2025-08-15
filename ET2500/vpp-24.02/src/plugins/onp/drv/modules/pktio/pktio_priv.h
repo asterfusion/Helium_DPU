@@ -152,7 +152,8 @@ typedef struct
   struct roc_nix_cq *cqs;
   struct roc_nix nix;
   struct roc_npc npc;
-  u32 tx_cached_pkts;
+  u16 pci_device_id;
+  u32 tx_cached_pkts : 16;
   /* Flow vector */
   cnxk_pktio_flow_t *flow_entries;
   /* IPsec fast path context */

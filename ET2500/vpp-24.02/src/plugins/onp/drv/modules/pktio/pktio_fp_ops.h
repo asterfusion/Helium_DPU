@@ -23,7 +23,7 @@
  /* inl_ipsec, sched_inp, out_cksum, desc_sz, name */                         \
                                                                               \
  _(        0,      0,    0,        4,  poll_none)                             \
- _(        0,      0,    1,        4,  poll_ocs)                              \
+ _(        0,      0,    1,        8,  poll_ocs)                              \
  _(        1,      1,    0,        4,  outb_inl_ipsec_none)                   \
  _(        1,      1,    1,        4,  outb_inl_ipsec_ocs)                    \
  _(        0,      1,    0,        4,  outb_lka_ipsec_none)                   \

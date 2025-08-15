@@ -130,7 +130,7 @@ cnxk_pktio_dev_mode_update (cnxk_pktio_t *pktio)
 {
   u32 pci_dev_id;
 
-  pci_dev_id = pktio->nix.pci_dev->id.device_id;
+  pci_dev_id = pktio->pci_device_id;
   switch (pci_dev_id)
     {
     case PCI_DEVID_CNXK_RVU_VF:
@@ -222,6 +222,7 @@ cnxk_pktio_init (vlib_main_t *vm, vlib_pci_addr_t *addr, uuid_t uid_token,
     case PCI_DEVID_CNXK_RVU_SDP_PF:
     case PCI_DEVID_CNXK_RVU_SDP_VF:
       pktio = cnxk_pktio_alloc ();
+      pktio->pci_device_id=dev->id.device_id;
       return cnxk_pktio_nix_dev_init (pktio, dev);
 
     default:
@@ -286,6 +287,50 @@ cnxk_pktio_start (vlib_main_t *vm, cnxk_pktio_t *dev)
 		      roc_error_msg_get (rv));
       return -1;
     }
+        if (dev->pci_device_id == PCI_DEVID_CNXK_RVU_VF)
+    {
+      struct roc_npc_item_info item_info[ROC_NPC_ITEM_TYPE_END] = {0};
+      struct roc_npc_action actions[ROC_NPC_ITEM_TYPE_END] = {0};
+      struct roc_npc_attr attr = {0};
+      struct roc_npc_flow *npc_flow;
+      ethernet_header_t eth_spec = {0}, eth_mask = {0};
+      int layer = 0, action = 0, rv = 0;
+
+      // Set any dmac match
+      eth_spec.type = 0;
+      eth_mask.type = 0;
+      memset(eth_spec.src_address, 0, CNXK_MAC_ADDRESS_LEN);
+      memset(eth_mask.src_address, 0, CNXK_MAC_ADDRESS_LEN);
+
+      memset(eth_spec.dst_address, 0, CNXK_MAC_ADDRESS_LEN);
+      memset(eth_mask.dst_address, 0, CNXK_MAC_ADDRESS_LEN);
+
+      item_info[layer].type = ROC_NPC_ITEM_TYPE_ETH;
+      item_info[layer].spec = (void *)&eth_spec;
+      item_info[layer].mask = (void *)&eth_mask;
+      item_info[layer].size = sizeof(ethernet_header_t);
+      layer++;
+
+      item_info[layer].type = ROC_NPC_ITEM_TYPE_END;
+
+      /* make count as default action */
+      actions[action].type = ROC_NPC_ACTION_TYPE_COUNT;
+      action++;
+
+      actions[action].type = ROC_NPC_ACTION_TYPE_END;
+
+      attr.priority = 1;
+      attr.egress = 1;
+
+      npc_flow = roc_npc_flow_create(&dev->npc, &attr, item_info, actions, dev->npc.pf_func, &rv);
+      if (rv)
+      {
+        printf("Flow create failed: %s\n", roc_error_msg_get(rv));
+        return rv;
+      }
+      roc_npc_mcam_clear_counter(&dev->npc, npc_flow->ctr_id);
+    }
+
 
   dev->is_started = 1;
 
