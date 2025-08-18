@@ -16,6 +16,7 @@
 #include <dns/dns.h>
 #include <vlibapi/api.h>
 #include <vlibmemory/api.h>
+#include <vnet/ip/ip_types_api.h>
 
 #include <vlib/vlib.h>
 #include <vnet/vnet.h>
@@ -28,7 +29,7 @@
 
 int
 vnet_dns_response_to_reply (u8 * response,
-			    vl_api_dns_resolve_name_reply_t * rmp,
+			    dns_resolve_name_t **out_rn,
 			    u32 * min_ttlp);
 int
 vnet_dns_response_to_name (u8 * response,
@@ -202,22 +203,31 @@ reply:
 	{
 	case DNS_API_PENDING_NAME_TO_IP:
 	  {
-	    vl_api_dns_resolve_name_reply_t *rmp;
+	    vl_api_dns_resolve_name_v2_reply_t *rmp;
+      dns_resolve_name_t *rn = NULL;
+      dns_resolve_name_t *_rn;
+
 	    regp = vl_api_client_index_to_registration (pr->client_index);
 	    if (regp == 0)
 	      continue;
-
-	    rmp = vl_msg_api_alloc (sizeof (*rmp));
-	    rmp->_vl_msg_id =
-	      clib_host_to_net_u16 (VL_API_DNS_RESOLVE_NAME_REPLY
-				    + dm->msg_id_base);
-	    rmp->context = pr->client_context;
 	    min_ttl = ~0;
-	    rv = vnet_dns_response_to_reply (ep->dns_response, rmp, &min_ttl);
+	    rv = vnet_dns_response_to_reply (ep->dns_response, &rn, &min_ttl);
 	    if (min_ttl != ~0)
 	      ep->expiration_time = now + min_ttl;
-	    rmp->retval = clib_host_to_net_u32 (rv);
+
+      int alloc_size = sizeof(*rmp) + vec_len(rn) * sizeof(vl_api_address_t);
+      rmp = vl_msg_api_alloc (alloc_size);
+	    rmp->_vl_msg_id = htons((VL_API_DNS_RESOLVE_NAME_V2_REPLY)+(REPLY_MSG_ID_BASE));
+	    rmp->context = pr->client_context;
+	    rmp->retval = ntohl (rv);
+      rmp->count = htonl(vec_len(rn));
+      for(int i=0; i< vec_len(rn); i++)
+      {
+        _rn = &rn[i];
+        ip_address_encode(&_rn->address.ip, IP46_TYPE_ANY, &rmp->address[i]);
+      }
 	    vl_api_send_msg (regp, (u8 *) rmp);
+      vec_free(rn);
 	  }
 	  break;
 
