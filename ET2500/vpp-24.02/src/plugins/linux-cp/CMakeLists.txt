@@ -63,6 +63,7 @@ add_vpp_plugin(linux_cp
   lcp_bfd.c
   lcp_bpdu.c
   lcp_vrrp.c
+  lcp_mvrp.c
 
   API_FILES
   lcp.api
