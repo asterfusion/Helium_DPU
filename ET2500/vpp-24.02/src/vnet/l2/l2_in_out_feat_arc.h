@@ -41,6 +41,7 @@ typedef enum
   IN_OUT_FEAT_ARC_N_TABLE_GROUPS
 } in_out_feat_arc_table_group_id_t;
 
+int l2_has_features (u32 sw_if_index, int is_output);
 int vnet_l2_feature_enable_disable (const char *arc_name,
 				    const char *node_name, u32 sw_if_index,
 				    int enable_disable, void *feature_config,

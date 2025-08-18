@@ -545,7 +545,7 @@ l2_in_out_feat_arc_init (vlib_main_t * vm)
 }
 
 
-static int
+int
 l2_has_features (u32 sw_if_index, int is_output)
 {
   int has_features = 0;
