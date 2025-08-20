@@ -97,3 +97,7 @@ if (${VPP_PLATFORM_NAME} MATCHES "octeon10")
   add_compile_definitions(ET2500_SET_TC)
   add_compile_definitions(ET2500_NO_NETLINK)
 endif()
+
+if (${ASROUTER_NAME} MATCHES "octeon10")
+  add_compile_definitions(ET2500_LCP_DISTINGUISH_LOOPBACK)
+endif()

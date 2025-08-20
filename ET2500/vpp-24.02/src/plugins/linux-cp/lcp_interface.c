@@ -40,6 +40,9 @@
 #include <vlibapi/api_helper_macros.h>
 #include <vnet/ipsec/ipsec_punt.h>
 
+#ifdef ET2500_LCP_DISTINGUISH_LOOPBACK
+extern vnet_device_class_t ethernet_simulated_device_class;
+#endif
 vlib_log_class_t lcp_itf_pair_logger;
 
 /**
@@ -1062,6 +1065,12 @@ lcp_itf_pair_create (u32 phy_sw_if_index, u8 *host_if_name,
 	.rv = 0,
 	.error = NULL,
       };
+#ifdef ET2500_LCP_DISTINGUISH_LOOPBACK
+      if (hw->dev_class_index == ethernet_simulated_device_class.index)
+      {
+          args.num_rx_queues = 1;
+      }
+#endif
       ethernet_interface_t *ei;
       u32 host_sw_mtu_size;
 
