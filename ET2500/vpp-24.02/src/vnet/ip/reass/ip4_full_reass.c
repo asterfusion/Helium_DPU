@@ -2083,6 +2083,17 @@ ip4_local_full_reass_enabled ()
 
 #endif
 
+static clib_error_t *
+ip4_full_reass_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_add)
+{
+  ip4_full_reass_main_t *rm = &ip4_full_reass_main;
+  vec_validate (rm->feature_use_refcount_per_intf, sw_if_index);
+  rm->feature_use_refcount_per_intf[sw_if_index] = 0;
+  return 0;
+}
+
+VNET_SW_INTERFACE_ADD_DEL_FUNCTION (ip4_full_reass_sw_interface_add_del);
+
 /*
  * fd.io coding-style-patch-verification: ON
  *

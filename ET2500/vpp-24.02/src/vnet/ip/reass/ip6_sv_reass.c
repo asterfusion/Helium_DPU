@@ -1439,6 +1439,17 @@ ip6_sv_reass_custom_context_register_next_node (uword node_index)
 }
 #endif
 
+static clib_error_t *
+ip6_sv_reass_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_add)
+{
+  ip6_sv_reass_main_t *rm = &ip6_sv_reass_main;
+  vec_validate (rm->feature_use_refcount_per_intf, sw_if_index);
+  rm->feature_use_refcount_per_intf[sw_if_index] = 0;
+  return 0;
+}
+
+VNET_SW_INTERFACE_ADD_DEL_FUNCTION (ip6_sv_reass_sw_interface_add_del);
+
 /*
  * fd.io coding-style-patch-verification: ON
  *
