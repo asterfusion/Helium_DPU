@@ -97,13 +97,15 @@ VLIB_INIT_FUNCTION (wg_init);
 VNET_FEATURE_INIT (wg4_output_tun, static) = {
   .arc_name = "ip4-output",
   .node_name = "wg4-output-tun",
-  .runs_after = VNET_FEATURES ("gso-ip4"),
+  .runs_after = VNET_FEATURES ("gso-ip4", "nat44-ed-in2out-output",
+                               "nat44-in2out-output-worker-handoff",
+                               "nat-pre-in2out-output"),
 };
 
 VNET_FEATURE_INIT (wg6_output_tun, static) = {
   .arc_name = "ip6-output",
   .node_name = "wg6-output-tun",
-  .runs_after = VNET_FEATURES ("gso-ip6"),
+  .runs_after = VNET_FEATURES ("gso-ip6", "nat64-in2out", "nat64-in2out-handoff"),
 };
 
 VLIB_PLUGIN_REGISTER () =
