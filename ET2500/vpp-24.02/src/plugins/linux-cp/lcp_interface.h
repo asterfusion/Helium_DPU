@@ -59,6 +59,35 @@ typedef struct lcp_itf_phy_adj
   adj_index_t adj_index[N_AF];
 } lcp_itf_phy_adj_t;
 
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+typedef enum
+{
+    /**
+     * @brief Strip vlan tag
+     * Strip vlan tag from the incoming packet
+     * when delivering the packet to host interface.
+     */
+    LCP_ITF_HOST_VLAN_TAG_STRIP,
+
+    /**
+     * @brief Keep vlan tag.
+     * When incoming packet is untagged, add PVID tag to the packet when delivering
+     * the packet to host interface.
+     */
+    LCP_ITF_HOST_VLAN_TAG_KEEP,
+
+    /**
+     * @brief Keep the packet same as the incoming packet
+     *
+     * The packet delivered to host interface is the same as the original packet.
+     * When the host interface is PORT and LAG, the packet delivered to host interface is the
+     * same as the original packet seen by the PORT and LAG.
+     * When the host interface is VLAN, the packet delivered to host interface will not have tag.
+     */
+    LCP_ITF_HOST_VLAN_TAG_ORIGINAL,
+} lip_host_vlan_tag_e;
+#endif
+
 /**
  * A pair of interfaces
  */
@@ -74,6 +103,11 @@ typedef struct lcp_itf_pair_t_
   lip_flag_t lip_flags;		  /* Flags */
   u8 lip_rewrite_len;		  /* The length of an L2 MAC rewrite */
   f64 lip_create_ts;		  /* Timestamp of creation */
+
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+  lip_host_vlan_tag_e lip_host_vlan_tag; /* type of host interface vlan action */
+  u16 lip_host_pvlan;         /* pvlan */
+#endif
 } lcp_itf_pair_t;
 extern lcp_itf_pair_t *lcp_itf_pair_pool;
 

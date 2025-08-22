@@ -105,6 +105,21 @@ format_lcp_itf_pair (u8 *s, va_list *args)
   if (lip->lip_namespace)
     s = format (s, " netns %s", lip->lip_namespace);
 
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+  switch(lip->lip_host_vlan_tag)
+  {
+  case LCP_ITF_HOST_VLAN_TAG_STRIP:
+      s = format (s, " vlan-tag-type strip(pvlan %d)", lip->lip_host_pvlan);
+      break;
+  case LCP_ITF_HOST_VLAN_TAG_KEEP:
+      s = format (s, " vlan-tag-type keep(pvlan %d)", lip->lip_host_pvlan);
+      break;
+  case LCP_ITF_HOST_VLAN_TAG_ORIGINAL:
+      s = format (s, " vlan-tag-type original(pvlan %d)", lip->lip_host_pvlan);
+      break;
+  }
+#endif
+
   return s;
 }
 
@@ -380,6 +395,12 @@ lcp_itf_pair_add (u32 host_sw_if_index, u32 phy_sw_if_index, u8 *host_name,
 
   /* set timestamp when pair entered service */
   lip->lip_create_ts = vlib_time_now (vlib_get_main ());
+
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+  /* set default vlan tag action and pvlan */
+  lip->lip_host_vlan_tag = LCP_ITF_HOST_VLAN_TAG_ORIGINAL;
+  lip->lip_host_pvlan = 0xffff;
+#endif
 
   return 0;
 }

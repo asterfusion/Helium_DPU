@@ -100,4 +100,5 @@ endif()
 
 if (${ASROUTER_NAME} MATCHES "octeon10")
   add_compile_definitions(ET2500_LCP_DISTINGUISH_LOOPBACK)
+  add_compile_definitions(SUPPORT_LCP_VLAN_TAG_ACT)
 endif()

@@ -337,6 +337,119 @@ VLIB_CLI_COMMAND (lcp_itf_pair_show_cmd_node, static) = {
   .is_mp_safe = 1,
 };
 
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+static clib_error_t *
+lcp_itf_pair_set_vlan_tag_cmd (vlib_main_t *vm, unformat_input_t *input,
+				vlib_cli_command_t *cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  vnet_main_t *vnm = vnet_get_main ();
+  u32 sw_if_index = ~0;
+  clib_error_t *error = NULL;
+  lcp_itf_pair_t *pair = NULL;
+  lip_host_vlan_tag_e type = LCP_ITF_HOST_VLAN_TAG_ORIGINAL;
+
+  if (unformat_user (input, unformat_line_input, line_input))
+    {
+      while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+	{
+	  if (unformat (line_input, "phy %U", unformat_vnet_sw_interface, vnm,
+			     &sw_if_index))
+	    ;
+	  else if (unformat (line_input, "vlan_tag strip"))
+          type = LCP_ITF_HOST_VLAN_TAG_STRIP;
+	  else if (unformat (line_input, "vlan_tag keep"))
+          type = LCP_ITF_HOST_VLAN_TAG_KEEP;
+	  else if (unformat (line_input, "vlan_tag orig"))
+          type = LCP_ITF_HOST_VLAN_TAG_ORIGINAL;
+	  else
+	    {
+	      error = clib_error_return (0, "unknown input `%U'",
+					 format_unformat_error, line_input);
+	      break;
+	    }
+	}
+      unformat_free (line_input);
+    }
+
+  if (error) return error;
+  else if (sw_if_index == ~0)
+    error = clib_error_return (0, "interface name or sw_if_index required");
+
+  pair = lcp_itf_pair_get (lcp_itf_pair_find_by_phy (sw_if_index));
+
+  if (pair)
+  {
+      pair->lip_host_vlan_tag = type;
+  }
+  else
+  {
+    error = clib_error_return (0, "interface name or sw_if_index not has lcp_itf_pair");
+  }
+  return error;
+}
+
+
+VLIB_CLI_COMMAND (lcp_itf_pair_set_vlan_tag_cmd_node, static) = {
+  .path = "lcp set vlan-tag",
+  .function = lcp_itf_pair_set_vlan_tag_cmd,
+  .short_help = "lcp set vlan-tag phy <interface> vlan_tag (strip|keep|orig)",
+};
+
+static clib_error_t *
+lcp_itf_pair_set_pvlan_cmd (vlib_main_t *vm, unformat_input_t *input,
+				vlib_cli_command_t *cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  vnet_main_t *vnm = vnet_get_main ();
+  u32 sw_if_index = ~0;
+  clib_error_t *error = NULL;
+  lcp_itf_pair_t *pair = NULL;
+  u16 pvlan = 0xffff;
+
+  if (unformat_user (input, unformat_line_input, line_input))
+    {
+      while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+	{
+	  if (unformat (line_input, "phy %U", unformat_vnet_sw_interface, vnm,
+			     &sw_if_index))
+	    ;
+	  else if (unformat (line_input, "pvlan %u", &pvlan))
+	    ;
+	  else
+	    {
+	      error = clib_error_return (0, "unknown input `%U'",
+					 format_unformat_error, line_input);
+	      break;
+	    }
+	}
+      unformat_free (line_input);
+    }
+
+  if (error) return error;
+  else if (sw_if_index == ~0)
+    error = clib_error_return (0, "interface name or sw_if_index required");
+
+  pair = lcp_itf_pair_get (lcp_itf_pair_find_by_phy (sw_if_index));
+
+  if (pair)
+  {
+      pair->lip_host_pvlan = pvlan;
+  }
+  else
+  {
+    error = clib_error_return (0, "interface name or sw_if_index not has lcp_itf_pair");
+  }
+  return error;
+}
+
+VLIB_CLI_COMMAND (lcp_itf_pair_set_pvlan_cmd_node, static) = {
+  .path = "lcp set pvlan",
+  .function = lcp_itf_pair_set_pvlan_cmd,
+  .short_help = "lcp set pvlan phy <interface> pvlan <pvlan>",
+};
+#endif
+
 clib_error_t *
 lcp_cli_init (vlib_main_t *vm)
 {
