@@ -65,6 +65,49 @@ format_lip_punt_trace (u8 *s, va_list *args)
   return s;
 }
 
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+static_always_inline void lip_punt_vlan_tag_proc(const lcp_itf_pair_t *lip, vlib_buffer_t *b)
+{
+    u8 *data = (u8 *) ethernet_buffer_get_header (b);
+
+    if (lip->lip_host_vlan_tag == LCP_ITF_HOST_VLAN_TAG_STRIP)
+    {
+        if ((data[12] == 0x81 && data[13] == 0x00) ||
+            (data[12] == 0x88 && data[13] == 0xa8) ||
+            (data[12] == 0x91 && data[13] == 0x00) ||
+            (data[12] == 0x92 && data[13] == 0x00))
+        {
+            //vlan packet
+            clib_memmove(data + 4, data, 12);
+            vlib_buffer_advance (b, 4);
+        }
+    }
+    else if (lip->lip_host_vlan_tag == LCP_ITF_HOST_VLAN_TAG_KEEP)
+    {
+        if ((data[12] == 0x81 && data[13] == 0x00) ||
+            (data[12] == 0x88 && data[13] == 0xa8) ||
+            (data[12] == 0x91 && data[13] == 0x00) ||
+            (data[12] == 0x92 && data[13] == 0x00))
+        {
+            //keep vlan, do nothing
+        }
+        else
+        {
+            //add pvlan
+            if (lip->lip_host_pvlan < 4096)
+            {
+                clib_memmove(data - 4, data, 12);
+                data[8] = 0x81;
+                data[9] = 0x00;
+                data[10] = lip->lip_host_pvlan >> 8;
+                data[11] = lip->lip_host_pvlan & 0xFF;
+                vlib_buffer_advance (b, -4);
+            }
+        }
+    }
+}
+#endif
+
 /**
  * Pass punted packets from the PHY to the HOST.
  */
@@ -139,6 +182,10 @@ VLIB_NODE_FN (lip_punt_node)
 	   * VNET_BUFFER_F_LOCALLY_ORIGINATED in an 'else {}' here and
 	   * then pass to the next node on the ip[46]-punt feature arc
 	   */
+
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+	  lip_punt_vlan_tag_proc(lip0, b0);
+#endif
 
 	trace0:
 	  if (PREDICT_FALSE ((b0->flags & VLIB_BUFFER_IS_TRACED)))
@@ -838,6 +885,9 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 			lip0->lip_host_sw_if_index;
 		      reply_copies[n_copies++] =
 			vlib_get_buffer_index (vm, c0);
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+		      lip_punt_vlan_tag_proc(lip0, c0);
+#endif
 		    }
 		}
 	    }
@@ -883,6 +933,9 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 			lip1->lip_host_sw_if_index;
 		      reply_copies[n_copies++] =
 			vlib_get_buffer_index (vm, c1);
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+		      lip_punt_vlan_tag_proc(lip1, c1);
+#endif
 		    }
 		}
 	    }
@@ -974,6 +1027,9 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 			lip0->lip_host_sw_if_index;
 		      reply_copies[n_copies++] =
 			vlib_get_buffer_index (vm, c0);
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+		      lip_punt_vlan_tag_proc(lip0, c0);
+#endif
 		    }
 		}
 	    }

@@ -344,6 +344,52 @@ vl_api_lcp_set_interface_bpdu_drop_t_handler (
   REPLY_MACRO (VL_API_LCP_SET_INTERFACE_BPDU_DROP_REPLY);
 }
 
+static void
+vl_api_lcp_set_interface_vlan_tag_t_handler (
+  vl_api_lcp_set_interface_vlan_tag_t *mp)
+{
+  vl_api_lcp_set_interface_vlan_tag_reply_t *rmp;
+  int rv = 0;
+  u32 sw_if_index = ntohl (mp->sw_if_index);
+  u8 vlan_tag = mp->vlan_tag;
+
+  VALIDATE_SW_IF_INDEX (mp);
+
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+  lcp_itf_pair_t *pair = lcp_itf_pair_get (lcp_itf_pair_find_by_phy (sw_if_index));
+
+  if (pair) {
+      pair->lip_host_vlan_tag = vlan_tag;
+  }
+#endif
+
+  BAD_SW_IF_INDEX_LABEL;
+  REPLY_MACRO (VL_API_LCP_SET_INTERFACE_VLAN_TAG_REPLY);
+}
+
+static void
+vl_api_lcp_set_interface_pvlan_t_handler (
+  vl_api_lcp_set_interface_pvlan_t *mp)
+{
+  vl_api_lcp_set_interface_pvlan_reply_t *rmp;
+  int rv = 0;
+  u32 sw_if_index = ntohl (mp->sw_if_index);
+  u16 pvlan = ntohs(mp->pvlan);
+
+  VALIDATE_SW_IF_INDEX (mp);
+
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+  lcp_itf_pair_t *pair = lcp_itf_pair_get (lcp_itf_pair_find_by_phy (sw_if_index));
+
+  if (pair) {
+      pair->lip_host_pvlan = pvlan;
+  }
+#endif
+
+  BAD_SW_IF_INDEX_LABEL;
+  REPLY_MACRO (VL_API_LCP_SET_INTERFACE_VLAN_TAG_REPLY);
+}
+
 /*
  * Set up the API message handling tables
  */
