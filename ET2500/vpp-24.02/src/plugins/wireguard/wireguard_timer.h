@@ -61,7 +61,8 @@ wg_birthdate_has_expired (f64 birthday_seconds, f64 expiration_seconds)
   if (birthday_seconds == 0.0)
     return true;
   f64 now_seconds = vlib_time_now (vlib_get_main ());
-  return (birthday_seconds + expiration_seconds) < now_seconds;
+  //sometimes the timer is inaccurate, causing the verification to fail
+  return (birthday_seconds + expiration_seconds) < (now_seconds + 0.5);
 }
 
 static_always_inline bool

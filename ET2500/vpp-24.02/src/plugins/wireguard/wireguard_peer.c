@@ -374,13 +374,11 @@ u32 wg_peer_get_output_interface(wg_peer_t *peer)
 
     dpo = load_balance_get_bucket_i (lb, 0);
 
-    //adj = adj_get (dpo->dpoi_index);
+    adj = adj_get (dpo->dpoi_index);
 
-    //if (0 == adj->rewrite_header.sw_if_index)
+    if (0 == adj->rewrite_header.sw_if_index)
     {
-        lb = load_balance_get (dpo->dpoi_index);
-        dpo = load_balance_get_bucket_i (lb, 0);
-        adj = adj_get (dpo->dpoi_index);
+        return 1;
     }
     return adj->rewrite_header.sw_if_index;
 }
