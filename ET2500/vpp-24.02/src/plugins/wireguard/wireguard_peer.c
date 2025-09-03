@@ -377,7 +377,9 @@ u32 wg_peer_get_output_interface(wg_peer_t *peer)
 
     adj = adj_get (dpo->dpoi_index);
 
-    if (dpo->dpoi_next_node != IP_LOOKUP_NEXT_REWRITE && dpo->dpoi_next_node != IP_LOOKUP_NEXT_GLEAN)
+    if (dpo->dpoi_next_node != IP_LOOKUP_NEXT_REWRITE &&
+        dpo->dpoi_next_node != IP_LOOKUP_NEXT_GLEAN &&
+        dpo->dpoi_next_node != IP_LOOKUP_NEXT_MIDCHAIN)
     {
         lb = load_balance_get (dpo->dpoi_index);
         dpo = load_balance_get_bucket_i (lb, 0);
