@@ -39,8 +39,6 @@ arp_mk_reply (vnet_main_t * vnm,
   u8 *rewrite0, rewrite0_len;
   ethernet_header_t *eth_tx;
   u32 next0;
-  vnet_sw_interface_t *sub_sw = vnet_get_sw_interface (vnm, sw_if_index0);
-  vnet_sw_interface_t *sup_sw = vnet_get_sup_sw_interface (vnm, sw_if_index0);
 
   /* Send a reply.
      An adjacency to the sender is not always present,
@@ -67,10 +65,6 @@ arp_mk_reply (vnet_main_t * vnm,
 
   mac_address_from_bytes (&arp0->ip4_over_ethernet[0].mac,
 			  hw_if0->hw_address);
-  if (sub_sw != sup_sw)
-  {
-      arp0->ip4_over_ethernet[0].mac.bytes[5] = (u8)(sw_if_index0);
-  }
   clib_mem_unaligned (&arp0->ip4_over_ethernet[0].ip4.data_u32, u32) =
     if_addr0->data_u32;
 
