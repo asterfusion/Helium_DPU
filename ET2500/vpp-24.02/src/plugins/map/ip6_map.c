@@ -131,12 +131,23 @@ ip6_map_security_check (map_domain_t * d, vlib_buffer_t * b0,
 	      u16 port = ip4_get_port (ip4, 1);
 	      if (port)
 		{
-		  if (mm->sec_check)
-		    *error =
-		      ip6_map_sec_check (d, port, ip4,
-					 ip6) ? MAP_ERROR_NONE :
-		      MAP_ERROR_DECAP_SEC_CHECK;
-		}
+            if (d->sec_check_valid)
+            {
+                if (d->sec_check)
+                    *error =
+                        ip6_map_sec_check (d, port, ip4,
+                                ip6) ? MAP_ERROR_NONE :
+                        MAP_ERROR_DECAP_SEC_CHECK;
+            }
+            else
+            {
+                if (mm->sec_check)
+                    *error =
+                        ip6_map_sec_check (d, port, ip4,
+                                ip6) ? MAP_ERROR_NONE :
+                        MAP_ERROR_DECAP_SEC_CHECK;
+            }
+        }
 	      else
 		{
 		  *error = MAP_ERROR_BAD_PROTOCOL;
@@ -144,12 +155,24 @@ ip6_map_security_check (map_domain_t * d, vlib_buffer_t * b0,
 	    }
 	  else
 	    {
-	      if (mm->sec_check_frag)
-		{
-		  vnet_buffer (b0)->ip.reass.next_index =
-		    map_main.ip4_sv_reass_custom_next_index;
-		  *next = IP6_MAP_NEXT_IP4_REASS;
-		}
+            if (d->sec_check_valid)
+            {
+                if (d->sec_check_frag)
+                {
+                    vnet_buffer (b0)->ip.reass.next_index =
+                        map_main.ip4_sv_reass_custom_next_index;
+                    *next = IP6_MAP_NEXT_IP4_REASS;
+                }
+            }
+            else
+            {
+                if (mm->sec_check_frag)
+                {
+                    vnet_buffer (b0)->ip.reass.next_index =
+                        map_main.ip4_sv_reass_custom_next_index;
+                    *next = IP6_MAP_NEXT_IP4_REASS;
+                }
+            }
 	    }
 	}
     }
@@ -256,7 +279,9 @@ ip6_map (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	    }
 	  else
 	    {
-	      error0 = MAP_ERROR_BAD_PROTOCOL;
+	      //error0 = MAP_ERROR_BAD_PROTOCOL;
+	      vlib_buffer_advance (p0, -sizeof (ip6_header_t));
+	      vnet_feature_next (&next1, p0);
 	    }
 	  if (PREDICT_TRUE
 	      (ip61->protocol == IP_PROTOCOL_IP_IN_IP
@@ -283,7 +308,9 @@ ip6_map (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	    }
 	  else
 	    {
-	      error1 = MAP_ERROR_BAD_PROTOCOL;
+	      //error1 = MAP_ERROR_BAD_PROTOCOL;
+	      vlib_buffer_advance (p1, -sizeof (ip6_header_t));
+	      vnet_feature_next (&next1, p1);
 	    }
 
 	  if (d0)
@@ -361,7 +388,8 @@ ip6_map (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	      map_add_trace (vm, node, p1, map_domain_index1, port1);
 	    }
 
-	  if (error0 == MAP_ERROR_DECAP_SEC_CHECK && mm->icmp6_enabled)
+	  if (error0 == MAP_ERROR_DECAP_SEC_CHECK &&
+	      ((d0 && d0->icmp6_enabled_valid) ? d0->icmp6_enabled : mm->icmp6_enabled))
 	    {
 	      /* Set ICMP parameters */
 	      vlib_buffer_advance (p0, -sizeof (ip6_header_t));
@@ -375,7 +403,8 @@ ip6_map (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	      next0 = (error0 == MAP_ERROR_NONE) ? next0 : IP6_MAP_NEXT_DROP;
 	    }
 
-	  if (error1 == MAP_ERROR_DECAP_SEC_CHECK && mm->icmp6_enabled)
+	  if (error1 == MAP_ERROR_DECAP_SEC_CHECK &&
+	      ((d1 && d1->icmp6_enabled_valid) ? d1->icmp6_enabled : mm->icmp6_enabled))
 	    {
 	      /* Set ICMP parameters */
 	      vlib_buffer_advance (p1, -sizeof (ip6_header_t));
@@ -390,9 +419,9 @@ ip6_map (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	    }
 
 	  /* Reset packet */
-	  if (next0 == IP6_MAP_NEXT_IP6_LOCAL)
+	  if (next0 == IP6_MAP_NEXT_IP6_LOCAL || next0 == IP6_MAP_NEXT_IP6_ICMP_RELAY)
 	    vlib_buffer_advance (p0, -sizeof (ip6_header_t));
-	  if (next1 == IP6_MAP_NEXT_IP6_LOCAL)
+	  if (next1 == IP6_MAP_NEXT_IP6_LOCAL || next1 == IP6_MAP_NEXT_IP6_ICMP_RELAY)
 	    vlib_buffer_advance (p1, -sizeof (ip6_header_t));
 
 	  p0->error = error_node->errors[error0];
@@ -507,9 +536,8 @@ ip6_map (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	      map_add_trace (vm, node, p0, map_domain_index0, port0);
 	    }
 
-	  if (mm->icmp6_enabled &&
-	      (error0 == MAP_ERROR_DECAP_SEC_CHECK
-	       || error0 == MAP_ERROR_NO_DOMAIN))
+	  if (error0 == MAP_ERROR_DECAP_SEC_CHECK &&
+	      ((d0 && d0->icmp6_enabled_valid) ? d0->icmp6_enabled : mm->icmp6_enabled))
 	    {
 	      /* Set ICMP parameters */
 	      vlib_buffer_advance (p0, -sizeof (ip6_header_t));
@@ -524,7 +552,7 @@ ip6_map (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	    }
 
 	  /* Reset packet */
-	  if (next0 == IP6_MAP_NEXT_IP6_LOCAL)
+	  if (next0 == IP6_MAP_NEXT_IP6_LOCAL || next0 == IP6_MAP_NEXT_IP6_ICMP_RELAY)
 	    vlib_buffer_advance (p0, -sizeof (ip6_header_t));
 
 	  p0->error = error_node->errors[error0];
