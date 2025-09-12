@@ -370,17 +370,25 @@ u32 wg_peer_get_output_interface(wg_peer_t *peer)
         dst_addr_v6.as_u64[1] = peer->dst.addr.ip6.as_u64[1];
         lbi = ip6_fib_table_fwding_lookup (0, &dst_addr_v6);
     }
+
     lb = load_balance_get (lbi);
 
     dpo = load_balance_get_bucket_i (lb, 0);
 
-    //adj = adj_get (dpo->dpoi_index);
+    adj = adj_get (dpo->dpoi_index);
 
-    //if (0 == adj->rewrite_header.sw_if_index)
+    if (dpo->dpoi_next_node != IP_LOOKUP_NEXT_REWRITE &&
+        dpo->dpoi_next_node != IP_LOOKUP_NEXT_GLEAN &&
+        dpo->dpoi_next_node != IP_LOOKUP_NEXT_MIDCHAIN)
     {
         lb = load_balance_get (dpo->dpoi_index);
         dpo = load_balance_get_bucket_i (lb, 0);
         adj = adj_get (dpo->dpoi_index);
+
+        if (0 == adj->rewrite_header.sw_if_index)
+        {
+            return 1;
+        }
     }
     return adj->rewrite_header.sw_if_index;
 }
