@@ -37,6 +37,7 @@
 
 #define LOAD_SYMBOL(s) LOAD_SYMBOL_FROM_PLUGIN_TO("acl_plugin.so", s, s)
 
+#define ACL_BIND_MAX_COUNTER    128
 
 static inline clib_error_t * acl_plugin_exports_init (acl_plugin_methods_t *m)
 {
@@ -682,14 +683,14 @@ linear_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt
 
 typedef struct match_acl{
     u8  acl_match_count;
-    u8  action[64];
-    u64 action_expand_bitmap[64];
-    u8  set_tc_value[64];
-    u32 acl_index[64];
-    u32 rule_index[64];
-    u32 acl_pos[64];
-    u32 curr_match_index[64];
-    u32 policer_index[64];
+    u8  action[ACL_BIND_MAX_COUNTER];
+    u64 action_expand_bitmap[ACL_BIND_MAX_COUNTER];
+    u8  set_tc_value[ACL_BIND_MAX_COUNTER];
+    u32 acl_index[ACL_BIND_MAX_COUNTER];
+    u32 rule_index[ACL_BIND_MAX_COUNTER];
+    u32 acl_pos[ACL_BIND_MAX_COUNTER];
+    u32 curr_match_index[ACL_BIND_MAX_COUNTER];
+    u32 policer_index[ACL_BIND_MAX_COUNTER];
 } match_acl_t;
 
 always_inline int
@@ -716,7 +717,7 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
     {
         if (single_acl_match_5tuple_sai(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap, &expand))
         {
-            if (j > 64)
+            if (j >= ACL_BIND_MAX_COUNTER)
             {
                 break;
             }
@@ -931,6 +932,7 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
     u64 *pkey;
     int mask_type_index, order_index;
     int j = 0;
+    int k = 0;
 
     u32 lc_index = match->pkt.lc_index;
     applied_hash_ace_entry_t **applied_hash_aces = vec_elt_at_index (am->hash_entry_vec_by_lc_index, lc_index);
@@ -977,17 +979,56 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
             applied_hash_ace_entry_t *pae = vec_elt_at_index ((*applied_hash_aces), curr_index);
             collision_match_rule_t *crs = pae->colliding_rules;
             int i;
+            u32 tmp_index = 0;
+            applied_hash_ace_entry_t *tmp_pae = NULL;
+
             for (i = 0; i < vec_len (crs); i++)
             {
                 if (single_rule_match_5tuple (&crs[i].rule, is_ip6, match))
                 {
-                    match_acl_info->curr_match_index[j++] = crs[i].applied_entry_index;
+                    tmp_index = crs[i].applied_entry_index;
+                    tmp_pae = vec_elt_at_index ((*applied_hash_aces), tmp_index);
+
+                    for (j = 0; j < k; j++)
+                    {
+                        if (match_acl_info->acl_index[j] == tmp_pae->acl_index)
+                        {
+                            if (tmp_index < match_acl_info->curr_match_index[j])
+                            {
+                                match_acl_info->rule_index[j] = tmp_pae->ace_index;
+                                match_acl_info->action[j] = tmp_pae->action;
+                                match_acl_info->acl_pos[j] = tmp_pae->acl_position;
+                                match_acl_info->curr_match_index[j] = tmp_index;
+
+                                match_acl_info->action_expand_bitmap[j] = tmp_pae->action_expand_bitmap;
+                                match_acl_info->policer_index[j] = tmp_pae->policer_index;
+                                match_acl_info->set_tc_value[j] = tmp_pae->set_tc_value;
+                            }
+
+                            break;
+                        }
+                    }
+
+                    if (j == k)
+                    {
+                        match_acl_info->acl_index[k] = tmp_pae->acl_index;
+                        match_acl_info->rule_index[k] = tmp_pae->ace_index;
+                        match_acl_info->action[k] = tmp_pae->action;
+                        match_acl_info->acl_pos[k] = tmp_pae->acl_position;
+                        match_acl_info->curr_match_index[k] = tmp_index;
+
+                        match_acl_info->action_expand_bitmap[k] = tmp_pae->action_expand_bitmap;
+                        match_acl_info->policer_index[k] = tmp_pae->policer_index;
+                        match_acl_info->set_tc_value[k] = tmp_pae->set_tc_value;
+                        k++;
+                    }
                 }
             }
         }
     }
 
-    return j;
+    match_acl_info->acl_match_count = k;
+    return k;
 }
 
 always_inline int
@@ -1015,54 +1056,7 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
                        int is_ip6, u32 * trace_bitmap, match_acl_t *match_acl_info)
 {
     acl_main_t *am = p_acl_main;
-    applied_hash_ace_entry_t **applied_hash_aces = vec_elt_at_index(am->hash_entry_vec_by_lc_index, lc_index);
-    u32 match_count = multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
-    u32 acl_match_count = 0;
-
-    for (int i = 0; i < match_count; i++)
-    {
-        int j = 0;
-        u32 match_index = match_acl_info->curr_match_index[i];
-        if (match_index < vec_len((*applied_hash_aces)))
-        {
-            applied_hash_ace_entry_t *pae = vec_elt_at_index((*applied_hash_aces), match_index);
-            for (j = 0; j < acl_match_count; j++)
-            {
-                if (match_acl_info->acl_index[j] == pae->acl_index)
-                {
-                    if (match_index < match_acl_info->curr_match_index[j])
-                    {
-                        match_acl_info->rule_index[j] = pae->ace_index;
-                        match_acl_info->action[j] = pae->action;
-                        match_acl_info->acl_pos[j] = pae->acl_position;
-                        match_acl_info->curr_match_index[j] = match_index;
-
-                        match_acl_info->action_expand_bitmap[j] = pae->action_expand_bitmap;
-                        match_acl_info->policer_index[j] = pae->policer_index;
-                        match_acl_info->set_tc_value[j] = pae->set_tc_value;
-                    }
-
-                    break;
-                }
-            }
-
-            if (j == acl_match_count)
-            {
-                match_acl_info->acl_index[acl_match_count] = pae->acl_index;
-                match_acl_info->rule_index[acl_match_count] = pae->ace_index;
-                match_acl_info->action[acl_match_count] = pae->action;
-                match_acl_info->acl_pos[acl_match_count] = pae->acl_position;
-                match_acl_info->curr_match_index[acl_match_count] = match_index;
-
-                match_acl_info->action_expand_bitmap[j] = pae->action_expand_bitmap;
-                match_acl_info->policer_index[acl_match_count] = pae->policer_index;
-                match_acl_info->set_tc_value[j] = pae->set_tc_value;
-                acl_match_count++;
-            }
-        }
-    }
-
-    match_acl_info->acl_match_count = acl_match_count;
+    multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
 
     return 0;
 }
