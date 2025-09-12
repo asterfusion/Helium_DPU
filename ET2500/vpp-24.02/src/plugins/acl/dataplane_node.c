@@ -418,6 +418,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
   u64 *hash;
   /* for the delayed counters */
   u32 saved_byte_count = 0;
+  match_acl_t match_acl_info;
 
   error_node = vlib_node_get_runtime (vm, node->node_index);
   no_error_existing_session =
@@ -453,7 +454,6 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
       int acl_check_needed = 1;
       u32 match_acl_in_index = ~0;
       u32 match_rule_index = ~0;
-      match_acl_t match_acl_info;
       match_rule_expand_t action_expand;
 
       memset(&match_acl_info, 0, sizeof(match_acl_t));
@@ -576,8 +576,11 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
               
           }
 
-          acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &action, &action_expand);
 		}
+	      if (PREDICT_FALSE(match_acl_info.acl_match_count))
+              {
+                  acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &action, &action_expand);
+              }
 
 	      b[0]->error = error_node->errors[action];
 
