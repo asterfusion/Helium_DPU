@@ -195,6 +195,7 @@ int security_check_enable_disable(u32 sw_if_index,
     switch(security_check_type)
     {
     case SECURITY_CHECK_TYPE_DAI:
+        clib_bitmap_validate(secm->dai_config.enable_by_sw_if_index, sw_if_index);
         feature_enabled = vnet_feature_is_enabled("l2-input-nonip", "dai-check-node", sw_if_index);
         if (feature_enabled && is_enable)
             //already enable
@@ -209,11 +210,13 @@ int security_check_enable_disable(u32 sw_if_index,
         clib_bitmap_set(secm->dai_config.enable_by_sw_if_index, sw_if_index, is_enable);
         vec_foreach(pcounter, secm->dai_config.counter) 
         {
+            vec_validate(pcounter->if_counter, sw_if_index);
             pcounter->if_counter[sw_if_index].pkt = 0;
             pcounter->if_counter[sw_if_index].bytes = 0;
         }
         break;
     case SECURITY_CHECK_TYPE_SAVI:
+        clib_bitmap_validate(secm->savi_config.enable_by_sw_if_index, sw_if_index);
         feature_enabled = vnet_feature_is_enabled("l2-input-ip6", "savi-check-node", sw_if_index);
         if (feature_enabled && is_enable)
             //already enable
@@ -228,11 +231,13 @@ int security_check_enable_disable(u32 sw_if_index,
         clib_bitmap_set(secm->savi_config.enable_by_sw_if_index, sw_if_index, is_enable);
         vec_foreach(pcounter, secm->savi_config.counter) 
         {
+            vec_validate(pcounter->if_counter, sw_if_index);
             pcounter->if_counter[sw_if_index].pkt = 0;
             pcounter->if_counter[sw_if_index].bytes = 0;
         }
         break;
     case SECURITY_CHECK_TYPE_IPSG:
+        clib_bitmap_validate(secm->ipsg_config.enable_by_sw_if_index, sw_if_index);
         feature_enabled = vnet_feature_is_enabled("l2-input-ip4", "ipsg-check-node", sw_if_index);
         if (feature_enabled && is_enable)
             //already enable
@@ -248,11 +253,13 @@ int security_check_enable_disable(u32 sw_if_index,
         clib_bitmap_set(secm->ipsg_config.enable_by_sw_if_index, sw_if_index, is_enable);
         vec_foreach(pcounter, secm->ipsg_config.counter) 
         {
+            vec_validate(pcounter->if_counter, sw_if_index);
             pcounter->if_counter[sw_if_index].pkt = 0;
             pcounter->if_counter[sw_if_index].bytes = 0;
         }
         break;
     case SECURITY_CHECK_TYPE_IPSGV6:
+        clib_bitmap_validate(secm->ipsgv6_config.enable_by_sw_if_index, sw_if_index);
         feature_enabled = vnet_feature_is_enabled("l2-input-ip6", "ipsgv6-check-node", sw_if_index);
         if (feature_enabled && is_enable)
             //already enable
@@ -268,6 +275,7 @@ int security_check_enable_disable(u32 sw_if_index,
         clib_bitmap_set(secm->ipsgv6_config.enable_by_sw_if_index, sw_if_index, is_enable);
         vec_foreach(pcounter, secm->ipsgv6_config.counter) 
         {
+            vec_validate(pcounter->if_counter, sw_if_index);
             pcounter->if_counter[sw_if_index].pkt = 0;
             pcounter->if_counter[sw_if_index].bytes = 0;
         }
@@ -281,6 +289,7 @@ int security_check_enable_disable(u32 sw_if_index,
         switch(security_check_type)
         {
         case SECURITY_CHECK_TYPE_DAI:
+            clib_bitmap_validate(secm->dai_config.enable_by_sw_if_index, foreach_sw_if_index);
             feature_enabled = vnet_feature_is_enabled("l2-input-nonip", "dai-check-node", foreach_sw_if_index);
             if (feature_enabled && is_enable)
                 //already enable
@@ -295,11 +304,13 @@ int security_check_enable_disable(u32 sw_if_index,
             clib_bitmap_set(secm->dai_config.enable_by_sw_if_index, foreach_sw_if_index, is_enable);
             vec_foreach(pcounter, secm->dai_config.counter) 
             {
+                vec_validate(pcounter->if_counter, foreach_sw_if_index);
                 pcounter->if_counter[foreach_sw_if_index].pkt = 0;
                 pcounter->if_counter[foreach_sw_if_index].bytes = 0;
             }
             break;
         case SECURITY_CHECK_TYPE_SAVI:
+            clib_bitmap_validate(secm->savi_config.enable_by_sw_if_index, foreach_sw_if_index);
             feature_enabled = vnet_feature_is_enabled("l2-input-ip6", "savi-check-node", foreach_sw_if_index);
             if (feature_enabled && is_enable)
                 //already enable
@@ -314,11 +325,13 @@ int security_check_enable_disable(u32 sw_if_index,
             clib_bitmap_set(secm->savi_config.enable_by_sw_if_index, foreach_sw_if_index, is_enable);
             vec_foreach(pcounter, secm->savi_config.counter) 
             {
+                vec_validate(pcounter->if_counter, foreach_sw_if_index);
                 pcounter->if_counter[foreach_sw_if_index].pkt = 0;
                 pcounter->if_counter[foreach_sw_if_index].bytes = 0;
             }
             break;
         case SECURITY_CHECK_TYPE_IPSG:
+            clib_bitmap_validate(secm->ipsg_config.enable_by_sw_if_index, foreach_sw_if_index);
             feature_enabled = vnet_feature_is_enabled("l2-input-ip4", "ipsg-check-node", foreach_sw_if_index);
             if (feature_enabled && is_enable)
                 //already enable
@@ -334,11 +347,13 @@ int security_check_enable_disable(u32 sw_if_index,
             clib_bitmap_set(secm->ipsg_config.enable_by_sw_if_index, foreach_sw_if_index, is_enable);
             vec_foreach(pcounter, secm->ipsg_config.counter) 
             {
+                vec_validate(pcounter->if_counter, foreach_sw_if_index);
                 pcounter->if_counter[foreach_sw_if_index].pkt = 0;
                 pcounter->if_counter[foreach_sw_if_index].bytes = 0;
             }
             break;
         case SECURITY_CHECK_TYPE_IPSGV6:
+            clib_bitmap_validate(secm->ipsgv6_config.enable_by_sw_if_index, foreach_sw_if_index);
             feature_enabled = vnet_feature_is_enabled("l2-input-ip6", "ipsgv6-check-node", foreach_sw_if_index);
             if (feature_enabled && is_enable)
                 //already enable
@@ -354,6 +369,7 @@ int security_check_enable_disable(u32 sw_if_index,
             clib_bitmap_set(secm->ipsgv6_config.enable_by_sw_if_index, foreach_sw_if_index, is_enable);
             vec_foreach(pcounter, secm->ipsgv6_config.counter) 
             {
+                vec_validate(pcounter->if_counter, foreach_sw_if_index);
                 pcounter->if_counter[foreach_sw_if_index].pkt = 0;
                 pcounter->if_counter[foreach_sw_if_index].bytes = 0;
             }
@@ -637,6 +653,7 @@ int security_check_ragurad_role(u32 sw_if_index,
     if (!hw)
         return VNET_ERR_INVALID_VALUE;
 
+
     switch(role)
     {
     case RAGUARD_ROLE_NONE:
@@ -763,6 +780,11 @@ security_check_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_
         return 0;
     }
 
+    clib_bitmap_validate(secm->dai_config.enable_by_sw_if_index, sw_if_index);
+    clib_bitmap_validate(secm->savi_config.enable_by_sw_if_index, sw_if_index);
+    clib_bitmap_validate(secm->ipsg_config.enable_by_sw_if_index, sw_if_index);
+    clib_bitmap_validate(secm->ipsgv6_config.enable_by_sw_if_index, sw_if_index);
+    vec_validate(secm->raguard_config.role_by_sw_if_index, sw_if_index);
     if (is_add)
     {
         if (clib_bitmap_get_no_check(secm->dai_config.enable_by_sw_if_index, sup_sw_if_index))
@@ -775,6 +797,7 @@ security_check_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_
 
             vec_foreach(pcounter, secm->dai_config.counter) 
             {
+                vec_validate(pcounter->if_counter, sw_if_index);
                 pcounter->if_counter[sw_if_index].pkt = 0;
                 pcounter->if_counter[sw_if_index].bytes = 0;
             }
@@ -788,6 +811,7 @@ security_check_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_
             clib_bitmap_set(secm->savi_config.enable_by_sw_if_index, sw_if_index, 1);
             vec_foreach(pcounter, secm->savi_config.counter) 
             {
+                vec_validate(pcounter->if_counter, sw_if_index);
                 pcounter->if_counter[sw_if_index].pkt = 0;
                 pcounter->if_counter[sw_if_index].bytes = 0;
             }
@@ -801,6 +825,7 @@ security_check_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_
             clib_bitmap_set(secm->ipsg_config.enable_by_sw_if_index, sw_if_index, 1);
             vec_foreach(pcounter, secm->ipsg_config.counter) 
             {
+                vec_validate(pcounter->if_counter, sw_if_index);
                 pcounter->if_counter[sw_if_index].pkt = 0;
                 pcounter->if_counter[sw_if_index].bytes = 0;
             }
@@ -814,6 +839,7 @@ security_check_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_
             clib_bitmap_set(secm->ipsgv6_config.enable_by_sw_if_index, sw_if_index, 1);
             vec_foreach(pcounter, secm->ipsgv6_config.counter) 
             {
+                vec_validate(pcounter->if_counter, sw_if_index);
                 pcounter->if_counter[sw_if_index].pkt = 0;
                 pcounter->if_counter[sw_if_index].bytes = 0;
             }
@@ -835,7 +861,6 @@ security_check_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_
                                              sw_if_index, 1, 0, 0);
             if (rv) clib_error ("Could not enable raguard-check-node-ip6 on ip6-multicast feature");
 
-            vec_validate(secm->raguard_config.role_by_sw_if_index, sw_if_index);
             secm->raguard_config.role_by_sw_if_index[sw_if_index] = 
                         secm->raguard_config.role_by_sw_if_index[sup_sw_if_index];
         }
@@ -845,24 +870,28 @@ security_check_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_
         clib_bitmap_set(secm->dai_config.enable_by_sw_if_index, sw_if_index, 0);
         vec_foreach(pcounter, secm->dai_config.counter) 
         {
+            vec_validate(pcounter->if_counter, sw_if_index);
             pcounter->if_counter[sw_if_index].pkt = 0;
             pcounter->if_counter[sw_if_index].bytes = 0;
         }
         clib_bitmap_set(secm->savi_config.enable_by_sw_if_index, sw_if_index, 0);
         vec_foreach(pcounter, secm->savi_config.counter) 
         {
+            vec_validate(pcounter->if_counter, sw_if_index);
             pcounter->if_counter[sw_if_index].pkt = 0;
             pcounter->if_counter[sw_if_index].bytes = 0;
         }
         clib_bitmap_set(secm->ipsg_config.enable_by_sw_if_index, sw_if_index, 0);
         vec_foreach(pcounter, secm->ipsg_config.counter) 
         {
+            vec_validate(pcounter->if_counter, sw_if_index);
             pcounter->if_counter[sw_if_index].pkt = 0;
             pcounter->if_counter[sw_if_index].bytes = 0;
         }
         clib_bitmap_set(secm->ipsgv6_config.enable_by_sw_if_index, sw_if_index, 0);
         vec_foreach(pcounter, secm->ipsgv6_config.counter) 
         {
+            vec_validate(pcounter->if_counter, sw_if_index);
             pcounter->if_counter[sw_if_index].pkt = 0;
             pcounter->if_counter[sw_if_index].bytes = 0;
         }
