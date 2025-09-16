@@ -68,7 +68,8 @@ check_verify_l3_dmac_v4(vlib_buffer_t * p, ip4_header_t * ip, u8 *error)
     {
         if (ethernet_address_is_broadcast(e->dst_address))
         {
-            if (!(ip4_address_is_multicast (&ip->dst_address)))
+            if (!(ip4_address_is_multicast (&ip->dst_address)) &&
+                !(ip4_address_is_global_broadcast(&ip->dst_address)))
             {
                 *error = IP4_ERROR_BAD_L3_MAC;
                 return;
