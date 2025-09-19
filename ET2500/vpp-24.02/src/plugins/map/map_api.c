@@ -40,6 +40,11 @@ vl_api_map_add_domain_t_handler (vl_api_map_add_domain_t * mp)
   u32 index;
   u8 flags = 0;
 
+  if (mp->is_map_t)
+  {
+      flags |= MAP_DOMAIN_TRANSLATION;
+  }
+
   mp->tag[ARRAY_LEN (mp->tag) - 1] = '\0';
   rv =
     map_create_domain ((ip4_address_t *) & mp->ip4_prefix.address,
@@ -268,6 +273,56 @@ out:
   vl_api_send_msg (reg, (u8 *) rmp);
 }
 
+static void
+vl_api_map_domain_stats_t_handler (vl_api_map_domain_stats_t * mp)
+{
+  vl_api_map_domain_stats_reply_t *rmp;
+  vlib_counter_t v;
+  u64 rx_pkts = 0;
+  u64 tx_pkts = 0;
+  u64 rx_bytes = 0;
+  u64 tx_bytes = 0;
+  map_main_t *mm = &map_main;
+  u32 map_domain_index = ~0;
+  vl_api_registration_t *reg;
+
+  reg = vl_api_client_index_to_registration (mp->client_index);
+  if (!reg)
+    return;
+
+  rmp = vl_msg_api_alloc (sizeof (*rmp));
+  rmp->_vl_msg_id = htons (VL_API_MAP_DOMAIN_STATS_REPLY + mm->msg_id_base);
+  rmp->context = mp->context;
+  rmp->retval = 0;
+
+  map_domain_index = ntohl(mp->domain_index);
+
+  if (pool_is_free_index (mm->domains, map_domain_index))
+    {
+        rmp->rx_pkts = 0; rmp->tx_pkts = 0;
+        rmp->rx_bytes = 0; rmp->tx_bytes = 0;
+        goto out;
+    }
+
+  map_domain_counter_lock (mm);
+
+  vlib_get_combined_counter (&mm->domain_counters[MAP_DOMAIN_COUNTER_RX], map_domain_index, &v);
+  rx_pkts = v.packets; rx_bytes = v.bytes;
+  vlib_get_combined_counter (&mm->domain_counters[MAP_DOMAIN_COUNTER_TX], map_domain_index, &v);
+  tx_pkts = v.packets; tx_bytes = v.bytes;
+
+  map_domain_counter_unlock (mm);
+
+  /* Note: in network byte order! */
+  rmp->rx_pkts = clib_host_to_net_u64 (rx_pkts);
+  rmp->rx_bytes = clib_host_to_net_u64 (rx_bytes);
+  rmp->tx_pkts = clib_host_to_net_u64 (tx_pkts);
+  rmp->tx_bytes = clib_host_to_net_u64 (tx_bytes);
+
+out:
+  vl_api_send_msg (reg, (u8 *) rmp);
+}
+
 
 int
 map_param_set_fragmentation (bool inner, bool ignore_df)
@@ -291,6 +346,50 @@ static void
   rv = map_param_set_fragmentation (mp->inner, mp->ignore_df);
 
   REPLY_MACRO (VL_API_MAP_PARAM_SET_FRAGMENTATION_REPLY);
+}
+
+int
+map_domain_param_set_fragmentation (u32 domain_index, bool is_clean, bool inner, bool ignore_df)
+{
+  map_main_t *mm = &map_main;
+  map_domain_t *d;
+
+  if (pool_is_free_index (mm->domains, domain_index))
+    {
+      clib_warning ("MAP rule: domain does not exist: %d", domain_index);
+      return 0;
+    }
+
+  d = pool_elt_at_index (mm->domains, domain_index);
+  if (!d)
+    {
+      return 0;
+    }
+
+  if (is_clean)
+    {
+      d->frag_valid = 0;
+    }
+  else
+    {
+      d->frag_valid = 1;
+      d->frag_inner = ! !inner;
+      d->frag_ignore_df = ! !ignore_df;
+    }
+  return 0;
+}
+
+static void
+  vl_api_map_domain_param_set_fragmentation_t_handler
+  (vl_api_map_domain_param_set_fragmentation_t * mp)
+{
+  map_main_t *mm = &map_main;
+  vl_api_map_domain_param_set_fragmentation_reply_t *rmp;
+  int rv = 0;
+
+  rv = map_domain_param_set_fragmentation (ntohl(mp->domain_index), mp->is_clean, mp->inner, mp->ignore_df);
+
+  REPLY_MACRO (VL_API_MAP_DOMAIN_PARAM_SET_FRAGMENTATION_REPLY);
 }
 
 
@@ -320,6 +419,51 @@ vl_api_map_param_set_icmp_t_handler (vl_api_map_param_set_icmp_t * mp)
   REPLY_MACRO (VL_API_MAP_PARAM_SET_ICMP_REPLY);
 }
 
+int
+map_domain_param_set_icmp (u32 domain_index, bool is_clean, ip4_address_t * icmp_src_address)
+{
+  map_main_t *mm = &map_main;
+  map_domain_t *d;
+
+  if (pool_is_free_index (mm->domains, domain_index))
+    {
+      clib_warning ("MAP rule: domain does not exist: %d", domain_index);
+      return 0;
+    }
+
+  d = pool_elt_at_index (mm->domains, domain_index);
+  if (!d)
+    {
+      return 0;
+    }
+
+  if (icmp_src_address == 0)
+    return -1;
+
+  if (is_clean)
+    {
+      d->icmp4_src_address_valid = 0;
+    }
+  else 
+    {
+      d->icmp4_src_address_valid = 1;
+      d->icmp4_src_address = *icmp_src_address;
+    }
+
+  return 0;
+}
+
+static void
+vl_api_map_domain_param_set_icmp_t_handler (vl_api_map_domain_param_set_icmp_t * mp)
+{
+  map_main_t *mm = &map_main;
+  vl_api_map_domain_param_set_icmp_reply_t *rmp;
+  int rv;
+
+  rv = map_domain_param_set_icmp (ntohl(mp->domain_index), mp->is_clean, (ip4_address_t *) & mp->ip4_err_relay_src);
+
+  REPLY_MACRO (VL_API_MAP_DOMAIN_PARAM_SET_ICMP_REPLY);
+}
 
 int
 map_param_set_icmp6 (u8 enable_unreachable)
@@ -343,6 +487,48 @@ vl_api_map_param_set_icmp6_t_handler (vl_api_map_param_set_icmp6_t * mp)
   REPLY_MACRO (VL_API_MAP_PARAM_SET_ICMP6_REPLY);
 }
 
+int
+map_domain_param_set_icmp6 (u32 domain_index, bool is_clean, u8 enable_unreachable)
+{
+  map_main_t *mm = &map_main;
+  map_domain_t *d;
+
+  if (pool_is_free_index (mm->domains, domain_index))
+    {
+      clib_warning ("MAP rule: domain does not exist: %d", domain_index);
+      return 0;
+    }
+
+  d = pool_elt_at_index (mm->domains, domain_index);
+  if (!d)
+    {
+      return 0;
+    }
+
+  if (!d)
+    {
+      d->icmp6_enabled_valid = 0;
+    }
+  else
+    {
+      d->icmp6_enabled_valid = 1;
+      d->icmp6_enabled = ! !enable_unreachable;
+    }
+
+  return 0;
+}
+
+static void
+vl_api_map_domain_param_set_icmp6_t_handler (vl_api_map_domain_param_set_icmp6_t * mp)
+{
+  map_main_t *mm = &map_main;
+  vl_api_map_domain_param_set_icmp6_reply_t *rmp;
+  int rv;
+
+  rv = map_domain_param_set_icmp6 (ntohl(mp->domain_index), mp->is_clean, mp->enable_unreachable);
+
+  REPLY_MACRO (VL_API_MAP_DOMAIN_PARAM_SET_ICMP6_REPLY);
+}
 
 static void
   vl_api_map_param_add_del_pre_resolve_t_handler
@@ -382,6 +568,49 @@ static void
   REPLY_MACRO (VL_API_MAP_PARAM_SET_SECURITY_CHECK_REPLY);
 }
 
+int
+map_domain_param_set_security_check (u32 domain_index, bool is_clean, bool enable, bool fragments)
+{
+  map_main_t *mm = &map_main;
+  map_domain_t *d;
+
+  if (pool_is_free_index (mm->domains, domain_index))
+    {
+      clib_warning ("MAP rule: domain does not exist: %d", domain_index);
+      return 0;
+    }
+
+  d = pool_elt_at_index (mm->domains, domain_index);
+  if (!d)
+    {
+      return 0;
+    }
+  if (is_clean)
+    {
+      d->sec_check_valid = 0;
+    }
+  else
+    {
+      d->sec_check_valid = 1;
+      d->sec_check = ! !enable;
+      d->sec_check_frag = ! !fragments;
+    }
+
+  return 0;
+}
+
+static void
+  vl_api_map_domain_param_set_security_check_t_handler
+  (vl_api_map_domain_param_set_security_check_t * mp)
+{
+  map_main_t *mm = &map_main;
+  vl_api_map_domain_param_set_security_check_reply_t *rmp;
+  int rv;
+
+  rv = map_domain_param_set_security_check (ntohl(mp->domain_index), mp->is_clean, mp->enable, mp->fragments);
+
+  REPLY_MACRO (VL_API_MAP_DOMAIN_PARAM_SET_SECURITY_CHECK_REPLY);
+}
 
 int
 map_param_set_traffic_class (bool copy, u8 tc)
@@ -407,6 +636,119 @@ static void
   REPLY_MACRO (VL_API_MAP_PARAM_SET_TRAFFIC_CLASS_REPLY);
 }
 
+int
+map_domain_param_set_traffic_class (u32 domain_index, bool is_clean, bool copy, u8 tc)
+{
+  map_main_t *mm = &map_main;
+  map_domain_t *d;
+
+  if (pool_is_free_index (mm->domains, domain_index))
+    {
+      clib_warning ("MAP rule: domain does not exist: %d", domain_index);
+      return 0;
+    }
+
+  d = pool_elt_at_index (mm->domains, domain_index);
+  if (!d)
+    {
+      return 0;
+    }
+
+  if (is_clean)
+    {
+      d->tc_valid = 0;
+    }
+  else 
+    {
+      d->tc_valid = 1;
+      d->tc_copy = ! !copy;
+      d->tc = tc;
+    }
+
+  return 0;
+}
+
+static void
+  vl_api_map_domain_param_set_traffic_class_t_handler
+  (vl_api_map_domain_param_set_traffic_class_t * mp)
+{
+  map_main_t *mm = &map_main;
+  vl_api_map_domain_param_set_traffic_class_reply_t *rmp;
+  int rv;
+
+  rv = map_domain_param_set_traffic_class (ntohl(mp->domain_index), mp->is_clean, mp->copy, mp->tc_class);
+
+  REPLY_MACRO (VL_API_MAP_DOMAIN_PARAM_SET_TRAFFIC_CLASS_REPLY);
+}
+
+int
+map_param_set_tos (bool copy, u8 tos)
+{
+  map_main_t *mm = &map_main;
+
+  mm->tos_copy = ! !copy;
+  mm->tos = tos;
+
+  return 0;
+}
+
+static void
+  vl_api_map_param_set_tos_t_handler
+  (vl_api_map_param_set_tos_t * mp)
+{
+  map_main_t *mm = &map_main;
+  vl_api_map_param_set_tos_reply_t *rmp;
+  int rv;
+
+  rv = map_param_set_tos (mp->copy, mp->tos);
+
+  REPLY_MACRO (VL_API_MAP_PARAM_SET_TOS_REPLY);
+}
+
+int
+map_domain_param_set_tos (u32 domain_index, bool is_clean, bool copy, u8 tos)
+{
+  map_main_t *mm = &map_main;
+  map_domain_t *d;
+
+  if (pool_is_free_index (mm->domains, domain_index))
+    {
+      clib_warning ("MAP rule: domain does not exist: %d", domain_index);
+      return 0;
+    }
+
+  d = pool_elt_at_index (mm->domains, domain_index);
+  if (!d)
+    {
+      return 0;
+    }
+
+  if (is_clean)
+    {
+      d->tos_valid = 0;
+    }
+  else
+    {
+      d->tos_valid = 1;
+      d->tos_copy = ! !copy;
+      d->tos = tos;
+    }
+
+  return 0;
+}
+
+static void
+  vl_api_map_domain_param_set_tos_t_handler
+  (vl_api_map_domain_param_set_tos_t * mp)
+{
+  map_main_t *mm = &map_main;
+  vl_api_map_domain_param_set_tos_reply_t *rmp;
+  int rv;
+
+  rv = map_domain_param_set_tos (ntohl(mp->domain_index), mp->is_clean, mp->copy, mp->tos);
+
+  REPLY_MACRO (VL_API_MAP_DOMAIN_PARAM_SET_TOS_REPLY);
+}
 
 int
 map_param_set_tcp (u16 tcp_mss)
@@ -430,6 +772,81 @@ vl_api_map_param_set_tcp_t_handler (vl_api_map_param_set_tcp_t * mp)
   REPLY_MACRO (VL_API_MAP_PARAM_SET_TCP_REPLY);
 }
 
+int
+map_domain_param_set_tcp (u32 domain_index, bool is_clean, u16 tcp_mss)
+{
+  map_main_t *mm = &map_main;
+  map_domain_t *d;
+
+  if (pool_is_free_index (mm->domains, domain_index))
+    {
+      clib_warning ("MAP rule: domain does not exist: %d", domain_index);
+      return 0;
+    }
+
+  d = pool_elt_at_index (mm->domains, domain_index);
+  if (!d)
+    {
+      return 0;
+    }
+
+  if (is_clean)
+    {
+      d->tcp_mss_valid = 0;
+    }
+  else
+    {
+      d->tcp_mss_valid = 1;
+      d->tcp_mss = tcp_mss;
+    }
+
+  return 0;
+}
+
+static void
+vl_api_map_domain_param_set_tcp_t_handler (vl_api_map_domain_param_set_tcp_t * mp)
+{
+  map_main_t *mm = &map_main;
+  vl_api_map_domain_param_set_tcp_reply_t *rmp;
+  int rv = 0;
+
+  map_domain_param_set_tcp (ntohl(mp->domain_index), mp->is_clean, ntohs (mp->tcp_mss));
+  REPLY_MACRO (VL_API_MAP_DOMAIN_PARAM_SET_TCP_REPLY);
+}
+
+int
+map_domain_param_set_mtu (u32 domain_index, u16 mtu)
+{
+  map_main_t *mm = &map_main;
+  map_domain_t *d;
+
+  if (pool_is_free_index (mm->domains, domain_index))
+    {
+      clib_warning ("MAP rule: domain does not exist: %d", domain_index);
+      return 0;
+    }
+
+  d = pool_elt_at_index (mm->domains, domain_index);
+  if (!d)
+    {
+      return 0;
+    }
+
+  d->mtu = mtu;
+
+  return 0;
+}
+
+static void
+vl_api_map_domain_param_set_mtu_t_handler (vl_api_map_domain_param_set_mtu_t * mp)
+{
+  map_main_t *mm = &map_main;
+  vl_api_map_domain_param_set_mtu_reply_t *rmp;
+  int rv = 0;
+
+  map_domain_param_set_mtu (ntohl(mp->domain_index), ntohs (mp->mtu));
+  REPLY_MACRO (VL_API_MAP_DOMAIN_PARAM_SET_MTU_REPLY);
+}
 
 static void
 vl_api_map_param_get_t_handler (vl_api_map_param_get_t * mp)

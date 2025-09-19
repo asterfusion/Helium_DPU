@@ -58,6 +58,7 @@ typedef enum
 //Buffer structure being too small to contain big structures like this.
 /* *INDENT-OFF* */
 typedef CLIB_PACKED (struct {
+  map_domain_t *d;
   ip6_address_t daddr;
   ip6_address_t saddr;
   //IPv6 header + Fragmentation header will be here
@@ -215,6 +216,7 @@ always_inline int
 map_ip4_to_ip6_fragmented (vlib_buffer_t * p,
 			   ip4_mapt_pseudo_header_t * pheader)
 {
+  map_main_t *mm = &map_main;
   ip4_header_t *ip4;
   ip6_header_t *ip6;
   ip6_frag_hdr_t *frag;
@@ -239,8 +241,25 @@ map_ip4_to_ip6_fragmented (vlib_buffer_t * p,
 				  (ip4->flags_and_fragment_offset) &
 				  IP4_HEADER_FLAG_MORE_FRAGMENTS);
 
-  ip6->ip_version_traffic_class_and_flow_label =
-    clib_host_to_net_u32 ((6 << 28) + (ip4->tos << 20));
+  if (pheader->d->tc_valid)
+  {
+      if (pheader->d->tc_copy)
+          ip6->ip_version_traffic_class_and_flow_label =
+              clib_host_to_net_u32 ((6 << 28) + (ip4->tos << 20));
+      else
+          ip6->ip_version_traffic_class_and_flow_label =
+              clib_host_to_net_u32 ((6 << 28) + (pheader->d->tc << 20));
+  }
+  else
+  {
+      if (mm->tc_copy)
+          ip6->ip_version_traffic_class_and_flow_label =
+              clib_host_to_net_u32 ((6 << 28) + (ip4->tos << 20));
+      else
+          ip6->ip_version_traffic_class_and_flow_label =
+              clib_host_to_net_u32 ((6 << 28) + (mm->tc << 20));
+  }
+
   ip6->payload_length =
     clib_host_to_net_u16 (clib_net_to_host_u16 (ip4->length) -
 			  sizeof (*ip4) + sizeof (*frag));
@@ -361,12 +380,25 @@ map_ip4_to_ip6_tcp_udp (vlib_buffer_t * p, ip4_mapt_pseudo_header_t * pheader)
   else
     {
       tcp_header_t *tcp = ip4_next_header (ip4);
-      if (mm->tcp_mss > 0)
-	{
-	  csum = tcp->checksum;
-	  map_mss_clamping (tcp, &csum, mm->tcp_mss);
-	  tcp->checksum = ip_csum_fold (csum);
-	}
+
+      if (pheader->d->tcp_mss_valid)
+      {
+          if (pheader->d->tcp_mss > 0 && tcp_syn (tcp))
+          {
+              csum = tcp->checksum;
+              map_mss_clamping (tcp, &csum, pheader->d->tcp_mss);
+              tcp->checksum = ip_csum_fold (csum);
+          }
+      }
+      else
+      {
+          if (mm->tcp_mss > 0 && tcp_syn (tcp))
+          {
+              csum = tcp->checksum;
+              map_mss_clamping (tcp, &csum, mm->tcp_mss);
+              tcp->checksum = ip_csum_fold (csum);
+          }
+      }
       checksum = &tcp->checksum;
     }
 
@@ -393,8 +425,24 @@ map_ip4_to_ip6_tcp_udp (vlib_buffer_t * p, ip4_mapt_pseudo_header_t * pheader)
       frag = NULL;
     }
 
-  ip6->ip_version_traffic_class_and_flow_label =
-    clib_host_to_net_u32 ((6 << 28) + (ip4->tos << 20));
+  if (pheader->d->tc_valid)
+  {
+      if (pheader->d->tc_copy)
+          ip6->ip_version_traffic_class_and_flow_label =
+              clib_host_to_net_u32 ((6 << 28) + (ip4->tos << 20));
+      else
+          ip6->ip_version_traffic_class_and_flow_label =
+              clib_host_to_net_u32 ((6 << 28) + (pheader->d->tc << 20));
+  }
+  else
+  {
+      if (mm->tc_copy)
+          ip6->ip_version_traffic_class_and_flow_label =
+              clib_host_to_net_u32 ((6 << 28) + (ip4->tos << 20));
+      else
+          ip6->ip_version_traffic_class_and_flow_label =
+              clib_host_to_net_u32 ((6 << 28) + (mm->tc << 20));
+  }
   ip6->payload_length = u16_net_add (ip4->length, -sizeof (*ip4));
   ip6->hop_limit = ip4->ttl;
   ip6->protocol = ip4->protocol;
@@ -617,7 +665,7 @@ ip4_map_t (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	  vnet_buffer (p0)->map_t.mtu = d0->mtu ? d0->mtu : ~0;
 
 	  if (PREDICT_FALSE
-	      (df0 && !map_main.frag_ignore_df
+	      (df0 && !(d0->frag_valid ? d0->frag_ignore_df : map_main.frag_ignore_df)
 	       &&
 	       ((ip4_len0 +
 		 (sizeof (ip6_header_t) - sizeof (ip4_header_t))) >
@@ -655,6 +703,7 @@ ip4_map_t (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	    map_get_pfx_net (d0, ip40->dst_address.as_u32, (u16) dst_port0);
 	  pheader0->daddr.as_u64[1] =
 	    map_get_sfx_net (d0, ip40->dst_address.as_u32, (u16) dst_port0);
+      pheader0->d = d0;
 
 	  if (PREDICT_TRUE
 	      (error0 == MAP_ERROR_NONE && next0 != IP4_MAPT_NEXT_MAPT_ICMP))

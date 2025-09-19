@@ -21,6 +21,7 @@ import "vnet/interface_types.api";
 /** \brief Add MAP domains
     @param client_index - opaque cookie to identify the sender
     @param context - sender context, to match reply w/ request
+    @param is_map_t - If 1 domain base map-t, if 0 domain base map-e
     @param ip6_prefix - Rule IPv6 prefix
     @param ip4_prefix - Rule IPv4 prefix
     @param ip6_src - MAP domain IPv6 BR address / Tunnel source
@@ -34,6 +35,7 @@ autoendian define map_add_domain
 {
   u32 client_index;
   u32 context;
+  bool is_map_t;
   vl_api_ip6_prefix_t ip6_prefix;
   vl_api_ip4_prefix_t ip4_prefix;
   vl_api_ip6_prefix_t ip6_src;
@@ -134,6 +136,7 @@ define map_domain_details
 {
   u32 context;
   u32 domain_index;
+  bool is_map_t;
   vl_api_ip6_prefix_t ip6_prefix;
   vl_api_ip4_prefix_t ip4_prefix;
   vl_api_ip6_prefix_t ip6_src;
@@ -143,6 +146,19 @@ define map_domain_details
   u8 flags;
   u16 mtu;
   string tag[64];
+
+  u8 frag_inner;
+  u8 frag_ignore_df;
+  vl_api_ip4_address_t icmp_ip4_err_relay_src;
+  bool icmp6_enable_unreachable;
+  vl_api_ip4_address_t ip4_nh_address;
+  vl_api_ip6_address_t ip6_nh_address;
+  bool sec_check_enable;
+  bool sec_check_fragments;
+  bool tc_copy;
+  u8 tc_class;
+  bool tos_copy;
+  u8 tos_class;
 };
 
 define map_rule_dump
@@ -204,6 +220,34 @@ define map_summary_stats_reply
   u64 total_security_check[2];
 };
 
+/** \brief Request for a single block of summary stats
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define map_domain_stats
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+};
+
+/** \brief Reply for map_summary_stats request
+    @param context - sender context, to match reply w/ request
+    @param retval - return code for request
+    @param rx_pkts -
+    @param tx_pkts -
+    @param rx_bytes -
+    @param tx_bytes -
+*/
+define map_domain_stats_reply
+{
+  u32 context;
+  i32 retval;
+  u64 rx_pkts;
+  u64 tx_pkts;
+  u64 rx_bytes;
+  u64 tx_bytes;
+};
 
 /** \brief Set MAP fragmentation parameters
     @param client_index - opaque cookie to identify the sender
@@ -215,6 +259,24 @@ autoreply define map_param_set_fragmentation
 {
   u32 client_index;
   u32 context;
+  bool inner;
+  bool ignore_df;
+};
+
+/** \brief Set MAP fragmentation parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param inner - 1=frag inner packet, 0=frag tunnel packets
+    @param ignore_df - 1=IP4 fragment despite DF bit, 0=honor DF
+*/
+autoreply define map_domain_param_set_fragmentation
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
   bool inner;
   bool ignore_df;
 };
@@ -232,6 +294,22 @@ autoreply define map_param_set_icmp
   vl_api_ip4_address_t ip4_err_relay_src;
 };
 
+/** \brief Set MAP ICMP parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param icmp4_err_relay_src - IPv4 ICMP err relay src address
+*/
+autoreply define map_domain_param_set_icmp
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  vl_api_ip4_address_t ip4_err_relay_src;
+};
+
 
 /** \brief Set MAP ICMP6 parameters
     @param client_index - opaque cookie to identify the sender
@@ -245,6 +323,21 @@ autoreply define map_param_set_icmp6
   bool enable_unreachable;
 };
 
+/** \brief Set MAP ICMP6 parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param enable_unreachable - 1 = send ICMP unreachable err msgs
+*/
+autoreply define map_domain_param_set_icmp6
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  bool enable_unreachable;
+};
 
 /** \brief Add/delete MAP pre-resolve IP addresses parameters
     @param client_index - opaque cookie to identify the sender
@@ -276,11 +369,28 @@ autoreply define map_param_set_security_check
   bool fragments;
 };
 
+/** \brief Set MAP security-check parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param enable - 1=enable security check on first inbound packet
+    @param fragments - 1=enable check on (subsequent) fragments too
+*/
+autoreply define map_domain_param_set_security_check
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  bool enable;
+  bool fragments;
+};
 
 /** \brief Set MAP traffic class parameters
     @param client_index - opaque cookie to identify the sender
     @param context - sender context, to match reply w/ request
-    @param copy - 1 = copy packet class/TOS field, 0 = use tc_class instead
+    @param copy - 1 = copy packet class field, 0 = use tc_class instead
     @param tc_class - class field value when copy == 0
 */
 autoreply define map_param_set_traffic_class
@@ -291,6 +401,55 @@ autoreply define map_param_set_traffic_class
   u8 tc_class;
 };
 
+/** \brief Set MAP traffic class parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param copy - 1 = copy packet class field, 0 = use tc_class instead
+    @param tc_class - class field value when copy == 0
+*/
+autoreply define map_domain_param_set_traffic_class
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  bool copy;
+  u8 tc_class;
+};
+
+/** \brief Set MAP tos parameters
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param copy - 1 = copy packet TOS field, 0 = use tc_class instead
+    @param tos - tos field value when copy == 0
+*/
+autoreply define map_param_set_tos
+{
+  u32 client_index;
+  u32 context;
+  bool copy;
+  u8 tos;
+};
+
+/** \brief Set MAP tos parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param copy - 1 = copy packet TOS field, 0 = use tc_class instead
+    @param tos - tos field value when copy == 0
+*/
+autoreply define map_domain_param_set_tos
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  bool copy;
+  u8 tos;
+};
 
 /** \brief Set MAP TCP parameters
     @param client_index - opaque cookie to identify the sender
@@ -304,6 +463,35 @@ autoreply define map_param_set_tcp
   u16 tcp_mss;
 };
 
+/** \brief Set MAP TCP parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param domain_index - MAP Domain index
+    @parma tcp_mss - TCP MSS clamping value
+*/
+autoreply define map_domain_param_set_tcp
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  u16 tcp_mss;
+};
+
+/** \brief Set MAP mtu per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @parma mtu - mtu value
+*/
+autoreply define map_domain_param_set_mtu
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  u16 mtu;
+};
 
 /** \brief Request for a single block of MAP parameters
     @param client_index - opaque cookie to identify the sender
@@ -327,8 +515,10 @@ define map_param_get
     @param ip6_nh_address - direct IP6 next-hop address
     @param sec_check_enable - 1=enable security check on first inbound packet
     @param sec_check_fragments - 1=enable check on (subsequent) fragments too
-    @param tc_copy - 1 = copy packet class/TOS field, 0 = use class instead
+    @param tc_copy - 1 = copy packet class field, 0 = use class instead
     @param tc_class - class field value when copy == 0
+    @param tos_copy - 1 = copy packet TOS field, 0 = use class instead
+    @param tos - TOS field value when copy == 0
 */
 define map_param_get_reply
 {
@@ -348,6 +538,8 @@ define map_param_get_reply
   bool sec_check_fragments;
   bool tc_copy;
   u8 tc_class;
+  bool tos_copy;
+  u8 tos_class;
 };
 
 /*

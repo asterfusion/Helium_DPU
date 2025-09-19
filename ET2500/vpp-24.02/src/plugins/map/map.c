@@ -141,7 +141,7 @@ map_create_domain (ip4_address_t * ip4_prefix,
     }
 
   /* Get domain index */
-  pool_get_aligned (mm->domains, d, CLIB_CACHE_LINE_BYTES);
+  pool_get_aligned (mm->domains, d, CLIB_CACHE_LINE_BYTES * 2);
   clib_memset (d, 0, sizeof (*d));
   *map_domain_index = d - mm->domains;
 
@@ -175,6 +175,9 @@ map_create_domain (ip4_address_t * ip4_prefix,
   /* Really needed? Or always use FIB? */
   mm->ip6_src_prefix_tbl->add (mm->ip6_src_prefix_tbl, &d->ip6_src,
 			       d->ip6_src_len, *map_domain_index);
+
+  mm->ip6_prefix_tbl->add (mm->ip6_prefix_tbl, &d->ip6_prefix,
+			       d->ip6_prefix_len, *map_domain_index);
 
   /* Validate packet/byte counters */
   map_domain_counter_lock (mm);
@@ -218,6 +221,8 @@ map_delete_domain (u32 map_domain_index)
 			      d->ip4_prefix_len);
   mm->ip6_src_prefix_tbl->delete (mm->ip6_src_prefix_tbl, &d->ip6_src,
 				  d->ip6_src_len);
+  mm->ip6_prefix_tbl->delete (mm->ip6_prefix_tbl, &d->ip6_prefix,
+				  d->ip6_prefix_len);
 
   /* Release user-assigned MAP domain name. */
   map_free_extras (map_domain_index);
@@ -500,6 +505,89 @@ done:
   return error;
 }
 
+static clib_error_t *
+map_domain_security_check_command_fn (vlib_main_t * vm,
+			       unformat_input_t * input,
+			       vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  clib_error_t *error = NULL;
+  bool enable = false;
+  bool check_frag = false;
+  bool saw_enable = false;
+  bool saw_frag = false;
+  bool is_clean = false;
+  u32 map_domain_index = ~0;
+
+  /* Get a line of input. */
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (line_input, "index %d", &map_domain_index));
+      else if (unformat (line_input, "enable"))
+	{
+	  enable = true;
+	  saw_enable = true;
+	}
+      else if (unformat (line_input, "disable"))
+	{
+	  enable = false;
+	  saw_enable = true;
+	}
+      else if (unformat (line_input, "fragments on"))
+	{
+	  check_frag = true;
+	  saw_frag = true;
+	}
+      else if (unformat (line_input, "fragments off"))
+	{
+	  check_frag = false;
+	  saw_frag = true;
+	}
+      else if (unformat (line_input, "clean"))
+	{
+	  is_clean = true;
+	}
+      else
+	{
+	  error = clib_error_return (0, "unknown input `%U'",
+				     format_unformat_error, line_input);
+	  goto done;
+	}
+    }
+
+  if (map_domain_index == ~0)
+    {
+        error = clib_error_return (0,
+                "Must specify map domain index");
+        goto done;
+    }
+
+  if (!is_clean)
+    {
+      if (!saw_enable)
+        {
+          error = clib_error_return (0,
+        			 "Must specify enable 'enable' or 'disable'");
+          goto done;
+        }
+
+      if (!saw_frag)
+        {
+          error = clib_error_return (0, "Must specify fragments 'on' or 'off'");
+          goto done;
+        }
+    }
+  map_domain_param_set_security_check (map_domain_index, is_clean, enable, check_frag);
+
+done:
+  unformat_free (line_input);
+
+  return error;
+}
+
 
 static clib_error_t *
 map_add_domain_command_fn (vlib_main_t * vm,
@@ -551,6 +639,8 @@ map_add_domain_command_fn (vlib_main_t * vm,
 	num_m_args++;
       else if (unformat (line_input, "mtu %d", &mtu))
 	num_m_args++;
+      else if (unformat (line_input, "map-t"))
+	flags |= MAP_DOMAIN_TRANSLATION;
       else if (unformat (line_input, "tag %s", &tag))
 	;
       else
@@ -754,6 +844,61 @@ done:
 }
 
 static clib_error_t *
+map_domain_icmp_relay_source_address_command_fn (vlib_main_t * vm,
+					  unformat_input_t * input,
+					  vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  ip4_address_t icmp_src_address;
+  ip4_address_t *p_icmp_addr = 0;
+  map_main_t *mm = &map_main;
+  clib_error_t *error = NULL;
+  bool is_clean = false;
+  u32 map_domain_index = ~0;
+
+  icmp_src_address.as_u32 = 0;
+
+  /* Get a line of input. */
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (line_input, "index %d", &map_domain_index));
+      else if (unformat
+	  (line_input, "%U", unformat_ip4_address, &icmp_src_address))
+	{
+	  mm->icmp4_src_address = icmp_src_address;
+	  p_icmp_addr = &icmp_src_address;
+	}
+      else if (unformat (line_input, "clean"))
+	{
+	  is_clean = true;
+	}
+      else
+	{
+	  error = clib_error_return (0, "unknown input `%U'",
+				     format_unformat_error, line_input);
+	  goto done;
+	}
+    }
+
+  if (map_domain_index == ~0)
+    {
+        error = clib_error_return (0,
+                "Must specify map domain index");
+        goto done;
+    }
+
+  map_domain_param_set_icmp (map_domain_index, is_clean, p_icmp_addr);
+
+done:
+  unformat_free (line_input);
+
+  return error;
+}
+
+static clib_error_t *
 map_icmp_unreachables_command_fn (vlib_main_t * vm,
 				  unformat_input_t * input,
 				  vlib_cli_command_t * cmd)
@@ -795,6 +940,54 @@ done:
   return error;
 }
 
+static clib_error_t *
+map_domain_icmp_unreachables_command_fn (vlib_main_t * vm,
+				  unformat_input_t * input,
+				  vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  int num_m_args = 0;
+  clib_error_t *error = NULL;
+  bool enabled = false;
+  bool is_clean = false;
+  u32 map_domain_index = ~0;
+
+  /* Get a line of input. */
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      num_m_args++;
+      if (unformat (line_input, "index %d", &map_domain_index));
+      else if (unformat (line_input, "on"))
+	enabled = true;
+      else if (unformat (line_input, "off"))
+	enabled = false;
+      else if (unformat (line_input, "clean"))
+	is_clean = true;
+      else
+	{
+	  error = clib_error_return (0, "unknown input `%U'",
+				     format_unformat_error, line_input);
+	  goto done;
+	}
+    }
+
+  if (map_domain_index == ~0)
+    {
+        error = clib_error_return (0,
+                "Must specify map domain index");
+        goto done;
+    }
+
+  map_domain_param_set_icmp6 (map_domain_index, is_clean, enabled);
+
+done:
+  unformat_free (line_input);
+
+  return error;
+}
 
 static clib_error_t *
 map_fragment_command_fn (vlib_main_t * vm,
@@ -862,6 +1055,88 @@ done:
 }
 
 static clib_error_t *
+map_domain_fragment_command_fn (vlib_main_t * vm,
+			 unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  clib_error_t *error = NULL;
+  bool frag_inner = false;
+  bool frag_ignore_df = false;
+  bool saw_in_out = false;
+  bool saw_df = false;
+  u32 map_domain_index = ~0;
+  bool is_clean; 
+
+  /* Get a line of input. */
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (line_input, "index %d", &map_domain_index));
+      else if (unformat (line_input, "inner"))
+	{
+	  frag_inner = true;
+	  saw_in_out = true;
+	}
+      else if (unformat (line_input, "outer"))
+	{
+	  frag_inner = false;
+	  saw_in_out = true;
+	}
+      else if (unformat (line_input, "ignore-df"))
+	{
+	  frag_ignore_df = true;
+	  saw_df = true;
+	}
+      else if (unformat (line_input, "honor-df"))
+	{
+	  frag_ignore_df = false;
+	  saw_df = true;
+	}
+      else if (unformat (line_input, "clean"))
+	{
+	  is_clean = true;
+	}
+      else
+	{
+	  error = clib_error_return (0, "unknown input `%U'",
+				     format_unformat_error, line_input);
+	  goto done;
+	}
+    }
+  if (map_domain_index == ~0)
+    {
+        error = clib_error_return (0,
+                "Must specify map domain index");
+        goto done;
+    }
+
+  if (!is_clean)
+    {
+      if (!saw_in_out)
+        {
+          error = clib_error_return (0, "Must specify 'inner' or 'outer'");
+          goto done;
+        }
+    
+      if (!saw_df)
+        {
+          error = clib_error_return (0, "Must specify 'ignore-df' or 'honor-df'");
+          goto done;
+        }
+    }
+
+  map_domain_param_set_fragmentation (map_domain_index, is_clean, frag_inner, frag_ignore_df);
+
+done:
+  unformat_free (line_input);
+
+  return error;
+}
+
+
+static clib_error_t *
 map_traffic_class_command_fn (vlib_main_t * vm,
 			      unformat_input_t * input,
 			      vlib_cli_command_t * cmd)
@@ -898,11 +1173,158 @@ done:
   return error;
 }
 
+static clib_error_t *
+map_domain_traffic_class_command_fn (vlib_main_t * vm,
+			      unformat_input_t * input,
+			      vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  u32 tc = 0;
+  clib_error_t *error = NULL;
+  bool tc_copy = false;
+  bool is_clean = false;
+  u32 map_domain_index = ~0;
+
+
+  /* Get a line of input. */
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (line_input, "index %d", &map_domain_index));
+      else if (unformat (line_input, "copy"))
+	tc_copy = true;
+      else if (unformat (line_input, "%x", &tc))
+	tc = tc & 0xff;
+      else if (unformat (line_input, "clean"))
+	is_clean = true;
+      else
+	{
+	  error = clib_error_return (0, "unknown input `%U'",
+				     format_unformat_error, line_input);
+	  goto done;
+	}
+    }
+
+  if (map_domain_index == ~0)
+    {
+        error = clib_error_return (0,
+                "Must specify map domain index");
+        goto done;
+    }
+
+  map_domain_param_set_traffic_class (map_domain_index, is_clean, tc_copy, tc);
+
+done:
+  unformat_free (line_input);
+
+  return error;
+}
+
+static clib_error_t *
+map_tos_command_fn (vlib_main_t * vm,
+			      unformat_input_t * input,
+			      vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  u32 tos = 0;
+  clib_error_t *error = NULL;
+  bool tos_copy = false;
+
+
+  /* Get a line of input. */
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (line_input, "copy"))
+	tos_copy = true;
+      else if (unformat (line_input, "%x", &tos))
+	tos = tos & 0xff;
+      else
+	{
+	  error = clib_error_return (0, "unknown input `%U'",
+				     format_unformat_error, line_input);
+	  goto done;
+	}
+    }
+
+  map_param_set_tos (tos_copy, tos);
+
+done:
+  unformat_free (line_input);
+
+  return error;
+}
+
+static clib_error_t *
+map_domain_tos_command_fn (vlib_main_t * vm,
+			      unformat_input_t * input,
+			      vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  u32 tos = 0;
+  clib_error_t *error = NULL;
+  bool tos_copy = false;
+  bool is_clean = false;
+  u32 map_domain_index = ~0;
+
+
+  /* Get a line of input. */
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (line_input, "index %d", &map_domain_index));
+      else if (unformat (line_input, "copy"))
+	tos_copy = true;
+      else if (unformat (line_input, "%x", &tos))
+	tos = tos & 0xff;
+      else if (unformat (line_input, "clean"))
+	is_clean = true;
+      else
+	{
+	  error = clib_error_return (0, "unknown input `%U'",
+				     format_unformat_error, line_input);
+	  goto done;
+	}
+    }
+
+  if (map_domain_index == ~0)
+    {
+        error = clib_error_return (0,
+                "Must specify map domain index");
+        goto done;
+    }
+
+  map_domain_param_set_tos (map_domain_index, is_clean, tos_copy, tos);
+
+done:
+  unformat_free (line_input);
+
+  return error;
+}
+
 static char *
 map_flags_to_string (u32 flags)
 {
-  if (flags & MAP_DOMAIN_PREFIX)
-    return "prefix";
+  if (flags & MAP_DOMAIN_TRANSLATION)
+  {
+      if (flags & MAP_DOMAIN_PREFIX)
+          return "MAP-T : ipv4 prefix";
+      else
+          return "MAP-T : ipv4 exclusive or shared";
+  }
+  else
+  {
+      if (flags & MAP_DOMAIN_PREFIX)
+          return "MAP-E : ipv4 prefix";
+      else
+          return "MAP-E : ipv4 exclusive or shared";
+  }
   return "";
 }
 
@@ -961,6 +1383,44 @@ format_map_domain (u8 * s, va_list * args)
 		      " rule psid: %d ip6-dst %U\n", i, format_ip6_address,
 		      &dst);
 	}
+    }
+
+  //params
+  if (d->tc_valid)
+    {
+        if (d->tc_copy)
+            s = format (s, " Ipv6 Traffic class: copy\n");
+        else
+            s = format (s, " Ipv6 Traffic class: %d\n", d->tc);
+    }
+  if (d->tos_valid)
+    {
+        if (d->tc_copy)
+            s = format (s, " Ipv4 Tos: copy\n");
+        else
+            s = format (s, " Ipv4 Tos: %d\n", d->tos);
+    }
+  if (d->tcp_mss_valid)
+    {
+        s = format (s, " TCP MSS clamping: %d\n", d->tcp_mss);
+    }
+  if (d->frag_valid)
+    {
+        s = format (s, " Fragmentation: %s\n", d->frag_inner ? "Frag Inner" : "Frag tunnel");
+        s = format (s, " Ignore df: %s\n", d->frag_ignore_df ? "True" : "False");
+    }
+  if (d->sec_check_valid)
+    {
+        s = format (s, " security check on first packet: %s\n", d->sec_check ? "True" : "False");
+        s = format (s, " security check on frag packet: %s\n", d->sec_check_frag ? "True" : "False");
+    }
+  if (d->icmp6_enabled_valid)
+    {
+        s = format (s, " send icmpv6 unreachable err msg: %s\n", d->icmp6_enabled ? "True" : "False");
+    }
+  if (d->icmp4_src_address_valid)
+    {
+        s = format (s, " ipv4 icmp err relay src address: %U\n", format_ip4_address, &d->icmp4_src_address);
     }
   return s;
 }
@@ -1087,9 +1547,14 @@ show_map_stats_command_fn (vlib_main_t * vm, unformat_input_t * input,
 #endif
 
   if (mm->tc_copy)
-    vlib_cli_output (vm, "MAP traffic-class: copy");
+    vlib_cli_output (vm, "MAP IPV6 traffic-class: copy");
   else
-    vlib_cli_output (vm, "MAP traffic-class: %x", mm->tc);
+    vlib_cli_output (vm, "MAP IPV6 traffic-class: %x", mm->tc);
+
+  if (mm->tos_copy)
+    vlib_cli_output (vm, "MAP IPV4 Tos: copy");
+  else
+    vlib_cli_output (vm, "MAP IPV4 Tos: %x", mm->tos);
 
   if (mm->tcp_mss)
     vlib_cli_output (vm, "MAP TCP MSS clamping: %u", mm->tcp_mss);
@@ -1254,11 +1719,62 @@ done:
   return error;
 }
 
+static clib_error_t *
+map_domain_tcp_mss_command_fn (vlib_main_t * vm,
+			unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  clib_error_t *error = NULL;
+  u32 tcp_mss = 0;
+  u32 map_domain_index = ~0;
+  bool is_clean = false;
+
+  /* Get a line of input. */
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (line_input, "index %d", &map_domain_index))
+	;
+      else if (unformat (line_input, "%u", &tcp_mss))
+	;
+      else if (unformat (line_input, "clean"))
+	is_clean = true;
+      else
+	{
+	  error = clib_error_return (0, "unknown input `%U'",
+				     format_unformat_error, line_input);
+	  goto done;
+	}
+    }
+
+  if (map_domain_index == ~0)
+    {
+        error = clib_error_return (0,
+                "Must specify map domain index");
+        goto done;
+    }
+
+  if (tcp_mss >= (0x1 << 16))
+    {
+      error = clib_error_return (0, "invalid value `%u'", tcp_mss);
+      goto done;
+    }
+
+  map_domain_param_set_tcp (map_domain_index, is_clean, tcp_mss);
+
+done:
+  unformat_free (line_input);
+
+  return error;
+}
+
 
 /* *INDENT-OFF* */
 
 /*?
- * Set or copy the IP TOS/Traffic Class field
+ * Set or copy the IP Traffic Class field
  *
  * @cliexpar
  * @cliexstart{map params traffic-class}
@@ -1276,6 +1792,60 @@ VLIB_CLI_COMMAND(map_traffic_class_command, static) = {
 };
 
 /*?
+ * Set or copy the IP Traffic Class field per domain
+ *
+ * @cliexpar
+ * @cliexstart{map domain params traffic-class}
+ *
+ * This command is used to set the traffic-class field in translated
+ * or encapsulated packets. If copy is specifed (the default) then the
+ * traffic-class field is copied from the original packet to the
+ * translated / encapsulating header.
+ * @cliexend
+ ?*/
+VLIB_CLI_COMMAND(map_domain_traffic_class_command, static) = {
+  .path = "map domain params traffic-class",
+  .short_help = "map domain params traffic-class index <domain> {0x0-0xff | copy} [clean]",
+  .function = map_domain_traffic_class_command_fn,
+};
+
+/*?
+ * Set or copy the IP TOS field
+ *
+ * @cliexpar
+ * @cliexstart{map params tos}
+ *
+ * This command is used to set the tos field in translated
+ * or encapsulated packets. If copy is specifed (the default) then the
+ * TOS field is copied from the original packet to the
+ * translated / encapsulating header.
+ * @cliexend
+ ?*/
+VLIB_CLI_COMMAND(map_tos_command, static) = {
+  .path = "map params tos",
+  .short_help = "map params tos {0x0-0xff | copy}",
+  .function = map_tos_command_fn,
+};
+
+/*?
+ * Set or copy the IP TOS field per domain
+ *
+ * @cliexpar
+ * @cliexstart{map domain params tos}
+ *
+ * This command is used to set the tos field in translated
+ * or encapsulated packets. If copy is specifed (the default) then the
+ * TOS field is copied from the original packet to the
+ * translated / encapsulating header.
+ * @cliexend
+ ?*/
+VLIB_CLI_COMMAND(map_domain_tos_command, static) = {
+  .path = "map domain params tos",
+  .short_help = "map domain params tos index <domain> {0x0-0xff | copy} [clean]",
+  .function = map_domain_tos_command_fn,
+};
+
+/*?
  * TCP MSS clamping
  *
  * @cliexpar
@@ -1289,6 +1859,22 @@ VLIB_CLI_COMMAND(map_tcp_mss_command, static) = {
   .path = "map params tcp-mss",
   .short_help = "map params tcp-mss <value>",
   .function = map_tcp_mss_command_fn,
+};
+
+/*?
+ * TCP MSS clamping per domain
+ *
+ * @cliexpar
+ * @cliexstart{map domain params tcp-mss}
+ *
+ * This command is used to set the TCP MSS in translated
+ * or encapsulated packets.
+ * @cliexend
+ ?*/
+VLIB_CLI_COMMAND(map_domain_tcp_mss_command, static) = {
+  .path = "map domain params tcp-mss",
+  .short_help = "map domain params tcp-mss index <domain> <value> [clean]",
+  .function = map_domain_tcp_mss_command_fn,
 };
 
 /*?
@@ -1334,6 +1920,29 @@ VLIB_CLI_COMMAND(map_security_check_command, static) = {
 };
 
 /*?
+ * Enable or disable the MAP-E inbound security check per domain
+ * Specify if the inbound security check should be done on fragments
+ *
+ * @cliexpar
+ * @cliexstart{map domain params security-check}
+ *
+ * By default, a decapsulated packet's IPv4 source address will be
+ * verified against the outer header's IPv6 source address. Disabling
+ * this feature will allow IPv4 source address spoofing.
+ *
+ * Typically the inbound on-decapsulation security check is only done
+ * on the first packet. The packet that contains the L4
+ * information. While a security check on every fragment is possible,
+ * it has a cost. State must be created on the first fragment.
+ * @cliexend
+ ?*/
+VLIB_CLI_COMMAND(map_domain_security_check_command, static) = {
+  .path = "map domain params security-check",
+  .short_help = "map domain params security-check index <domain> enable|disable fragments on|off [clean]",
+  .function = map_domain_security_check_command_fn,
+};
+
+/*?
  * Specify the IPv4 source address used for relayed ICMP error messages
  *
  * @cliexpar
@@ -1351,6 +1960,23 @@ VLIB_CLI_COMMAND(map_icmp_relay_source_address_command, static) = {
 };
 
 /*?
+ * Specify the IPv4 source address used for relayed ICMP error messages per domain
+ *
+ * @cliexpar
+ * @cliexstart{map domain params icmp source-address}
+ *
+ * This command specifies which IPv4 source address (must be local to
+ * the system), that is used for relayed received IPv6 ICMP error
+ * messages.
+ * @cliexend
+ ?*/
+VLIB_CLI_COMMAND(map_domain_icmp_relay_source_address_command, static) = {
+  .path = "map domain params icmp source-address",
+  .short_help = "map domain params icmp source-address index <domain> <ip4-address> [clean]",
+  .function = map_domain_icmp_relay_source_address_command_fn,
+};
+
+/*?
  * Send IPv6 ICMP unreachables
  *
  * @cliexpar
@@ -1364,6 +1990,22 @@ VLIB_CLI_COMMAND(map_icmp_unreachables_command, static) = {
   .path = "map params icmp6 unreachables",
   .short_help = "map params icmp6 unreachables {on|off}",
   .function = map_icmp_unreachables_command_fn,
+};
+
+/*?
+ * Send IPv6 ICMP unreachables per domain
+ *
+ * @cliexpar
+ * @cliexstart{map domain params icmp6 unreachables}
+ *
+ * Send IPv6 ICMP unreachable messages back if security check fails or
+ * no MAP domain exists.
+ * @cliexend
+ ?*/
+VLIB_CLI_COMMAND(map_domain_icmp_unreachables_command, static) = {
+  .path = "map domain params icmp6 unreachables",
+  .short_help = "map domain params icmp6 unreachables index <domain> {on|off} [clean]",
+  .function = map_domain_icmp_unreachables_command_fn,
 };
 
 /*?
@@ -1385,6 +2027,24 @@ VLIB_CLI_COMMAND(map_fragment_command, static) = {
   .function = map_fragment_command_fn,
 };
 
+/*?
+ * Configure MAP fragmentation behaviour per domain
+ *
+ * @cliexpar
+ * @cliexstart{map domain params fragment}
+ *
+ * Allows fragmentation of the IPv4 packet even if the DF bit is
+ * set. The choice between inner or outer fragmentation of tunnel
+ * packets is complicated. The benefit of inner fragmentation is that
+ * the ultimate endpoint must reassemble, instead of the tunnel
+ * endpoint.
+ * @cliexend
+ ?*/
+VLIB_CLI_COMMAND(map_domain_fragment_command, static) = {
+  .path = "map domain params fragment",
+  .short_help = "map domain params fragment index <domain> inner|outer ignore-df|honor-df [clean]",
+  .function = map_domain_fragment_command_fn,
+};
 
 /*?
  * Add MAP domain
@@ -1497,6 +2157,8 @@ map_init (vlib_main_t * vm)
   /* traffic class */
   mm->tc = 0;
   mm->tc_copy = true;
+  mm->tos = 0;
+  mm->tos_copy = true;
 
   /* Inbound security check */
   mm->sec_check = true;

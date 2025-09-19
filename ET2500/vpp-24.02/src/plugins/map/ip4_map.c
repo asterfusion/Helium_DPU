@@ -67,10 +67,14 @@ ip4_map_port_and_security_check (map_domain_t * d, vlib_buffer_t * b0,
  * ip4_map_vtcfl
  */
 static_always_inline u32
-ip4_map_vtcfl (ip4_header_t * ip4, vlib_buffer_t * p)
+ip4_map_vtcfl (map_domain_t *d, ip4_header_t * ip4, vlib_buffer_t * p)
 {
   map_main_t *mm = &map_main;
-  u8 tc = mm->tc_copy ? ip4->tos : mm->tc;
+  u8 tc = 0;
+  if (d->tc_valid)
+      tc = d->tc_copy ? ip4->tos : d->tc;
+  else
+      tc = mm->tc_copy ? ip4->tos : mm->tc;
   u32 vtcfl = 0x6 << 28;
   vtcfl |= tc << 20;
   vtcfl |= vnet_buffer (p)->ip.flow_hash & 0x000fffff;
@@ -101,13 +105,16 @@ ip4_map_decrement_ttl (ip4_header_t * ip, u8 * error)
 }
 
 static u32
-ip4_map_fragment (vlib_main_t * vm, u32 bi, u16 mtu, bool df, u32 ** buffers,
+ip4_map_fragment (vlib_main_t * vm, u32 bi, map_domain_t *d, u16 mtu, bool df, u32 ** buffers,
 		  u8 * error)
 {
   map_main_t *mm = &map_main;
   vlib_buffer_t *b = vlib_get_buffer (vm, bi);
 
-  if (mm->frag_inner)
+  bool frag_inner = d->frag_valid ? d->frag_inner : mm->frag_inner;
+  bool frag_ignore_df = d->frag_valid ? d->frag_ignore_df : mm->frag_ignore_df;
+
+  if (frag_inner)
     {
       /* IPv4 fragmented packets inside of IPv6 */
       ip4_frag_do_fragment (vm, bi, mtu, sizeof (ip6_header_t), buffers);
@@ -124,7 +131,7 @@ ip4_map_fragment (vlib_main_t * vm, u32 bi, u16 mtu, bool df, u32 ** buffers,
     }
   else
     {
-      if (df && !mm->frag_ignore_df)
+      if (df && !frag_ignore_df)
 	{
 	  icmp4_error_set_vnet_buffer (b, ICMP4_destination_unreachable,
 				       ICMP4_destination_unreachable_fragmentation_needed_and_dont_fragment_set,
@@ -201,12 +208,26 @@ ip4_map (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	  if (ip40->protocol == IP_PROTOCOL_TCP)
 	    {
 	      tcp_header_t *tcp = ip4_next_header (ip40);
-	      if (mm->tcp_mss > 0 && tcp_syn (tcp))
-		{
-		  ip_csum_t csum = tcp->checksum;
-		  map_mss_clamping (tcp, &csum, mm->tcp_mss);
-		  tcp->checksum = ip_csum_fold (csum);
-		}
+
+          if (d0->tcp_mss_valid)
+          {
+              if (d0->tcp_mss > 0 && tcp_syn (tcp))
+              {
+                  ip_csum_t csum = tcp->checksum;
+                  map_mss_clamping (tcp, &csum, d0->tcp_mss);
+                  tcp->checksum = ip_csum_fold (csum);
+              }
+
+          }
+          else
+          {
+              if (mm->tcp_mss > 0 && tcp_syn (tcp))
+              {
+                  ip_csum_t csum = tcp->checksum;
+                  map_mss_clamping (tcp, &csum, mm->tcp_mss);
+                  tcp->checksum = ip_csum_fold (csum);
+              }
+          }
 	    }
 
 	  /* Decrement IPv4 TTL */
@@ -229,7 +250,7 @@ ip4_map (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	  vnet_buffer (p0)->sw_if_index[VLIB_TX] = (u32) ~ 0;
 
 	  ip6h0->ip_version_traffic_class_and_flow_label =
-	    ip4_map_vtcfl (ip40, p0);
+	    ip4_map_vtcfl (d0, ip40, p0);
 	  ip6h0->payload_length = ip40->length;
 	  ip6h0->protocol = IP_PROTOCOL_IP_IN_IP;
 	  ip6h0->hop_limit = 0x40;
@@ -249,7 +270,7 @@ ip4_map (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 		       sizeof (*ip6h0) > d0->mtu)))
 		{
 		  next0 =
-		    ip4_map_fragment (vm, pi0, d0->mtu, df0, &buffer0,
+		    ip4_map_fragment (vm, pi0, d0, d0->mtu, df0, &buffer0,
 				      &error0);
 
 		  if (error0 == MAP_ERROR_NONE)
