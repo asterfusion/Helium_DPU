@@ -640,7 +640,7 @@ ip4_map_t (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 				   &vnet_buffer (p0)->map_t.map_domain_index,
 				   &error0);
 
-	  if (!d0)
+	  if (!d0 || !(d0->flags & MAP_DOMAIN_TRANSLATION))
 	    {			/* Guess it wasn't for us */
 	      vnet_feature_next (&next0, p0);
 	      goto exit;
