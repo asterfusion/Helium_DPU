@@ -114,8 +114,22 @@ ip4_map_fragment (vlib_main_t * vm, u32 bi, map_domain_t *d, u16 mtu, bool df, u
   bool frag_inner = d->frag_valid ? d->frag_inner : mm->frag_inner;
   bool frag_ignore_df = d->frag_valid ? d->frag_ignore_df : mm->frag_ignore_df;
 
+  if (df && !frag_ignore_df)
+    {
+      icmp4_error_set_vnet_buffer (b, ICMP4_destination_unreachable,
+              ICMP4_destination_unreachable_fragmentation_needed_and_dont_fragment_set,
+              mtu);
+      vlib_buffer_advance (b, sizeof (ip6_header_t));
+      *error = MAP_ERROR_DF_SET;
+      return (IP4_MAP_NEXT_ICMP_ERROR);
+    }
+
   if (frag_inner)
     {
+      if (frag_ignore_df)
+	{
+	  ip4_header_clear_df((ip4_header_t *)(vlib_buffer_get_current(b) + sizeof(ip6_header_t)));
+	}
       /* IPv4 fragmented packets inside of IPv6 */
       ip4_frag_do_fragment (vm, bi, mtu, sizeof (ip6_header_t), buffers);
 
@@ -131,16 +145,6 @@ ip4_map_fragment (vlib_main_t * vm, u32 bi, map_domain_t *d, u16 mtu, bool df, u
     }
   else
     {
-      if (df && !frag_ignore_df)
-	{
-	  icmp4_error_set_vnet_buffer (b, ICMP4_destination_unreachable,
-				       ICMP4_destination_unreachable_fragmentation_needed_and_dont_fragment_set,
-				       mtu);
-	  vlib_buffer_advance (b, sizeof (ip6_header_t));
-	  *error = MAP_ERROR_DF_SET;
-	  return (IP4_MAP_NEXT_ICMP_ERROR);
-	}
-
       /* Create IPv6 fragments here */
       ip6_frag_do_fragment (vm, bi, mtu, 0, buffers);
     }
