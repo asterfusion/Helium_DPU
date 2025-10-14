@@ -2489,6 +2489,56 @@ VLIB_CLI_COMMAND (show_dns_cache_command) =
 /* *INDENT-ON* */
 
 static clib_error_t *
+dns_enable_command_fn (vlib_main_t * vm,
+			   unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  dns_main_t *dm = &dns_main;
+
+
+
+  dns_enable_disable(vm,dm,1);
+
+
+  return 0;
+}
+
+/* *INDENT-OFF* */
+VLIB_CLI_COMMAND (dns_enable_command) =
+{
+  .path = "dns enable",
+  .short_help = "dns enable",
+  .function = dns_enable_command_fn,
+};
+
+static clib_error_t *
+dns_sever_add_command_fn(vlib_main_t *vm,
+                         unformat_input_t *input, vlib_cli_command_t *cmd)
+{
+  dns_main_t *dm = &dns_main;
+  ip4_address_t ip4;
+  if (unformat(input, "%U", unformat_ip4_address, &ip4))
+  {
+
+    /* Already there? done... */
+
+
+    vec_add2(dm->ip4_name_servers, ip4, 1);
+  }
+
+return 0;
+}
+
+
+/* *INDENT-OFF* */
+VLIB_CLI_COMMAND (dns_sever_add_command) =
+{
+  .path = "dns server add ",
+  .short_help = "dns server add ",
+  .function = dns_sever_add_command_fn,
+};
+/* *INDENT-ON* */
+
+static clib_error_t *
 show_dns_servers_command_fn (vlib_main_t * vm,
 			     unformat_input_t * input,
 			     vlib_cli_command_t * cmd)
@@ -3229,6 +3279,61 @@ vnet_send_dns4_reply (vlib_main_t * vm, dns_main_t * dm,
       vlib_put_frame_to_node (vm, ip4_lookup_node.index, f);
     }
 }
+
+
+__clib_export u8
+dns_query_domain_name (u8  * domain,dns_resolve_name_t **rn)
+{
+  dns_main_t *dm = &dns_main;
+
+  dns_cache_entry_t *ep = 0;
+  dns_pending_request_t _t0 = { 0 }, *t0 = &_t0;
+  int rv;
+ dns_resolve_name_t *rn2 = NULL;
+  dns_resolve_name_t *_rn;
+
+
+ 
+  if(dm->is_enabled ==0)
+  {
+    return 0;
+  }
+  t0->request_type = DNS_API_PENDING_NAME_TO_IP;
+  t0->client_index = 0;
+  t0->client_context = 0;
+  t0->qp_type = DNS_TYPE_A;
+  rv = dns_resolve_name_ex (domain, &ep, t0, &rn2);
+           for(int i=0; i< vec_len(rn2); i++)
+           {
+              _rn = &rn2[i];
+              u8 *ip_str = format(0, "%U", format_ip4_address, &_rn->address.ip.ip4);
+              vec_free(ip_str); 
+            
+           }
+           
+  /* Error, e.g. not enabled? Tell the user */
+  if (rv < 0)
+    {
+      clib_warning ("dns_resolve_name_ex returned %d", rv);
+      return 0;
+    }
+
+  /* Resolution pending? Don't reply... */
+  if (ep == 0 || rn2 == NULL || vec_len(rn2) == 0)
+  {
+ 
+    return 0;
+  }
+  *rn= rn2;
+
+ 
+
+
+	
+  /* *INDENT-ON* */
+  return 1;
+}
+
 
 #include <dns/dns.api.c>
 static clib_error_t *

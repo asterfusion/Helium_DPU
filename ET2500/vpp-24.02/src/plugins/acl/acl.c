@@ -31,6 +31,8 @@
 
 #include <vlibapi/api.h>
 #include <vlibmemory/api.h>
+#include <plugins/geosite/geosite.h>
+#include <plugins/dns/dns.h>
 
 /* define message IDs */
 #include <acl/acl.api_enum.h>
@@ -59,11 +61,28 @@ acl_main_t acl_main;
 VLIB_PLUGIN_REGISTER () = {
     .version = VPP_BUILD_VER,
     .description = "Access Control Lists (ACL)",
+   
 };
 /* *INDENT-ON* */
 
 /* methods exported from ACL-as-a-service */
 static acl_plugin_methods_t acl_plugin;
+
+void *geosite_get_index_by_country_code_ptr;
+void *geosite_country_index_get_code_ptr;
+
+
+void *geoip_get_index_by_country_code_ptr;
+void *geoip_country_index_get_code_ptr;
+
+
+ void *geosite_get_country_index_by_domain_ptr;
+
+ void *dns_query_domain_ptr;
+ void *get_domain_by_index_ptr;
+ void *geoip_get_country_code_by_ip4_ptr;
+ void *geoip_get_country_code_by_ip6_ptr;
+//  void *cc_get_ptr;
 
 /* Format vec16. */
 u8 *
@@ -172,6 +191,14 @@ acl_print_acl_x (acl_vector_print_func_t vpr, vlib_main_t * vm,
       out0 = format (out0, "  %9d: %s ", j, r->is_ipv6 ? "ipv6" : "ipv4");
       out0 = format_acl_action (out0, r->is_permit);
       out0 = format (out0, " src_sw_if_index %u ", r->src_sw_if_index);
+      //("r->geosite_cc_index =%d",r->geosite_cc_index);
+      if(r->geosite_cc_index!=0){
+      out0 = format (out0, " geosite %s ", ((__typeof__ (geosite_get_country_code_by_index) *)geosite_country_index_get_code_ptr) (r->geosite_cc_index));
+      }
+       //clib_warning("r->geoip_cc_index =%d",r->geoip_cc_index);
+      if(r->geoip_cc_index!=0){
+      out0 = format (out0, " geoip %s ", ((__typeof__ (geoip_get_country_code_by_index) *)geoip_country_index_get_code_ptr) (r->geoip_cc_index));
+      }
       out0 = format (out0, " smac %02x:%02x:%02x:%02x:%02x:%02x ",
         r->src_mac[0], r->src_mac[1], r->src_mac[2], r->src_mac[3], r->src_mac[4], r->src_mac[5]);
       out0 = format (out0, " dmac %02x:%02x:%02x:%02x:%02x:%02x ",
@@ -579,6 +606,16 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       r->tcp_flags_mask = rules[i].tcp_flags_mask;
       r->rule_id = rules[i].rule_id;
       r->src_sw_if_index = ntohl(rules[i].src_sw_if_index);
+      //r->geosite_cc_index = 0;
+      if(rules[i].geosite_country_code[0] != '\0'){
+        r->geosite_cc_index = ((__typeof__ (geosite_get_index_by_country_code) *)geosite_get_index_by_country_code_ptr)((char*)rules[i].geosite_country_code);
+       // clib_warning("country_code %s geosite_cc_index %d,length =%d", (char*)rules[i].geosite_country_code, r->geosite_cc_index,strlen((char*)rules[i].geosite_country_code));
+      }
+     // r->geoip_cc_index = 0;
+      if(rules[i].geoip_country_code[0] != '\0'){  
+        r->geoip_cc_index = ((__typeof__ (geoip_get_index_by_country_code) *)geoip_get_index_by_country_code_ptr)((char*)rules[i].geoip_country_code);
+       // clib_warning("country_code %s geoip_cc_index %d,length =%d", (char*)rules[i].geoip_country_code, r->geoip_cc_index,strlen((char*)rules[i].geoip_country_code));
+      }
 
       r->action_expand_bitmap = rules[i].action_expand_bitmap;
       r->policer_index = ntohl(rules[i].policer_index);
@@ -3148,6 +3185,9 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
   u8  set_tc_value;
   ip_prefix_t src, dst;
   u32 src_sw_if_index = 0;
+  
+  u8 *geosite_country_code;
+  u8 *geoip_country_code;
   u8 *tag = 0;
 
   if (!unformat_user (input, unformat_line_input, line_input))
@@ -3259,6 +3299,33 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
 	  vec_validate_acl_rules (rules, rule_idx);
       rules[rule_idx].src_sw_if_index = htonl(src_sw_if_index);
     }
+    else if (unformat (line_input, "geosite %s", &geosite_country_code))
+    {
+	    vec_validate_acl_rules (rules, rule_idx);
+     if (_vec_len(geosite_country_code) < sizeof(rules[rule_idx].geosite_country_code)) {
+       
+        memcpy(rules[rule_idx].geosite_country_code, geosite_country_code, _vec_len(geosite_country_code));
+       
+        rules[rule_idx].geosite_country_code[_vec_len(geosite_country_code)] = '\0';
+      
+      } 
+      vec_free(geosite_country_code);
+      
+    }
+       else if (unformat (line_input, "geoip %s", &geoip_country_code))
+    {
+	    vec_validate_acl_rules (rules, rule_idx);
+     if (_vec_len(geoip_country_code) < sizeof(rules[rule_idx].geoip_country_code)) {
+       
+        memcpy(rules[rule_idx].geoip_country_code, geoip_country_code, _vec_len(geoip_country_code));
+       
+        rules[rule_idx].geoip_country_code[_vec_len(geoip_country_code)] = '\0';
+       
+      } 
+      vec_free(geoip_country_code);
+      
+    }
+
       else if (unformat (line_input, "tag %s", &tag))
 	{
 	}
@@ -3938,7 +4005,7 @@ VLIB_CLI_COMMAND (aclplugin_set_acl_command, static) = {
   .short_help =
     "set acl-plugin acl [index <idx>] <permit|deny|permit+reflect> src "
     "<PREFIX> dst <PREFIX> [proto X] [sport X[-Y]] [dport X[-Y]] [tcpflags "
-    "<int> mask <int>] [src_sw_if_index <idx>] [tag FOO] {use comma separated list for multiple "
+    "<int> mask <int>] [src_sw_if_index <idx>] [geosite <name>][geoip <name>][tag FOO] {use comma separated list for multiple "
     "rules}",
   .function = acl_set_aclplugin_acl_fn,
 };
@@ -4130,6 +4197,68 @@ acl_init (vlib_main_t * vm)
   am->acl_counter_lock = clib_mem_alloc_aligned (CLIB_CACHE_LINE_BYTES,
 						 CLIB_CACHE_LINE_BYTES);
   am->acl_counter_lock[0] = 0;	/* should be no need */
+
+
+    geosite_get_index_by_country_code_ptr = 
+    vlib_get_plugin_symbol ("geosite_plugin.so", "geosite_get_index_by_country_code");
+  if(geosite_get_index_by_country_code_ptr == NULL)
+  {
+      return clib_error_return (0, "geosite_plugins5.so is not loaded");
+  }
+
+      geosite_country_index_get_code_ptr = 
+    vlib_get_plugin_symbol ("geosite_plugin.so", "geosite_get_country_code_by_index");
+  if(geosite_country_index_get_code_ptr == NULL)
+  {
+      return clib_error_return (0, "geosite_plugins3.so is not loaded");
+  }
+
+      geoip_get_index_by_country_code_ptr = 
+    vlib_get_plugin_symbol ("geosite_plugin.so", "geoip_get_index_by_country_code");
+  if(geoip_get_index_by_country_code_ptr == NULL)
+  {
+      return clib_error_return (0, "geosite_plugins5.so is not loaded");
+  }
+
+      geoip_country_index_get_code_ptr = 
+    vlib_get_plugin_symbol ("geosite_plugin.so", "geoip_get_country_code_by_index");
+  if(geoip_country_index_get_code_ptr == NULL)
+  {
+      return clib_error_return (0, "geosite_plugins3.so is not loaded");
+  }
+
+
+
+      geosite_get_country_index_by_domain_ptr = 
+    vlib_get_plugin_symbol ("geosite_plugin.so", "geosite_get_country_index_by_domain");
+  if(geosite_get_country_index_by_domain_ptr == NULL)
+  {
+      return clib_error_return (0, "geosite_plugins2.so is not loaded");
+  }
+
+
+
+    dns_query_domain_ptr = 
+   vlib_get_plugin_symbol ("dns_plugin.so", "dns_query_domain_name");
+  if(dns_query_domain_ptr == NULL)
+  {
+      return clib_error_return (0, "dns_plugin8.so is not loaded");
+  }
+
+  geoip_get_country_code_by_ip4_ptr = 
+   vlib_get_plugin_symbol ("geosite_plugin.so", "geoip_get_country_code_by_ip4");
+  if(geoip_get_country_code_by_ip4_ptr == NULL)
+  {
+      return clib_error_return (0, "geosite_plugin7.so is not loaded");
+  }
+
+    geoip_get_country_code_by_ip6_ptr = 
+   vlib_get_plugin_symbol ("geosite_plugin.so", "geoip_get_country_code_by_ip6");
+  if(geoip_get_country_code_by_ip6_ptr == NULL)
+  {
+      return clib_error_return (0, "geosite_plugin6.so is not loaded");
+  }
+
 
   clib_bihash_init_8_8 (&am->acl_index_bd_id_hash,
 			     "ACL plugin acl_index and bd_id bihash",

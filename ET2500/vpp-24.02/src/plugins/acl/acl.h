@@ -399,5 +399,23 @@ typedef enum {
 void aclp_post_session_change_request(acl_main_t *am, u32 target_thread, u32 target_session, acl_fa_sess_req_t request_type);
 void aclp_swap_wip_and_pending_session_change_requests(acl_main_t *am, u32 target_thread);
 
+#define GEOSITE_FIND_CC_CODE (1 << 0)
+#define GEOSITE_DNS_FIND_CC_CODE (1 << 1)
+#define GEOIP_FIND_CC_CODE (1 << 2)
+#define GEO_CFG 0XFFFF
+
+extern void *geosite_get_index_by_country_code_ptr;
+extern void *geosite_country_index_get_code_ptr;
+
+
+extern void *geoip_get_index_by_country_code_ptr;
+extern void *geoip_country_index_get_code_ptr;
+
+extern void *geosite_get_country_index_by_domain_ptr;
+// extern void *cc_get_ptr;
+extern void *dns_query_domain_ptr;
+extern void *get_domain_by_index_ptr;
+extern void *geoip_get_country_code_by_ip4_ptr;
+extern void *geoip_get_country_code_by_ip6_ptr;
 #endif
 

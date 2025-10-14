@@ -35,6 +35,8 @@
 #include <vppinfra/bihash_64_8.h>
 #include <vppinfra/bihash_8_8.h>
 #include <vppinfra/bihash_template.h>
+#include <plugins/geosite/geosite.h>
+#include <plugins/dns/dns.h>
 //#include <vppinfra/bihash_template.c>
 
 typedef struct
@@ -328,7 +330,7 @@ acl_fa_node_common_prepare_fn (vlib_main_t * vm,
 
 always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, u32 *rule_index, u8 *action, match_rule_expand_t *action_expand)
 {
-    for (int i = 0; i < match_acl_info->acl_match_count; i++)
+  for (int i = 0; i < match_acl_info->acl_match_count; i++)
     {
         if (ACL_ACTION_DENY == match_acl_info->action[i])
         {
@@ -363,7 +365,101 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
     }
 
     return;
-}   
+}
+
+always_inline u8
+acl_get_country_index_by_domain(vlib_buffer_t **b, u32 **cc_indices, u32 **dns_cc_indices, int is_ipv6)
+{
+  u8 result = 0;
+
+
+
+    if(vnet_buffer2(b[0])->geosite_domain_ptr == NULL){
+    return result;
+ 
+  }
+
+  char *domain_name;
+  domain_name =  vnet_buffer2(b[0])->geosite_domain_ptr;
+  *cc_indices = ((__typeof__(geosite_get_country_index_by_domain) *)geosite_get_country_index_by_domain_ptr)(domain_name);
+  if (*cc_indices)
+  {
+    result |= GEOSITE_FIND_CC_CODE;
+  }
+
+
+
+
+  dns_resolve_name_t *rn=NULL;
+
+  u8 rv = ((__typeof__(dns_query_domain_name) *)dns_query_domain_ptr)((u8 *)domain_name, &rn);
+  if (rv)
+  {
+    for (int i = 0; i < vec_len(rn); i++)
+    {
+      dns_resolve_name_t *_rn = &rn[i];
+      u8 *ip_str = format(0, "%U", format_ip4_address, &_rn->address.ip.ip4);
+      vec_free(ip_str);
+      u32 *cc_indices_tmp;
+      if (is_ipv6)
+      {
+        cc_indices_tmp = ((__typeof__(geoip_get_country_code_by_ip6) *)geoip_get_country_code_by_ip6_ptr)(_rn->address.ip.ip6);
+      }
+      else
+      {
+        cc_indices_tmp = ((__typeof__(geoip_get_country_code_by_ip4) *)geoip_get_country_code_by_ip4_ptr)(_rn->address.ip.ip4);
+      }
+      if (cc_indices_tmp)
+      {
+      
+        u32 *tmp_ptr;
+        vec_foreach(tmp_ptr, cc_indices_tmp)
+        {
+          vec_add1(*dns_cc_indices, *tmp_ptr);
+        }
+        vec_free(cc_indices_tmp);
+      }
+    }
+    vec_free(rn);
+    if (*dns_cc_indices)
+    {
+      result |= GEOSITE_DNS_FIND_CC_CODE;
+    }
+  }
+
+  return result;
+}
+
+always_inline u8
+acl_get_country_index_by_dip4(vlib_buffer_t **b, u32 **cc_indices, ip4_address_t ip4)
+{
+  u8 result = 0;
+  u8 *ip_str = format(0, "%U", format_ip4_address, &ip4);
+  vec_free(ip_str);
+  *cc_indices = ((__typeof__(geoip_get_country_code_by_ip4) *)geoip_get_country_code_by_ip4_ptr)(ip4);
+  if (*cc_indices)
+  {
+    result |= GEOIP_FIND_CC_CODE;
+  }
+  return result;
+}
+
+
+always_inline u8
+acl_get_country_index_by_dip6(vlib_buffer_t **b, u32 **cc_indices, ip6_address_t ip6)
+{
+  u8 result = 0;
+  u8 *ip_str = format(0, "%U", format_ip6_address, &ip6);
+  vec_free(ip_str);
+  *cc_indices = ((__typeof__(geoip_get_country_code_by_ip6) *)geoip_get_country_code_by_ip6_ptr)(ip6);
+  if (*cc_indices)
+  {
+    result |= GEOIP_FIND_CC_CODE;
+  }
+  return result;
+}
+
+
 
 always_inline void 
 acl_action_expand_proc(vlib_main_t *vm, vlib_buffer_t *b, u16 *next, const match_rule_expand_t *action_expand)
@@ -418,6 +514,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
   u64 *hash;
   /* for the delayed counters */
   u32 saved_byte_count = 0;
+  match_acl_t match_acl_info;
 
   error_node = vlib_node_get_runtime (vm, node->node_index);
   no_error_existing_session =
@@ -453,14 +550,28 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
       int acl_check_needed = 1;
       u32 match_acl_in_index = ~0;
       u32 match_rule_index = ~0;
-      match_acl_t match_acl_info;
       match_rule_expand_t action_expand;
-
+      
+      u32 *cc_indices = NULL;
+      u32 *dns_cc_indices = NULL;
+      u8 get_cc_code =0;
       memset(&match_acl_info, 0, sizeof(match_acl_t));
       memset(&action_expand, 0, sizeof(match_rule_expand_t));
 
       next[0] = 0;		/* drop by default */
+   
+      if(b[0]->flags & VLIB_BUFFER_DOMAIN_VALID )
+      {
 
+         get_cc_code =acl_get_country_index_by_domain(&b[0],&cc_indices,&dns_cc_indices,is_ip6);
+
+      }else{
+       if(is_ip6)
+        get_cc_code =acl_get_country_index_by_dip6(&b[0],&cc_indices, fa_5tuple->ip6_addr[1]);
+      else
+        get_cc_code =acl_get_country_index_by_dip4(&b[0],&cc_indices, fa_5tuple->ip4_addr[1]);
+      }
+      //clib_warning("get_cc_code=%d", get_cc_code);
       /* Try to match an existing session first */
 
       if (with_stateful_datapath)
@@ -549,7 +660,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 	      acl_plugin_match_5tuple_inline_sai (am, lc_index0,
 							     (fa_5tuple_opaque_t *) & fa_5tuple[0], is_ip6,
 							     &trace_bitmap,
-							     &match_acl_info);
+							     &match_acl_info,get_cc_code,cc_indices,dns_cc_indices);
 	      if (PREDICT_FALSE
 		  (match_acl_info.acl_match_count && am->interface_acl_counters_enabled))
 		{
@@ -576,8 +687,11 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
               
           }
 
-          acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &action, &action_expand);
 		}
+	      if (PREDICT_FALSE(match_acl_info.acl_match_count))
+              {
+                  acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &action, &action_expand);
+              }
 
 	      b[0]->error = error_node->errors[action];
 

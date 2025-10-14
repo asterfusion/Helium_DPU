@@ -319,6 +319,21 @@ interface_rx_dpo_inline (vlib_main_t * vm,
                 tr1 = vlib_add_trace (vm, node, b1, sizeof (*tr1));
                 tr1->sw_if_index = ido1->ido_sw_if_index;
             }
+            if (b0->flags &VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL)
+            {
+                clib_mem_free(vnet_buffer2(b0)->geosite_domain_ptr);
+                b0->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
+                vnet_buffer2(b0)->geosite_domain_ptr = NULL;
+            }
+            if (b1->flags &VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b1)->geosite_domain_ptr != NULL)
+            {
+                clib_mem_free(vnet_buffer2(b1)->geosite_domain_ptr);
+                b1->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
+                vnet_buffer2(b1)->geosite_domain_ptr = NULL;
+            }
+
+
+
         }
 
         while (n_left_from > 0 && n_left_to_next > 0)
@@ -361,6 +376,12 @@ interface_rx_dpo_inline (vlib_main_t * vm,
 
                 tr = vlib_add_trace (vm, node, b0, sizeof (*tr));
                 tr->sw_if_index = ido0->ido_sw_if_index;
+            }
+            if (b0->flags &VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL)
+            {
+                clib_mem_free(vnet_buffer2(b0)->geosite_domain_ptr);
+                b0->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
+                vnet_buffer2(b0)->geosite_domain_ptr = NULL;
             }
         }
         vlib_put_next_frame (vm, node, next_index, n_left_to_next);

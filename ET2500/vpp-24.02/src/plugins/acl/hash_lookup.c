@@ -88,7 +88,7 @@ first_mask_contains_second_mask(int is_ip6, fa_5tuple_t * mask1, fa_5tuple_t * m
     {
       u32 padcheck = 0;
       int i;
-      for (i=0; i<2; i++) {
+      for (i=0; i<1; i++) {
         padcheck |= mask1->l3_zero_pad_1[i];
         padcheck |= mask2->l3_zero_pad_1[i];
       }
@@ -117,7 +117,7 @@ first_mask_contains_second_mask(int is_ip6, fa_5tuple_t * mask1, fa_5tuple_t * m
       /* check the pads, both masks must have it 0 */
       u32 padcheck = 0;
       int i;
-      for (i=0; i<8; i++) {
+      for (i=0; i<7; i++) {
         padcheck |= mask1->l3_zero_pad[i];
         padcheck |= mask2->l3_zero_pad[i];
       }
@@ -141,7 +141,10 @@ first_mask_contains_second_mask(int is_ip6, fa_5tuple_t * mask1, fa_5tuple_t * m
 
   if ((mask1->src_sw_if_index & mask2->src_sw_if_index) != mask1->src_sw_if_index)
       return 0;
-
+  if ((mask1->geosite_cc_index & mask2->geosite_cc_index) != mask1->geosite_cc_index)
+      return 0;
+  if ((mask1->geoip_cc_index & mask2->geoip_cc_index) != mask1->geoip_cc_index)
+      return 0;
   /* take care if port are not exact-match  */
   if ((mask1->l4.as_u64 & mask2->l4.as_u64) != mask1->l4.as_u64)
     return 0;
@@ -1040,7 +1043,7 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
   hi->match.pkt.is_ip6 = r->is_ipv6;
   
   if (r->is_ipv6) {
-    clib_memset(hi->match.l3_zero_pad_1, 0, sizeof(u32) * 2);
+    clib_memset(hi->match.l3_zero_pad_1, 0, sizeof(u32) * 1);
     if (r->src_mac_len != 0)
     {
         clib_memcpy(&hi->match.mac6_addr[0], r->src_mac, 6);
@@ -1063,7 +1066,7 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
     make_ip6_address_mask(&mask->ip6_addr[1], r->dst_prefixlen);
     hi->match.ip6_addr[1] = r->dst.ip6;
   } else {
-    clib_memset(hi->match.l3_zero_pad, 0, sizeof(u32) * 8);
+    clib_memset(hi->match.l3_zero_pad, 0, sizeof(u32) * 7);
     if (r->src_mac_len != 0)
     {
         clib_memcpy(&hi->match.mac4_addr[0], r->src_mac, 6);
@@ -1092,6 +1095,14 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
       hi->match.src_sw_if_index = r->src_sw_if_index;
   }
 
+  if (r->geosite_cc_index != 0) {
+      mask->geosite_cc_index = ~0;
+      hi->match.geosite_cc_index = r->geosite_cc_index;
+  }
+    if (r->geoip_cc_index != 0) {
+      mask->geoip_cc_index = ~0;
+      hi->match.geoip_cc_index = r->geoip_cc_index;
+  }
   if (r->proto != 0) {
     mask->l4.proto = ~0; /* L4 proto needs to be matched */
     hi->match.l4.proto = r->proto;
