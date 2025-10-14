@@ -854,8 +854,8 @@ VNET_FEATURE_INIT (ip6_map_feature, static) =
 {
   .arc_name = "ip6-unicast",
   .node_name = "ip6-map",
-  .runs_before = VNET_FEATURES ("ip6-flow-classify"),
-  .runs_after = VNET_FEATURES ("ip6-full-reassembly-feature"),
+  .runs_before = VNET_FEATURES ("nat64-in2out", "nat64-in2out-handoff", "ipsec6-input-feature"),
+  .runs_after = VNET_FEATURES ("ip6-full-reassembly-feature", "spi-ip6-input-node"),
 };
 
 VLIB_REGISTER_NODE(ip6_map_node) = {

@@ -737,8 +737,12 @@ ip4_map_t (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 VNET_FEATURE_INIT (ip4_map_t_feature, static) = {
     .arc_name = "ip4-unicast",
     .node_name = "ip4-map-t",
-    .runs_before = VNET_FEATURES ("ip4-flow-classify"),
-    .runs_after = VNET_FEATURES ("ip4-sv-reassembly-feature"),
+    .runs_before = VNET_FEATURES ("nat44-ed-out2in", "nat44-ed-in2out", 
+                                  "nat44-out2in-worker-handoff", "nat44-in2out-worker-handoff", 
+                                  "nat44-handoff-classify", "nat44-ed-classify", 
+                                  "nat-pre-out2in", "nat-pre-in2out",
+                                  "ipsec4-input-feature"),
+    .runs_after = VNET_FEATURES("ip4-sv-reassembly-feature", "spi-ip4-input-node"),
 };
 
 VLIB_REGISTER_NODE(ip4_map_t_fragmented_node) = {
