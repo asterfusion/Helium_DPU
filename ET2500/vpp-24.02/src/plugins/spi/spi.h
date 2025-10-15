@@ -264,6 +264,8 @@ typedef struct
     u32 tcp_ack_number;
     u32 tcp_seq_number;
 
+    /* geosite match acl*/
+    u32 geosite_match_acl;
 } spi_flow_t;
 
 typedef struct

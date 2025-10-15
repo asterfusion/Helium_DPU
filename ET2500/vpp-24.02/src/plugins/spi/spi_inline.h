@@ -690,7 +690,7 @@ spi_create_session(f64 now,
     session->session_type = type;
     session->create_timestamp = now;
     session->session_timer_handle = (~0);
-
+    session->flow[SPI_FLOW_DIR_UPLINK].geosite_match_acl = (~0);
     //fill flow
     if (pkt->pkt_info.exchanged_tuple)
     {

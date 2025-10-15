@@ -97,6 +97,8 @@ typedef struct
 #define DNS_RESOLVER_EVENT_RESOLVED	1
 #define DNS_RESOLVER_EVENT_PENDING	2
 
+u8  dns_query_domain_name(u8  * domain,dns_resolve_name_t** rn);
+
 
 typedef struct
 {

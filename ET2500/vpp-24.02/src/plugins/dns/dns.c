@@ -2489,6 +2489,87 @@ VLIB_CLI_COMMAND (show_dns_cache_command) =
 /* *INDENT-ON* */
 
 static clib_error_t *
+dns_enable_disable_command_fn (vlib_main_t *vm, unformat_input_t *input,
+			       vlib_cli_command_t *cmd)
+{
+  dns_main_t *dm = &dns_main;
+  u32 enable_disable;
+  int rv;
+
+  enable_disable = 0;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "enable"))
+	enable_disable = 1;
+      else if (unformat (input, "disable"))
+	enable_disable = 0;
+      else
+	return clib_error_return (0, "unknown input `%U'",
+				  format_unformat_error, input);
+    }
+
+  rv = dns_enable_disable (vm, dm, enable_disable);
+  if (rv)
+    return clib_error_return (0, "%U", format_vnet_api_errno, rv);
+
+  return 0;
+}
+
+VLIB_CLI_COMMAND (dns_enable_disable_command) = {
+  .path = "dns",
+  .short_help = "dns [enable][disable]",
+  .function = dns_enable_disable_command_fn,
+};
+
+static clib_error_t *
+dns_name_server_add_del_command_fn (vlib_main_t *vm, unformat_input_t *input,
+				    vlib_cli_command_t *cmd)
+{
+  dns_main_t *dm = &dns_main;
+  u8 is_add = 1;
+  ip6_address_t ip6_server;
+  ip4_address_t ip4_server;
+  int ip6_set = 0;
+  int ip4_set = 0;
+  int rv = 0;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "%U", unformat_ip6_address, &ip6_server))
+	ip6_set = 1;
+      else if (unformat (input, "%U", unformat_ip4_address, &ip4_server))
+	ip4_set = 1;
+      else if (unformat (input, "del"))
+	is_add = 0;
+      else
+	return clib_error_return (0, "unknown input `%U'",
+				  format_unformat_error, input);
+    }
+
+  if (ip4_set && ip6_set)
+    return clib_error_return (0, "Only one server address configed");
+  if ((ip4_set + ip6_set) == 0)
+    return clib_error_return (0, "Server address required");
+
+  if (ip6_set)
+    rv = dns6_name_server_add_del (dm, ip6_server.as_u8, is_add);
+  else
+    rv = dns4_name_server_add_del (dm, ip4_server.as_u8, is_add);
+
+  if (rv)
+    return clib_error_return (0, "%U", format_vnet_api_errno, rv);
+
+  return 0;
+}
+
+VLIB_CLI_COMMAND (dns_name_server_add_del_command) = {
+  .path = "dns name-server",
+  .short_help = "dns name-server <ip-address> [del]",
+  .function = dns_name_server_add_del_command_fn,
+};
+
+static clib_error_t *
 show_dns_servers_command_fn (vlib_main_t * vm,
 			     unformat_input_t * input,
 			     vlib_cli_command_t * cmd)
@@ -3229,6 +3310,61 @@ vnet_send_dns4_reply (vlib_main_t * vm, dns_main_t * dm,
       vlib_put_frame_to_node (vm, ip4_lookup_node.index, f);
     }
 }
+
+
+__clib_export u8
+dns_query_domain_name (u8  * domain,dns_resolve_name_t **rn)
+{
+  dns_main_t *dm = &dns_main;
+
+  dns_cache_entry_t *ep = 0;
+  dns_pending_request_t _t0 = { 0 }, *t0 = &_t0;
+  int rv;
+ dns_resolve_name_t *rn2 = NULL;
+  dns_resolve_name_t *_rn;
+
+
+ 
+  if(dm->is_enabled ==0)
+  {
+    return 0;
+  }
+  t0->request_type = DNS_API_PENDING_NAME_TO_IP;
+  t0->client_index = 0;
+  t0->client_context = 0;
+  t0->qp_type = DNS_TYPE_A;
+  rv = dns_resolve_name_ex (domain, &ep, t0, &rn2);
+           for(int i=0; i< vec_len(rn2); i++)
+           {
+              _rn = &rn2[i];
+              u8 *ip_str = format(0, "%U", format_ip4_address, &_rn->address.ip.ip4);
+              vec_free(ip_str); 
+            
+           }
+           
+  /* Error, e.g. not enabled? Tell the user */
+  if (rv < 0)
+    {
+      clib_warning ("dns_resolve_name_ex returned %d", rv);
+      return 0;
+    }
+
+  /* Resolution pending? Don't reply... */
+  if (ep == 0 || rn2 == NULL || vec_len(rn2) == 0)
+  {
+ 
+    return 0;
+  }
+  *rn= rn2;
+
+ 
+
+
+	
+  /* *INDENT-ON* */
+  return 1;
+}
+
 
 #include <dns/dns.api.c>
 static clib_error_t *

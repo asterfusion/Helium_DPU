@@ -39,7 +39,9 @@ typedef struct
   u8 tcp_flags_mask;
   u16 rule_id;
   u32 src_sw_if_index;
-
+  u16 geosite_cc_index;
+  u16 geoip_cc_index;
+  
   u64 action_expand_bitmap; 
   u32 policer_index;
   u8  set_tc_value;
