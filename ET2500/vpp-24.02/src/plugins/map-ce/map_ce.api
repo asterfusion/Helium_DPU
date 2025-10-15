@@ -1,0 +1,722 @@
+/*
+ * Copyright 2024-2027 Asterfusion Network
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+option version = "4.2.1";
+
+import "vnet/ip/ip_types.api";
+import "vnet/interface_types.api";
+
+/** \brief Add MAP CE domains
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_map_t - If 1 domain base map-t, if 0 domain base map-e
+    @param ip6_prefix - Rule IPv6 prefix
+    @param ip4_prefix - Rule IPv4 prefix
+    @param ip6_dst - MAP domain IPv6 BR address / Tunnel source
+    @param end_user_ip6_prefix - MAP domain ce_psid, only valid with CE
+    @param ea_bits_len - Embedded Address bits length
+    @param psid_offset - Port Set Identifier (PSID) offset
+    @param psid_length - PSID length
+    @param mtu - MTU. default 1280
+    @param tag - A user field stored with the MAP
+*/
+autoendian define map_ce_add_domain
+{
+  u32 client_index;
+  u32 context;
+  bool is_map_t;
+  vl_api_ip6_prefix_t ip6_prefix;
+  vl_api_ip4_prefix_t ip4_prefix;
+  vl_api_ip6_prefix_t ip6_dst;
+  vl_api_ip6_prefix_t end_user_ip6_prefix;
+  u8 ea_bits_len;
+  u8 psid_offset;
+  u8 psid_length;
+  u16 mtu [default=1280];
+  string tag[64];
+};
+
+/** \brief Reply for MAP CE domain add
+    @param context - returned sender context, to match reply w/ request
+    @param index - MAP CE domain index
+    @param retval - return code
+*/
+define map_ce_add_domain_reply
+{
+  u32 context;
+  u32 index;
+  i32 retval;
+};
+
+/** \brief Delete MAP CE domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param index - MAP CE Domain index
+*/
+autoreply define map_ce_del_domain
+{
+  u32 client_index;
+  u32 context;
+  u32 index;
+};
+
+/** \brief Add or Delete MAP CE rule from a domain (Used to index domains based on the configured local prefix)
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param index - MAP Domain index
+    @param is_add - If 1 add rule, if 0 delete rule
+    @param ip4_prefix - MAP CE IPv4 local prefix
+*/
+autoreply define map_ce_add_del_rule
+{
+  u32 client_index;
+  u32 context;
+  u32 index;
+  bool is_add;
+  vl_api_ip4_prefix_t ip4_prefix;
+};
+
+/** \brief Get list of map ce domains
+    @param client_index - opaque cookie to identify the sender
+*/
+service {
+  rpc map_ce_domains_get returns map_ce_domains_get_reply
+    stream map_ce_domain_details;
+};
+
+define map_ce_domains_get
+{
+  u32 client_index;
+  u32 context;
+  u32 cursor;
+};
+
+define map_ce_domains_get_reply
+{
+  u32 context;
+  i32 retval;
+  u32 cursor;
+};
+
+define map_ce_domain_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+/** \brief Details about a single MAP domain
+    @param context - returned sender context, to match reply w/ request
+    @param domain_index - MAP domain index
+    @param is_ce - If 1 domain is CE, if 0 domain is BR
+    @param ip6_prefix - Rule IPv6 prefix
+    @param ip4_prefix - Rule IPv4 prefix
+    @param ip6_src - MAP domain IPv6 BR address / Tunnel source
+    @param end_user_ip6_prefix - MAP domain end-used-ipv6-prefix, only valid with CE
+    @param ea_bits_len - Embedded Address bits length
+    @param psid_offset - Port Set Identifier (PSID) offset
+    @param psid_length - PSID length
+    @param flags -
+    @param mtu - MTU
+    @param tag - The user field stored with the MAP at creation time
+
+    @param psid_valid - manually psid is valid; 1=psid  0=get from end_user_ip6_prefix
+    @param psid - manually psid
+    @param inner - 1=frag inner packet, 0=frag tunnel packets, ~0=untouched
+    @param ignore_df - 1=IP4 fragm despite DF bit, 0=honor DF, ~0=untouched
+    @param icmp_ip4_err_relay_src - IPv4 ICMP err relay src address
+    @param icmp6_enable_unreachable - 1 = send ICMP unreachable err msgs
+    @param ip4_nh_address - direct IP4 next-hop address
+    @param ip6_nh_address - direct IP6 next-hop address
+    @param sec_check_enable - 1=enable security check on first inbound packet
+    @param sec_check_fragments - 1=enable check on (subsequent) fragments too
+    @param tc_copy - 1 = copy packet class field, 0 = use class instead
+    @param tc_class - class field value when copy == 0
+    @param tos_copy - 1 = copy packet TOS field, 0 = use class instead
+    @param tos - TOS field value when copy == 0
+*/
+define map_ce_domain_details
+{
+  u32 context;
+  u32 domain_index;
+  vl_api_ip6_prefix_t ip6_prefix;
+  vl_api_ip4_prefix_t ip4_prefix;
+  vl_api_ip6_prefix_t ip6_dst;
+  vl_api_ip6_prefix_t end_user_ip6_prefix;
+  u8 ea_bits_len;
+  u8 psid_offset;
+  u8 psid_length;
+  u8 flags;
+  u16 mtu;
+  string tag[64];
+
+  bool psid_valid;
+  u16 psid;
+  u8 frag_inner;
+  u8 frag_ignore_df;
+  vl_api_ip4_address_t icmp_ip4_err_relay_src;
+  bool icmp6_enable_unreachable;
+  vl_api_ip4_address_t ip4_nh_address;
+  vl_api_ip6_address_t ip6_nh_address;
+  bool sec_check_enable;
+  bool sec_check_fragments;
+  bool tc_copy;
+  u8 tc_class;
+  bool tos_copy;
+  u8 tos_class;
+};
+
+define map_ce_rule_dump
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+};
+
+define map_ce_rule_details
+{
+  u32 context;
+  vl_api_ip4_prefix_t ip4_local_prefix;
+};
+
+/** \brief Enable or disable a MAP CE interface
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index -
+    @param is_enable - 0=disable, 1=enable interface
+    @param is_translation -  0=encapsulation, 1=translation
+*/
+autoreply define map_ce_if_enable_disable
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool is_enable;
+};
+
+/** \brief Request for a single block of summary stats
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define map_ce_summary_stats
+{
+  u32 client_index;
+  u32 context;
+};
+
+/** \brief Reply for map_summary_stats request
+    @param context - sender context, to match reply w/ request
+    @param retval - return code for request
+    @param total_bindings -
+    @param total_pkts -
+    @param total_ip4_fragments -
+    @param total_security_check -
+*/
+define map_ce_summary_stats_reply
+{
+  u32 context;
+  i32 retval;
+  u64 total_bindings;
+  u64 total_pkts[2];
+  u64 total_bytes[2];
+  u64 total_ip4_fragments;
+  u64 total_security_check[2];
+};
+
+/** \brief Request for a single block of summary stats
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define map_ce_domain_stats
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+};
+
+/** \brief Reply for map_summary_stats request
+    @param context - sender context, to match reply w/ request
+    @param retval - return code for request
+    @param rx_pkts -
+    @param tx_pkts -
+    @param rx_bytes -
+    @param tx_bytes -
+*/
+define map_ce_domain_stats_reply
+{
+  u32 context;
+  i32 retval;
+  u64 rx_pkts;
+  u64 tx_pkts;
+  u64 rx_bytes;
+  u64 tx_bytes;
+};
+
+/** \brief Set MAP fragmentation parameters
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param inner - 1=frag inner packet, 0=frag tunnel packets
+    @param ignore_df - 1=IP4 fragment despite DF bit, 0=honor DF
+*/
+autoreply define map_ce_param_set_fragmentation
+{
+  u32 client_index;
+  u32 context;
+  bool inner;
+  bool ignore_df;
+};
+
+/** \brief Set MAP fragmentation parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param inner - 1=frag inner packet, 0=frag tunnel packets
+    @param ignore_df - 1=IP4 fragment despite DF bit, 0=honor DF
+*/
+autoreply define map_ce_domain_param_set_fragmentation
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  bool inner;
+  bool ignore_df;
+};
+
+
+/** \brief Set MAP ICMP parameters
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param icmp4_err_relay_src - IPv4 ICMP err relay src address
+*/
+autoreply define map_ce_param_set_icmp
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip4_address_t ip4_err_relay_src;
+};
+
+/** \brief Set MAP ICMP parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param icmp4_err_relay_src - IPv4 ICMP err relay src address
+*/
+autoreply define map_ce_domain_param_set_icmp
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  vl_api_ip4_address_t ip4_err_relay_src;
+};
+
+
+/** \brief Set MAP ICMP6 parameters
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param enable_unreachable - 1 = send ICMP unreachable err msgs
+*/
+autoreply define map_ce_param_set_icmp6
+{
+  u32 client_index;
+  u32 context;
+  bool enable_unreachable;
+};
+
+/** \brief Set MAP ICMP6 parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param enable_unreachable - 1 = send ICMP unreachable err msgs
+*/
+autoreply define map_ce_domain_param_set_icmp6
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  bool enable_unreachable;
+};
+
+/** \brief Set MAP security-check parameters
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param enable - 1=enable security check on first inbound packet
+    @param fragments - 1=enable check on (subsequent) fragments too
+*/
+autoreply define map_ce_param_set_security_check
+{
+  u32 client_index;
+  u32 context;
+  bool enable;
+  bool fragments;
+};
+
+/** \brief Set MAP security-check parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param enable - 1=enable security check on first inbound packet
+    @param fragments - 1=enable check on (subsequent) fragments too
+*/
+autoreply define map_ce_domain_param_set_security_check
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  bool enable;
+  bool fragments;
+};
+
+/** \brief Set MAP traffic class parameters
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param copy - 1 = copy packet class field, 0 = use tc_class instead
+    @param tc_class - class field value when copy == 0
+*/
+autoreply define map_ce_param_set_traffic_class
+{
+  u32 client_index;
+  u32 context;
+  bool copy;
+  u8 tc_class;
+};
+
+/** \brief Set MAP traffic class parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param copy - 1 = copy packet class field, 0 = use tc_class instead
+    @param tc_class - class field value when copy == 0
+*/
+autoreply define map_ce_domain_param_set_traffic_class
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  bool copy;
+  u8 tc_class;
+};
+
+/** \brief Set MAP tos parameters
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param copy - 1 = copy packet TOS field, 0 = use tc_class instead
+    @param tos - tos field value when copy == 0
+*/
+autoreply define map_ce_param_set_tos
+{
+  u32 client_index;
+  u32 context;
+  bool copy;
+  u8 tos;
+};
+
+/** \brief Set MAP tos parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param copy - 1 = copy packet TOS field, 0 = use tc_class instead
+    @param tos - tos field value when copy == 0
+*/
+autoreply define map_ce_domain_param_set_tos
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  bool copy;
+  u8 tos;
+};
+
+/** \brief Set MAP TCP parameters
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @parma tcp_mss - TCP MSS clamping value
+*/
+autoreply define map_ce_param_set_tcp
+{
+  u32 client_index;
+  u32 context;
+  u16 tcp_mss;
+};
+
+/** \brief Set MAP TCP parameters per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param domain_index - MAP Domain index
+    @parma tcp_mss - TCP MSS clamping value
+*/
+autoreply define map_ce_domain_param_set_tcp
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  bool is_clean;
+  u16 tcp_mss;
+};
+
+/** \brief Set MAP mtu per domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param domain_index - MAP Domain index
+    @parma mtu - mtu value
+*/
+autoreply define map_ce_domain_param_set_mtu
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  u16 mtu;
+};
+
+/** \brief Set MAP psid per CE role domain
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_clean - 1=reset domain use global, 0=config domain self parameters
+    @param domain_index - MAP Domain index
+    @parma psid - psid value
+*/
+autoreply define map_ce_domain_set_psid
+{
+  u32 client_index;
+  u32 context;
+  u32 domain_index;
+  u16 psid;
+};
+
+/** \brief Request for a single block of MAP parameters
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+*/
+define map_ce_param_get
+{
+  u32 client_index;
+  u32 context;
+};
+
+
+/** \brief Reply for map_param_get request
+    @param context - sender context, to match reply w/ request
+    @param retval - return code for request
+    @param inner - 1=frag inner packet, 0=frag tunnel packets, ~0=untouched
+    @param ignore_df - 1=IP4 fragm despite DF bit, 0=honor DF, ~0=untouched
+    @param icmp_ip4_err_relay_src - IPv4 ICMP err relay src address
+    @param icmp6_enable_unreachable - 1 = send ICMP unreachable err msgs
+    @param ip4_nh_address - direct IP4 next-hop address
+    @param ip6_nh_address - direct IP6 next-hop address
+    @param sec_check_enable - 1=enable security check on first inbound packet
+    @param sec_check_fragments - 1=enable check on (subsequent) fragments too
+    @param tc_copy - 1 = copy packet class field, 0 = use class instead
+    @param tc_class - class field value when copy == 0
+    @param tos_copy - 1 = copy packet TOS field, 0 = use class instead
+    @param tos - TOS field value when copy == 0
+*/
+define map_ce_param_get_reply
+{
+  u32 context;
+  i32 retval;
+  u8 frag_inner;
+  u8 frag_ignore_df;
+  vl_api_ip4_address_t icmp_ip4_err_relay_src;
+  bool icmp6_enable_unreachable;
+  bool sec_check_enable;
+  bool sec_check_fragments;
+  bool tc_copy;
+  u8 tc_class;
+  bool tos_copy;
+  u8 tos;
+};
+
+/*
+ * MAP Error counters/messages
+ */
+counters map_ce {
+  none {
+    severity info;
+    type counter64;
+    units "packets";
+    description "valid MAP packets";
+  };
+  bad_protocol {
+    severity error;
+    type counter64;
+    units "packets";
+    description "bad protocol";
+  };
+  sec_check {
+    severity error;
+    type counter64;
+    units "packets";
+    description "security check failed";
+  };
+  encap_sec_check {
+    severity error;
+    type counter64;
+    units "packets";
+    description "encap security check failed";
+  };
+  decap_sec_check {
+    severity error;
+    type counter64;
+    units "packets";
+    description "decap security check failed";
+  };
+  icmp {
+    severity error;
+    type counter64;
+    units "packets";
+    description "unable to translate ICMP";
+  };
+  icmp_relay {
+    severity error;
+    type counter64;
+    units "packets";
+    description "unable to relay ICMP";
+  };
+  unknown {
+    severity error;
+    type counter64;
+    units "packets";
+    description "unknown";
+  };
+  no_binding {
+    severity error;
+    type counter64;
+    units "packets";
+    description "no binding";
+  };
+  no_domain {
+    severity error;
+    type counter64;
+    units "packets";
+    description "no domain";
+  };
+  fragmented {
+    severity error;
+    type counter64;
+    units "packets";
+    description "packet is a fragment";
+  };
+  fragment_memory {
+    severity error;
+    type counter64;
+    units "packets";
+    description "could not cache fragment";
+  };
+  fragment_malformed {
+    severity error;
+    type counter64;
+    units "packets";
+    description "fragment has unexpected format";
+  };
+  fragment_dropped {
+    severity error;
+    type counter64;
+    units "packets";
+    description "dropped cached fragment";
+  };
+  malformed {
+    severity error;
+    type counter64;
+    units "packets";
+    description "malformed packet";
+  };
+  df_set {
+    severity error;
+    type counter64;
+    units "packets";
+    description "can't fragment, DF set";
+  };
+  time_exceeded {
+    severity error;
+    type counter64;
+    units "packets";
+    description "time exceeded";
+  };
+  no_nat_domain {
+    severity error;
+    type counter64;
+    units "packets";
+    description "no nat domain";
+  };
+  nat_unsupported_protocol {
+    severity error;
+    type counter64;
+    units "packets";
+    description "map nat unsupported protocol";
+  };
+  nat_bad_icmp_type {
+    severity error;
+    type counter64;
+    units "packets";
+    description "map nat44 bad icmp type";
+  };
+  nat_max_sessions_exceeded {
+    severity error;
+    type counter64;
+    units "packets";
+    description "map nat44 max sessions exceeded";
+  };
+  nat_cannot_create_user {
+    severity error;
+    type counter64;
+    units "packets";
+    description "map nat44 cannot create user";
+  };
+  nat_cannot_create_session {
+    severity error;
+    type counter64;
+    units "packets";
+    description "map nat44 cannot create session";
+  };
+  nat_out_of_ports {
+    severity error;
+    type counter64;
+    units "packets";
+    description "map nat44 out of ports";
+  };
+  nat_no_translation {
+    severity error;
+    type counter64;
+    units "packets";
+    description "map nat44 no translation";
+  };
+  nat_checksum_bad {
+    severity error;
+    type counter64;
+    units "packets";
+    description "map nat44 checksum bad";
+  };
+};
+paths {
+  "/err/map-ce-ip4-classify" "map_ce";
+  "/err/map-ce-ip6-classify" "map_ce";
+  "/err/map-ce-nat44-ei-in2out" "map_ce";
+  "/err/map-ce-nat44-ei-out2in" "map_ce";
+  "/err/ip4-map-ce" "map_ce";
+  "/err/ip6-map-ce" "map_ce";
+  "/err/ip4-t-map-ce" "map_ce";
+  "/err/ip6-t-map-ce" "map_ce";
+};
