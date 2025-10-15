@@ -532,7 +532,7 @@ ip6_map_t (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	    ip6_map_get_domain (&ip60->src_address,
 				&vnet_buffer (p0)->map_t.map_domain_index,
 				&error0);
-	  if (!d0)
+	  if (!d0 || !(d0->flags & MAP_DOMAIN_TRANSLATION))
 	    {			/* Guess it wasn't for us */
 	      vnet_feature_next (&next0, p0);
 	      goto exit;
@@ -758,8 +758,8 @@ VLIB_REGISTER_NODE(ip6_map_t_tcp_udp_node) = {
 VNET_FEATURE_INIT (ip6_map_t_feature, static) = {
     .arc_name = "ip6-unicast",
     .node_name = "ip6-map-t",
-    .runs_before = VNET_FEATURES ("ip6-flow-classify"),
-    .runs_after = VNET_FEATURES ("ip6-sv-reassembly-feature"),
+    .runs_before = VNET_FEATURES ("nat64-in2out", "nat64-in2out-handoff", "ipsec6-input-feature"),
+    .runs_after = VNET_FEATURES ("ip6-sv-reassembly-feature", "spi-ip6-input-node"),
 };
 
 VLIB_REGISTER_NODE(ip6_map_t_node) = {

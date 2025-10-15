@@ -364,9 +364,9 @@ map_get_ip4 (map_domain_t * d, ip6_address_t * addr)
        * And now only support |ip6_prefix_len | ea_bits_len | subnet | <= 64
        */
       u8  subnet_bit_len = 32 - d->ip4_prefix_len - d->ea_bits_len;
-      u32 ip4_addr_u32 = d->ip4_prefix.as_u32 & ~(~0u >> d->ip4_prefix_len);
+      u32 ip4_addr_u32 = clib_host_to_net_u32(d->ip4_prefix.as_u32) & ~(~0u >> d->ip4_prefix_len);
       u64 ea_bits_subnet = (clib_net_to_host_u64(addr->as_u64[0]) & (~0ull >> d->ip6_prefix_len));
-      ip4_addr_u32 |= ea_bits_subnet & (~0ull << subnet_bit_len);
+      ip4_addr_u32 |= ((ea_bits_subnet >> (64 - d->ip6_prefix_len - d->ea_bits_len)) << subnet_bit_len);
       ip4_addr_u32 |= ea_bits_subnet & ((1u << subnet_bit_len) - 1) ;
 
       return clib_host_to_net_u32(ip4_addr_u32);
