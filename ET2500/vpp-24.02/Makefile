@@ -82,6 +82,7 @@ DEB_DEPENDS += nasm
 DEB_DEPENDS += iperf ethtool  # for 'make test TEST=vm_vpp_interfaces'
 DEB_DEPENDS += libpcap-dev
 DEB_DEPENDS += tshark
+DEB_DEPENDS += libprotobuf-c-dev
 
 LIBFFI=libffi6 # works on all but 20.04 and debian-testing
 
