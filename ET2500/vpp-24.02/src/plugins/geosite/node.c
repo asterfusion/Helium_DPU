@@ -291,6 +291,7 @@ get_http_domain(u8 *payload, char *domain, u16 payload_length, u16 *domain_lengt
     int i = 0;
     uint8_t *current_ptr = payload;
     uint8_t *ptr = payload;
+    uint8_t *end = NULL;
     while (*current_ptr != 0x20) // == space
     {
         i++;
@@ -404,7 +405,7 @@ get_http_domain(u8 *payload, char *domain, u16 payload_length, u16 *domain_lengt
 
 is_http:
 
-    uint8_t *end = payload + payload_length;
+    end = payload + payload_length; //declarations are not allowed immediately after a label in gcc 12
     uint8_t *line_start = current_ptr + 1;
 
     // find the last str of the request line
