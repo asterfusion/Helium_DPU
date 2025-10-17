@@ -118,7 +118,7 @@ acl_fill_5tuple_l3_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
 
 always_inline void
 acl_fill_5tuple_l4_and_pkt_data (acl_main_t * am, u32 sw_if_index0, vlib_buffer_t * b0, int is_ip6, int is_input,
-		 int l3_offset, fa_session_l4_key_t *p5tuple_l4, fa_packet_info_t *p5tuple_pkt, u8 *ip_protocol)
+		 int l3_offset, fa_session_l4_key_t *p5tuple_l4, fa_packet_info_t *p5tuple_pkt)
 {
   /* IP4 and IP6 protocol numbers of ICMP */
   static u8 icmp_protos_v4v6[] = { IP_PROTOCOL_ICMP, IP_PROTOCOL_ICMP6 };
@@ -189,11 +189,6 @@ acl_fill_5tuple_l4_and_pkt_data (acl_main_t * am, u32 sw_if_index0, vlib_buffer_
     }
   tmp_l4_flags |= is_input ? FA_SK_L4_FLAG_IS_INPUT : 0;
 
-  if (NULL != ip_protocol)
-  {
-      *ip_protocol = proto;
-  }
-
   if (PREDICT_TRUE (offset_within_packet (b0, l4_offset)))
     {
       tcp_header_t *tcph = vlib_buffer_get_current (b0) + l4_offset;
@@ -238,7 +233,7 @@ acl_fill_5tuple_l4_and_pkt_data (acl_main_t * am, u32 sw_if_index0, vlib_buffer_
 
 always_inline void
 acl_fill_5tuple (acl_main_t * am, u32 sw_if_index0, vlib_buffer_t * b0, int is_ip6,
-		 int is_input, int is_l2_path, fa_5tuple_t * p5tuple_pkt, u8 *ip_protocol)
+		 int is_input, int is_l2_path, fa_5tuple_t * p5tuple_pkt)
 {
   int l3_offset;
   int l2_offset;
@@ -278,7 +273,7 @@ acl_fill_5tuple (acl_main_t * am, u32 sw_if_index0, vlib_buffer_t * b0, int is_i
   if (0 == no_l3_l4_flag)
   {
       acl_fill_5tuple_l3_data(am, b0, is_ip6, l3_offset, p5tuple_pkt);
-      acl_fill_5tuple_l4_and_pkt_data(am, sw_if_index0, b0, is_ip6, is_input, l3_offset, &p5tuple_pkt->l4, &p5tuple_pkt->pkt, ip_protocol);
+      acl_fill_5tuple_l4_and_pkt_data(am, sw_if_index0, b0, is_ip6, is_input, l3_offset, &p5tuple_pkt->l4, &p5tuple_pkt->pkt);
   }
 }
 
@@ -287,7 +282,7 @@ acl_plugin_fill_5tuple_inline (void *p_acl_main, u32 lc_index, vlib_buffer_t * b
 		 int is_input, int is_l2_path, fa_5tuple_opaque_t * p5tuple_pkt)
 {
   acl_main_t *am = p_acl_main;
-  acl_fill_5tuple(am, 0, b0, is_ip6, is_input, is_l2_path, (fa_5tuple_t *)p5tuple_pkt, NULL);
+  acl_fill_5tuple(am, 0, b0, is_ip6, is_input, is_l2_path, (fa_5tuple_t *)p5tuple_pkt);
 }
 
 always_inline int

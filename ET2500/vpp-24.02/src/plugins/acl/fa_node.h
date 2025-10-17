@@ -246,7 +246,6 @@ typedef struct {
   fa_5tuple_t fa_5tuples[VLIB_FRAME_SIZE];
   u64 hashes[VLIB_FRAME_SIZE];
   u16 nexts[VLIB_FRAME_SIZE];
-  u8 ip_protocol[VLIB_FRAME_SIZE];
 
 } acl_fa_per_worker_data_t;
 

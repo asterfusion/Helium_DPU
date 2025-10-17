@@ -540,7 +540,7 @@ acl_fa_try_recycle_session (acl_main_t * am, int is_input, u16 thread_index,
 always_inline fa_full_session_id_t
 acl_fa_add_session (acl_main_t * am, int is_input, int is_ip6,
 		    u32 sw_if_index, u64 now, fa_5tuple_t * p5tuple,
-		    u16 current_policy_epoch, u8 ip_protocol)
+		    u16 current_policy_epoch)
 {
   fa_full_session_id_t f_sess_id;
   uword thread_index = os_get_thread_index ();
@@ -588,7 +588,7 @@ acl_fa_add_session (acl_main_t * am, int is_input, int is_ip6,
   sess->link_next_idx = FA_SESSION_BOGUS_INDEX;
   sess->deleted = 0;
   sess->is_ip6 = is_ip6;
-  sess->ip_protocol = ip_protocol;
+  sess->ip_protocol = p5tuple->l4.proto;
   sess->hitcount_bytes = 0;
   sess->hitcount_pkts = 0;
 
@@ -604,7 +604,7 @@ acl_fa_add_session (acl_main_t * am, int is_input, int is_ip6,
       kv_64_8.key[1] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_64_8.key[7];
       l4->l4_flags = 0;
-      if (IP_PROTOCOL_TCP != ip_protocol && IP_PROTOCOL_UDP != ip_protocol)
+      if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
       {
           l4->port[0] = 0;
           l4->port[1] = 0;
@@ -621,7 +621,7 @@ acl_fa_add_session (acl_main_t * am, int is_input, int is_ip6,
       kv_32_8.key[0] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_32_8.key[3];
       l4->l4_flags = 0;
-      if (IP_PROTOCOL_TCP != ip_protocol && IP_PROTOCOL_UDP != ip_protocol)
+      if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
       {
           l4->port[0] = 0;
           l4->port[1] = 0;
@@ -639,7 +639,7 @@ acl_fa_add_session (acl_main_t * am, int is_input, int is_ip6,
 
 always_inline int
 acl_fa_find_session (acl_main_t * am, int is_ip6, u32 sw_if_index0,
-		     fa_5tuple_t * p5tuple, u64 * pvalue_sess, u8 ip_protocol)
+		     fa_5tuple_t * p5tuple, u64 * pvalue_sess)
 {
   int res = 0;
   if (is_ip6)
@@ -652,7 +652,7 @@ acl_fa_find_session (acl_main_t * am, int is_ip6, u32 sw_if_index0,
       kv_64_8.key[1] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_64_8.key[7];
       l4->l4_flags = 0;
-      if (IP_PROTOCOL_TCP != ip_protocol && IP_PROTOCOL_UDP != ip_protocol)
+      if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
       {
           l4->port[0] = 0;
           l4->port[1] = 0;
@@ -670,7 +670,7 @@ acl_fa_find_session (acl_main_t * am, int is_ip6, u32 sw_if_index0,
       kv_32_8.key[0] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_32_8.key[3];
       l4->l4_flags = 0;
-      if (IP_PROTOCOL_TCP != ip_protocol && IP_PROTOCOL_UDP != ip_protocol)
+      if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
       {
           l4->port[0] = 0;
           l4->port[1] = 0;
@@ -684,7 +684,7 @@ acl_fa_find_session (acl_main_t * am, int is_ip6, u32 sw_if_index0,
 
 always_inline u64
 acl_fa_make_session_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
-			  fa_5tuple_t * p5tuple, u8 ip_protocol)
+			  fa_5tuple_t * p5tuple)
 {  
   if (is_ip6)
   {
@@ -695,7 +695,7 @@ acl_fa_make_session_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
     kv_64_8.key[1] = 0;
     fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_64_8.key[7];
     l4->l4_flags = 0;
-    if (IP_PROTOCOL_TCP != ip_protocol && IP_PROTOCOL_UDP != ip_protocol)
+    if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
     {
         l4->port[0] = 0;
         l4->port[1] = 0;
@@ -710,7 +710,7 @@ acl_fa_make_session_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
     kv_32_8.key[0] = 0;
     fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_32_8.key[3];
     l4->l4_flags = 0;
-    if (IP_PROTOCOL_TCP != ip_protocol && IP_PROTOCOL_UDP != ip_protocol)
+    if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
     {
         l4->port[0] = 0;
         l4->port[1] = 0;
@@ -741,7 +741,7 @@ acl_fa_prefetch_session_data_for_hash (acl_main_t * am, int is_ip6, u64 hash)
 always_inline int
 acl_fa_find_session_with_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
 			       u64 hash, fa_5tuple_t * p5tuple,
-			       u64 * pvalue_sess, u8 ip_protocol)
+			       u64 * pvalue_sess)
 {
   int res = 0;
   if (is_ip6)
@@ -755,7 +755,7 @@ acl_fa_find_session_with_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
       kv_64_8.key[1] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_64_8.key[7];
       l4->l4_flags = 0;
-      if (IP_PROTOCOL_TCP != ip_protocol && IP_PROTOCOL_UDP != ip_protocol)
+      if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
       {
           l4->port[0] = 0;
           l4->port[1] = 0;
@@ -775,7 +775,7 @@ acl_fa_find_session_with_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
       kv_32_8.key[0] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_32_8.key[3];
       l4->l4_flags = 0;
-      if (IP_PROTOCOL_TCP != ip_protocol && IP_PROTOCOL_UDP != ip_protocol)
+      if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
       {
           l4->port[0] = 0;
           l4->port[1] = 0;
