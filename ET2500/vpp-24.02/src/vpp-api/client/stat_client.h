@@ -61,6 +61,7 @@ extern stat_client_main_t stat_client_main;
 stat_client_main_t *stat_client_get (void);
 void stat_client_free (stat_client_main_t * sm);
 int stat_segment_connect_r (const char *socket_name, stat_client_main_t * sm);
+int stat_segment_connect_sai (const char *socket_name, stat_client_main_t * sm, int *socket_num);
 int stat_segment_connect (const char *socket_name);
 void stat_segment_disconnect_r (stat_client_main_t * sm);
 void stat_segment_disconnect (void);
