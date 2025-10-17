@@ -130,8 +130,10 @@ typedef struct {
   u8 link_list_id;        /* +1 bytes = 105 */
   u8 deleted;             /* +1 bytes = 106 */
   u8 is_ip6;              /* +1 bytes = 107 */
-  u8 reserved1[5];        /* +5 bytes = 112 */
-  u64 reserved2[2];       /* +2*8 bytes = 128 */
+  u8 ip_protocol;         /* +1 bytes = 108 */
+  u8 reserved1[4];        /* +4 bytes = 112 */
+  u64 hitcount_pkts;      /* +4 bytes = 120 */
+  u64 hitcount_bytes;     /* +4 bytes = 128 */
 } fa_session_t;
 
 #define FA_POLICY_EPOCH_MASK 0x7fff

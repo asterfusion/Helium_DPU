@@ -77,7 +77,7 @@ acl_fill_5tuple_l2_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
     if (is_ip6)
     {
         int ii;
-        for(ii = 0; ii < 2; ii++)
+        for(ii = 0; ii < 1; ii++)
         {
             p5tuple_pkt->l3_zero_pad_1[ii] = 0;
         }
@@ -88,7 +88,7 @@ acl_fill_5tuple_l2_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
     else
     {
         int ii;
-        for(ii = 0; ii < 8; ii++)
+        for(ii = 0; ii < 7; ii++)
         {
             p5tuple_pkt->l3_zero_pad[ii] = 0;
         }

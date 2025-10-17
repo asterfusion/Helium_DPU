@@ -197,7 +197,7 @@ process_established_session (vlib_main_t * vm, acl_main_t * am,
 			     u32 pkt_len, int node_trace_on,
 			     u32 * trace_bitmap)
 {
-  u8 action = 0;
+  u8 action = ACL_ACTION_DENY;
   fa_session_t *sess = get_session_ptr_no_check (am, f_sess_id.thread_index,
 						 f_sess_id.session_index);
 
@@ -258,8 +258,6 @@ acl_fa_node_common_prepare_fn (vlib_main_t * vm,
   fa_5tuple_t *fa_5tuple;
   u64 *hash;
 
-
-
   from = vlib_frame_vector_args (frame);
   vlib_get_buffers (vm, from, pw->bufs, frame->n_vectors);
 
@@ -268,7 +266,6 @@ acl_fa_node_common_prepare_fn (vlib_main_t * vm,
   sw_if_index = pw->sw_if_indices;
   fa_5tuple = pw->fa_5tuples;
   hash = pw->hashes;
-
 
   /*
    * fill the sw_if_index, 5tuple and session hash,
@@ -514,6 +511,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
   u64 *hash;
   /* for the delayed counters */
   u32 saved_byte_count = 0;
+  u8 *pinout_reflect_by_sw_if_index = is_input ? am->input_reflect_by_sw_if_index : am->output_reflect_by_sw_if_index;
   match_acl_t match_acl_info;
 
   error_node = vlib_node_get_runtime (vm, node->node_index);
@@ -616,6 +614,18 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 						 node_trace_on,
 						 &trace_bitmap);
 
+                   fa_session_t *sess = get_session_ptr (am, thread_index, f_sess_id.session_index);
+                  saved_byte_count = vlib_buffer_length_in_chain (vm, b[0]);
+
+                  if (!is_l2_path && is_input)
+                  {
+                        saved_byte_count += ethernet_buffer_header_size(b[0]);
+                  }
+
+                  /* prefetch the counter that we are going to increment */
+                  sess->hitcount_pkts += 1;
+                  sess->hitcount_bytes += saved_byte_count;
+
 		  /* expose the session id to the tracer */
 		  if (node_trace_on)
 		    {
@@ -661,6 +671,33 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 							     (fa_5tuple_opaque_t *) & fa_5tuple[0], is_ip6,
 							     &trace_bitmap,
 							     &match_acl_info,get_cc_code,cc_indices,dns_cc_indices);
+              //Only hit the default rule and enabled acl reflect
+              if (PREDICT_FALSE((1 == match_acl_info.acl_match_count) && 1 == pinout_reflect_by_sw_if_index[sw_if_index[0]]))
+              {
+                  //icmpv6 NA or RA
+                  if (IP_PROTOCOL_ICMP6 == fa_5tuple->l4.proto && (fa_5tuple->l4.port[0] == 134 || fa_5tuple->l4.port[0] == 136))
+                  {
+                      match_acl_info.acl_match_count = 1;
+                  }
+
+                  //arp
+                  else if (is_l2_path)
+                  {
+                      u16 ethertype = 0;
+                      ethernet_header_t *h0 = vlib_buffer_get_current (b[0]);
+                      u8 *l3h0 = (u8 *) h0 + vnet_buffer (b[0])->l2.l2_len;
+                      ethertype = clib_net_to_host_u16(*((u16 *)(l3h0 - 2)));
+                      if (ETHERNET_TYPE_ARP != ethertype)
+                      {
+                          match_acl_info.acl_match_count = 0;
+                      }
+                  }
+
+                  else
+                  {
+                        match_acl_info.acl_match_count = 0;
+                  }
+              }
 	      if (PREDICT_FALSE
 		  (match_acl_info.acl_match_count && am->interface_acl_counters_enabled))
 		{
@@ -688,17 +725,14 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
           }
 
 		}
-	      if (PREDICT_FALSE(match_acl_info.acl_match_count))
-              {
-                  acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &action, &action_expand);
-              }
+              acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &action, &action_expand);
 
 	      b[0]->error = error_node->errors[action];
 
-	      if (1 == action)
+	      if (ACL_ACTION_PERMIT == action)
 		pkts_acl_permit++;
 
-	      if (2 == action)
+	      if (ACL_ACTION_PERMIT_REFLECT == action)
 		{
 		  if (!acl_fa_can_add_session (am, is_input, sw_if_index[0]))
 		    acl_fa_try_recycle_session (am, is_input,
@@ -738,7 +772,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 		    }
 		  else
 		    {
-		      action = 0;
+		      action = ACL_ACTION_DENY;
 		      b[0]->error =
 			error_node->errors
 			[ACL_FA_ERROR_ACL_TOO_MANY_SESSIONS];

@@ -523,7 +523,7 @@ acl_api_invalid_prefix (const vl_api_prefix_t * prefix)
 
 static int
 acl_add_list (u32 count, vl_api_acl_rule_t rules[],
-	      u32 * acl_list_index, u8 * tag)
+	      u32 * acl_list_index, u8 * tag, u8 reflect, u32 reflect_session)
 {
   acl_main_t *am = &acl_main;
   acl_list_t *a;
@@ -630,6 +630,15 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       /* Will return the newly allocated ACL index */
       *acl_list_index = a - am->acls;
       add_replace_del_flag = ACL_ADD_LIST;
+      if (0 != *acl_list_index)
+      {
+          a->reflect_flag = reflect;
+          if (reflect)
+          {
+              am->fa_conn_table_max_entries = reflect_session;
+              acl_fa_verify_init_sessions (am);
+          }
+      }
     }
   else
     {
@@ -886,7 +895,7 @@ acl_is_not_defined (acl_main_t * am, u32 acl_list_index)
 static int
 acl_interface_set_inout_acl_list (acl_main_t * am, u32 sw_if_index,
 				  u8 is_input, u32 * vec_acl_list_index,
-				  int *may_clear_sessions)
+				  int *may_clear_sessions, u8 reflect)
 {
   u32 *pacln;
   uword *seen_acl_bitmap = 0;
@@ -932,6 +941,11 @@ acl_interface_set_inout_acl_list (acl_main_t * am, u32 sw_if_index,
   u32 ***pinout_sw_if_index_vec_by_acl =
     is_input ? &am->input_sw_if_index_vec_by_acl : &am->
     output_sw_if_index_vec_by_acl;
+
+  u8 **pinout_reflect_by_sw_if_index = is_input ? &am->input_reflect_by_sw_if_index : &am->output_reflect_by_sw_if_index;
+
+  vec_validate ((*pinout_reflect_by_sw_if_index), sw_if_index);
+  (*pinout_reflect_by_sw_if_index)[sw_if_index] = reflect;
 
   vec_validate ((*pinout_acl_vec_by_sw_if_index), sw_if_index);
 
@@ -1023,13 +1037,64 @@ done:
   return rv;
 }
 
+static int
+acl_interface_set_acl_list (acl_main_t *am, u32 sw_if_index,
+                                 u32 *vec_inacl_list_index, u32 *vec_outacl_list_index,
+                                 int *may_clear_sessions)
+{
+    int ret = 0;
+    u32 *pacln;
+    u8 inacl_reflect = 0;
+    u8 outacl_reflect = 0;
+    acl_list_t *a;
+
+    vec_foreach (pacln, vec_inacl_list_index)
+    {
+        a = am->acls + *pacln;
+        if (1 == a->reflect_flag)
+        {
+            inacl_reflect = 1;
+            break;
+        }
+    }
+
+    vec_foreach (pacln, vec_outacl_list_index)
+    {
+        a = am->acls + *pacln;
+        if (1 == a->reflect_flag)
+        {
+            outacl_reflect = 1;
+            break;
+        }
+    }
+
+    if ((0 == vec_len(vec_outacl_list_index)) && (1 == inacl_reflect))
+    {
+        vec_add1 (vec_outacl_list_index, 0);
+    }
+
+    if ((0 == vec_len(vec_inacl_list_index)) && (1 == outacl_reflect))
+    {
+        vec_add1 (vec_inacl_list_index, 0);
+    }
+
+    ret = acl_interface_set_inout_acl_list(am, sw_if_index, 0, vec_outacl_list_index, may_clear_sessions, inacl_reflect);
+
+    if (0 == ret)
+    {
+        ret = acl_interface_set_inout_acl_list(am, sw_if_index, 1, vec_inacl_list_index, may_clear_sessions, outacl_reflect);
+    }
+
+    return ret;
+}
+
 static void
 acl_interface_reset_inout_acls (u32 sw_if_index, u8 is_input,
 				int *may_clear_sessions)
 {
   acl_main_t *am = &acl_main;
   acl_interface_set_inout_acl_list (am, sw_if_index, is_input, 0,
-				    may_clear_sessions);
+				    may_clear_sessions, 0);
 }
 
 static int
@@ -1085,7 +1150,7 @@ acl_interface_add_del_inout_acl (u32 sw_if_index, u8 is_add, u8 is_input,
     }
 
   rv = acl_interface_set_inout_acl_list (am, sw_if_index, is_input, acl_vec,
-					 &may_clear_sessions);
+					 &may_clear_sessions, 0);
 done:
   vec_free (acl_vec);
   return rv;
@@ -2096,7 +2161,7 @@ vl_api_acl_add_replace_t_handler (vl_api_acl_add_replace_t * mp)
 
   if (verify_message_len (mp, expected_len, "acl_add_replace"))
     {
-      rv = acl_add_list (acl_count, mp->r, &acl_list_index, mp->tag);
+      rv = acl_add_list (acl_count, mp->r, &acl_list_index, mp->tag, mp->reflect, ntohl(mp->reflect_session));
     }
   else
     {
@@ -2123,6 +2188,17 @@ vl_api_acl_del_t_handler (vl_api_acl_del_t * mp)
   REPLY_MACRO (VL_API_ACL_DEL_REPLY);
 }
 
+static void
+vl_api_acl_reflect_timeout_t_handler (vl_api_acl_reflect_timeout_t * mp)
+{
+  acl_main_t *am = &acl_main;
+  vl_api_acl_reflect_timeout_reply_t *rmp;
+  int rv = 0;
+
+  //rv = set_acl_reflect_timeout (ntohl (mp->tcp_idle_timeout), ntohl (mp->udp_idle_timeout), ntohl (mp->tcp_transient_timeout));
+
+  REPLY_MACRO (VL_API_ACL_REFLECT_TIMEOUT_REPLY);
+}
 
 static void
   vl_api_acl_stats_intf_counters_enable_t_handler
@@ -2203,8 +2279,7 @@ static void
                     }
                 }
 
-                rv = acl_interface_set_inout_acl_list (am, sw_if_index, 0, out_acl_vec, &may_clear_sessions);
-                rv = rv || acl_interface_set_inout_acl_list (am, sw_if_index, 1, in_acl_vec, &may_clear_sessions);
+                rv = acl_interface_set_acl_list (am, sw_if_index, in_acl_vec, out_acl_vec, &may_clear_sessions);
                 vec_free (in_acl_vec);
                 vec_free (out_acl_vec);
             }
@@ -3341,7 +3416,7 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
   if (!tag)
     vec_add (tag, "cli", 4);
 
-  rv = acl_add_list (vec_len (rules), rules, &acl_index, tag);
+  rv = acl_add_list (vec_len (rules), rules, &acl_index, tag, 0, ACL_FA_CONN_TABLE_DEFAULT_MAX_ENTRIES);
 
   vec_free (rules);
   vec_free (tag);
@@ -3689,8 +3764,8 @@ acl_plugin_show_sessions (acl_main_t * am,
 	    pw->fa_sessions_pool + show_session_session_index;
 	  u64 *m = (u64 *) & sess->info;
 	  vlib_cli_output (vm,
-			   "    info: %016llx %016llx %016llx %016llx %016llx %016llx",
-			   m[0], m[1], m[2], m[3], m[4], m[5]);
+			   "    info: %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx",
+			   m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7]);
 	  vlib_cli_output (vm, "    sw_if_index: %u", sess->sw_if_index);
 	  vlib_cli_output (vm, "    tcp_flags_seen: %x",
 			   sess->tcp_flags_seen.as_u16);
@@ -3798,6 +3873,72 @@ acl_plugin_show_sessions (acl_main_t * am,
   vlib_cli_output (vm, "Reclassify sessions: %d", am->reclassify_sessions);
 }
 
+static void
+acl_plugin_show_sessions_one (acl_main_t * am,
+                         u32 show_session_thread_id,
+                         u32 show_session_session_index)
+{
+    vlib_main_t *vm = am->vlib_main;
+    u16 wk;
+
+    for (wk = 0; wk < vec_len (am->per_worker_data); wk++)
+    {
+        acl_fa_per_worker_data_t *pw = &am->per_worker_data[wk];
+
+        if (show_session_thread_id == wk
+            && show_session_session_index < pool_len (pw->fa_sessions_pool))
+        {
+            fa_session_t *sess = pw->fa_sessions_pool + show_session_session_index;
+            u64 *m = (u64 *) & sess->info;
+            if (0 == m[6] && 0 == m[7])
+            {
+                continue;
+            }
+            vlib_cli_output (vm, "Thread #%d, Session #%u:", wk, show_session_session_index);
+            vlib_cli_output (vm, "  session index %u:", show_session_session_index);
+            vlib_cli_output (vm,
+                        "    info: %016llx %016llx %016llx %016llx %016llx %016llx %016llx %016llx",
+                        m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7]);
+            vlib_cli_output (vm, "    sw_if_index: %u", sess->sw_if_index);
+            vlib_cli_output (vm, "    tcp_flags_seen: %x", sess->tcp_flags_seen.as_u16);
+            vlib_cli_output (vm, "    last active time: %lu", sess->last_active_time);
+            vlib_cli_output (vm, "    thread index: %u", sess->thread_index);
+            vlib_cli_output (vm, "    link enqueue time: %lu", sess->link_enqueue_time);
+            vlib_cli_output (vm, "    link next index: %u", sess->link_next_idx);
+            vlib_cli_output (vm, "    link prev index: %u", sess->link_prev_idx);
+            vlib_cli_output (vm, "    link list id: %u", sess->link_list_id);
+            if (0 == m[0] && 0 == m[1] && 0 == m[2])
+            {
+                u8 *ip4_addr = (u8 *)(&(m[5]));
+                vlib_cli_output (vm, "    ip: %u.%u.%u.%u <-> %u.%u.%u.%u",
+                    ip4_addr[0], ip4_addr[1], ip4_addr[2], ip4_addr[3],
+                    ip4_addr[4], ip4_addr[5], ip4_addr[6], ip4_addr[7]);
+            }
+
+            else
+            {
+                u8 *ip6_addr = (u8 *)(&(m[2]));
+                vlib_cli_output (vm, "    ip: %u:%u:%u:%u:%u:%u:%u:%u:%u:%u:%u:%u:%u:%u:%u:%u <-> %u:%u:%u:%u:%u:%u:%u:%u:%u:%u:%u:%u:%u:%u:%u:%u",
+                    ip6_addr[0], ip6_addr[1], ip6_addr[2], ip6_addr[3],
+                    ip6_addr[4], ip6_addr[5], ip6_addr[6], ip6_addr[7],
+                    ip6_addr[8], ip6_addr[9], ip6_addr[10], ip6_addr[11],
+                    ip6_addr[12], ip6_addr[13], ip6_addr[14], ip6_addr[15],
+                    ip6_addr[16], ip6_addr[17], ip6_addr[18], ip6_addr[19],
+                    ip6_addr[20], ip6_addr[21], ip6_addr[22], ip6_addr[23],
+                    ip6_addr[24], ip6_addr[25], ip6_addr[26], ip6_addr[27],
+                    ip6_addr[28], ip6_addr[29], ip6_addr[30], ip6_addr[31]);
+            }
+            u8 *ip_protocol = (u8 *)(&(m[7]));
+            if (IP_PROTOCOL_TCP == ip_protocol[4] || IP_PROTOCOL_UDP == ip_protocol[4])
+            {
+                u16 *port_id = (u16 *)(&(m[7]));
+                vlib_cli_output (vm, "    port: %u <-> %u", port_id[0], port_id[1]);
+            }
+            vlib_cli_output (vm, "    hitcount packets: %lu", sess->hitcount_pkts);
+            vlib_cli_output (vm, "    hitcount bytes: %lu", sess->hitcount_bytes);
+        }
+    }
+}
 static clib_error_t *
 acl_show_aclplugin_sessions_fn (vlib_main_t * vm,
 				unformat_input_t * input,
@@ -3809,13 +3950,42 @@ acl_show_aclplugin_sessions_fn (vlib_main_t * vm,
   u32 show_bihash_verbose = 0;
   u32 show_session_thread_id = ~0;
   u32 show_session_session_index = ~0;
+  u32 show_session_session_index_start = ~0;
+  u32 show_session_session_index_end = ~0;
   (void) unformat (input, "thread %u index %u", &show_session_thread_id,
 		   &show_session_session_index);
   (void) unformat (input, "verbose %u", &show_bihash_verbose);
 
-  acl_plugin_show_sessions (am, show_session_thread_id,
-			    show_session_session_index);
-  show_fa_sessions_hash (vm, show_bihash_verbose);
+  (void) unformat (input, "thread %u index_range %u-%u", &show_session_thread_id,
+                  &show_session_session_index_start, &show_session_session_index_end);
+
+  if (~0 != show_session_session_index_end)
+  {
+      u32 session_index = 0;
+      for (session_index = show_session_session_index_start; session_index <= show_session_session_index_end; session_index++)
+      {
+          acl_plugin_show_sessions_one(am, show_session_thread_id, session_index);
+      }
+  }
+
+  else if (~0 != show_session_session_index)
+  {
+      acl_plugin_show_sessions_one(am, show_session_thread_id, show_session_session_index);
+  }
+
+  else if (0 != show_bihash_verbose)
+  {
+      acl_plugin_show_sessions (am, show_session_thread_id,
+                           show_session_session_index);
+      show_fa_sessions_hash (vm, show_bihash_verbose);
+  }
+
+  else
+  {
+      acl_plugin_show_sessions (am, show_session_thread_id,
+                           show_session_session_index);
+  }
+
   return error;
 }
 
@@ -3938,7 +4108,7 @@ VLIB_CLI_COMMAND (aclplugin_show_memory_command, static) = {
 
 VLIB_CLI_COMMAND (aclplugin_show_sessions_command, static) = {
     .path = "show acl-plugin sessions",
-    .short_help = "show acl-plugin sessions",
+    .short_help = "show acl-plugin sessions [[ thread N index N ] | [ thread N index_range M-N ] | [ verbose 1 ]]",
     .function = acl_show_aclplugin_sessions_fn,
 };
 
@@ -4137,7 +4307,7 @@ acl_init (vlib_main_t * vm)
     ACL_FA_CONN_TABLE_DEFAULT_HASH_NUM_BUCKETS;
   am->fa_conn_table_hash_memory_size =
     ACL_FA_CONN_TABLE_DEFAULT_HASH_MEMORY_SIZE;
-  am->fa_conn_table_max_entries = ACL_FA_CONN_TABLE_DEFAULT_MAX_ENTRIES;
+  am->fa_conn_table_max_entries = 0;
   am->reclassify_sessions = 0;
   vlib_thread_main_t *tm = vlib_get_thread_main ();
 

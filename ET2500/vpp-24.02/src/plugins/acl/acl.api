@@ -109,6 +109,8 @@ define acl_plugin_get_conn_table_max_entries_reply
   u32 acl_index; /* ~0 to add, existing ACL# to replace */
   string tag[64]; /* What gets in here gets out in the corresponding tag field when dumping the ACLs. */
   u32 count;
+  u8 reflect;
+  u32 reflect_session;
   vl_api_acl_rule_t r[count];
   option vat_help = "<acl-idx> <permit|permit+reflect|deny|action N> [src IP/plen] [dst IP/plen] [sport X-Y] [dport X-Y] [proto P] [tcpflags FL MASK], ... , ...";
 };
@@ -537,4 +539,19 @@ define acl_plugin_use_hash_lookup_get_reply
   option status="in_progress";
   u32 context;
   bool enable;
+};
+
+/** \brief Set acl reflect timeout
+    @param tcp_idle_timeout
+    @param udp_idle_timeout
+    @param tcp_transient_timeout
+*/
+
+autoreply define acl_reflect_timeout
+{
+  u32 client_index;
+  u32 context;
+  u32 tcp_idle_timeout;
+  u32 udp_idle_timeout;
+  u32 tcp_transient_timeout;
 };
