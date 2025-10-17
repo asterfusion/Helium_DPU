@@ -149,6 +149,75 @@ stat_segment_connect_r (const char *socket_name, stat_client_main_t * sm)
 }
 
 int
+stat_segment_connect_sai (const char *socket_name, stat_client_main_t * sm, int *socket_num)
+{
+  int mfd = -1;
+  int sock;
+
+  if (*socket_num >= 0)
+  {
+      close (*socket_num);
+  }
+  clib_memset (sm, 0, sizeof (*sm));
+  *socket_num = -1;
+
+  if ((sock = socket (AF_UNIX, SOCK_SEQPACKET, 0)) < 0)
+  {
+    perror ("Stat client couldn't open socket");
+    return -1;
+  }
+
+  struct sockaddr_un un = { 0 };
+  un.sun_family = AF_UNIX;
+  strncpy ((char *) un.sun_path, socket_name, sizeof (un.sun_path) - 1);
+  if (connect (sock, (struct sockaddr *) &un, sizeof (struct sockaddr_un)) <
+    0)
+  {
+    close (sock);
+    return -2;
+  }
+
+  *socket_num = sock;
+
+  if ((mfd = recv_fd (sock)) < 0)
+    {
+      close (sock);
+      *socket_num = -1;
+      fprintf (stderr, "Receiving file descriptor failed\n");
+      return -3;
+    }
+  //close (sock);
+
+  /* mmap shared memory segment. */
+  void *memaddr;
+  struct stat st = { 0 };
+
+  if (fstat (mfd, &st) == -1)
+    {
+      close (mfd);
+      perror ("mmap fstat failed");
+      *socket_num = -1;
+      return -4;
+    }
+  if ((memaddr =
+       mmap (NULL, st.st_size, PROT_READ, MAP_SHARED, mfd, 0)) == MAP_FAILED)
+    {
+      close (mfd);
+      perror ("mmap map failed");
+      *socket_num = -1;
+      return -5;
+    }
+
+  close (mfd);
+  sm->memory_size = st.st_size;
+  sm->shared_header = memaddr;
+  sm->directory_vector =
+    stat_segment_adjust (sm, (void *) sm->shared_header->directory_vector);
+
+  return 0;
+}
+
+int
 stat_segment_connect (const char *socket_name)
 {
   stat_client_main_t *sm = &stat_client_main;
