@@ -38,9 +38,9 @@
 #define  ACL_PLUGIN_VERSION_MAJOR 1
 #define  ACL_PLUGIN_VERSION_MINOR 4
 
-#define UDP_SESSION_IDLE_TIMEOUT_SEC 600
-#define TCP_SESSION_IDLE_TIMEOUT_SEC (3600*24)
-#define TCP_SESSION_TRANSIENT_TIMEOUT_SEC 120
+#define UDP_SESSION_IDLE_TIMEOUT_SEC 60
+#define TCP_SESSION_IDLE_TIMEOUT_SEC 120
+#define TCP_SESSION_TRANSIENT_TIMEOUT_SEC 30
 
 #define SESSION_PURGATORY_TIMEOUT_USEC 10
 
@@ -99,6 +99,7 @@ typedef struct
   /** Required for pool_get_aligned */
   CLIB_CACHE_LINE_ALIGN_MARK(cacheline0);
   u8 tag[64];
+  u8 reflect_flag;
   acl_rule_t *rules;
 } acl_list_t;
 
@@ -184,6 +185,8 @@ typedef struct {
   u32 *input_policy_epoch_by_sw_if_index;
   u32 *output_policy_epoch_by_sw_if_index;
 
+  u8 *input_reflect_by_sw_if_index;
+  u8 *output_reflect_by_sw_if_index;
   /* whether we need to take the epoch of the session into account */
   int reclassify_sessions;
 
@@ -398,6 +401,7 @@ typedef enum {
 
 void aclp_post_session_change_request(acl_main_t *am, u32 target_thread, u32 target_session, acl_fa_sess_req_t request_type);
 void aclp_swap_wip_and_pending_session_change_requests(acl_main_t *am, u32 target_thread);
+void acl_fa_verify_init_sessions (acl_main_t * am);
 
 #define GEOSITE_FIND_CC_CODE (1 << 0)
 #define GEOSITE_DNS_FIND_CC_CODE (1 << 1)

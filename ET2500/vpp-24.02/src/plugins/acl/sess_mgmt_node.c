@@ -85,10 +85,10 @@ format_ip4_session_bihash_kv (u8 * s, va_list * args)
 }
 
 
-static void
+void
 acl_fa_verify_init_sessions (acl_main_t * am)
 {
-  if (!am->fa_sessions_hash_is_initialized)
+  if (!am->fa_sessions_hash_is_initialized && am->fa_conn_table_max_entries > 0)
     {
       u16 wk;
       /* Allocate the per-worker sessions pools */
@@ -154,8 +154,9 @@ acl_fa_conn_time_to_check (acl_main_t * am, acl_fa_per_worker_data_t * pw,
   if (session_index == FA_SESSION_BOGUS_INDEX)
     return 0;
   fa_session_t *sess = get_session_ptr (am, thread_index, session_index);
+  u64 config_timeout = fa_session_get_list_timeout (am, sess);
   u64 timeout_time =
-    sess->link_enqueue_time + fa_session_get_list_timeout (am, sess);
+    sess->link_enqueue_time + config_timeout;
   return (timeout_time < now)
     || (sess->link_enqueue_time <= pw->swipe_end_time);
 }
@@ -244,8 +245,9 @@ acl_fa_check_idle_sessions (acl_main_t * am, u16 thread_index, u64 now)
 	fa_session_t *sess =
 	  get_session_ptr (am, thread_index, fsid.session_index);
 	u32 sw_if_index = sess->sw_if_index;
+	u64 config_timeout = fa_session_get_timeout (am, sess);
 	u64 sess_timeout_time =
-	  sess->last_active_time + fa_session_get_timeout (am, sess);
+	  sess->last_active_time + config_timeout;
 	int timeout_passed = (now >= sess_timeout_time);
 	int clearing_interface =
 	  clib_bitmap_get (pw->pending_clear_sw_if_index_bitmap, sw_if_index);
@@ -862,7 +864,7 @@ acl_fa_enable_disable (u32 sw_if_index, int is_input, int enable_disable)
   acl_main_t *am = &acl_main;
   if (enable_disable)
     {
-      acl_fa_verify_init_sessions (am);
+      //acl_fa_verify_init_sessions (am);
       am->fa_total_enabled_count++;
       vlib_process_signal_event (am->vlib_main, am->fa_cleaner_node_index,
 				 ACL_FA_CLEANER_RESCHEDULE, 0);

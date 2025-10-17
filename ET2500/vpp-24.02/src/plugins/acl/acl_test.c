@@ -1490,6 +1490,44 @@ static int api_macip_acl_add_replace (vat_main_t * vam)
     return ret;
 }
 
+static int api_acl_reflect_timeout (vat_main_t * vam)
+{
+    unformat_input_t * i = vam->input;
+    vl_api_acl_reflect_timeout_t * mp;
+    u32 tcp_idle_timeout = ~0;
+    u32 udp_idle_timeout = 0;
+    u32 tcp_transient_timeout = 0;
+    int ret;
+
+    if (!unformat (i, "tcp_idle_timeout %d", &tcp_idle_timeout)) {
+      errmsg ("missing udp_idle_timeout\n");
+      return -99;
+    }
+
+    else if (!unformat (i, "udp_idle_timeout %d", &udp_idle_timeout)) {
+      errmsg ("missing udp_idle_timeout\n");
+      return -99;
+    }
+
+    else if (!unformat (i, "tcp_transient_timeout %d", &tcp_transient_timeout)) {
+      errmsg ("missing tcp_transient_timeout\n");
+      return -99;
+    }
+
+    /* Construct the API message */
+    M(ACL_REFLECT_TIMEOUT, mp);
+    mp->tcp_idle_timeout = ntohl(tcp_idle_timeout);
+    mp->udp_idle_timeout = ntohl(udp_idle_timeout);
+    mp->tcp_transient_timeout = ntohl(tcp_transient_timeout);
+
+    /* send it... */
+    S(mp);
+
+    /* Wait for a reply... */
+    W (ret);
+    return ret;
+}
+
 #define VL_API_LOCAL_SETUP_MESSAGE_ID_TABLE local_setup_message_id_table
 static void local_setup_message_id_table (vat_main_t * vam)
 {
