@@ -1269,6 +1269,7 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
     }
 
   // delete sessions for static mapping
+#ifndef SUPPORT_NAT_PROTO
   if (sm->num_workers > 1)
     {
       tsm = vec_elt_at_index (sm->per_thread_data, m->workers[0]);
@@ -1281,6 +1282,24 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
   nat_ed_static_mapping_del_sessions (sm, tsm, m->local_addr, m->local_port,
 				      m->proto, fib_index,
 				      is_sm_addr_only (flags), e_addr, e_port);
+#else
+  if (sm->num_workers > 1)
+  {
+      vec_foreach (tsm, sm->per_thread_data)
+      {
+	  nat_ed_static_mapping_del_sessions (sm, tsm, m->local_addr, m->local_port,
+		  m->proto, fib_index,
+		  is_sm_addr_only (flags), e_addr, e_port);
+      }
+  }
+  else
+  {
+      tsm = vec_elt_at_index (sm->per_thread_data, sm->num_workers);
+      nat_ed_static_mapping_del_sessions (sm, tsm, m->local_addr, m->local_port,
+	      m->proto, fib_index,
+	      is_sm_addr_only (flags), e_addr, e_port);
+  }
+#endif
 
   fib_table_unlock (fib_index, FIB_PROTOCOL_IP4, sm->fib_src_low);
 
