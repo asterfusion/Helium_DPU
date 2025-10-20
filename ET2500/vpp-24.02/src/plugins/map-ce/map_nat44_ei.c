@@ -255,7 +255,7 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     map_nat44_ei_domain_t *mnat;
     map_nat44_ei_address_t *address;
     int i;
-    char name[256];
+    u8 *name = NULL;
 
     if (map_domain_index == ~0)
     {
@@ -276,30 +276,36 @@ map_ce_nat44_domain_create(u32 map_domain_index)
 
 
     /* Init Hash */
-    snprintf(name, sizeof(name), "%s-%u", "map_ce_nat44_static_in2out", map_domain_index);
+    name = format(name, "%s-%u", "map_ce_nat44_static_in2out", map_domain_index);
     vec_validate_init_c_string (mnat->static_in2out_name, name, strlen ((char *) name));
     clib_bihash_init_8_8 (&mnat->static_in2out, (char *)mnat->static_in2out_name, 
                           MAP_NAT_STATIC_HASH_BUCKETS, MAP_NAT_STATIC_HASH_MEMORY_SIZE);
+    vec_free(name);
 
-    snprintf(name, sizeof(name), "%s-%u", "map_ce_nat44_static_out2in", map_domain_index);
+    name = format(name, "%s-%u", "map_ce_nat44_static_out2in", map_domain_index);
     vec_validate_init_c_string (mnat->static_out2in_name, name, strlen ((char *) name));
     clib_bihash_init_8_8 (&mnat->static_out2in, (char *)mnat->static_out2in_name, 
                           MAP_NAT_STATIC_HASH_BUCKETS, MAP_NAT_STATIC_HASH_MEMORY_SIZE);
+    vec_free(name);
 
-    snprintf(name, sizeof(name), "%s-%u", "map_ce_nat44_in2out", map_domain_index);
+    name = format(name, "%s-%u", "map_ce_nat44_in2out", map_domain_index);
     vec_validate_init_c_string (mnat->in2out_name, name, strlen ((char *) name));
     clib_bihash_init_8_8 (&mnat->in2out, (char *)mnat->in2out_name, 
                           MAP_NAT_HASH_BUCKETS, MAP_NAT_HASH_MEMORY_SIZE);
+    vec_free(name);
 
-    snprintf(name, sizeof(name), "%s-%u", "map_ce_nat44_out2in", map_domain_index);
+    name = format(name, "%s-%u", "map_ce_nat44_out2in", map_domain_index);
     vec_validate_init_c_string (mnat->out2in_name, name, strlen ((char *) name));
     clib_bihash_init_8_8 (&mnat->out2in, (char *)mnat->out2in_name, 
                           MAP_NAT_HASH_BUCKETS, MAP_NAT_HASH_MEMORY_SIZE);
+    vec_free(name);
 
-    snprintf(name, sizeof(name), "%s-%u", "map_ce_nat44_users", map_domain_index);
+    name = format(name, "%s-%u", "map_ce_nat44_users", map_domain_index);
     vec_validate_init_c_string (mnat->users_hash_name, name, strlen ((char *) name));
     clib_bihash_init_8_8 (&mnat->users_hash, (char *)mnat->users_hash_name, 
                           MAP_NAT_HASH_BUCKETS, MAP_NAT_HASH_MEMORY_SIZE); //Consistent with session size
+
+    vec_free(name);
 
     clib_bihash_set_kvp_format_fn_8_8 (&mnat->static_in2out, format_map_nat44_ei_static_session_kvp);
     clib_bihash_set_kvp_format_fn_8_8 (&mnat->static_out2in, format_map_nat44_ei_static_session_kvp);

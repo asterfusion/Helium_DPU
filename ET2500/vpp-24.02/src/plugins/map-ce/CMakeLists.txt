@@ -29,5 +29,6 @@ add_vpp_plugin(map_ce
 
   INSTALL_HEADERS
   map_ce.h
+  map_ce_nat.h
   lpm.h
 )

@@ -320,17 +320,12 @@ map_nat44_ei_session_alloc_for_static_mapping (map_nat44_ei_domain_t *mnat,
     map_nat44_ei_user_t *u = NULL;
     map_nat44_ei_session_t *s = NULL;
     clib_bihash_kv_8_8_t kv;
-    ip4_header_t *ip;
-    udp_header_t *udp;
     map_nat44_ei_is_idle_session_ctx_t ctx;
 
     if (PREDICT_FALSE (map_nat44_maximum_sessions_exceeded (mnat)))
     {
         return MAP_CE_ERROR_NAT_MAX_SESSIONS_EXCEEDED;
     }
-
-    ip = vlib_buffer_get_current (b);
-    udp = ip4_next_header (ip);
 
     u = map_nat44_ei_user_get_or_create (mnat, &i2o_addr);
     if (!u)
@@ -842,6 +837,8 @@ nat44_map_ce_in2out (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t 
             p0 = vlib_get_buffer (vm, pi0);
             ip40 = vlib_buffer_get_current (p0);
 
+            proto0 = ip_proto_to_map_nat_proto (ip40->protocol);
+
             map_domain_index0 = vnet_buffer (p0)->map_ce.map_domain_index;
             d0 = pool_elt_at_index (mm->domains, map_domain_index0);
 
@@ -855,8 +852,6 @@ nat44_map_ce_in2out (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t 
 
             next0 = vnet_buffer (p0)->map_ce.is_translation ? 
                                 MAP_CE_NAT44_EI_I2O_NEXT_MAP_T : MAP_CE_NAT44_EI_I2O_NEXT_MAP_E;
-
-            proto0 = ip_proto_to_map_nat_proto (ip40->protocol);
 
             if (PREDICT_FALSE (proto0 == MAP_CE_NAT_PROTOCOL_OTHER))
             {
@@ -1233,6 +1228,8 @@ nat44_map_ce_out2in (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t 
             p0 = vlib_get_buffer (vm, pi0);
             ip40 = vlib_buffer_get_current (p0);
 
+            proto0 = ip_proto_to_map_nat_proto (ip40->protocol);
+
             map_domain_index0 = vnet_buffer (p0)->map_ce.map_domain_index;
             d0 = pool_elt_at_index (mm->domains, map_domain_index0);
 
@@ -1243,8 +1240,6 @@ nat44_map_ce_out2in (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t 
             }
 
             mnat0 = vec_elt_at_index (mm->nat_domains, map_domain_index0);
-
-            proto0 = ip_proto_to_map_nat_proto (ip40->protocol);
 
             if (PREDICT_FALSE (proto0 == MAP_CE_NAT_PROTOCOL_OTHER))
             {
