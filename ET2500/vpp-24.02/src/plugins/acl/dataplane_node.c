@@ -327,6 +327,8 @@ acl_fa_node_common_prepare_fn (vlib_main_t * vm,
 
 always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, u32 *rule_index, u8 *action, match_rule_expand_t *action_expand)
 {
+  u16 priority = 0;
+
   for (int i = 0; i < match_acl_info->acl_match_count; i++)
     {
         if (ACL_ACTION_DENY == match_acl_info->action[i])
@@ -348,9 +350,10 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
             action_expand->policer_index = match_acl_info->policer_index[i];
             action_expand->set_tc_value = match_acl_info->set_tc_value[i];
+            priority = match_acl_info->acl_priority[i];
         }
 
-        else if (match_acl_info->action[i] == *action && match_acl_info->acl_index[i] > *acl_index)
+        else if (match_acl_info->action[i] == *action && match_acl_info->acl_priority[i] > priority)
         {
             *action = match_acl_info->action[i];
             *acl_index = match_acl_info->acl_index[i];
@@ -358,6 +361,18 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
             action_expand->policer_index = match_acl_info->policer_index[i];
             action_expand->set_tc_value = match_acl_info->set_tc_value[i];
+            priority = match_acl_info->acl_priority[i];
+        }
+
+        else if (match_acl_info->action[i] == *action && match_acl_info->acl_priority[i] == priority && match_acl_info->acl_index[i] > *acl_index)
+        {
+            *action = match_acl_info->action[i];
+            *acl_index = match_acl_info->acl_index[i];
+            *rule_index = match_acl_info->rule_index[i];
+            action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
+            action_expand->policer_index = match_acl_info->policer_index[i];
+            action_expand->set_tc_value = match_acl_info->set_tc_value[i];
+            priority = match_acl_info->acl_priority[i];
         }
     }
 

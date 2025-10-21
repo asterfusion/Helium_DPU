@@ -728,6 +728,8 @@ hash_acl_apply(acl_main_t *am, u32 lc_index, int acl_index, u32 acl_position)
     int is_ip6 = ha->rules[i].match.pkt.is_ip6;
     u32 new_index = base_offset + i;
     applied_hash_ace_entry_t *pae = vec_elt_at_index((*applied_hash_aces), new_index);
+    acl_list_t *a = am->acls + acl_index;
+    pae->priority = a->priority;
     pae->acl_index = acl_index;
     pae->ace_index = ha->rules[i].ace_index;
     pae->acl_position = acl_position;

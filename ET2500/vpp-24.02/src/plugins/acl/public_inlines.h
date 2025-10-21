@@ -691,6 +691,7 @@ typedef struct match_acl{
     u32 acl_pos[64];
     u32 curr_match_index[64];
     u32 policer_index[64];
+    u16 acl_priority[64];
 } match_acl_t;
 
 always_inline int
@@ -1086,9 +1087,11 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
             int i;
             u32 tmp_index = 0;
             applied_hash_ace_entry_t *tmp_pae = NULL;
+            applied_hash_ace_entry_t *count_pae = NULL;
 
             for (i = 0; i < vec_len (crs); i++)
             {
+                count_pae = NULL;
                 if (single_rule_match_5tuple (&crs[i].rule, is_ip6, match))
                 {
                     tmp_index = crs[i].applied_entry_index;
@@ -1108,6 +1111,8 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
                                 match_acl_info->action_expand_bitmap[j] = tmp_pae->action_expand_bitmap;
                                 match_acl_info->policer_index[j] = tmp_pae->policer_index;
                                 match_acl_info->set_tc_value[j] = tmp_pae->set_tc_value;
+                                match_acl_info->acl_priority[j] = tmp_pae->priority;
+                                count_pae = tmp_pae;
                             }
 
                             break;
@@ -1125,8 +1130,14 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
                         match_acl_info->action_expand_bitmap[k] = tmp_pae->action_expand_bitmap;
                         match_acl_info->policer_index[k] = tmp_pae->policer_index;
                         match_acl_info->set_tc_value[k] = tmp_pae->set_tc_value;
+                        match_acl_info->acl_priority[k] = tmp_pae->priority;
                         k++;
+                        count_pae = tmp_pae;
                     }
+                }
+                if (count_pae)
+                {
+                    count_pae->hitcount++;
                 }
             }
         }

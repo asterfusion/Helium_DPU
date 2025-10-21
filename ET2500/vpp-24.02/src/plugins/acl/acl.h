@@ -100,6 +100,7 @@ typedef struct
   CLIB_CACHE_LINE_ALIGN_MARK(cacheline0);
   u8 tag[64];
   u8 reflect_flag;
+  u16 priority;
   acl_rule_t *rules;
 } acl_list_t;
 

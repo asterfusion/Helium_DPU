@@ -523,7 +523,7 @@ acl_api_invalid_prefix (const vl_api_prefix_t * prefix)
 
 static int
 acl_add_list (u32 count, vl_api_acl_rule_t rules[],
-	      u32 * acl_list_index, u8 * tag, u8 reflect, u32 reflect_session)
+	      u32 * acl_list_index, u8 * tag, u8 reflect, u32 reflect_session, u16 priority)
 {
   acl_main_t *am = &acl_main;
   acl_list_t *a;
@@ -638,6 +638,10 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
               am->fa_conn_table_max_entries = reflect_session;
               acl_fa_verify_init_sessions (am);
           }
+          if (priority)
+          {
+              a->priority = priority;
+          }
       }
     }
   else
@@ -658,6 +662,7 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
           add_replace_del_flag = ACL_ADD_LIST;
       }
     }
+
   a->rules = acl_new_rules;
   memcpy (a->tag, tag, tag_len + 1);
   if (am->trace_acl > 255)
@@ -2161,7 +2166,7 @@ vl_api_acl_add_replace_t_handler (vl_api_acl_add_replace_t * mp)
 
   if (verify_message_len (mp, expected_len, "acl_add_replace"))
     {
-      rv = acl_add_list (acl_count, mp->r, &acl_list_index, mp->tag, mp->reflect, ntohl(mp->reflect_session));
+      rv = acl_add_list (acl_count, mp->r, &acl_list_index, mp->tag, mp->reflect, ntohl(mp->reflect_session), ntohs(mp->priority));
     }
   else
     {
@@ -3416,7 +3421,7 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
   if (!tag)
     vec_add (tag, "cli", 4);
 
-  rv = acl_add_list (vec_len (rules), rules, &acl_index, tag, 0, ACL_FA_CONN_TABLE_DEFAULT_MAX_ENTRIES);
+  rv = acl_add_list (vec_len (rules), rules, &acl_index, tag, 0, ACL_FA_CONN_TABLE_DEFAULT_MAX_ENTRIES, 0);
 
   vec_free (rules);
   vec_free (tag);

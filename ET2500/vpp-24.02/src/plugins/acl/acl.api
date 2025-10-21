@@ -111,6 +111,7 @@ define acl_plugin_get_conn_table_max_entries_reply
   u32 count;
   u8 reflect;
   u32 reflect_session;
+  u16 priority;
   vl_api_acl_rule_t r[count];
   option vat_help = "<acl-idx> <permit|permit+reflect|deny|action N> [src IP/plen] [dst IP/plen] [sport X-Y] [dport X-Y] [proto P] [tcpflags FL MASK], ... , ...";
 };
