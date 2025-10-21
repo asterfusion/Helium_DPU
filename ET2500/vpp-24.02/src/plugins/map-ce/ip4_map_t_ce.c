@@ -412,6 +412,8 @@ ip4_map_t_ce (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame
             pi0 = to_next[0] = from[0];
             from += 1;
             n_left_from -= 1;
+            to_next += 1;
+            n_left_to_next -= 1;
 
             p0 = vlib_get_buffer (vm, pi0);
             ip40 = vlib_buffer_get_current (p0);

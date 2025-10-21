@@ -14,6 +14,7 @@
  */
 
 #include <vnet/ip/ip_frag.h>
+#include <vnet/ip/ip4_to_ip6.h>
 #include "map_ce.h"
 
 enum map_ce_nat44_in2out_next_e
@@ -110,14 +111,15 @@ map_nat44_ei_session_update_lru (map_nat44_ei_domain_t *mnat,
                                 map_nat44_ei_session_t *s)
 {
     /* don't update too often - timeout is in magnitude of seconds anyway */
+    MAP_NAT_LOCK(s, self);
     if (s->last_heard > s->last_lru_update + 1)
     {
         clib_dlist_remove (mnat->list_pool, s->per_user_index);
         clib_dlist_addtail (mnat->list_pool, s->per_user_list_head_index, s->per_user_index);
         s->last_lru_update = s->last_heard;
     }
+    MAP_NAT_UNLOCK(s, self);
 }
-
 
 static_always_inline int
 map_nat44_ei_static_mapping_match (map_nat44_ei_domain_t *mnat,
@@ -286,8 +288,8 @@ map_nat44_ei_session_alloc_or_recycle (map_nat44_ei_domain_t *mnat,
 
         MAP_NAT_UNLOCK(mnat, list_pool);
 
-        per_user_translation_list_elt->value = s - mnat->sessions;
         clib_dlist_init (mnat->list_pool, per_user_translation_list_elt - mnat->list_pool);
+        per_user_translation_list_elt->value = s - mnat->sessions;
 
         MAP_NAT_LOCK(s, self);
 
@@ -373,7 +375,7 @@ map_nat44_ei_session_alloc_for_static_mapping (map_nat44_ei_domain_t *mnat,
 
 
 static_always_inline u8 
-map_nat44_icmp_get_key (vlib_buffer_t *b, 
+map_nat44_in2out_icmp_get_key (vlib_buffer_t *b, 
                         ip4_header_t *ip, 
                         ip4_address_t *addr,
                         u16 *port, 
@@ -391,7 +393,9 @@ map_nat44_icmp_get_key (vlib_buffer_t *b,
     icmp = (icmp46_header_t *) ip4_next_header (ip);
     echo = (map_ce_nat_icmp_echo_header_t *) (icmp + 1);
 
-    if (!map_ce_nat44_icmp_type_is_error_message(vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags))
+    u8 icmp_type = vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags;
+
+    if (!map_ce_nat44_icmp_type_is_error_message(icmp_type))
     {
         *nat_proto = MAP_CE_NAT_PROTOCOL_ICMP;
         *addr = ip->src_address;
@@ -552,7 +556,7 @@ map_nat44_ei_icmp_in2out (map_ce_domain_t *d,
 
     echo = (map_ce_nat_icmp_echo_header_t *) (icmp + 1);
 
-    error = map_nat44_icmp_get_key (b, ip, &addr, &port, &proto);
+    error = map_nat44_in2out_icmp_get_key (b, ip, &addr, &port, &proto);
     if (MAP_CE_ERROR_NONE != error)
     {
         *next = MAP_CE_NAT44_EI_I2O_NEXT_DROP;
@@ -750,6 +754,9 @@ map_nat44_ei_tcp_udp_in2out (map_ce_domain_t *d,
         s = pool_elt_at_index (mnat->sessions, value.value);
     }
 
+    if (p_s)
+        *p_s = s;
+
     old_addr = ip->src_address.as_u32;
     ip->src_address = s->out2in.addr;
     new_addr = ip->src_address.as_u32;
@@ -832,7 +839,8 @@ nat44_map_ce_in2out (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t 
             pi0 = to_next[0] = from[0];
             from += 1;
             n_left_from -= 1;
-
+            to_next += 1;
+            n_left_to_next -= 1;
 
             p0 = vlib_get_buffer (vm, pi0);
             ip40 = vlib_buffer_get_current (p0);
@@ -893,6 +901,58 @@ trace:
     return frame->n_vectors;
 }
 
+static_always_inline u8 
+map_nat44_out2in_icmp_get_key (vlib_buffer_t *b, 
+                        ip4_header_t *ip, 
+                        ip4_address_t *addr,
+                        u16 *port, 
+                        map_ce_nat_protocol_t *nat_proto)
+{
+    void *l4_header;
+
+    icmp46_header_t *icmp;
+    map_ce_nat_icmp_echo_header_t *echo;
+
+    ip4_header_t *inner_ip;
+    icmp46_header_t *inner_icmp;
+    map_ce_nat_icmp_echo_header_t *inner_echo;
+
+    icmp = (icmp46_header_t *) ip4_next_header (ip);
+    echo = (map_ce_nat_icmp_echo_header_t *) (icmp + 1);
+
+    u8 icmp_type = ip4_is_fragment(ip) ? vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags : icmp->type;
+    u16 l4_dst_port = ip4_is_fragment(ip) ? vnet_buffer (b)->ip.reass.l4_dst_port : ip4_get_port(ip, 0);
+
+    if (!map_ce_nat44_icmp_type_is_error_message(icmp_type))
+    {
+        *nat_proto = MAP_CE_NAT_PROTOCOL_ICMP;
+        *addr = ip->dst_address;
+        *port = l4_dst_port;
+    }
+    else
+    {
+        inner_ip = (ip4_header_t *) (echo + 1);
+        l4_header = ip4_next_header (inner_ip);
+        *nat_proto = ip_proto_to_map_nat_proto (inner_ip->protocol);
+        *addr = inner_ip->dst_address;
+        switch (*nat_proto)
+        {
+        case MAP_CE_NAT_PROTOCOL_ICMP:
+            inner_icmp = (icmp46_header_t *) l4_header;
+            inner_echo = (map_ce_nat_icmp_echo_header_t *) (inner_icmp + 1);
+            *port = inner_echo->identifier;
+            break;
+        case MAP_CE_NAT_PROTOCOL_UDP:
+        case MAP_CE_NAT_PROTOCOL_TCP:
+            *port = ((map_ce_nat_tcp_udp_header_t *) l4_header)->dst_port;
+            break;
+        default:
+            return MAP_CE_ERROR_NAT_UNSUPPORTED_PROTOCOL;
+        }
+    }
+    return MAP_CE_ERROR_NONE;            /* success */
+}
+
 static_always_inline u8
 map_nat44_ei_icmp_out2in (map_ce_domain_t *d,
                           map_nat44_ei_domain_t *mnat,
@@ -934,7 +994,10 @@ map_nat44_ei_icmp_out2in (map_ce_domain_t *d,
     icmp = ip4_next_header (ip);
     echo = (map_ce_nat_icmp_echo_header_t *) (icmp + 1);
 
-    error = map_nat44_icmp_get_key (b, ip, &addr, &port, &proto);
+    u8 is_non_first_fragment = ! !ip4_get_fragment_offset (ip);
+    u8 icmp_type = ip4_is_fragment(ip) ? vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags : icmp->type;
+
+    error = map_nat44_out2in_icmp_get_key (b, ip, &addr, &port, &proto);
     if (MAP_CE_ERROR_NONE != error)
     {
         *next = MAP_CE_NAT44_EI_O2I_NEXT_DROP;
@@ -954,8 +1017,7 @@ map_nat44_ei_icmp_out2in (map_ce_domain_t *d,
         }
 
         if (PREDICT_FALSE
-                (vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags != ICMP4_echo_reply && 
-                (vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags != ICMP4_echo_request)))
+                (icmp_type != ICMP4_echo_reply && (icmp_type != ICMP4_echo_request)))
         {
             *next = MAP_CE_NAT44_EI_O2I_NEXT_DROP;
             return MAP_CE_ERROR_NAT_BAD_ICMP_TYPE;
@@ -973,9 +1035,8 @@ map_nat44_ei_icmp_out2in (map_ce_domain_t *d,
     }
     else
     {
-        if (PREDICT_FALSE(vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags != ICMP4_echo_reply && 
-                          vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags != ICMP4_echo_request && 
-                          !map_ce_nat44_icmp_type_is_error_message (vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags)))
+        if (PREDICT_FALSE(icmp_type != ICMP4_echo_reply && icmp_type != ICMP4_echo_request && 
+                          !map_ce_nat44_icmp_type_is_error_message (icmp_type)))
         {
             *next = MAP_CE_NAT44_EI_O2I_NEXT_DROP;
             return MAP_CE_ERROR_NAT_BAD_ICMP_TYPE;
@@ -1013,7 +1074,7 @@ map_nat44_ei_icmp_out2in (map_ce_domain_t *d,
     sum = ip_csum_update (sum, old_addr, new_addr, ip4_header_t, dst_address /* changed member */ );
     ip->checksum = ip_csum_fold (sum);
 
-    if (!vnet_buffer (b)->ip.reass.is_non_first_fragment)
+    if (!is_non_first_fragment)
     {
         if (icmp->checksum == 0)
             icmp->checksum = 0xffff;
@@ -1115,13 +1176,16 @@ map_nat44_ei_tcp_udp_out2in (map_ce_domain_t *d,
     udp = ip4_next_header (ip);
     tcp = (tcp_header_t *) udp;
 
-    init_map_nat_k (&kv, ip->dst_address, vnet_buffer (b)->ip.reass.l4_dst_port, proto);
+    u8 is_non_first_fragment = ! !ip4_get_fragment_offset (ip);
+    u16 l4_dst_port =  ip4_is_fragment (ip) ? vnet_buffer (b)->ip.reass.l4_dst_port : udp->dst_port;
+
+    init_map_nat_k (&kv, ip->dst_address, l4_dst_port, proto);
 
     if (clib_bihash_search_8_8 (&mnat->out2in, &kv, &value))
     {
 	  /* Try to match static mapping by external address and port,
 	     destination address and port in packet */
-        if (map_nat44_ei_static_mapping_match (mnat, ip->dst_address, vnet_buffer (b)->ip.reass.l4_dst_port,
+        if (map_nat44_ei_static_mapping_match (mnat, ip->dst_address, l4_dst_port,
                                                proto, &mapping_addr, &mapping_port, 1))
         {
             *next = MAP_CE_NAT44_EI_O2I_NEXT_DROP;
@@ -1130,7 +1194,7 @@ map_nat44_ei_tcp_udp_out2in (map_ce_domain_t *d,
 
         /* Create session initiated by host from external network */
         error = map_nat44_ei_session_alloc_for_static_mapping (mnat, b, 
-                mapping_addr, mapping_port, ip->dst_address, vnet_buffer (b)->ip.reass.l4_dst_port, proto, &s, now);
+                mapping_addr, mapping_port, ip->dst_address, l4_dst_port, proto, &s, now);
 
         if (error != MAP_CE_ERROR_NONE)
         {
@@ -1143,6 +1207,9 @@ map_nat44_ei_tcp_udp_out2in (map_ce_domain_t *d,
         s = pool_elt_at_index (mnat->sessions, value.value);
     }
 
+    if (p_s)
+        *p_s = s;
+
     old_addr = ip->dst_address.as_u32;
     ip->dst_address = s->in2out.addr;
     new_addr = ip->dst_address.as_u32;
@@ -1153,9 +1220,9 @@ map_nat44_ei_tcp_udp_out2in (map_ce_domain_t *d,
 
     if (PREDICT_TRUE (proto == MAP_CE_NAT_PROTOCOL_TCP))
 	{
-        if (!vnet_buffer (b)->ip.reass.is_non_first_fragment)
+        if (!is_non_first_fragment)
 	    {
-            old_port = vnet_buffer (b)->ip.reass.l4_dst_port;
+            old_port = l4_dst_port;
             new_port = udp->dst_port = s->in2out.port;
             sum = tcp->checksum;
             sum = ip_csum_update (sum, old_addr, new_addr, ip4_header_t, dst_address /* changed member */ );
@@ -1166,9 +1233,9 @@ map_nat44_ei_tcp_udp_out2in (map_ce_domain_t *d,
     }
     else
 	{
-	  if (!vnet_buffer (b)->ip.reass.is_non_first_fragment)
+	  if (!is_non_first_fragment)
 	    {
-	      old_port = vnet_buffer (b)->ip.reass.l4_dst_port;
+	      old_port = l4_dst_port;
 	      new_port = udp->dst_port = s->in2out.port;
           if (PREDICT_FALSE (udp->checksum))
           {
@@ -1223,7 +1290,8 @@ nat44_map_ce_out2in (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t 
             pi0 = to_next[0] = from[0];
             from += 1;
             n_left_from -= 1;
-
+            to_next += 1;
+            n_left_to_next -= 1;
 
             p0 = vlib_get_buffer (vm, pi0);
             ip40 = vlib_buffer_get_current (p0);

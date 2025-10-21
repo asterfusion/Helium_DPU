@@ -876,6 +876,7 @@ map_ce_if_enable_disable (bool is_enable, u32 sw_if_index)
     is_enable = ! !is_enable;
 
     ip4_sv_reass_enable_disable_with_refcnt (sw_if_index, is_enable);
+    ip6_sv_reass_enable_disable_with_refcnt (sw_if_index, is_enable);
     ip6_full_reass_enable_disable_with_refcnt (sw_if_index, is_enable);
     vnet_feature_enable_disable ("ip4-unicast", "map-ce-ip4-classify", sw_if_index,
             is_enable ? 1 : 0, 0, 0);

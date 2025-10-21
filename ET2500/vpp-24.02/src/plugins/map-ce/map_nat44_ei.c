@@ -396,7 +396,7 @@ map_ce_nat44_domain_remove(u32 map_domain_index)
 
     map_nat44_ei_address_t *address;
     map_nat44_ei_static_mapping_t *m, *static_pool;
-    map_nat44_ei_session_t *ses, *session_pool;
+    map_nat44_ei_session_t *ses;
 
     if (map_domain_index == ~0)
         return;
@@ -429,8 +429,7 @@ map_ce_nat44_domain_remove(u32 map_domain_index)
     vec_free (mnat->static_out2in_name);
 
     /* free dynamic mapping */
-    session_pool = pool_dup (mnat->sessions);
-    pool_foreach (ses, session_pool)
+    pool_foreach (ses, mnat->sessions)
     {
         error = map_nat44_ei_del_dynamic_mapping (mnat, ses);
         if (error)
@@ -438,7 +437,6 @@ map_ce_nat44_domain_remove(u32 map_domain_index)
             clib_warning ("map-ce nat44 error occurred while removing dynamic adderess");
         }
     }
-    pool_free (session_pool);
     pool_free (mnat->sessions);
 
     /* free dynamic hash*/

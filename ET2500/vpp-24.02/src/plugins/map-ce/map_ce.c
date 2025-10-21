@@ -392,23 +392,24 @@ map_ce_delete_domain (u32 map_domain_index)
     mm->ip4_local_tbl->delete (mm->ip4_local_tbl, &d->ip4_prefix,
             d->ip4_prefix_len);
 
-    /* Release user-assigned MAP CE domain name. */
-    map_ce_free_extras (map_domain_index);
-
-    /* Release MAP CE NAT44 domain */
-    map_ce_nat44_domain_remove(map_domain_index);
-
     /* release this domain local_rule */
     for (i = 0; i < vec_len(d->local_rules); i++)
     {
         prefix = &d->local_rules[i];
-        if (ip_prefix_version(prefix))
+        if (ip_prefix_version(prefix) == AF_IP4)
         {
             mm->ip4_local_tbl->delete (mm->ip4_local_tbl, 
                                     &ip_prefix_v4(prefix),
                                     ip_prefix_len(prefix));
         }
     }
+
+    /* Release user-assigned MAP CE domain name. */
+    map_ce_free_extras (map_domain_index);
+
+    /* Release MAP CE NAT44 domain */
+    map_ce_nat44_domain_remove(map_domain_index);
+
     vec_free (d->local_rules);
 
     pool_put (mm->domains, d);

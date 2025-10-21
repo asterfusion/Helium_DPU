@@ -306,6 +306,8 @@ ip6_map_t_ce (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame
             u16 l4_offset0, frag_hdr_offset0;
 
             i32 map_port0 = -1;
+            u64 d60addr0;
+            u64 d61addr0;
             u32 saddr0;
             u32 daddr0;
             u32 l4_len0;
@@ -329,6 +331,8 @@ ip6_map_t_ce (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame
 
             ip60 = vlib_buffer_get_current (p0);
 
+            d60addr0 = ip60->dst_address.as_u64[0];
+            d61addr0 = ip60->dst_address.as_u64[1];
             saddr0 = ip6_map_t_ce_embedded_address (d0, &ip60->src_address);
             daddr0 = map_ce_get_ip4 (d0, &ip60->dst_address);
 
@@ -413,8 +417,8 @@ ip6_map_t_ce (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame
 
             if (PREDICT_FALSE (map_port0 != -1) && 
                               (d0->sec_check_valid ? d0->sec_check : mm->sec_check) &&
-                              (ip60->dst_address.as_u64[0] != map_ce_get_pfx_net (d0, daddr0, map_port0) || 
-                               ip60->dst_address.as_u64[1] != map_ce_get_sfx_net (d0, daddr0, map_port0)))
+                              (d60addr0 != map_ce_get_pfx_net (d0, daddr0, map_port0) ||
+                               d61addr0 != map_ce_get_sfx_net (d0, daddr0, map_port0)))
             {
                 // Security check when map_port0 is not zero (non-first fragment, UDP or TCP)
                 error0 = MAP_CE_ERROR_SEC_CHECK;

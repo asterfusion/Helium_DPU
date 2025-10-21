@@ -57,14 +57,14 @@ format_ip6_map_ce_post_ip4_reass_trace (u8 * s, va_list * args)
 static_always_inline bool
 ip6_map_ce_sec_check (map_ce_domain_t * d, u16 port, ip4_header_t * ip4, ip6_header_t * ip6)
 {
-    u16 sp4 = clib_net_to_host_u16 (port);
-    u32 sa4 = clib_net_to_host_u32 (ip4->src_address.as_u32);
-    u64 sal6 = map_ce_get_pfx (d, sa4, sp4);
-    u64 sar6 = map_ce_get_sfx (d, sa4, sp4);
+    u16 dp4 = clib_net_to_host_u16 (port);
+    u32 da4 = clib_net_to_host_u32 (ip4->dst_address.as_u32);
+    u64 dal6 = map_ce_get_pfx (d, da4, dp4);
+    u64 dar6 = map_ce_get_sfx (d, da4, dp4);
 
     if (PREDICT_FALSE(
-            sal6 != clib_net_to_host_u64 (ip6->src_address.as_u64[0]) || 
-            sar6 != clib_net_to_host_u64 (ip6->src_address.as_u64[1])
+            dal6 != clib_net_to_host_u64 (ip6->dst_address.as_u64[0]) || 
+            dar6 != clib_net_to_host_u64 (ip6->dst_address.as_u64[1])
             ))
         return (false);
     return (true);
@@ -81,7 +81,7 @@ mape_ce_ip6_map_security_check (map_ce_domain_t * d, vlib_buffer_t * b,
     {
         if (!ip4_is_fragment (ip4))
         {
-            u16 port = ip4_get_port (ip4, 1);
+            u16 port = ip4_get_port (ip4, 0);
             if (port)
             {
                 if (d->sec_check_valid)
@@ -397,7 +397,7 @@ ip6_map_ce_post_ip4_reass (vlib_main_t * vm,
             map_domain_index0 = vnet_buffer (p0)->map_ce.map_domain_index;
             d0 = pool_elt_at_index (mm->domains, map_domain_index0);
 
-            port0 = vnet_buffer (p0)->ip.reass.l4_src_port;
+            port0 = vnet_buffer (p0)->ip.reass.l4_dst_port;
 
             error0 = ip6_map_ce_sec_check (d0, port0, ip40, ip60) ? 
                         MAP_CE_ERROR_NONE : MAP_CE_ERROR_DECAP_SEC_CHECK;
