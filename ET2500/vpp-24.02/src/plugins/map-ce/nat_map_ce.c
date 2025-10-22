@@ -1047,8 +1047,8 @@ map_nat44_ei_icmp_out2in (map_ce_domain_t *d,
 
     if (s)
     {
-        addr = s->out2in.addr;
-        port = s->out2in.port;
+        addr = s->in2out.addr;
+        port = s->in2out.port;
     }
     if (p_s)
         *p_s = s;

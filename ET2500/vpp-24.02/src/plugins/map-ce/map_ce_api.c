@@ -718,7 +718,7 @@ vl_api_map_ce_domain_param_set_tos_t_handler (vl_api_map_ce_domain_param_set_tos
 
     rv = map_ce_domain_param_set_tos (ntohl(mp->domain_index), mp->is_clean, mp->copy, mp->tos);
 
-    REPLY_MACRO (VL_API_MAP_CE_PARAM_SET_TOS_REPLY);
+    REPLY_MACRO (VL_API_MAP_CE_DOMAIN_PARAM_SET_TOS_REPLY);
 }
 
 int

@@ -108,7 +108,14 @@ format_map_ce_domain (u8 * s, va_list * args)
     {
         s = format (s, " ipv4 icmp err relay src address: %U\n", format_ip4_address, &d->icmp4_src_address);
     }
-  return s;
+
+    ip_prefix_t *local_prefix;
+    s = format(s, " Local prefix: \n");
+    vec_foreach(local_prefix, d->local_rules)
+    {
+        s = format(s, "\t%U\n", format_ip_prefix, local_prefix);
+    }
+    return s;
 }
 
 u8 *
@@ -428,7 +435,7 @@ map_ce_domain_set_psid (u32 domain_index, u16 psid)
         return -1;
     }
 
-    if (pool_is_free_index (mm->nat_domains, domain_index))
+    if (domain_index >= vec_len (mm->nat_domains))
     {
         clib_warning ("MAP CE nat domain does not exist: %d", domain_index);
         return -1;
