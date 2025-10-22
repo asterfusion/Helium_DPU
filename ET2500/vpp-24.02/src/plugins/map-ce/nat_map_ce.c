@@ -171,6 +171,7 @@ map_nat44_ei_user_get_or_create (map_nat44_ei_domain_t *mnat,
 
     dlist_elt_t *per_user_list_head_elt;
 
+    user_key.as_u64 = 0;
     user_key.addr.as_u32 = addr->as_u32;
     kv.key = user_key.as_u64;
 
@@ -192,30 +193,26 @@ map_nat44_ei_user_get_or_create (map_nat44_ei_domain_t *mnat,
 
         MAP_NAT_UNLOCK(mnat, users);
 
-        u->addr.as_u32 = addr->as_u32;
-
         MAP_NAT_LOCK(mnat, list_pool);
 
         pool_get (mnat->list_pool, per_user_list_head_elt);
 
         MAP_NAT_UNLOCK(mnat, list_pool);
 
+        MAP_NAT_LOCK(u, self);
+        u->addr.as_u32 = addr->as_u32;
         u->sessions_per_user_list_head_index = per_user_list_head_elt - mnat->list_pool;
-
         clib_dlist_init (mnat->list_pool, u->sessions_per_user_list_head_index);
+        MAP_NAT_UNLOCK(u, self);
 
         kv.value = u - mnat->users;
 
         /* add user */
-        MAP_NAT_LOCK(mnat, users_hash);
-
         if (clib_bihash_add_del_8_8 (&mnat->users_hash, &kv, 1))
         {
             map_nat44_ei_delete_user_with_no_session (mnat, u, false);
             return NULL;
         }
-
-        MAP_NAT_UNLOCK(mnat, users_hash);
     }
     else
     {
@@ -356,7 +353,6 @@ map_nat44_ei_session_alloc_for_static_mapping (map_nat44_ei_domain_t *mnat,
     ctx.now = now;
     ctx.mnat = mnat;
 
-    MAP_NAT_LOCK(mnat, in2out_out2in);
     init_map_nat_i2o_kv (&kv, s, s - mnat->sessions);
     if (clib_bihash_add_or_overwrite_stale_8_8 (
                 &mnat->in2out, &kv, map_nat44_i2o_is_idle_session_cb, &ctx))
@@ -366,7 +362,6 @@ map_nat44_ei_session_alloc_for_static_mapping (map_nat44_ei_domain_t *mnat,
     if (clib_bihash_add_or_overwrite_stale_8_8 (
                 &mnat->out2in, &kv, map_nat44_o2i_is_idle_session_cb, &ctx))
         clib_warning ("map nat44 ei out2in key add failed");
-    MAP_NAT_UNLOCK(mnat, in2out_out2in);
 
     *sessionp = s;
 
@@ -496,8 +491,6 @@ map_nat44_mapping (map_ce_domain_t *d,
     ctx.now = now;
     ctx.mnat = mnat;
 
-    MAP_NAT_LOCK(mnat, in2out_out2in);
-
     init_map_nat_i2o_kv (&kv, s, s - mnat->sessions);
     if (clib_bihash_add_or_overwrite_stale_8_8 (
                 &mnat->in2out, &kv, 
@@ -509,8 +502,6 @@ map_nat44_mapping (map_ce_domain_t *d,
                 &mnat->out2in, &kv, 
                 map_nat44_o2i_is_idle_session_cb, &ctx))
         clib_warning ("map nat44 ei out2in key add failed");
-
-    MAP_NAT_UNLOCK(mnat, in2out_out2in);
 
     return MAP_CE_ERROR_NONE;
 }

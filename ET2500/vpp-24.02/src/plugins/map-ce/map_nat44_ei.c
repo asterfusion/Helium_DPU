@@ -380,10 +380,8 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     map_ce_nat44_reset_timeouts(&mnat->timeouts);
 
     /* lock init */
-    clib_spinlock_init (&mnat->lock_in2out_out2in);
     clib_spinlock_init (&mnat->lock_sessions);
     clib_spinlock_init (&mnat->lock_users);
-    clib_spinlock_init (&mnat->lock_users_hash);
     clib_spinlock_init (&mnat->lock_list_pool);
 }
 
@@ -464,10 +462,8 @@ map_ce_nat44_domain_remove(u32 map_domain_index)
     vec_free(mnat->addresses);
 
     /* free lock */
-    clib_spinlock_free (&mnat->lock_in2out_out2in);
     clib_spinlock_free (&mnat->lock_sessions);
     clib_spinlock_free (&mnat->lock_users);
-    clib_spinlock_free (&mnat->lock_users_hash);
     clib_spinlock_free (&mnat->lock_list_pool);
 
     clib_memset(mnat, 0, sizeof(map_nat44_ei_domain_t));
