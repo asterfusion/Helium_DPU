@@ -91,6 +91,7 @@ typedef struct {
   u64 action_expand_bitmap;
   u32 policer_index;
   u8 set_tc_value;
+  u16 priority;
 } applied_hash_ace_entry_t;
 
 typedef struct {

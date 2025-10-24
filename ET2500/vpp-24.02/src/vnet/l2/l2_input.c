@@ -219,6 +219,35 @@ l2input_interface_mac_change (u32 sw_if_index,
     }
 }
 
+void
+l2input_interface_mac_add_del (u32 sw_if_index,
+			      const u8 * address, int is_add)
+{
+    /* check if the sw_if_index passed is a BVI in a BD */
+    l2_input_config_t *intf_config;
+
+    intf_config = l2input_intf_config (sw_if_index);
+
+    if (l2_input_is_bridge (intf_config) && l2_input_is_bvi (intf_config))
+    {
+        /* add l2fib entry for the bvi interface */
+        if (is_add)
+        {
+            l2fib_add_entry (address,
+  		       intf_config->bd_index,
+  		       sw_if_index,
+  		       L2FIB_ENTRY_RESULT_FLAG_BVI |
+  		       L2FIB_ENTRY_RESULT_FLAG_STATIC);
+        }
+
+        /* delete l2fib entry of the bvi interface */
+        else
+        {
+            l2fib_del_entry (address, intf_config->bd_index, sw_if_index);
+        }
+    }
+}
+
 walk_rc_t
 l2input_recache (u32 bd_index, u32 sw_if_index)
 {

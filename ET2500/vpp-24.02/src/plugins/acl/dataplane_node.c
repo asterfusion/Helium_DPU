@@ -166,8 +166,11 @@ fill_5tuple_xN (int vector_sz, acl_main_t * am, int is_ip6, int is_input,
 {
   int ii;
   for (ii = 0; ii < vector_sz; ii++)
+  {
     acl_fill_5tuple (am, sw_if_index[ii], b[ii], is_ip6,
 		     is_input, is_l2_path, &out_fa_5tuple[ii]);
+    out_fa_5tuple[ii].pkt.is_ip6 = is_ip6;
+  }
 }
 
 always_inline void
@@ -276,6 +279,7 @@ acl_fa_node_common_prepare_fn (vlib_main_t * vm,
    */
 
   n_left = frame->n_vectors;
+  memset(fa_5tuple, 0, sizeof(fa_5tuple_t) * VLIB_FRAME_SIZE);
   while (n_left >= (ACL_PLUGIN_PREFETCH_GAP + 1) * ACL_PLUGIN_VECTOR_SIZE)
     {
       const int vec_sz = ACL_PLUGIN_VECTOR_SIZE;
@@ -327,6 +331,8 @@ acl_fa_node_common_prepare_fn (vlib_main_t * vm,
 
 always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, u32 *rule_index, u8 *action, match_rule_expand_t *action_expand)
 {
+  u16 priority = 0;
+
   for (int i = 0; i < match_acl_info->acl_match_count; i++)
     {
         if (ACL_ACTION_DENY == match_acl_info->action[i])
@@ -348,9 +354,10 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
             action_expand->policer_index = match_acl_info->policer_index[i];
             action_expand->set_tc_value = match_acl_info->set_tc_value[i];
+            priority = match_acl_info->acl_priority[i];
         }
 
-        else if (match_acl_info->action[i] == *action && match_acl_info->acl_index[i] > *acl_index)
+        else if (match_acl_info->action[i] == *action && match_acl_info->acl_priority[i] > priority)
         {
             *action = match_acl_info->action[i];
             *acl_index = match_acl_info->acl_index[i];
@@ -358,6 +365,18 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
             action_expand->policer_index = match_acl_info->policer_index[i];
             action_expand->set_tc_value = match_acl_info->set_tc_value[i];
+            priority = match_acl_info->acl_priority[i];
+        }
+
+        else if (match_acl_info->action[i] == *action && match_acl_info->acl_priority[i] == priority && match_acl_info->acl_index[i] > *acl_index)
+        {
+            *action = match_acl_info->action[i];
+            *acl_index = match_acl_info->acl_index[i];
+            *rule_index = match_acl_info->rule_index[i];
+            action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
+            action_expand->policer_index = match_acl_info->policer_index[i];
+            action_expand->set_tc_value = match_acl_info->set_tc_value[i];
+            priority = match_acl_info->acl_priority[i];
         }
     }
 
@@ -657,6 +676,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 		    }
 		}
 	    }
+        }
 
 	  if (acl_check_needed)
 	    {
@@ -675,7 +695,9 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
               if (PREDICT_FALSE((1 == match_acl_info.acl_match_count) && 1 == pinout_reflect_by_sw_if_index[sw_if_index[0]]))
               {
                   //icmpv6 NA or RA
-                  if (IP_PROTOCOL_ICMP6 == fa_5tuple->l4.proto && (fa_5tuple->l4.port[0] == 134 || fa_5tuple->l4.port[0] == 136))
+                  if (IP_PROTOCOL_ICMP6 == fa_5tuple->l4.proto &&  
+                      (fa_5tuple->l4.port[0] == 133 || fa_5tuple->l4.port[0] == 134 ||
+                       fa_5tuple->l4.port[0] == 135 || fa_5tuple->l4.port[0] == 136))
                   {
                       match_acl_info.acl_match_count = 1;
                   }
@@ -813,7 +835,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 	  sw_if_index++;
 	  hash++;
 	  n_left -= 1;
-	}
+	//}
     }
 
   /*

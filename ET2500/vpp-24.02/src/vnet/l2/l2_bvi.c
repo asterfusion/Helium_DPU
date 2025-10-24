@@ -58,12 +58,21 @@ bvi_mac_change (vnet_hw_interface_t * hi,
   return (NULL);
 }
 
+static clib_error_t *
+bvi_mac_add_del (vnet_hw_interface_t *hi, const u8 *address, u8 is_add)
+{
+  l2input_interface_mac_add_del (hi->sw_if_index, address, is_add);
+
+  return (NULL);
+}
+
 /* *INDENT-OFF* */
 VNET_DEVICE_CLASS (bvi_device_class) = {
   .name = "BVI",
   .format_device_name = format_bvi_name,
   .admin_up_down_function = bvi_admin_up_down,
   .mac_addr_change_function = bvi_mac_change,
+  .mac_addr_add_del_function = bvi_mac_add_del,
 };
 /* *INDENT-ON* */
 
