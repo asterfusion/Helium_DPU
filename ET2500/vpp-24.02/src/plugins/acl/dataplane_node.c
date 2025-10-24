@@ -672,6 +672,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 		    }
 		}
 	    }
+        }
 
 	  if (acl_check_needed)
 	    {
@@ -828,7 +829,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 	  sw_if_index++;
 	  hash++;
 	  n_left -= 1;
-	}
+	//}
     }
 
   /*
