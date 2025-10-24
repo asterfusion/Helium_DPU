@@ -311,7 +311,7 @@ int update_geosite_trie(domain_trie_t *new_trie)
 static clib_error_t *
 geosite_load_command_fn(vlib_main_t *vm, unformat_input_t *input, vlib_cli_command_t *cmd)
 {
-    const char *default_path = "/etc/sonic/geosite_default.dat";
+    const char *default_path = "/etc/sonic/vpp/geosite_default.dat";
     const char *path = NULL;
     u8 *filename = 0;
     domain_trie_t *new_trie = NULL;
@@ -495,7 +495,7 @@ int update_geoip_trie(geoip_db_t *new_trie)
 static clib_error_t *
 geoip_load_command_fn(vlib_main_t *vm, unformat_input_t *input, vlib_cli_command_t *cmd)
 {
-    const char *default_path = "/etc/sonic/geoip_default.dat";
+    const char *default_path = "/etc/sonic/vpp/geoip_default.dat";
     const char *path = NULL;
     u8 *filename = 0;
     geoip_db_t *new_trie = NULL;
@@ -650,8 +650,8 @@ VLIB_CLI_COMMAND(show_geosite_trie_command, static) = {
 #endif
 
 static int geosite_load(bool is_geosite){
-    const char *default_geosite_path = "/etc/vpp/geosite.dat";
-    const char *default_geoip_path = "/etc/vpp/geoip.dat";
+    const char *default_geosite_path = "/etc/sonic/vpp/geosite.dat";
+    const char *default_geoip_path = "/etc/sonic/vpp/geoip.dat";
     int rv = 0;
     GEOSITE2_INFO("Loading %s from: %s",is_geosite ? "geosite": "geoip", is_geosite ? default_geosite_path:default_geoip_path);
     if(is_geosite){
