@@ -166,8 +166,11 @@ fill_5tuple_xN (int vector_sz, acl_main_t * am, int is_ip6, int is_input,
 {
   int ii;
   for (ii = 0; ii < vector_sz; ii++)
+  {
     acl_fill_5tuple (am, sw_if_index[ii], b[ii], is_ip6,
 		     is_input, is_l2_path, &out_fa_5tuple[ii]);
+    out_fa_5tuple[ii].pkt.is_ip6 = is_ip6;
+  }
 }
 
 always_inline void
@@ -276,6 +279,7 @@ acl_fa_node_common_prepare_fn (vlib_main_t * vm,
    */
 
   n_left = frame->n_vectors;
+  memset(fa_5tuple, 0, sizeof(fa_5tuple_t) * VLIB_FRAME_SIZE);
   while (n_left >= (ACL_PLUGIN_PREFETCH_GAP + 1) * ACL_PLUGIN_VECTOR_SIZE)
     {
       const int vec_sz = ACL_PLUGIN_VECTOR_SIZE;
@@ -691,7 +695,9 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
               if (PREDICT_FALSE((1 == match_acl_info.acl_match_count) && 1 == pinout_reflect_by_sw_if_index[sw_if_index[0]]))
               {
                   //icmpv6 NA or RA
-                  if (IP_PROTOCOL_ICMP6 == fa_5tuple->l4.proto && (fa_5tuple->l4.port[0] == 134 || fa_5tuple->l4.port[0] == 136))
+                  if (IP_PROTOCOL_ICMP6 == fa_5tuple->l4.proto &&  
+                      (fa_5tuple->l4.port[0] == 133 || fa_5tuple->l4.port[0] == 134 ||
+                       fa_5tuple->l4.port[0] == 135 || fa_5tuple->l4.port[0] == 136))
                   {
                       match_acl_info.acl_match_count = 1;
                   }
