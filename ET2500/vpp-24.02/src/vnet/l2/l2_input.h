@@ -272,6 +272,8 @@ void l2input_interface_mac_change (u32 sw_if_index,
 				   const u8 * old_address,
 				   const u8 * new_address);
 
+void l2input_interface_mac_add_del (u32 sw_if_index,
+			      const u8 * address, int is_add);
 void l2_input_seq_num_inc (u32 sw_if_index);
 walk_rc_t l2input_recache (u32 bd_index, u32 sw_if_index);
 
