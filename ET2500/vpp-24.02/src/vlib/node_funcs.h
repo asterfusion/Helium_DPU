@@ -1311,6 +1311,9 @@ vlib_node_t *vlib_get_node_by_name (vlib_main_t * vm, u8 * name);
 /* Rename a node. */
 void vlib_node_rename (vlib_main_t * vm, u32 node_index, char *fmt, ...);
 
+/* Reset node next */
+void vlib_node_reset_next (vlib_main_t * vm, u32 node_index);
+
 /* Register new packet processing node.  Nodes can be registered
    dynamically via this call or statically via the VLIB_REGISTER_NODE
    macro. */

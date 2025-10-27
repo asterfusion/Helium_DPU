@@ -1174,6 +1174,10 @@ vnet_delete_hw_interface (vnet_main_t * vnm, u32 hw_if_index)
 			hw_if_index);
       vlib_unregister_errors (vm, hw->output_node_index);
       vlib_unregister_errors (vm, hw->tx_node_index);
+      vlib_node_reset_next(vm, hw->tx_node_index);
+      vlib_node_add_named_next_with_slot (vm, hw->tx_node_index,
+					  "error-drop",
+					  VNET_INTERFACE_TX_NEXT_DROP);
       vec_add2 (im->deleted_hw_interface_nodes, dn, 1);
       dn->tx_node_index = hw->tx_node_index;
       dn->output_node_index = hw->output_node_index;
