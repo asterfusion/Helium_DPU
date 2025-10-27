@@ -148,6 +148,57 @@ vlib_node_runtime_update (vlib_main_t * vm, u32 node_index, u32 next_index)
   vlib_worker_thread_node_runtime_update ();
 }
 
+void
+vlib_node_reset_next (vlib_main_t * vm, u32 node_index)
+{
+  vlib_node_main_t *nm = &vm->node_main;
+  vlib_node_t *node, *next;
+  u32 i;
+  u32 next_index;
+
+  ASSERT (vlib_get_thread_index () == 0);
+
+  node = vec_elt (nm->nodes, node_index);
+
+  /* Runtime has to be initialized. */
+  ASSERT (nm->flags & VLIB_NODE_MAIN_RUNTIME_STARTED);
+
+  vlib_worker_thread_barrier_sync (vm);
+
+  vec_foreach_index(i, node->next_nodes)
+  {
+      next_index = node->next_nodes[i];
+
+      hash_unset (node->next_slot_by_node, next_index);
+
+      next = vlib_get_node (vm, next_index);
+      next->prev_node_bitmap = clib_bitmap_andnoti (next->prev_node_bitmap, node_index);
+
+      node->next_nodes[i] = 0;
+      node->n_vectors_by_next_node[i] = 0;
+
+      vlib_node_runtime_update(vm, node_index, i);
+  }
+
+  /* Siblings all get same node structure. */
+  {
+    uword sib_node_index;
+    vlib_node_t *sib_node;
+    /* *INDENT-OFF* */
+    clib_bitmap_foreach (sib_node_index, node->sibling_bitmap)  {
+      sib_node = vec_elt (nm->nodes, sib_node_index);
+      if (sib_node != node)
+	{
+        vlib_node_reset_next(vm, sib_node_index);
+	}
+    }
+    /* *INDENT-ON* */
+  }
+
+  vlib_worker_thread_barrier_release (vm);
+  return;
+}
+
 uword
 vlib_node_get_next (vlib_main_t * vm, uword node_index, uword next_node_index)
 {
