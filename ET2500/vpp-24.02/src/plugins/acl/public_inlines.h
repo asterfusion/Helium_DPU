@@ -1465,12 +1465,10 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
 
 
       if(tmp_match_acl_info != NULL){
-          clib_warning("free tmp_match_acl_info %p",tmp_match_acl_info);
           clib_mem_free(tmp_match_acl_info);
           tmp_match_acl_info = NULL;}
 
       if(tmp_dns_match_acl_info != NULL){
-        clib_warning("free tmp_dns_match_acl_info %p",tmp_dns_match_acl_info);
           clib_mem_free(tmp_dns_match_acl_info);
           tmp_dns_match_acl_info = NULL;}          
 
@@ -1500,7 +1498,6 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
                   match_acl_info->policer_index[i] = tmp_match_acl_info->policer_index[i];
                   match_acl_info->set_tc_value[i] = tmp_match_acl_info->set_tc_value[i];
               }
-               clib_warning("free2 tmp_match_acl_info %p",tmp_match_acl_info);
               clib_mem_free(tmp_match_acl_info);
               tmp_match_acl_info = NULL;}   
         
