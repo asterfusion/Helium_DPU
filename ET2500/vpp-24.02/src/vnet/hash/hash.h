@@ -34,7 +34,9 @@ typedef struct vnet_hash_function_registration
 
 typedef struct
 {
+  u16 msg_id_base;
   vnet_hash_function_registration_t *hash_registrations;
+  u32 hash_seed;
 } vnet_hash_main_t;
 
 extern vnet_hash_main_t vnet_hash_main;
@@ -55,5 +57,6 @@ vnet_hash_fn_t vnet_hash_function_from_name (const char *name,
 vnet_hash_function_registration_t *
 vnet_hash_function_from_func (vnet_hash_fn_t fn, vnet_hash_fn_type_t ftype);
 format_function_t format_vnet_hash;
+void hash_set_global_seed (u32 seed);
 
 #endif

@@ -114,6 +114,20 @@ define bond_create2_reply
   vl_api_interface_index_t sw_if_index;
 };
 
+/** \brief Set bond load balance algorithm
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - bond interface index
+    @param lb - load balance algorithm
+*/
+autoreply define bond_set_lb_algo
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_bond_lb_algo_t lb;
+};
+
 /** \brief Delete bond interface
     @param client_index - opaque cookie to identify the sender
     @param context - sender context, to match reply w/ request

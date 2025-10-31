@@ -53,6 +53,7 @@ locate_ethertype (ethernet_header_t *eth)
 static void
 hash_eth_l2 (void **p, u32 *hash, u32 n_packets)
 {
+  vnet_hash_main_t *hm = &vnet_hash_main;
   u32 n_left_from = n_packets;
 
   while (n_left_from >= 8)
@@ -62,6 +63,11 @@ hash_eth_l2 (void **p, u32 *hash, u32 n_packets)
       u64 a = clib_mem_unaligned (dst, u64);
       u32 *src = (u32 *) &eth->src_address[2];
       u32 b = clib_mem_unaligned (src, u32);
+
+      if( hm->hash_seed != 0)
+      {
+        b ^= hm->hash_seed;
+      }
 
       clib_prefetch_load (p[4]);
       clib_prefetch_load (p[5]);
@@ -103,6 +109,7 @@ hash_eth_l23_inline (void **p)
   u16 ethertype, *ethertype_p;
   u32 *mac1, *mac2, *mac3;
   u32 hash;
+  vnet_hash_main_t *hm = &vnet_hash_main;
 
   ethertype_p = locate_ethertype (eth);
   ethertype = clib_mem_unaligned (ethertype_p, u16);
@@ -127,6 +134,10 @@ hash_eth_l23_inline (void **p)
 
       a = clib_mem_unaligned (mac1, u32) ^ clib_mem_unaligned (mac2, u32) ^
 	  clib_mem_unaligned (mac3, u32);
+      if(hm->hash_seed != 0)
+      {
+        a ^= hm->hash_seed;
+      }
       hash = lb_hash_hash_2_tuples (
 	clib_mem_unaligned (&ip4->address_pair, u64), a);
       return hash;
@@ -143,6 +154,10 @@ hash_eth_l23_inline (void **p)
 
       a = clib_mem_unaligned (mac1, u32) ^ clib_mem_unaligned (mac2, u32) ^
 	  clib_mem_unaligned (mac3, u32);
+      if(hm->hash_seed != 0)
+      {
+        a ^= hm->hash_seed;
+      }
       hash = lb_hash_hash (
 	clib_mem_unaligned (&ip6->src_address.as_uword[0], uword),
 	clib_mem_unaligned (&ip6->src_address.as_uword[1], uword),
@@ -196,6 +211,7 @@ hash_eth_l34_inline (void **p)
   ip4_header_t *ip4;
   u16 ethertype, *ethertype_p;
   u32 hash;
+  vnet_hash_main_t *hm = &vnet_hash_main;
 
   ethertype_p = locate_ethertype (eth);
   ethertype = clib_mem_unaligned (ethertype_p, u16);
@@ -220,6 +236,10 @@ hash_eth_l34_inline (void **p)
       t1 = is_tcp_udp ? clib_mem_unaligned (&tcp->src, u16) : 0;
       t2 = is_tcp_udp ? clib_mem_unaligned (&tcp->dst, u16) : 0;
       a = t1 ^ t2;
+      if(hm->hash_seed != 0)
+      {
+        a ^= hm->hash_seed;
+      }
       hash = lb_hash_hash_2_tuples (
 	clib_mem_unaligned (&ip4->address_pair, u64), a);
       return hash;
@@ -252,6 +272,10 @@ hash_eth_l34_inline (void **p)
       t1 = is_tcp_udp ? clib_mem_unaligned (&tcp->src, u16) : 0;
       t2 = is_tcp_udp ? clib_mem_unaligned (&tcp->dst, u16) : 0;
       a = t1 ^ t2;
+      if(hm->hash_seed != 0)
+      {
+        a ^= hm->hash_seed;
+      }
       hash = lb_hash_hash (
 	clib_mem_unaligned (&ip6->src_address.as_uword[0], uword),
 	clib_mem_unaligned (&ip6->src_address.as_uword[1], uword),
