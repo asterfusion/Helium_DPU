@@ -414,6 +414,7 @@ acl_fa_deactivate_session (acl_main_t * am, u32 sw_if_index,
       //not need mac and src_sw_if_index
       kv_64_8.key[0] = 0;
       kv_64_8.key[1] = 0;
+      kv_64_8.key[6] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_64_8.key[7];
       l4->l4_flags = 0;
       if (IP_PROTOCOL_TCP != sess->ip_protocol && IP_PROTOCOL_UDP != sess->ip_protocol)
@@ -432,6 +433,7 @@ acl_fa_deactivate_session (acl_main_t * am, u32 sw_if_index,
       memcpy(&kv_32_8, &sess->info.kv_32_8, sizeof(clib_bihash_kv_32_8_t));
       //not need mac and src_sw_if_index
       kv_32_8.key[0] = 0;
+      kv_32_8.key[2] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_32_8.key[3];
       l4->l4_flags = 0;
       if (IP_PROTOCOL_TCP != sess->ip_protocol && IP_PROTOCOL_UDP != sess->ip_protocol)
@@ -602,6 +604,7 @@ acl_fa_add_session (acl_main_t * am, int is_input, int is_ip6,
       //not need mac and src_sw_if_index
       kv_64_8.key[0] = 0;
       kv_64_8.key[1] = 0;
+      kv_64_8.key[6] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_64_8.key[7];
       l4->l4_flags = 0;
       if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
@@ -619,6 +622,7 @@ acl_fa_add_session (acl_main_t * am, int is_input, int is_ip6,
       memcpy(&kv_32_8, &sess->info.kv_32_8, sizeof(clib_bihash_kv_32_8_t));
       //not need mac and src_sw_if_index
       kv_32_8.key[0] = 0;
+      kv_32_8.key[2] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_32_8.key[3];
       l4->l4_flags = 0;
       if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
@@ -650,6 +654,7 @@ acl_fa_find_session (acl_main_t * am, int is_ip6, u32 sw_if_index0,
       //not need mac and src_sw_if_index
       kv_64_8.key[0] = 0;
       kv_64_8.key[1] = 0;
+      kv_64_8.key[6] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_64_8.key[7];
       l4->l4_flags = 0;
       if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
@@ -668,6 +673,7 @@ acl_fa_find_session (acl_main_t * am, int is_ip6, u32 sw_if_index0,
       memcpy(&kv_32_8, &p5tuple->kv_32_8, sizeof(clib_bihash_kv_32_8_t));
       //not need mac and src_sw_if_index
       kv_32_8.key[0] = 0;
+      kv_32_8.key[2] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_32_8.key[3];
       l4->l4_flags = 0;
       if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
@@ -693,6 +699,7 @@ acl_fa_make_session_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
     //hash not need mac and src_sw_if_index
     kv_64_8.key[0] = 0;
     kv_64_8.key[1] = 0;
+    kv_64_8.key[6] = 0;
     fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_64_8.key[7];
     l4->l4_flags = 0;
     if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
@@ -708,6 +715,7 @@ acl_fa_make_session_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
     memcpy(&kv_32_8, &p5tuple->kv_32_8, sizeof(clib_bihash_kv_32_8_t));
     //hash not need mac and src_sw_if_index
     kv_32_8.key[0] = 0;
+    kv_32_8.key[2] = 0;
     fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_32_8.key[3];
     l4->l4_flags = 0;
     if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
@@ -753,6 +761,7 @@ acl_fa_find_session_with_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
       //hash not need mac and src_sw_if_index
       kv_64_8.key[0] = 0;
       kv_64_8.key[1] = 0;
+      kv_64_8.key[6] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_64_8.key[7];
       l4->l4_flags = 0;
       if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
@@ -773,6 +782,7 @@ acl_fa_find_session_with_hash (acl_main_t * am, int is_ip6, u32 sw_if_index0,
       memcpy(&kv_32_8, &p5tuple->kv_32_8, sizeof(clib_bihash_kv_32_8_t));
       //hash not need mac and src_sw_if_index
       kv_32_8.key[0] = 0;
+      kv_32_8.key[2] = 0;
       fa_session_l4_key_t *l4 = (fa_session_l4_key_t *)&kv_32_8.key[3];
       l4->l4_flags = 0;
       if (IP_PROTOCOL_TCP != p5tuple->l4.proto && IP_PROTOCOL_UDP != p5tuple->l4.proto)
