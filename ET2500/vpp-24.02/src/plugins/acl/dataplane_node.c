@@ -562,18 +562,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 
       next[0] = 0;		/* drop by default */
    
-      if(b[0]->flags & VLIB_BUFFER_DOMAIN_VALID )
-      {
-
-         get_cc_code =acl_get_country_index_by_domain(&b[0],&cc_indices,&dns_cc_indices,is_ip6);
-
-      }else{
-       if(is_ip6)
-        get_cc_code =acl_get_country_index_by_dip6(&b[0],&cc_indices, fa_5tuple->ip6_addr[1]);
-      else
-        get_cc_code =acl_get_country_index_by_dip4(&b[0],&cc_indices, fa_5tuple->ip4_addr[1]);
-      }
-      //clib_warning("get_cc_code=%d", get_cc_code);
+     
       /* Try to match an existing session first */
 
       if (with_stateful_datapath)
@@ -665,6 +654,21 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 
 	  if (acl_check_needed)
 	    {
+
+     if(b[0]->flags & VLIB_BUFFER_DOMAIN_VALID )
+      {
+
+         get_cc_code =acl_get_country_index_by_domain(&b[0],&cc_indices,&dns_cc_indices,is_ip6);
+
+      }else{
+       if(is_ip6)
+        get_cc_code =acl_get_country_index_by_dip6(&b[0],&cc_indices, fa_5tuple->ip6_addr[1]);
+      else
+        get_cc_code =acl_get_country_index_by_dip4(&b[0],&cc_indices, fa_5tuple->ip4_addr[1]);
+      }
+   
+
+
 	      if (is_input)
 		lc_index0 = am->input_lc_index_by_sw_if_index[sw_if_index[0]];
 	      else
