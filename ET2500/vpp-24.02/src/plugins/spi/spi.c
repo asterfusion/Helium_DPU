@@ -337,7 +337,7 @@ spi_worker_resource_init (spi_per_thread_data_t *tspi, u32 max_session, u8 hando
             NULL, 1.0, 
             SPI_TW_TIMER_PER_PROCESS_MAX_EXPIRATIONS);
 
-    vec_prealloc(tspi->expired_session_per_worker, SPI_TW_TIMER_PER_PROCESS_MAX_EXPIRATIONS);
+    vec_prealloc(tspi->expired_session_per_worker, max_session);
 
     if (!handoff_enabled)
     {

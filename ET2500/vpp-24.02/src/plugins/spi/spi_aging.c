@@ -406,7 +406,7 @@ spi_worker_timer_input (vlib_main_t * vm,
         return 0;
     }
 
-    tw_timer_expire_timers_vec_16t_2w_512sl (tspi->timers_per_worker, 
+    tspi->expired_session_per_worker = tw_timer_expire_timers_vec_16t_2w_512sl (tspi->timers_per_worker,
                                               time_now, 
                                               tspi->expired_session_per_worker);
 
@@ -448,6 +448,8 @@ spi_worker_timer_input (vlib_main_t * vm,
         SPI_THREAD_UNLOCK(tspi);
 
         num_expired++;
+        if (num_expired > SPI_TW_TIMER_PER_PROCESS_MAX_EXPIRATIONS)
+            break;
     }
     if (num_expired)
         vec_delete (tspi->expired_session_per_worker, num_expired, 0);
