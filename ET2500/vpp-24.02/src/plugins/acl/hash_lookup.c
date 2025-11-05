@@ -656,6 +656,9 @@ void
 hash_acl_apply(acl_main_t *am, u32 lc_index, int acl_index, u32 acl_position)
 {
   int i;
+  int res = 0;
+  clib_bihash_kv_8_8_t key;
+  clib_bihash_kv_8_8_t kv_result;
 
   DBG0("HASH ACL apply: lc_index %d acl %d", lc_index, acl_index);
   if (!am->acl_lookup_hash_initialized) {
@@ -663,6 +666,11 @@ hash_acl_apply(acl_main_t *am, u32 lc_index, int acl_index, u32 acl_position)
                            am->hash_lookup_hash_buckets, am->hash_lookup_hash_memory);
     am->acl_lookup_hash_initialized = 1;
   }
+
+  clib_memset(&key, 0, sizeof(clib_bihash_kv_8_8_t));
+  clib_memset(&kv_result, 0, sizeof(clib_bihash_kv_8_8_t));
+  key.key = ((u64)lc_index << 32) | acl_index;
+  res = clib_bihash_search_inline_2_8_8(&am->sw_acl_index_priority_hash, &key, &kv_result);
 
   vec_validate(am->hash_entry_vec_by_lc_index, lc_index);
   vec_validate(am->hash_acl_infos, acl_index);
@@ -728,6 +736,10 @@ hash_acl_apply(acl_main_t *am, u32 lc_index, int acl_index, u32 acl_position)
     int is_ip6 = ha->rules[i].match.pkt.is_ip6;
     u32 new_index = base_offset + i;
     applied_hash_ace_entry_t *pae = vec_elt_at_index((*applied_hash_aces), new_index);
+    if (0 == res)
+    {
+        pae->priority = (uint16_t)kv_result.value;
+    }
     pae->acl_index = acl_index;
     pae->ace_index = ha->rules[i].ace_index;
     pae->acl_position = acl_position;

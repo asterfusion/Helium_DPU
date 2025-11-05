@@ -331,20 +331,11 @@ acl_fa_node_common_prepare_fn (vlib_main_t * vm,
 
 always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, u32 *rule_index, u8 *action, match_rule_expand_t *action_expand)
 {
-  for (int i = 0; i < match_acl_info->acl_match_count; i++)
+    u16 priority = 0;
+
+    for (int i = 0; i < match_acl_info->acl_match_count; i++)
     {
-        if (ACL_ACTION_DENY == match_acl_info->action[i])
-        {
-            *action = ACL_ACTION_DENY;
-            *acl_index = match_acl_info->acl_index[i];
-            *rule_index = match_acl_info->rule_index[i];
-            action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
-            action_expand->policer_index = match_acl_info->policer_index[i];
-            action_expand->set_tc_value = match_acl_info->set_tc_value[i];
-            break;
-        }
-
-	else if (match_acl_info->action[i] > *action)
+        if (match_acl_info->acl_priority[i] >= priority)
         {
             *action = match_acl_info->action[i];
             *acl_index = match_acl_info->acl_index[i];
@@ -352,16 +343,7 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
             action_expand->policer_index = match_acl_info->policer_index[i];
             action_expand->set_tc_value = match_acl_info->set_tc_value[i];
-        }
-
-        else if (match_acl_info->action[i] == *action && match_acl_info->acl_index[i] > *acl_index)
-        {
-            *action = match_acl_info->action[i];
-            *acl_index = match_acl_info->acl_index[i];
-            *rule_index = match_acl_info->rule_index[i];
-            action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
-            action_expand->policer_index = match_acl_info->policer_index[i];
-            action_expand->set_tc_value = match_acl_info->set_tc_value[i];
+            priority = match_acl_info->acl_priority[i];
         }
     }
 
@@ -709,6 +691,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
                         match_acl_info.acl_match_count = 0;
                   }
               }
+#if 0
 	      if (PREDICT_FALSE
 		  (match_acl_info.acl_match_count && am->interface_acl_counters_enabled))
 		{
@@ -736,7 +719,24 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
           }
 
 		}
+#endif
               acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &action, &action_expand);
+	      if (PREDICT_FALSE(match_acl_info.acl_match_count > 1 && am->interface_acl_counters_enabled))
+              {
+                  u32 buf_len = vlib_buffer_length_in_chain (vm, b[0]);
+                  saved_byte_count = buf_len;
+                  if (!is_l2_path && is_input)
+                  {
+                        saved_byte_count += ethernet_buffer_header_size(b[0]);
+                  }
+                  vlib_increment_combined_counter (am->combined_acl_counters +
+                                                   match_acl_in_index,
+                                                   thread_index,
+                                                   match_rule_index,
+                                                   1,
+                                                   saved_byte_count);
+
+              }
 
 	      b[0]->error = error_node->errors[action];
 

@@ -100,6 +100,7 @@ typedef struct
   CLIB_CACHE_LINE_ALIGN_MARK(cacheline0);
   u8 tag[64];
   u8 reflect_flag;
+  u16 priority;
   acl_rule_t *rules;
 } acl_list_t;
 
@@ -245,6 +246,7 @@ typedef struct {
   clib_bihash_64_8_t fa_ip6_sessions_hash;
   clib_bihash_32_8_t fa_ip4_sessions_hash;
   clib_bihash_8_8_t acl_index_bd_id_hash;
+  clib_bihash_8_8_t sw_acl_index_priority_hash;
   /* The process node which orchestrates the cleanup */
   u32 fa_cleaner_node_index;
   /* FA session timeouts, in seconds */

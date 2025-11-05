@@ -2200,6 +2200,127 @@ vl_api_acl_reflect_timeout_t_handler (vl_api_acl_reflect_timeout_t * mp)
   REPLY_MACRO (VL_API_ACL_REFLECT_TIMEOUT_REPLY);
 }
 
+static int
+acl_set_acl_priority (acl_main_t * am, u32 sw_if_index,
+                                 u8 is_input, int count, vl_api_acl_index_prio_t acls[])
+{
+    u32 *pacln;
+    uword *seen_acl_bitmap = 0;
+    uword *old_seen_acl_bitmap = 0;
+    uword *change_acl_bitmap = 0;
+    int acln;
+    int rv = 0;
+    u32 lc_index = ~0;
+    clib_bihash_kv_8_8_t key;
+    acl_list_t *a;
+
+    for (int i = 0; i < count; i++)
+    {
+        if (acl_is_not_defined (am, ntohl(acls[i].acl_index)))
+        {
+            /* ACL is not defined. Can not apply */
+            clib_warning ("ERROR: ACL %d not defined", ntohl(acls[i].acl_index));
+            rv = VNET_API_ERROR_NO_SUCH_ENTRY;
+            goto done;
+        }
+        if (clib_bitmap_get (seen_acl_bitmap, ntohl(acls[i].acl_index)))
+        {
+            /* ACL being applied twice within the list. error. */
+            clib_warning ("ERROR: ACL %d being applied twice", ntohl(acls[i].acl_index));
+            rv = VNET_API_ERROR_ENTRY_ALREADY_EXISTS;
+            goto done;
+        }
+        seen_acl_bitmap = clib_bitmap_set (seen_acl_bitmap, ntohl(acls[i].acl_index), 1);
+        a = am->acls + ntohl(acls[i].acl_index);
+        a->priority = ntohs(acls[i].acl_priority);
+    }
+
+    u32 **pinout_lc_index_by_sw_if_index =
+        is_input ? &am->input_lc_index_by_sw_if_index : &am->output_lc_index_by_sw_if_index;
+
+    u32 ***pinout_acl_vec_by_sw_if_index =
+        is_input ? &am->input_acl_vec_by_sw_if_index : &am->output_acl_vec_by_sw_if_index;
+
+    u32 ***pinout_sw_if_index_vec_by_acl =
+        is_input ? &am->input_sw_if_index_vec_by_acl : &am->output_sw_if_index_vec_by_acl;
+
+    vec_validate ((*pinout_acl_vec_by_sw_if_index), sw_if_index);
+
+    clib_bitmap_validate (old_seen_acl_bitmap, 1);
+
+    vec_foreach (pacln, (*pinout_acl_vec_by_sw_if_index)[sw_if_index])
+    {
+        old_seen_acl_bitmap = clib_bitmap_set (old_seen_acl_bitmap, *pacln, 1);
+    }
+    change_acl_bitmap = clib_bitmap_dup_xor (old_seen_acl_bitmap, seen_acl_bitmap);
+
+    vec_validate_init_empty ((*pinout_lc_index_by_sw_if_index), sw_if_index, ~0);
+    /* *INDENT-OFF* */
+    clib_bitmap_foreach (acln, change_acl_bitmap)
+    {
+        if (clib_bitmap_get(old_seen_acl_bitmap, acln))
+        {
+            /* ACL is being removed. */
+            if (acln < vec_len((*pinout_sw_if_index_vec_by_acl)))
+            {
+                lc_index = (*pinout_lc_index_by_sw_if_index)[sw_if_index];
+
+                if (~0 == lc_index)
+                {
+                    clib_warning ("ERROR: ACL %d being remove already", acln);
+                    rv = VNET_API_ERROR_ENTRY_ALREADY_EXISTS;
+                    goto done;
+                }
+                //remove hash
+                clib_memset(&key, 0, sizeof(clib_bihash_kv_8_8_t));
+                key.key = ((u64)lc_index << 32) | acln;
+                clib_bihash_add_del_8_8(&am->sw_acl_index_priority_hash, &key, 0);
+            }
+        }
+        else
+        {
+            /* ACL is being added. */
+            lc_index = (*pinout_lc_index_by_sw_if_index)[sw_if_index];
+            if (~0 == lc_index)
+            {
+                lc_index = acl_plugin.get_lookup_context_index (am->interface_acl_user_id, sw_if_index, is_input);
+                (*pinout_lc_index_by_sw_if_index)[sw_if_index] = lc_index;
+            }
+            //add hash
+            a = am->acls + acln;
+            clib_memset(&key, 0, sizeof(clib_bihash_kv_8_8_t));
+            key.key = ((u64)lc_index << 32) | acln;
+            key.value = a->priority;
+            clib_bihash_add_del_8_8(&am->sw_acl_index_priority_hash, &key, 1);
+        }
+    }
+
+done:
+  clib_bitmap_free (change_acl_bitmap);
+  clib_bitmap_free (seen_acl_bitmap);
+  clib_bitmap_free (old_seen_acl_bitmap);
+  return rv;
+}
+
+static void
+vl_api_acl_set_priority_t_handler (vl_api_acl_set_priority_t * mp)
+{
+  acl_main_t *am = &acl_main;
+  vl_api_acl_set_priority_reply_t *rmp;
+  int rv = 0;
+  u32 sw_if_index = ntohl (mp->sw_if_index);
+  u32 count = ntohl (mp->count);
+  u32 in_count = ntohl (mp->in_count);
+  u32 out_count = count - in_count;
+
+  rv = acl_set_acl_priority (am, sw_if_index, 1, in_count, mp->acls);
+  rv |= acl_set_acl_priority (am, sw_if_index, 0, out_count, &(mp->acls[in_count]));
+
+  //rv = acl_set_acl_priority (ntohl(mp->count), mp->acls);
+
+  REPLY_MACRO (VL_API_ACL_SET_PRIORITY_REPLY);
+}
+
 static void
   vl_api_acl_stats_intf_counters_enable_t_handler
   (vl_api_acl_stats_intf_counters_enable_t * mp)
@@ -4434,6 +4555,11 @@ acl_init (vlib_main_t * vm)
 			     "ACL plugin acl_index and bd_id bihash",
 			     ACL_INDEX_BD_ID_TABLE_HASH_NUM_BUCKETS,
 			     ACL_INDEX_BD_ID_TABLE_HASH_MEMORY_SIZE);
+
+  clib_bihash_init_8_8 (&am->sw_acl_index_priority_hash,
+                            "ACL plugin acl_index and priority bihash",
+                            ACL_INDEX_PRIORITY_TABLE_HASH_NUM_BUCKETS,
+                            ACL_INDEX_PRIORITY_TABLE_HASH_MEMORY_SIZE);
 
   return error;
 }
