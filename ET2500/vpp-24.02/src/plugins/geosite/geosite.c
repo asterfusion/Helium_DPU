@@ -74,7 +74,11 @@ int geosite_enable_disable (geosite_main_t * gmp, u32 sw_if_index,
   vnet_feature_enable_disable ("ip4-unicast", "geosite-input",
                                sw_if_index, enable_disable, 0, 0);
   vnet_feature_enable_disable ("ip6-unicast", "geosite-input",
-                               sw_if_index, enable_disable, 0, 0);                            
+                               sw_if_index, enable_disable, 0, 0);  
+  vnet_feature_enable_disable ("l2-input-ip4", "geosite-input",
+                               sw_if_index, enable_disable, 0, 0);
+  vnet_feature_enable_disable ("l2-input-ip6", "geosite-input",
+                               sw_if_index, enable_disable, 0, 0);                           
   /* Send an event to enable/disable the periodic scanner process */
   vlib_process_signal_event (gmp->vlib_main,
                              gmp->periodic_node_index,
@@ -964,6 +968,23 @@ VNET_FEATURE_INIT (geosite_ip6, static) =
   .runs_before = VNET_FEATURES ("acl-plugin-in-ip6-fa"),
   
 };
+
+VNET_FEATURE_INIT (geosite_l2ip4, static) =
+{
+  .arc_name = "l2-input-ip4",
+  .node_name = "geosite-input",
+  .runs_before = VNET_FEATURES ("acl-plugin-in-ip4-l2"),
+  
+};
+
+VNET_FEATURE_INIT (geosite_l2ip6, static) =
+{
+  .arc_name = "l2-input-ip6",
+  .node_name = "geosite-input",
+  .runs_before = VNET_FEATURES ("acl-plugin-in-ip6-l2"),
+  
+};
+
 
 /* *INDENT-OFF* */
 VLIB_PLUGIN_REGISTER () =
