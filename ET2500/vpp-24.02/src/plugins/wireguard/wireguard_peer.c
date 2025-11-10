@@ -348,7 +348,7 @@ static int wg_peer_set_allowed_ips(wg_peer_t *peer, const fib_prefix_t *allowed_
     return 0;
 }
 
-u32 wg_peer_get_output_interface(wg_peer_t *peer)
+u32 wg_peer_get_output_interface(wg_peer_endpoint_t *dst)
 {
     ip4_address_t dst_addr_v4;
     ip6_address_t dst_addr_v6;
@@ -356,18 +356,18 @@ u32 wg_peer_get_output_interface(wg_peer_t *peer)
     u32 lbi;
     const dpo_id_t *dpo;
     ip_adjacency_t *adj;
-    u8 is_ip4 = ip46_address_is_ip4 (&peer->dst.addr);
+    u8 is_ip4 = ip46_address_is_ip4 (&dst->addr);
 
     if (is_ip4)
     {
-        dst_addr_v4.data_u32 = peer->dst.addr.ip4.data_u32;
+        dst_addr_v4.data_u32 = dst->addr.ip4.data_u32;
         lbi = ip4_fib_forwarding_lookup (0, &dst_addr_v4);
     }
 
     else
     {
-        dst_addr_v6.as_u64[0] = peer->dst.addr.ip6.as_u64[0];
-        dst_addr_v6.as_u64[1] = peer->dst.addr.ip6.as_u64[1];
+        dst_addr_v6.as_u64[0] = dst->addr.ip6.as_u64[0];
+        dst_addr_v6.as_u64[1] = dst->addr.ip6.as_u64[1];
         lbi = ip6_fib_table_fwding_lookup (0, &dst_addr_v6);
     }
 
@@ -398,7 +398,8 @@ void wg_peer_src_init(wg_peer_t *peer)
     u32 out_sw_if_index;
     u8 is_ip4 = ip46_address_is_ip4(&peer->dst.addr);
 
-    out_sw_if_index = wg_peer_get_output_interface(peer);
+    out_sw_if_index = wg_peer_get_output_interface(&peer->dst);
+    peer->output_sw_index = out_sw_if_index;
     if (is_ip4)
     {
         ip4_main_t *im4 = &ip4_main;
