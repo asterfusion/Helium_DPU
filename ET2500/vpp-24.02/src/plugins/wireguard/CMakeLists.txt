@@ -59,6 +59,7 @@ add_vpp_plugin(wireguard
   wireguard_index_table.c
   wireguard_index_table.h
   wireguard_api.c
+  wireguard_process.c
 
   LINK_LIBRARIES ${OPENSSL_CRYPTO_LIBRARIES}
 

@@ -118,6 +118,8 @@ typedef struct wg_peer
 
   /* Handshake is sent to main thread? */
   bool handshake_is_sent;
+  u32 output_sw_index;
+  wg_peer_endpoint_t config_dst;
 } wg_peer_t;
 
 typedef struct wg_peer_table_bind_ctx_t_
@@ -151,6 +153,7 @@ void wg_peer_update_endpoint (index_t peeri, const ip46_address_t *addr,
 			      u16 port);
 void wg_peer_update_endpoint_from_mt (index_t peeri,
 				      const ip46_address_t *addr, u16 port);
+u32 wg_peer_get_output_interface(wg_peer_endpoint_t *dst);
 
 static inline bool
 wg_peer_is_dead (wg_peer_t *peer)
