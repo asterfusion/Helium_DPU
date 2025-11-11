@@ -367,6 +367,13 @@ typedef struct
       u16 mtu;			//Exit MTU
     } map_t;
 
+    /* MAP CE */
+    struct
+    {
+      u32 map_domain_index;
+      u8 is_translation;
+    } map_ce;
+
     /* IP Fragmentation */
     struct
     {
