@@ -23,7 +23,7 @@
 
 #define DNS_DPORT 53
 #define DNS_MAX_PACKET_SIZE 512
-#define DNS_MAX_DOMAIN_LEN 255
+#define DNS_MAX_DOMAIN_LEN 256
 #define DNS_MAX_LABELS 128
 #define DNS_MAX_JUMPS 5
 
@@ -701,7 +701,7 @@ VLIB_NODE_FN (geosite_node) (vlib_main_t * vm,
           u8 *payload;
           char *domain;
           u16 payload_length;
-          u16 domain_length;
+          u16 domain_length =0;
         bool get_domain =false;
           /* speculatively enqueue b0 to the current next frame */
         bi0 = from[0];
@@ -710,7 +710,8 @@ VLIB_NODE_FN (geosite_node) (vlib_main_t * vm,
         to_next += 1;
         n_left_from -= 1;
         n_left_to_next -= 1;
-        domain = clib_mem_alloc(256 * sizeof(char));
+        domain = clib_mem_alloc(DNS_MAX_DOMAIN_LEN * sizeof(char));
+        clib_memset(domain, 0, DNS_MAX_DOMAIN_LEN);
         domain[0] ='\0';
         b0 = vlib_get_buffer (vm, bi0);
         sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
@@ -775,7 +776,7 @@ VLIB_NODE_FN (geosite_node) (vlib_main_t * vm,
         
 end_process:        vnet_feature_next (&next0, b0);
 
-       if(get_domain)
+       if(get_domain && domain_length < DNS_MAX_DOMAIN_LEN)
        
         {
 
@@ -798,7 +799,11 @@ end_process:        vnet_feature_next (&next0, b0);
                vlib_add_trace (vm, node, b0, sizeof (*t));
             t->sw_if_index = sw_if_index0;
             t->next_index = next0;
-            clib_memcpy (t->domain, domain,domain_length);
+            if(get_domain && domain_length < DNS_MAX_DOMAIN_LEN){
+                clib_memcpy (t->domain, domain,domain_length);
+            }else{
+                t->domain[0]='\0';
+            }
                          
             
             }
