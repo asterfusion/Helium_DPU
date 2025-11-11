@@ -23,7 +23,7 @@
 
 #define DNS_DPORT 53
 #define DNS_MAX_PACKET_SIZE 512
-#define DNS_MAX_DOMAIN_LEN 255
+#define DNS_MAX_DOMAIN_LEN 256
 #define DNS_MAX_LABELS 128
 #define DNS_MAX_JUMPS 5
 
@@ -710,8 +710,8 @@ VLIB_NODE_FN (geosite_node) (vlib_main_t * vm,
         to_next += 1;
         n_left_from -= 1;
         n_left_to_next -= 1;
-        domain = clib_mem_alloc(256 * sizeof(char));
-        clib_memset(domain, 0, 256);
+        domain = clib_mem_alloc(DNS_MAX_DOMAIN_LEN * sizeof(char));
+        clib_memset(domain, 0, DNS_MAX_DOMAIN_LEN);
         domain[0] ='\0';
         b0 = vlib_get_buffer (vm, bi0);
         sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
