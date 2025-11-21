@@ -125,3 +125,14 @@ typedef macip_acl_rule
   vl_api_prefix_t src_prefix;
   u16 rule_id;
 };
+
+/** \brief Index and priority of Access List
+    @param acl_index - Index of Access List
+    @param acl_priority - Priority of Access List
+*/
+
+typedef acl_index_prio
+{
+  u32 acl_index;
+  u16 acl_priority;
+};

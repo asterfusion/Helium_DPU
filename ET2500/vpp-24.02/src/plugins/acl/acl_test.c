@@ -1528,6 +1528,11 @@ static int api_acl_reflect_timeout (vat_main_t * vam)
     return ret;
 }
 
+static int api_acl_set_priority (vat_main_t * vam)
+{
+    return 0;
+}
+
 #define VL_API_LOCAL_SETUP_MESSAGE_ID_TABLE local_setup_message_id_table
 static void local_setup_message_id_table (vat_main_t * vam)
 {
