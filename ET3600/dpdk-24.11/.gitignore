@@ -1,0 +1,52 @@
+# ignore hidden files
+.*
+# except the tracked ones and derivatives
+!.ci/
+!.github/
+!.gitignore*
+!.mailmap*
+
+# ignore generated documentation tables
+doc/guides/nics/overview_table.txt
+doc/guides/nics/rte_flow_actions_table.txt
+doc/guides/nics/rte_flow_items_table.txt
+doc/guides/cryptodevs/overview_feature_table.txt
+doc/guides/cryptodevs/overview_cipher_table.txt
+doc/guides/cryptodevs/overview_auth_table.txt
+doc/guides/cryptodevs/overview_aead_table.txt
+doc/guides/cryptodevs/overview_asym_table.txt
+doc/guides/cryptodevs/overview_os_table.txt
+doc/guides/compressdevs/overview_feature_table.txt
+doc/guides/regexdevs/overview_feature_table.txt
+doc/guides/vdpadevs/overview_feature_table.txt
+doc/guides/bbdevs/overview_feature_table.txt
+doc/guides/gpus/overview_feature_table.txt
+doc/guides/eventdevs/overview_feature_table.txt
+doc/guides/eventdevs/overview_rx_adptr_feature_table.txt
+doc/guides/eventdevs/overview_tx_adptr_feature_table.txt
+doc/guides/eventdevs/overview_crypto_adptr_feature_table.txt
+doc/guides/eventdevs/overview_timer_adptr_feature_table.txt
+
+# ignore generated ctags/cscope files
+cscope.out.po
+cscope.out.in
+cscope.out
+cscope.files
+GTAGS
+GPATH
+GRTAGS
+tags
+TAGS
+
+# ignore python bytecode files
+*.pyc
+
+# DTS results
+dts/output
+
+# ignore default build directory, and directories from test-meson-builds.sh
+build
+build-*
+# ignore other build directory patterns
+*-gcc*
+*-clang*

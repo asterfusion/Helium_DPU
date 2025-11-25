@@ -1,0 +1,63 @@
+L2FWD_EVENT (atomic queue) output in packets per second
+cores, RESULT
+1, 7314495
+8, 44187476
+16, 81513620
+
+------------------------------------------------------------------------
+L3FWD_EVENT (ordered queue) output in packets per second
+cores, RESULT
+1, 7495352
+8, 44160021
+16, 83049287
+
+------------------------------------------------------------------------
+PERF_ATQ (parallel queue) output in packets per second
+cores, RESULT
+1, 11.868
+8, 56.318
+16, 93.648
+
+------------------------------------------------------------------------
+PIPELINE_ATQ_TX_FIRST (ordered queue) output in packets per second
+cores, RESULT
+1, 7.480
+8, 43.069
+16, 83.425
+
+------------------------------------------------------------------------
+GW_MODE_NO_PREF (atomic queue) output in packets per second
+cores, RESULT
+1, 4.828
+8, 31.616
+16, 61.556
+
+------------------------------------------------------------------------
+GW_MODE_PREF (atomic queue) output in packets per second
+cores, RESULT
+1, 7.3
+8, 43.035
+16, 83.120
+
+------------------------------------------------------------------------
+GW_MODE_WFE_PREF (atomic queue) output in packets per second
+cores, RESULT
+1, 7.3
+8, 43.019
+16, 83.129
+
+------------------------------------------------------------------------
+VECTOR_MODE (atomic queue) output in packets per second
+cores, RESULT
+1, 84.3
+8, 88.2
+16, 88.0
+
+------------------------------------------------------------------------
+CRYPTO_ADAPTER_FWD (parallel queue) output in packets per second
+cores, RESULT
+1, 7.447
+8, 41.331
+12, 41.331
+
+------------------------------------------------------------------------
