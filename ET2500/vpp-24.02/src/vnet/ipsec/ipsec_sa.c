@@ -153,6 +153,22 @@ ipsec_sa_set_crypto_alg (ipsec_sa_t * sa, ipsec_crypto_alg_t crypto_alg)
   sa->crypto_sync_enc_op_id = alg->enc_op_id;
   sa->crypto_sync_dec_op_id = alg->dec_op_id;
   sa->crypto_calg = alg->alg;
+
+  sa->crypto_iv_size = im->crypto_algs[crypto_alg].iv_size;
+  sa->esp_block_align = clib_max (4, im->crypto_algs[crypto_alg].block_align);
+  ASSERT (sa->crypto_iv_size <= ESP_MAX_IV_SIZE);
+  ASSERT (sa->esp_block_align <= ESP_MAX_BLOCK_SIZE);
+
+  if (IPSEC_CRYPTO_ALG_IS_GCM (crypto_alg))
+  {
+      sa->integ_icv_size = im->crypto_algs[crypto_alg].icv_size;
+      ipsec_sa_set_IS_CTR (sa);
+      ipsec_sa_set_IS_AEAD (sa);
+  }
+  else if (IPSEC_CRYPTO_ALG_IS_CTR (crypto_alg))
+  {
+      ipsec_sa_set_IS_CTR (sa);
+  }
 }
 
 void

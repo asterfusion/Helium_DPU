@@ -57,6 +57,11 @@ typedef enum
     (_alg == IPSEC_CRYPTO_ALG_AES_GCM_192) ||             \
     (_alg == IPSEC_CRYPTO_ALG_AES_GCM_256)))
 
+#define IPSEC_CRYPTO_ALG_IS_CTR(_alg)                                         \
+  (((_alg == IPSEC_CRYPTO_ALG_AES_CTR_128) ||                                 \
+    (_alg == IPSEC_CRYPTO_ALG_AES_CTR_192) ||                                 \
+    (_alg == IPSEC_CRYPTO_ALG_AES_CTR_256)))
+
 #define foreach_ipsec_integ_alg                                            \
   _ (0, NONE, "none")                                                      \
   _ (1, MD5_96, "md5-96")           /* RFC2403 */                          \
@@ -255,6 +260,12 @@ typedef struct
 
   ipsec_key_t integ_key;
   ipsec_key_t crypto_key;
+
+  u8 crypto_iv_size;
+  u8 esp_block_align;
+  u8 integ_icv_size;
+
+  u16 thread_index;
 } ipsec_sa_t;
 
 STATIC_ASSERT (VNET_CRYPTO_N_OP_IDS < (1 << 16), "crypto ops overflow");

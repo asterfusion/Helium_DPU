@@ -15,6 +15,8 @@
 #include <vnet/mpls/mpls_lookup.h>
 #include <vnet/l2/l2_input.h>
 
+#define AES_BLOCK_SIZE 16
+
 typedef struct
 {
   u32 sa_index;
@@ -76,7 +78,7 @@ onp_esp_dec_add_trace (ipsec_sa_t *sa, vlib_buffer_t *b, vlib_main_t *vm,
 		       u16 next, vlib_node_runtime_t *node, u32 sa_index,
 		       u32 seq)
 {
-#if 0
+#if 1
   onp_esp_decrypt_trace_t *tr;
 
   if (PREDICT_TRUE (!(b->flags & VLIB_BUFFER_IS_TRACED)))
@@ -88,8 +90,8 @@ onp_esp_dec_add_trace (ipsec_sa_t *sa, vlib_buffer_t *b, vlib_main_t *vm,
   tr->seq = seq;
   tr->sa_index = sa_index;
   tr->spi = sa->spi;
-  tr->sa_seq = sa->seq;
-  tr->sa_seq_hi = sa->seq_hi;
+  //tr->sa_seq = sa->seq;
+  //tr->sa_seq_hi = sa->seq_hi;
   tr->crypto_alg = sa->crypto_alg;
   tr->integ_alg = sa->integ_alg;
 
@@ -236,6 +238,21 @@ onp_esp_dec_post_process (vlib_main_t *vm, ipsec_sa_t *sa, vlib_buffer_t *b,
   bool is_chain_buf = 0;
   esp_footer_t *f;
 
+  ip4_header_t *ip4 = vlib_buffer_get_current (chained_buffer);
+  if ((ip4->ip_version_and_header_length & 0xf0) == 0x40)
+  {
+      u16 data_length = clib_net_to_host_u16(ip4->length);
+      u16 pay_length = AES_BLOCK_SIZE - (data_length + sizeof(esp_footer_t)) % AES_BLOCK_SIZE;
+      chained_buffer->current_length = data_length + pay_length;
+  }
+
+  else
+  {
+      ip6_header_t *ip6 = vlib_buffer_get_current (chained_buffer);
+      u16 data_length = clib_net_to_host_u16 (ip6->payload_length) + sizeof (ip6_header_t);
+      u16 pay_length = AES_BLOCK_SIZE - (data_length + sizeof(esp_footer_t)) % AES_BLOCK_SIZE;
+      chained_buffer->current_length = data_length + pay_length;
+  }
   while (chained_buffer->flags & VLIB_BUFFER_NEXT_PRESENT)
     {
       is_chain_buf = 1;

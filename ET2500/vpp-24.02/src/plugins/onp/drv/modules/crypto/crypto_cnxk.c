@@ -10,7 +10,7 @@
 #include <onp/drv/modules/pci/pci.h>
 #include <onp/drv/inc/pool.h>
 
-#define CPT_MAX_NB_DESC 128000
+#define CPT_MAX_NB_DESC 2097152
 #define CPT_MAX_SUBMIT_SIZE 64
 
 #define SRC_IOV_SIZE                                                          \

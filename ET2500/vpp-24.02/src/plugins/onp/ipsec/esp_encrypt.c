@@ -102,7 +102,7 @@ onp_esp_encrypt_tun_add_trace (vlib_main_t *vm, vlib_node_runtime_t *node,
 			       vlib_frame_t *frame, vlib_buffer_t *b,
 			       u32 next_index)
 {
-#if 0
+#if 1
   onp_esp_encrypt_trace_t *tr;
   ipsec_sa_t *sa;
   u32 sa_index;
@@ -113,8 +113,8 @@ onp_esp_encrypt_tun_add_trace (vlib_main_t *vm, vlib_node_runtime_t *node,
   tr->next_index = next_index;
   tr->sa_index = sa_index;
   tr->spi = sa->spi;
-  tr->seq = sa->seq;
-  tr->sa_seq_hi = sa->seq_hi;
+  //tr->seq = sa->seq;
+  //tr->sa_seq_hi = sa->seq_hi;
   tr->udp_encap = ipsec_sa_is_set_UDP_ENCAP (sa);
   tr->crypto_alg = sa->crypto_alg;
   tr->integ_alg = sa->integ_alg;
