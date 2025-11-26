@@ -410,6 +410,9 @@ vl_api_l2_flags_t_handler (vl_api_l2_flags_t * mp)
   if (flags & L2_ARP_TERM)
     bitmap |= L2INPUT_FEAT_ARP_TERM;
 
+  if (flags & L2_MULTICAST)
+    bitmap |= L2INPUT_FEAT_MULTICAST;
+
   rbm = l2input_intf_bitmap_enable (sw_if_index, bitmap, mp->is_set);
 
   BAD_SW_IF_INDEX_LABEL;
@@ -501,6 +504,7 @@ vl_api_bridge_domain_add_del_t_handler (vl_api_bridge_domain_add_del_t * mp)
     .arp_term = mp->arp_term,
     .arp_ufwd = mp->arp_ufwd,
     .mac_age = mp->mac_age,
+    .multicast = mp->multicast,
     .bd_id = ntohl (mp->bd_id),
     .bd_tag = mp->bd_tag
   };
@@ -652,6 +656,8 @@ bd_flags_decode (vl_api_bd_flags_t v)
     f |= L2_ARP_TERM;
   if (v & BRIDGE_API_FLAG_ARP_UFWD)
     f |= L2_ARP_UFWD;
+  if (v & BRIDGE_API_FLAG_MULTICAST)
+    f |= L2_MULTICAST;
 
   return (f);
 }

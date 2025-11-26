@@ -322,6 +322,10 @@ bd_set_flags (vlib_main_t * vm, u32 bd_index, bd_flags_t flags, u32 enable)
     {
       feature_bitmap |= L2INPUT_FEAT_ARP_UFWD;
     }
+  if (flags & L2_MULTICAST)
+    {
+      feature_bitmap |= L2INPUT_FEAT_MULTICAST;
+    }
 
   if (enable)
     {
@@ -1407,6 +1411,11 @@ bd_add_del (l2_bridge_domain_add_del_args_t * a)
 	enable_flags |= L2_ARP_UFWD;
       else
 	disable_flags |= L2_ARP_UFWD;
+
+      if (a->multicast)
+	enable_flags |= L2_MULTICAST;
+      else
+	disable_flags |= L2_MULTICAST;
 
       if (enable_flags)
 	bd_set_flags (vm, bd_index, enable_flags, 1 /* enable */ );

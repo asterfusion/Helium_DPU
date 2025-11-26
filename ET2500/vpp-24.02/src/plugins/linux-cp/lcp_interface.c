@@ -365,6 +365,20 @@ lcp_itf_pair_add (u32 host_sw_if_index, u32 phy_sw_if_index, u8 *host_name,
   vnet_l2_feature_enable_disable("l2-input-ip6", "linux-cp-l2-vrrp6",
           lip->lip_phy_sw_if_index, 1, NULL, 0);
 
+  vnet_feature_enable_disable("ip4-multicast", "linux-cp-igmp",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable("ip6-multicast", "linux-cp-igmp6",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+
+  vnet_l2_feature_enable_disable("l2-input-ip4", "linux-cp-l2-igmp",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+
+  vnet_l2_feature_enable_disable("l2-input-ip6", "linux-cp-l2-igmp6",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+
+  vnet_feature_enable_disable("ip4-local", "linux-cp-igmp-xc",
+          lip->lip_host_sw_if_index, 1, NULL, 0);
+
   /* enable ARP feature node for broadcast interfaces */
   if (lip->lip_host_type != LCP_ITF_HOST_TUN)
     {
