@@ -29,6 +29,7 @@ typedef struct {
   u8 flags;
 }l2mc_trace_t;
 
+#ifndef CLIB_MARCH_VARIANT
 static u8 *
 my_format_mac_address (u8 * s, va_list * args)
 {
@@ -53,6 +54,8 @@ static u8 * format_l2mc_trace (u8 * s, va_list * args)
 }
 
 vlib_node_registration_t l2mc_node;
+
+#endif /* CLIB_MARCH_VARIANT */
 
 #define foreach_l2mc_error                    \
 _(DROP, "l2mc dropped packets")               \
@@ -302,6 +305,8 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
   return frame->n_vectors;
 }
 
+/* *INDENT-OFF* */
+#ifndef CLIB_MARCH_VARIANT
 VLIB_REGISTER_NODE (l2mc_node) = 
 {
   .name = "l2-multicast",
@@ -320,3 +325,12 @@ VLIB_REGISTER_NODE (l2mc_node) =
         [L2MC_NEXT_L2_OUTPUT] = "l2-output",
   },
 };
+#endif /* CLIB_MARCH_VARIANT */
+/* *INDENT-ON* */
+/*
+ * fd.io coding-style-patch-verification: ON
+ *
+ * Local Variables:
+ * eval: (c-set-style "gnu")
+ * End:
+ */
