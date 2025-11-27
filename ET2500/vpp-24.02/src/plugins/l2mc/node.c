@@ -29,7 +29,7 @@ typedef struct {
   u8 flags;
 }l2mc_trace_t;
 
-#ifndef CLIB_MARCH_VARIANT
+
 static u8 *
 my_format_mac_address (u8 * s, va_list * args)
 {
@@ -38,6 +38,7 @@ my_format_mac_address (u8 * s, va_list * args)
 		 a[0], a[1], a[2], a[3], a[4], a[5]);
 }
 
+#ifndef CLIB_MARCH_VARIANT
 /* packet trace format function */
 static u8 * format_l2mc_trace (u8 * s, va_list * args)
 {
@@ -69,11 +70,13 @@ typedef enum
     L2MC_N_ERROR,
 } l2mc_error_t;
 
+#ifndef CLIB_MARCH_VARIANT
 static char *l2mc_error_strings[] = {
 #define _(sym,string) string,
     foreach_l2mc_error
 #undef _
 };
+#endif /* CLIB_MARCH_VARIANT */
 
 VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
                           vlib_node_runtime_t * node,
