@@ -53,10 +53,13 @@ static u8 * format_l2mc_trace (u8 * s, va_list * args)
   return s;
 }
 
+vlib_node_registration_t l2mc_node;
+
+#endif /* CLIB_MARCH_VARIANT */
+
 #define foreach_l2mc_error                    \
 _(DROP, "l2mc dropped packets")               \
     
-
 
 typedef enum
 {
@@ -71,10 +74,6 @@ static char *l2mc_error_strings[] = {
     foreach_l2mc_error
 #undef _
 };
-
-vlib_node_registration_t l2mc_node;
-
-#endif /* CLIB_MARCH_VARIANT */
 
 VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
                           vlib_node_runtime_t * node,
