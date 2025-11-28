@@ -255,6 +255,28 @@ onp_esp_encrypt_tun_post (vlib_main_t *vm, vlib_node_runtime_t *node,
 	    onp_esp_encrypt_tun_add_trace (vm, node, frame, b[3], next[3]);
 	}
 
+      if (is_ip6)
+      {
+        ip6_header_t *ip60 = vlib_buffer_get_current(b[0]);
+        ip6_header_t *ip61 = vlib_buffer_get_current(b[1]);
+        ip6_header_t *ip62 = vlib_buffer_get_current(b[2]);
+        ip6_header_t *ip63 = vlib_buffer_get_current(b[3]);
+        b[0]->current_length = clib_net_to_host_u16(ip60->payload_length) + sizeof (ip6_header_t);
+        b[1]->current_length = clib_net_to_host_u16(ip61->payload_length) + sizeof (ip6_header_t);
+        b[2]->current_length = clib_net_to_host_u16(ip62->payload_length) + sizeof (ip6_header_t);
+        b[3]->current_length = clib_net_to_host_u16(ip63->payload_length) + sizeof (ip6_header_t);
+      }
+      else
+      {
+        ip4_header_t *ip40 = vlib_buffer_get_current (b[0]);
+        ip4_header_t *ip41 = vlib_buffer_get_current (b[1]);
+        ip4_header_t *ip42 = vlib_buffer_get_current (b[2]);
+        ip4_header_t *ip43 = vlib_buffer_get_current (b[3]);
+        b[0]->current_length = clib_net_to_host_u16(ip40->length);
+        b[1]->current_length = clib_net_to_host_u16(ip41->length);
+        b[2]->current_length = clib_net_to_host_u16(ip42->length);
+        b[3]->current_length = clib_net_to_host_u16(ip43->length);
+      }
       b += 4;
       next += 4;
       n_left -= 4;
@@ -276,6 +298,17 @@ onp_esp_encrypt_tun_post (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  if (PREDICT_FALSE (b[0]->flags & VLIB_BUFFER_IS_TRACED))
 	    onp_esp_encrypt_tun_add_trace (vm, node, frame, b[0], next[0]);
 	}
+
+      if (is_ip6)
+      {
+        ip6_header_t *ip6 = vlib_buffer_get_current(b[0]);
+        b[0]->current_length = clib_net_to_host_u16(ip6->payload_length) + sizeof (ip6_header_t);
+      }
+      else
+      {
+        ip4_header_t *ip4 = vlib_buffer_get_current (b[0]);
+        b[0]->current_length = clib_net_to_host_u16(ip4->length);
+      }
 
       b += 1;
       next += 1;
