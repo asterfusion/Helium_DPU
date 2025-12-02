@@ -789,7 +789,6 @@ end_process:        vnet_feature_next (&next0, b0);
             strncpy(geosite_domain->str, domain, sizeof(geosite_domain->str) - 1);
             u32 idx = geosite_domain - geosite_main.pool ; 
            vnet_buffer2(b0)->geosite_domain_index = idx;
-           geosite_domain_t *m = pool_elt_at_index(geosite_main.pool, idx);
         }
         else{
             clib_mem_free(domain);
