@@ -896,9 +896,8 @@ static  void geosite_free_domain_cb(vlib_main_t *vm, vlib_buffer_t *b)
 
     geosite_domain_t *domain =
         pool_elt_at_index(geosite_main.pool,
-                          vnet_buffer2(b)->geosite_domain_index);
-    domain->refcnt --;      
-    if (domain->refcnt == 0) {
+                          vnet_buffer2(b)->geosite_domain_index);     
+    if (__sync_sub_and_fetch(&domain->refcnt, 1) == 0) {
         pool_put(geosite_main.pool, domain);
 
     }
