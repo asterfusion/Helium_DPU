@@ -421,6 +421,18 @@ typedef struct
       u32 required_thread_index;
     } snat;
 
+    /* HQOS */
+    struct
+    {
+      u32 tc_index;
+      u32 color;
+      union
+      {
+          u32 user_id; //in
+          u32 queue_id; //to mapping (subport-pipe-queue)
+      };
+    } hqos;
+
     u32 unused[6];
   };
 } vnet_buffer_opaque_t;
