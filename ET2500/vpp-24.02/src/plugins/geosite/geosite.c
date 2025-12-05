@@ -35,7 +35,12 @@
 
 #include <protobuf-c/protobuf-c.h>
 #include "common.pb-c.h"
-
+#include <vnet/interface_output.h>
+#include <vnet/dpo/interface_rx_dpo.h>
+#include <vnet/l2/l2_flood.h>
+#include <vnet/dpo/replicate_dpo.h>
+#include <vnet/bier/bier_table.h>
+#include <vlib/punt.h>
 static vlib_log_class_t geosite2_logger __attribute__((unused));
 #define GEOSITE2_INFO(...)                              \
     vlib_log_notice (geosite2_logger, __VA_ARGS__);
@@ -794,13 +799,16 @@ char  *geoip_get_country_code_by_index(u16 index)
 
 
 __clib_export 
-u32 *geosite_get_country_index_by_domain(char *domain){
+u32 *geosite_get_country_index_by_domain(vlib_buffer_t *b,char **domain_name){
      geosite_main_t *gmp = &geosite_main;
     if (!gmp->domain_trie)
         return NULL;
     
+    char *domain;
+    geosite_domain_t *geosite_domain = pool_elt_at_index(geosite_main.pool, vnet_buffer2(b)->geosite_domain_index );
+    domain =  geosite_domain->str;        
     u32 *cc_indices = domain_trie_match(gmp->domain_trie, domain);
-
+    *domain_name = domain;
     if (vec_len(cc_indices) != 0) {
     
        return cc_indices;
@@ -881,6 +889,37 @@ return NULL;
 
 }
 
+static  void geosite_free_domain_cb(vlib_main_t *vm, vlib_buffer_t *b)
+{
+    if (vnet_buffer2(b)->geosite_domain_index == ~0)
+        return;
+
+    geosite_domain_t *domain =
+        pool_elt_at_index(geosite_main.pool,
+                          vnet_buffer2(b)->geosite_domain_index);     
+    if (__sync_sub_and_fetch(&domain->refcnt, 1) == 0) {
+        pool_put(geosite_main.pool, domain);
+
+    }
+
+        b->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
+        vnet_buffer2(b)->geosite_domain_index = ~0;
+}
+
+static  void clone_add_geosite_refcnt_cb(vlib_buffer_t *b,uint32_t n_clones)
+{
+    if (vnet_buffer2(b)->geosite_domain_index != ~0 && b->flags & VLIB_BUFFER_DOMAIN_VALID)
+       {
+            geosite_domain_t *domain =
+                pool_elt_at_index(geosite_main.pool,
+                                vnet_buffer2(b)->geosite_domain_index);
+            domain->refcnt = n_clones;
+       }
+
+
+    return;
+
+}
 
 
 
@@ -932,12 +971,15 @@ static clib_error_t * geosite_init (vlib_main_t * vm)
   gmp->vlib_main = vm;
   gmp->vnet_main = vnet_get_main();
   gmp->domain_trie = NULL;
-  
+  gmp-> pool = 0;
   /* Add our API messages to the global name_crc hash table */
   gmp->msg_id_base = setup_message_id_table ();
-
-
-
+  geosite_register_output_free_callback(geosite_free_domain_cb);
+  geosite_register_drop_free_callback(geosite_free_domain_cb);
+  l2flood_clone_add_geosite_refcnt_callback(clone_add_geosite_refcnt_cb);
+  replicate_clone_add_geosite_refcnt_callback(clone_add_geosite_refcnt_cb);
+  punt_clone_add_geosite_refcnt_callback(clone_add_geosite_refcnt_cb);
+  bier_clone_add_geosite_refcnt_callback(clone_add_geosite_refcnt_cb);
   return error;
 }
 

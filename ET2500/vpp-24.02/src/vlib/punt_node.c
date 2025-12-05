@@ -21,6 +21,14 @@
   _(NO_REG, "No registrations")                \
   _(REP_FAIL, "Replication Failure")
 
+punt_clone_add_geosite_refcnt_cb_t punt_clone_add_geosite_refcnt_cb = NULL;
+
+
+void punt_clone_add_geosite_refcnt_callback(punt_clone_add_geosite_refcnt_cb_t cb)
+{
+    punt_clone_add_geosite_refcnt_cb = cb;
+}
+
 typedef enum punt_error_t_
 {
 #define _(v,s) PUNT_ERROR_##v,
@@ -87,7 +95,10 @@ punt_replicate (vlib_main_t * vm,
   n_cloned0 = vlib_buffer_clone (vm, bi0,
 				 punt_clones[thread_index],
 				 n_clones0, 2 * CLIB_CACHE_LINE_BYTES);
-
+		 	if(punt_clone_add_geosite_refcnt_cb)
+			 {
+				 punt_clone_add_geosite_refcnt_cb(b0,n_cloned0);
+			 }
   if (PREDICT_FALSE (n_cloned0 != n_clones0))
     {
       b0->error = node->errors[PUNT_ERROR_REP_FAIL];

@@ -26,7 +26,7 @@
 
 #include <vppinfra/error.h>
 #include <vppinfra/hash.h>
-
+#include <vnet/l2/l2_flood.h>
 
 /**
  * @file
@@ -43,6 +43,13 @@
  * or "recycle" using replication_is_recycled().
  */
 
+ l2flood_clone_add_geosite_refcnt_cb_t l2flood_clone_add_geosite_refcnt_cb = NULL;
+
+
+void l2flood_clone_add_geosite_refcnt_callback(l2flood_clone_add_geosite_refcnt_cb_t cb)
+{
+    l2flood_clone_add_geosite_refcnt_cb = cb;
+}
 
 typedef struct
 {
@@ -223,7 +230,10 @@ VLIB_NODE_FN (l2flood_node) (vlib_main_t * vm,
 					    msm->clones[thread_index],
 					    n_clones,
 					    VLIB_BUFFER_CLONE_HEAD_SIZE);
-
+		 	if(l2flood_clone_add_geosite_refcnt_cb)
+			 {
+				 l2flood_clone_add_geosite_refcnt_cb(b0,n_cloned);
+			 }
 	      vec_set_len (msm->clones[thread_index], n_cloned);
 
 	      if (PREDICT_FALSE (n_cloned != n_clones))

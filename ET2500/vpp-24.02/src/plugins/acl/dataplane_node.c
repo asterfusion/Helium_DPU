@@ -375,19 +375,17 @@ acl_get_country_index_by_domain(vlib_buffer_t **b, u32 **cc_indices, u32 **dns_c
 
 
 
-    if(vnet_buffer2(b[0])->geosite_domain_ptr == NULL){
+    if(vnet_buffer2(b[0])->geosite_domain_index == ~0){
     return result;
  
   }
 
-  char *domain_name;
-  domain_name =  vnet_buffer2(b[0])->geosite_domain_ptr;
-  *cc_indices = ((__typeof__(geosite_get_country_index_by_domain) *)geosite_get_country_index_by_domain_ptr)(domain_name);
+  char *domain_name =NULL;
+  *cc_indices = ((__typeof__(geosite_get_country_index_by_domain) *)geosite_get_country_index_by_domain_ptr)(b[0],&domain_name);
   if (*cc_indices)
   {
     result |= GEOSITE_FIND_CC_CODE;
   }
-
 
 
 
