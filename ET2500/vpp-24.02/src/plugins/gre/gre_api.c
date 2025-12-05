@@ -120,7 +120,8 @@ vl_api_gre_tunnel_add_del_t_handler (vl_api_gre_tunnel_add_del_t *mp)
 out:
   /* *INDENT-OFF* */
   REPLY_MACRO2 (VL_API_GRE_TUNNEL_ADD_DEL_REPLY,
-		({ rmp->sw_if_index = ntohl (sw_if_index); }));
+		({ rmp->sw_if_index = ntohl (sw_if_index);
+    rmp->instance = ntohl (a->instance);  }));
   /* *INDENT-ON* */
 }
 
