@@ -233,7 +233,7 @@ vl_api_hqos_port_subport_profile_add_t_handler (vl_api_hqos_port_subport_profile
                        clib_net_to_host_u64(mp->tb_rate),
                        clib_net_to_host_u64(mp->tb_size), 
                        tc_rate_vec,
-                       ntohl(mp->tc_period), 
+                       clib_net_to_host_u64(mp->tc_period),
                        &hqos_port_subport_profile_id);
 
     vec_free(tc_rate_vec);
@@ -267,7 +267,7 @@ vl_api_hqos_port_subport_profile_update_t_handler (vl_api_hqos_port_subport_prof
                        clib_net_to_host_u64(mp->tb_rate),
                        clib_net_to_host_u64(mp->tb_size), 
                        tc_rate_vec,
-                       ntohl(mp->tc_period));
+                       clib_net_to_host_u64(mp->tc_period));
 
     vec_free(tc_rate_vec);
 
@@ -337,7 +337,7 @@ vl_api_hqos_subport_pipe_profile_add_t_handler (vl_api_hqos_subport_pipe_profile
                                        clib_net_to_host_u64(mp->tb_rate),
                                        clib_net_to_host_u64(mp->tb_size), 
                                        tc_rate_vec,
-                                       ntohl(mp->tc_period), 
+                                       clib_net_to_host_u64(mp->tc_period),
                                        mp->tc_ov_weight,
                                        mp->wrr_weight,
                                        &hqos_pipe_profile_id);
@@ -376,7 +376,7 @@ vl_api_hqos_subport_pipe_profile_update_t_handler (vl_api_hqos_subport_pipe_prof
                                           clib_net_to_host_u64(mp->tb_rate),
                                           clib_net_to_host_u64(mp->tb_size), 
                                           tc_rate_vec,
-                                          ntohl(mp->tc_period), 
+                                          clib_net_to_host_u64(mp->tc_period),
                                           mp->tc_ov_weight,
                                           mp->wrr_weight);
 

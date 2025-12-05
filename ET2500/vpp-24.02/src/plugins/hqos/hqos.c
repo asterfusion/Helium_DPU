@@ -586,7 +586,7 @@ int hqos_port_subport_profile_add(u32 hqos_port_id,
                                   u64 tb_rate,
                                   u64 tb_size,
                                   u64 *tc_rate,
-                                  u32 tc_period,
+                                  u64 tc_period,
                                   u32 *hqos_port_subport_profile_id)
 {
     int rv, i;
@@ -638,7 +638,7 @@ int hqos_port_subport_profile_update(u32 hqos_port_id,
                                      u64 tb_rate,
                                      u64 tb_size,
                                      u64 *tc_rate,
-                                     u32 tc_period)
+                                     u64 tc_period)
 {
     hqos_main_t *hm = &hqos_main;
     hqos_sched_port *hqos_port = NULL;
@@ -779,7 +779,7 @@ int hqos_subport_pipe_profile_add(u32 hqos_port_id,
                                   u64 tb_rate,
                                   u64 tb_size, 
                                   u64 *tc_rate,
-                                  u32 tc_period, 
+                                  u64 tc_period,
                                   u8 tc_ov_weight,
                                   u8 *wrr_weights,
                                   u32 *hqos_pipe_profile_id)
@@ -848,7 +848,7 @@ int hqos_subport_pipe_profile_update(u32 hqos_port_id,
                                      u64 tb_rate,
                                      u64 tb_size, 
                                      u64 *tc_rate,
-                                     u32 tc_period, 
+                                     u64 tc_period,
                                      u8 tc_ov_weight,
                                      u8 *wrr_weights)
 {
