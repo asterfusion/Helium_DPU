@@ -17,6 +17,12 @@ path=$( cd "$(dirname "${BASH_SOURCE}")" ; pwd -P )
 
 cd "$path"
 
+# Check if CUSTOM_VERSION is set
+if [ -n "$CUSTOM_VERSION" ]; then
+    echo "$CUSTOM_VERSION"
+    exit 0
+fi
+
 if [ -f .version ]; then
     vstring=$(cat .version)
 else

@@ -87,6 +87,7 @@ define ipip_add_tunnel_reply
   u32 context;
   i32 retval;
   vl_api_interface_index_t sw_if_index;
+  u32 instance;
 };
 
 /**

@@ -2154,7 +2154,7 @@ ikev2_add_tunnel_from_main (ikev2_add_ipsec_tunnel_args_t * a)
       rv = ipip_add_tunnel (IPIP_TRANSPORT_IP4, ~0, &ip_addr_46 (&a->local_ip),
 			    &ip_addr_46 (&a->remote_ip), 0,
 			    TUNNEL_ENCAP_DECAP_FLAG_NONE, IP_DSCP_CS0,
-			    TUNNEL_MODE_P2P, &sw_if_index);
+			    TUNNEL_MODE_P2P, &sw_if_index, NULL);
 
       if (rv == VNET_API_ERROR_IF_ALREADY_EXISTS)
 	{
