@@ -75,6 +75,7 @@ vl_api_gre_tunnel_add_del_t_handler (vl_api_gre_tunnel_add_del_t *mp)
   vl_api_gre_tunnel_add_del_reply_t *rmp;
   tunnel_encap_decap_flags_t flags;
   u32 sw_if_index = ~0;
+  u32 instance = ~0;
   ip46_type_t itype[2];
   int rv = 0;
 
@@ -115,13 +116,12 @@ vl_api_gre_tunnel_add_del_t_handler (vl_api_gre_tunnel_add_del_t *mp)
   a->outer_table_id = ntohl (mp->tunnel.outer_table_id);
   a->flags = flags;
 
-  rv = vnet_gre_tunnel_add_del (a, &sw_if_index);
-
+  rv = vnet_gre_tunnel_add_del (a, &sw_if_index,&instance);
 out:
   /* *INDENT-OFF* */
   REPLY_MACRO2 (VL_API_GRE_TUNNEL_ADD_DEL_REPLY,
-		({ rmp->sw_if_index = ntohl (sw_if_index);
-    rmp->instance = ntohl (a->instance);  }));
+		({ rmp->sw_if_index = ntohl (sw_if_index); 
+    rmp->instance = ntohl (instance);}));
   /* *INDENT-ON* */
 }
 
