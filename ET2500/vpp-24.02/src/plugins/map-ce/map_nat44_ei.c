@@ -319,8 +319,8 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     pool_alloc(mnat->users, MAP_NAT_USER_INITIAL_NUM);
 
     mnat->max_translations = MAP_NAT_SESSION_MAX;
-    mnat->max_translations_per_user = MAP_NAT_SESSION_MAX; //Consistent with session size
-    mnat->max_users = MAP_NAT_SESSION_MAX; //Consistent with session size
+    mnat->max_translations_per_user = MAP_NAT_SESSION_MAX_PER_USER;
+    mnat->max_users = MAP_NAT_USER_MAX;
 
     /* Init port alg */
     mnat->psid_offset = d->psid_offset;
