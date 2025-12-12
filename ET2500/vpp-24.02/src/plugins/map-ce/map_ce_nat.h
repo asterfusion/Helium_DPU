@@ -30,14 +30,15 @@
 
 #define MAP_NAT_STATIC_HASH_BUCKETS   (1024)
 #define MAP_NAT_STATIC_HASH_MEMORY_SIZE (64 << 20) //64M
-#define MAP_NAT_HASH_BUCKETS   (4096)
+#define MAP_NAT_HASH_BUCKETS   (512 * 1024)
 #define MAP_NAT_HASH_MEMORY_SIZE (0) //no limit
 
-#define MAP_NAT_STATIC_SESSION_MAX (1024)
-#define MAP_NAT_SESSION_MAX (10 * 1024)
+#define MAP_NAT_STATIC_SESSION_MAX (8192)
 
-#define MAP_NAT_USER_INITIAL_NUM (1024)
+#define MAP_NAT_USER_MAX    (5 * 1024)
+#define MAP_NAT_SESSION_MAX_PER_USER (512)
 
+#define MAP_NAT_SESSION_MAX (MAP_NAT_USER_MAX * MAP_NAT_SESSION_MAX_PER_USER)
 
 #define MAP_NAT_UDP_TIMEOUT 300
 #define MAP_NAT_TCP_TIMEOUT 300
@@ -445,7 +446,7 @@ map_nat44_ei_alloc_map_addr_port (map_nat44_ei_domain_t *mnat,
     map_nat44_ei_address_t *a;
     u16 m, ports, portnum, A, j;
     m = 16 - (mnat->psid_offset + mnat->psid_length);
-    ports = (1 << (16 - mnat->psid_length)) - (1 << m);
+    ports = mnat->psid_length == 0 ? (0xffff - 1024) : (1 << (16 - mnat->psid_length)) - (1 << m);
 
     if (!vec_len (mnat->addresses))
         goto exhausted;
@@ -457,9 +458,16 @@ map_nat44_ei_alloc_map_addr_port (map_nat44_ei_domain_t *mnat,
         {
             while (1)
             {
-                A = map_nat_random_port (&mnat->random_seed, 1, pow2_mask (mnat->psid_offset));
-                j = map_nat_random_port (&mnat->random_seed, 0, pow2_mask (m));
-                portnum = A | (mnat->psid << mnat->psid_offset) | (j << (16 - m));
+                if (mnat->psid_length != 0)
+                {
+                    A = map_nat_random_port (&mnat->random_seed, 1, pow2_mask (mnat->psid_offset));
+                    j = map_nat_random_port (&mnat->random_seed, 0, pow2_mask (m));
+                    portnum = A | (mnat->psid << mnat->psid_offset) | (j << (16 - m));
+                }
+                else
+                {
+                    portnum = 1024 + map_nat_random_port (&mnat->random_seed, 0, ports);
+                }
                 if (clib_bitmap_get (a->busy_port_bitmap[proto], portnum))
                     continue;
                 a->busy_port_bitmap[proto] = clib_bitmap_set (a->busy_port_bitmap[proto], portnum, 1);

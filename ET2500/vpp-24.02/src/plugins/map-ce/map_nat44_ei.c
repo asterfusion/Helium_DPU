@@ -316,11 +316,11 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     /* Pool alloc */
     pool_alloc(mnat->static_mappings, MAP_NAT_STATIC_SESSION_MAX);
     pool_alloc(mnat->sessions, MAP_NAT_SESSION_MAX);
-    pool_alloc(mnat->users, MAP_NAT_USER_INITIAL_NUM);
+    pool_alloc(mnat->users, MAP_NAT_USER_MAX);
 
     mnat->max_translations = MAP_NAT_SESSION_MAX;
-    mnat->max_translations_per_user = MAP_NAT_SESSION_MAX; //Consistent with session size
-    mnat->max_users = MAP_NAT_SESSION_MAX; //Consistent with session size
+    mnat->max_translations_per_user = MAP_NAT_SESSION_MAX_PER_USER;
+    mnat->max_users = MAP_NAT_USER_MAX;
 
     /* Init port alg */
     mnat->psid_offset = d->psid_offset;
@@ -340,7 +340,7 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     /* Addresses init */
     if (d->suffix_shift)
     {
-        vec_validate (mnat->addresses, ((1 << d->suffix_shift) - 2)); //exclude broadcast addresses
+        vec_validate (mnat->addresses, ((1 << d->suffix_shift)) - 1);
         vec_foreach_index(i, mnat->addresses)
         {
             address = vec_elt_at_index (mnat->addresses, i);
@@ -358,7 +358,7 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     }
     else
     {
-        vec_validate (mnat->addresses, 1);
+        vec_validate (mnat->addresses, 0);
         address = &mnat->addresses[0];
         if (d->ip4_prefix_len == 32)
         {
