@@ -314,7 +314,7 @@ int hqos_interface_mapping_hqos_port(u32 sw_if_index, u32 hqos_port_id)
         return 0;
     }
 
-    if (hqos_port_id >= HQOS_NODE_PORT_MAX)
+    if (hqos_port_id >= hm->hqos_node_port_max)
     {
         clib_warning ("%s :current hqos port id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -349,7 +349,7 @@ int hqos_interface_mapping_user_group_to_hqos_subport(u32 sw_if_index, u32 user_
         return VNET_API_ERROR_INVALID_VALUE;
     }
 
-    if (hqos_subport_id >= HQOS_NODE_MAX_SUBPORT_PER_PORT)
+    if (hqos_subport_id >= hm->hqos_node_max_subport_per_port)
     {
         clib_warning ("%s :current hqos_subport_id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -388,7 +388,7 @@ int hqos_interface_mapping_user_to_hqos_pipe(u32 sw_if_index, u32 user_id, u32 h
         return VNET_API_ERROR_INVALID_VALUE;
     }
 
-    if (hqos_pipe_id >= HQOS_NODE_MAX_PIPE_PER_SUBPORT)
+    if (hqos_pipe_id >= hm->hqos_node_max_pipe_per_subport)
     {
         clib_warning ("%s :current hqos_pipe_id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -445,10 +445,20 @@ int hqos_port_add(u64 port_rate,
 
     u32 tmp_port_id = (~0);
 
-    if (clib_bitmap_count_set_bits(hm->hqos_port_bitmap) > HQOS_NODE_PORT_MAX)
+    if (clib_bitmap_count_set_bits(hm->hqos_port_bitmap) > hm->hqos_node_port_max)
     {
         clib_warning ("%s: Maximum number of hqos port(No resources)", __FUNCTION__);
         return VNET_API_ERROR_UNSPECIFIED;
+    }
+
+    if (n_subports_per_port > hm->hqos_node_max_subport_per_port)
+    {
+        n_subports_per_port = hm->hqos_node_max_subport_per_port;
+    }
+
+    if (n_pipes_per_subport > hm->hqos_node_max_pipe_per_subport)
+    {
+        n_pipes_per_subport = hm->hqos_node_max_pipe_per_subport;
     }
 
     tmp_port_id = clib_bitmap_first_clear(hm->hqos_port_bitmap);
@@ -557,7 +567,7 @@ int hqos_port_del(u32 hqos_port_id)
     hqos_main_t *hm = &hqos_main;
     hqos_sched_port *hqos_port = NULL;
 
-    if (hqos_port_id >= HQOS_NODE_PORT_MAX)
+    if (hqos_port_id >= hm->hqos_node_port_max)
     {
         clib_warning ("%s :current hqos port id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -595,7 +605,7 @@ int hqos_port_subport_profile_add(u32 hqos_port_id,
 
     u32 tmp_port_subport_profile_id = (~0);
 
-    if (hqos_port_id >= HQOS_NODE_PORT_MAX)
+    if (hqos_port_id >= hm->hqos_node_port_max)
     {
         clib_warning ("%s :current hqos port id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -643,7 +653,7 @@ int hqos_port_subport_profile_update(u32 hqos_port_id,
     hqos_main_t *hm = &hqos_main;
     hqos_sched_port *hqos_port = NULL;
 
-    if (hqos_port_id >= HQOS_NODE_PORT_MAX)
+    if (hqos_port_id >= hm->hqos_node_port_max)
     {
         clib_warning ("%s :current hqos port id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -673,7 +683,7 @@ int hqos_port_subport_config(u32 hqos_port_id,
     hqos_main_t *hm = &hqos_main;
     hqos_sched_port *hqos_port = NULL;
 
-    if (hqos_port_id >= HQOS_NODE_PORT_MAX)
+    if (hqos_port_id >= hm->hqos_node_port_max)
     {
         clib_warning ("%s :current hqos port id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -685,7 +695,7 @@ int hqos_port_subport_config(u32 hqos_port_id,
         return VNET_API_ERROR_INVALID_VALUE;
     }
 
-    if (hqos_subport_id >= HQOS_NODE_MAX_SUBPORT_PER_PORT)
+    if (hqos_subport_id >= hm->hqos_node_max_subport_per_port)
     {
         clib_warning ("%s :current hqos_subport_id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -734,7 +744,7 @@ int hqos_port_subport_update_profile(u32 hqos_port_id,
     hqos_main_t *hm = &hqos_main;
     hqos_sched_port *hqos_port = NULL;
 
-    if (hqos_port_id >= HQOS_NODE_PORT_MAX)
+    if (hqos_port_id >= hm->hqos_node_port_max)
     {
         clib_warning ("%s :current hqos port id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -746,7 +756,7 @@ int hqos_port_subport_update_profile(u32 hqos_port_id,
         return VNET_API_ERROR_INVALID_VALUE;
     }
 
-    if (hqos_subport_id >= HQOS_NODE_MAX_SUBPORT_PER_PORT)
+    if (hqos_subport_id >= hm->hqos_node_max_subport_per_port)
     {
         clib_warning ("%s :current hqos_subport_id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -791,7 +801,7 @@ int hqos_subport_pipe_profile_add(u32 hqos_port_id,
 
     u32 tmp_pipe_profile_id = (~0);
 
-    if (hqos_port_id >= HQOS_NODE_PORT_MAX)
+    if (hqos_port_id >= hm->hqos_node_port_max)
     {
         clib_warning ("%s :current hqos port id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -803,7 +813,7 @@ int hqos_subport_pipe_profile_add(u32 hqos_port_id,
         return VNET_API_ERROR_INVALID_VALUE;
     }
 
-    if (hqos_subport_id >= HQOS_NODE_MAX_SUBPORT_PER_PORT)
+    if (hqos_subport_id >= hm->hqos_node_max_subport_per_port)
     {
         clib_warning ("%s :current hqos_subport_id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -856,7 +866,7 @@ int hqos_subport_pipe_profile_update(u32 hqos_port_id,
     hqos_main_t *hm = &hqos_main;
     hqos_sched_port *hqos_port = NULL;
 
-    if (hqos_port_id >= HQOS_NODE_PORT_MAX)
+    if (hqos_port_id >= hm->hqos_node_port_max)
     {
         clib_warning ("%s :current hqos port id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -868,7 +878,7 @@ int hqos_subport_pipe_profile_update(u32 hqos_port_id,
         return VNET_API_ERROR_INVALID_VALUE;
     }
 
-    if (hqos_subport_id >= HQOS_NODE_MAX_SUBPORT_PER_PORT)
+    if (hqos_subport_id >= hm->hqos_node_max_subport_per_port)
     {
         clib_warning ("%s :current hqos_subport_id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -890,7 +900,7 @@ int hqos_subport_pipe_update_profile(u32 hqos_port_id,
     hqos_main_t *hm = &hqos_main;
     hqos_sched_port *hqos_port = NULL;
 
-    if (hqos_port_id >= HQOS_NODE_PORT_MAX)
+    if (hqos_port_id >= hm->hqos_node_port_max)
     {
         clib_warning ("%s :current hqos port id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -902,7 +912,7 @@ int hqos_subport_pipe_update_profile(u32 hqos_port_id,
         return VNET_API_ERROR_INVALID_VALUE;
     }
 
-    if (hqos_subport_id >= HQOS_NODE_MAX_SUBPORT_PER_PORT)
+    if (hqos_subport_id >= hm->hqos_node_max_subport_per_port)
     {
         clib_warning ("%s :current hqos_subport_id invalid", __FUNCTION__);
         return VNET_API_ERROR_INVALID_VALUE;
@@ -930,7 +940,7 @@ void hqos_subport_stat_get(u32 hqos_port_id, u32 hqos_subport_id, hqos_sched_sub
     hqos_main_t *hm = &hqos_main;
     hqos_sched_port *hqos_port = NULL;
 
-    if (hqos_port_id >= HQOS_NODE_PORT_MAX)
+    if (hqos_port_id >= hm->hqos_node_port_max)
     {
         clib_warning ("%s :current hqos port id invalid", __FUNCTION__);
         return;
@@ -942,7 +952,7 @@ void hqos_subport_stat_get(u32 hqos_port_id, u32 hqos_subport_id, hqos_sched_sub
         return;
     }
 
-    if (hqos_subport_id >= HQOS_NODE_MAX_SUBPORT_PER_PORT)
+    if (hqos_subport_id >= hm->hqos_node_max_subport_per_port)
     {
         clib_warning ("%s :current hqos_subport_id invalid", __FUNCTION__);
         return;
@@ -962,7 +972,7 @@ void hqos_queue_stat_get(u32 hqos_port_id, u32 hqos_subport_id, u32 hqos_pipe_id
     hqos_main_t *hm = &hqos_main;
     hqos_sched_port *hqos_port = NULL;
 
-    if (hqos_port_id >= HQOS_NODE_PORT_MAX)
+    if (hqos_port_id >= hm->hqos_node_port_max)
     {
         clib_warning ("%s :current hqos port id invalid", __FUNCTION__);
         return;
@@ -974,7 +984,7 @@ void hqos_queue_stat_get(u32 hqos_port_id, u32 hqos_subport_id, u32 hqos_pipe_id
         return;
     }
 
-    if (hqos_subport_id >= HQOS_NODE_MAX_SUBPORT_PER_PORT)
+    if (hqos_subport_id >= hm->hqos_node_max_subport_per_port)
     {
         clib_warning ("%s :current hqos_subport_id invalid", __FUNCTION__);
         return;

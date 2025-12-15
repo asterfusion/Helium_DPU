@@ -22,8 +22,10 @@ hqos_pipe_profile_check(hqos_sched_pipe_params *params,
     }
 
     /* TB rate: non-zero, not greater than port rate */
-    if (params->tb_rate == 0 ||
-        params->tb_rate > rate) {
+    if (params->tb_rate == 0)
+        params->tb_rate = rate;
+
+    if (params->tb_rate > rate) {
         clib_warning("%s: Incorrect value for tb rate", __func__);
         return -EINVAL;
     }
@@ -36,16 +38,19 @@ hqos_pipe_profile_check(hqos_sched_pipe_params *params,
 
     /* TC rate: non-zero if qsize non-zero, less than pipe rate */
     for (i = 0; i < HQOS_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++) {
+        if (params->tc_rate[i] == 0)
+        {
+            params->tc_rate[i] = params->tb_rate;
+        }
+
         if ((qsize[i] == 0 && params->tc_rate[i] != 0) ||
-            (qsize[i] != 0 && (params->tc_rate[i] == 0 ||
-            params->tc_rate[i] > params->tb_rate))) {
+            (qsize[i] != 0 && (params->tc_rate[i] > params->tb_rate))) {
             clib_warning("%s: Incorrect value for qsize or tc_rate", __func__);
             return -EINVAL;
         }
     }
 
-    if (params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE] == 0 ||
-        qsize[HQOS_SCHED_TRAFFIC_CLASS_BE] == 0) {
+    if (qsize[HQOS_SCHED_TRAFFIC_CLASS_BE] == 0) {
         clib_warning("%s: Incorrect value for be traffic class rate", __func__);
         return -EINVAL;
     }
@@ -84,7 +89,12 @@ hqos_subport_profile_check(hqos_sched_subport_profile_params *params, u64 rate)
         return -EINVAL;
     }
 
-    if (params->tb_rate == 0 || params->tb_rate > rate) {
+    if (params->tb_rate == 0)
+    {
+        params->tb_rate = rate;
+    }
+
+    if (params->tb_rate > rate) {
         clib_warning("%s: Incorrect value for tb rate", __func__);
         return -EINVAL;
     }
@@ -95,17 +105,19 @@ hqos_subport_profile_check(hqos_sched_subport_profile_params *params, u64 rate)
     }
 
     for (i = 0; i < HQOS_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++) {
-        u64 tc_rate = params->tc_rate[i];
+        if (params->tc_rate[i] == 0)
+        {
+            params->tc_rate[i] = params->tb_rate;
+        }
 
-        if (tc_rate == 0 || (tc_rate > params->tb_rate)) {
+        if (params->tc_rate[i] > params->tb_rate) {
             clib_warning("%s: Incorrect value for tc rate", __func__);
             return -EINVAL;
         }
     }
 
     if (params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE] == 0) {
-        clib_warning("%s: Incorrect tc rate(best effort)", __func__);
-        return -EINVAL;
+        params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE] = params->tb_rate;
     }
 
     if (params->tc_period == 0) {
@@ -789,12 +801,14 @@ hqos_sched_port_subport_profile_add(hqos_sched_port *port,
 
     hqos_sched_subport_profile_convert(params, dst, port->rate);
 
+#if 0
     /* Subport profile should not exists */
     for (i = 0; i < port->n_subport_profiles; i++)
         if (memcmp(port->subport_profiles + i, dst, sizeof(*dst)) == 0) {
             clib_warning("%s: subport profile exists", __func__);
             return -EINVAL;
         }
+#endif
 
     /* Subport profile commit */
     *subport_profile_id = port->n_subport_profiles;
@@ -846,6 +860,7 @@ hqos_sched_subport_pipe_profile_add(hqos_sched_port *port,
     pp = &s->pipe_profiles[s->n_pipe_profiles];
     hqos_sched_pipe_profile_convert(s, params, pp, port->rate);
 
+#if 0
     /* Pipe profile should not exists */
     for (i = 0; i < s->n_pipe_profiles; i++)
     {
@@ -854,6 +869,7 @@ hqos_sched_subport_pipe_profile_add(hqos_sched_port *port,
             return -EINVAL;
         }
     }
+#endif
 
     /* Pipe profile commit */
     *pipe_profile_id = s->n_pipe_profiles;
