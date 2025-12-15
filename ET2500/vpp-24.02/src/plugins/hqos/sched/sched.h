@@ -629,6 +629,23 @@ hqos_sched_port_subport_profile_add(hqos_sched_port *port,
                                     u32 *subport_profile_id);
 
 /**
+ * Hierarchical scheduler subport bandwidth profile update
+ *
+ * @param port
+ *   Handle to port scheduler instance
+ * @param profile
+ *   Subport bandwidth profile
+ * @param subport_profile_id
+ *   Subport profile id
+ * @return
+ *   0 upon success, error code otherwise
+ */
+int
+hqos_sched_port_subport_profile_update(hqos_sched_port *port,
+                                    hqos_sched_subport_profile_params *profile,
+                                    u32 subport_profile_id);
+
+/**
  * Hierarchical scheduler pipe profile add
  *
  * @param port
@@ -647,6 +664,28 @@ hqos_sched_subport_pipe_profile_add(hqos_sched_port *port,
                                     u32 subport_id,
                                     hqos_sched_pipe_params *params,
                                     u32 *pipe_profile_id);
+
+/**
+ * Hierarchical scheduler pipe profile update
+ *
+ * when update, all references to this profile need to be reconfigured
+ *
+ * @param port
+ *   Handle to port scheduler instance
+ * @param subport_id
+ *   Subport ID
+ * @param params
+ *   Pipe profile parameters
+ * @param pipe_profile_id
+ *   Valid profile id .
+ * @return
+ *   0 upon success, error code otherwise
+ */
+int
+hqos_sched_subport_pipe_profile_update(hqos_sched_port *port,
+                                    u32 subport_id,
+                                    hqos_sched_pipe_params *params,
+                                    u32 pipe_profile_id);
 
 /**
  * Hierarchical scheduler subport traffic class

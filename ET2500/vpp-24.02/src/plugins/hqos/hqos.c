@@ -650,6 +650,7 @@ int hqos_port_subport_profile_update(u32 hqos_port_id,
                                      u64 *tc_rate,
                                      u64 tc_period)
 {
+    int rv, i;
     hqos_main_t *hm = &hqos_main;
     hqos_sched_port *hqos_port = NULL;
 
@@ -667,8 +668,26 @@ int hqos_port_subport_profile_update(u32 hqos_port_id,
 
     hqos_port = hm->hqos_port_ptr_vec[hqos_port_id];
 
-    //TODO
-    
+    hqos_sched_subport_profile_params subport_profile_params = {
+        .tb_rate = tb_rate,
+        .tb_size = tb_size,
+        .tc_period = tc_period,
+    };
+
+    for (i = 0; i < HQOS_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++)
+    {
+        subport_profile_params.tc_rate[i] = tc_rate[i];
+    }
+
+    rv = hqos_sched_port_subport_profile_update(hqos_port,
+                                             &subport_profile_params,
+                                             hqos_port_subport_profile_id);
+    if (rv)
+    {
+        clib_warning ("hqos_sched_port_subport_profile_update update failed", __FUNCTION__);
+        return VNET_API_ERROR_INVALID_ARGUMENT;
+    }
+
     return 0;
 }
 
@@ -862,6 +881,7 @@ int hqos_subport_pipe_profile_update(u32 hqos_port_id,
                                      u8 tc_ov_weight,
                                      u8 *wrr_weights)
 {
+    int rv, i;
 
     hqos_main_t *hm = &hqos_main;
     hqos_sched_port *hqos_port = NULL;
@@ -886,8 +906,32 @@ int hqos_subport_pipe_profile_update(u32 hqos_port_id,
 
     hqos_port = hm->hqos_port_ptr_vec[hqos_port_id];
 
-    //TODO
+    hqos_sched_pipe_params pipe_params = {
+        .tb_rate = tb_rate,
+        .tb_size = tb_size,
+        .tc_period = tc_period,
+        .tc_ov_weight = tc_ov_weight,
+    };
 
+    for (i = 0; i < HQOS_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++)
+    {
+        pipe_params.tc_rate[i] = tc_rate[i];
+    }
+
+    for (i = 0; i < HQOS_SCHED_BE_QUEUES_PER_PIPE; i++)
+    {
+        pipe_params.wrr_weights[i] = wrr_weights[i];
+    }
+
+    rv = hqos_sched_subport_pipe_profile_update(hqos_port,
+                                             hqos_subport_id,
+                                             &pipe_params,
+                                             hqos_pipe_profile_id);
+    if (rv)
+    {
+        clib_warning ("hqos_sched_subport_pipe_profile_update update failed", __FUNCTION__);
+        return VNET_API_ERROR_INVALID_ARGUMENT;
+    }
     return 0;
 }
 

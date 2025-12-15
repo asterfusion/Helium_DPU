@@ -766,7 +766,6 @@ hqos_sched_port_subport_profile_add(hqos_sched_port *port,
                                     u32 *subport_profile_id)
 {
     int status;
-    u32 i;
     hqos_sched_subport_profile *dst;
 
     /* Port */
@@ -801,20 +800,57 @@ hqos_sched_port_subport_profile_add(hqos_sched_port *port,
 
     hqos_sched_subport_profile_convert(params, dst, port->rate);
 
-#if 0
-    /* Subport profile should not exists */
-    for (i = 0; i < port->n_subport_profiles; i++)
-        if (memcmp(port->subport_profiles + i, dst, sizeof(*dst)) == 0) {
-            clib_warning("%s: subport profile exists", __func__);
-            return -EINVAL;
-        }
-#endif
-
     /* Subport profile commit */
     *subport_profile_id = port->n_subport_profiles;
     port->n_subport_profiles++;
 
     hqos_sched_port_log_subport_profile(port, *subport_profile_id);
+
+    return 0;
+}
+
+int
+hqos_sched_port_subport_profile_update(hqos_sched_port *port,
+                                    hqos_sched_subport_profile_params *params,
+                                    u32 subport_profile_id)
+{
+    int status;
+    hqos_sched_subport_profile *dst;
+
+    /* Port */
+    if (port == NULL) {
+        clib_warning("%s: Incorrect value for parameter port", __func__);
+        return -EINVAL;
+    }
+
+    if (params == NULL) {
+        clib_warning("%s: Incorrect value for parameter profile", __func__);
+        return -EINVAL;
+    }
+
+    if (subport_profile_id >= port->n_subport_profiles)
+    {
+        clib_warning("%s: subport profile id is invalid", __func__);
+        return -EINVAL;
+    }
+
+    dst = port->subport_profiles + subport_profile_id;
+
+    /* Subport profiles exceeds the max limit */
+    if (port->n_subport_profiles >= port->n_max_subport_profiles) {
+        clib_warning("%s: Number of subport profiles exceeds the max limit", __func__);
+        return -EINVAL;
+    }
+
+    status = hqos_subport_profile_check(params, port->rate);
+    if (status != 0) {
+        clib_warning("%s: subport profile check failed(%d)", __func__, status);
+        return -EINVAL;
+    }
+
+    hqos_sched_subport_profile_convert(params, dst, port->rate);
+
+    hqos_sched_port_log_subport_profile(port, subport_profile_id);
 
     return 0;
 }
@@ -827,7 +863,6 @@ hqos_sched_subport_pipe_profile_add(hqos_sched_port *port,
 {
     hqos_sched_subport *s;
     hqos_sched_pipe_profile *pp;
-    u32 i;
     int status;
 
     /* Port */
@@ -860,17 +895,6 @@ hqos_sched_subport_pipe_profile_add(hqos_sched_port *port,
     pp = &s->pipe_profiles[s->n_pipe_profiles];
     hqos_sched_pipe_profile_convert(s, params, pp, port->rate);
 
-#if 0
-    /* Pipe profile should not exists */
-    for (i = 0; i < s->n_pipe_profiles; i++)
-    {
-        if (memcmp(s->pipe_profiles + i, pp, sizeof(*pp)) == 0) {
-            clib_warning("%s: Pipe profile exists", __func__);
-            return -EINVAL;
-        }
-    }
-#endif
-
     /* Pipe profile commit */
     *pipe_profile_id = s->n_pipe_profiles;
     s->n_pipe_profiles++;
@@ -879,6 +903,61 @@ hqos_sched_subport_pipe_profile_add(hqos_sched_port *port,
         s->pipe_tc_be_rate_max = params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE];
 
     hqos_sched_port_log_pipe_profile(s, *pipe_profile_id);
+
+    return 0;
+}
+
+int
+hqos_sched_subport_pipe_profile_update(hqos_sched_port *port,
+                                    uint32_t subport_id,
+                                    hqos_sched_pipe_params *params,
+                                    uint32_t pipe_profile_id)
+{
+    hqos_sched_subport *s;
+    hqos_sched_pipe_profile *pp;
+    int status;
+
+    /* Port */
+    if (port == NULL) {
+        clib_warning("%s: Incorrect value for parameter port", __func__);
+        return -EINVAL;
+    }
+
+    /* Subport id not exceeds the max limit */
+    if (subport_id > port->n_subports_per_port) {
+        clib_warning("%s: Incorrect value for subport id", __func__);
+        return -EINVAL;
+    }
+
+    s = port->subports[subport_id];
+
+    /* Pipe profiles exceeds the max limit */
+    if (s->n_pipe_profiles >= s->n_max_pipe_profiles) {
+        clib_warning("%s: Number of pipe profiles exceeds the max limit", __func__);
+        return -EINVAL;
+    }
+
+    /* Pipe profile id valid */
+    if (pipe_profile_id >= s->n_pipe_profiles)
+    {
+        clib_warning("%s: pipe profiles id invalid", __func__);
+        return -EINVAL;
+    }
+
+    /* Pipe params */
+    status = hqos_pipe_profile_check(params, port->rate, &s->qsize[0]);
+    if (status != 0) {
+        clib_warning("%s: Pipe profile check failed(%d)", __func__, status);
+        return -EINVAL;
+    }
+
+    pp = &s->pipe_profiles[pipe_profile_id];
+    hqos_sched_pipe_profile_convert(s, params, pp, port->rate);
+
+    if (s->pipe_tc_be_rate_max < params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE])
+        s->pipe_tc_be_rate_max = params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE];
+
+    hqos_sched_port_log_pipe_profile(s, pipe_profile_id);
 
     return 0;
 }
