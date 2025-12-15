@@ -247,7 +247,13 @@ bier_lookup (vlib_main_t * vm,
                     to_next[0] = ci0;
                     to_next += 1;
                     n_left_to_next -= 1;
-
+                    if(b0->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL)
+                        {
+                            vnet_buffer2(c0)->geosite_domain_ptr =clib_mem_alloc(256 * sizeof(char));
+                            clib_memcpy_fast(vnet_buffer2(c0)->geosite_domain_ptr,vnet_buffer2(b0)->geosite_domain_ptr,256);
+                            c0->flags |= VLIB_BUFFER_DOMAIN_VALID;
+                    
+                        }
                     if (PREDICT_FALSE(b0->flags & VLIB_BUFFER_IS_TRACED))
                     {
                         bier_lookup_trace_t *tr;
@@ -275,6 +281,12 @@ bier_lookup (vlib_main_t * vm,
                         vlib_get_next_frame (vm, node, next_index,
                                              to_next, n_left_to_next);
                     }
+                }
+                if(b0->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL)
+                {
+                    clib_mem_free(vnet_buffer2(b0)->geosite_domain_ptr);
+                    b0->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
+                    vnet_buffer2(b0)->geosite_domain_ptr = NULL;
                 }
             }
             else
