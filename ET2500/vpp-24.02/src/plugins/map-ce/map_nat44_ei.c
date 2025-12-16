@@ -76,7 +76,7 @@ map_nat44_ei_static_mapping_del_sessions (map_nat44_ei_domain_t *mnat,
 
     kv.key = u_key->as_u64;
 
-    if (!clib_bihash_search_8_8 (&mnat->users_hash, &kv, &value))
+    if (!clib_bihash_search_8_8 (mnat->users_hash, &kv, &value))
     {
         user_index = value.value;
         u = pool_elt_at_index (mnat->users, user_index);
@@ -124,7 +124,7 @@ map_nat44_ei_delete_matching_dynamic_sessions (map_nat44_ei_domain_t *mnat,
 
     u_key.addr = m->local_addr;
     kv.key = u_key.as_u64;
-    if (!clib_bihash_search_8_8 (&mnat->users_hash, &kv, &value))
+    if (!clib_bihash_search_8_8 (mnat->users_hash, &kv, &value))
     {
         user_index = value.value;
         u = pool_elt_at_index (mnat->users, user_index);
@@ -164,13 +164,13 @@ map_nat44_ei_add_static_mapping (map_nat44_ei_domain_t *mnat,
     map_nat44_ei_static_mapping_t *m;
 
     init_map_nat_k (&kv, e_addr, e_port, proto);
-    if (!clib_bihash_search_8_8 (&mnat->static_out2in, &kv, &value))
+    if (!clib_bihash_search_8_8 (mnat->static_out2in, &kv, &value))
     {
         return VNET_API_ERROR_VALUE_EXIST;
     }
 
     init_map_nat_k (&kv, l_addr, l_port, proto);
-    if (!clib_bihash_search_8_8 (&mnat->static_in2out, &kv, &value))
+    if (!clib_bihash_search_8_8 (mnat->static_in2out, &kv, &value))
     {
         return VNET_API_ERROR_VALUE_EXIST;
     }
@@ -192,10 +192,10 @@ map_nat44_ei_add_static_mapping (map_nat44_ei_domain_t *mnat,
     m->proto = proto;
 
     init_map_nat_kv (&kv, m->local_addr, m->local_port, m->proto, m - mnat->static_mappings);
-    clib_bihash_add_del_8_8 (&mnat->static_in2out, &kv, 1);
+    clib_bihash_add_del_8_8 (mnat->static_in2out, &kv, 1);
 
     init_map_nat_kv (&kv, m->external_addr, m->external_port, m->proto, m - mnat->static_mappings);
-    clib_bihash_add_del_8_8 (&mnat->static_out2in, &kv, 1);
+    clib_bihash_add_del_8_8 (mnat->static_out2in, &kv, 1);
 
     map_nat44_ei_delete_matching_dynamic_sessions (mnat, m);
 
@@ -214,7 +214,7 @@ map_nat44_ei_del_static_mapping (map_nat44_ei_domain_t *mnat,
 
     init_map_nat_k (&kv, e_addr, e_port, proto);
 
-    if (clib_bihash_search_8_8 (&mnat->static_out2in, &kv, &value))
+    if (clib_bihash_search_8_8 (mnat->static_out2in, &kv, &value))
     {
         return VNET_API_ERROR_NO_SUCH_ENTRY;
     }
@@ -230,10 +230,10 @@ map_nat44_ei_del_static_mapping (map_nat44_ei_domain_t *mnat,
     map_nat44_ei_static_mapping_del_sessions (mnat, &u_key, e_addr, e_port);
 
     init_map_nat_k (&kv, l_addr, l_port, proto);
-    clib_bihash_add_del_8_8 (&mnat->static_in2out, &kv, 0);
+    clib_bihash_add_del_8_8 (mnat->static_in2out, &kv, 0);
 
     init_map_nat_k (&kv, e_addr, e_port, proto);
-    clib_bihash_add_del_8_8 (&mnat->static_out2in, &kv, 0);
+    clib_bihash_add_del_8_8 (mnat->static_out2in, &kv, 0);
 
     pool_put (mnat->static_mappings, m);
     return 0;
@@ -276,42 +276,52 @@ map_ce_nat44_domain_create(u32 map_domain_index)
 
 
     /* Init Hash */
+    mnat->static_in2out = clib_mem_alloc(sizeof(clib_bihash_8_8_t));
+    clib_memset(mnat->static_in2out, 0, sizeof(clib_bihash_8_8_t));
     name = format(name, "%s-%u", "map_ce_nat44_static_in2out", map_domain_index);
     vec_validate_init_c_string (mnat->static_in2out_name, name, strlen ((char *) name));
-    clib_bihash_init_8_8 (&mnat->static_in2out, (char *)mnat->static_in2out_name, 
+    clib_bihash_init_8_8 (mnat->static_in2out, (char *)mnat->static_in2out_name,
                           MAP_NAT_STATIC_HASH_BUCKETS, MAP_NAT_STATIC_HASH_MEMORY_SIZE);
     vec_free(name);
 
+    mnat->static_out2in = clib_mem_alloc(sizeof(clib_bihash_8_8_t));
+    clib_memset(mnat->static_out2in, 0, sizeof(clib_bihash_8_8_t));
     name = format(name, "%s-%u", "map_ce_nat44_static_out2in", map_domain_index);
     vec_validate_init_c_string (mnat->static_out2in_name, name, strlen ((char *) name));
-    clib_bihash_init_8_8 (&mnat->static_out2in, (char *)mnat->static_out2in_name, 
+    clib_bihash_init_8_8 (mnat->static_out2in, (char *)mnat->static_out2in_name,
                           MAP_NAT_STATIC_HASH_BUCKETS, MAP_NAT_STATIC_HASH_MEMORY_SIZE);
     vec_free(name);
 
+    mnat->in2out = clib_mem_alloc(sizeof(clib_bihash_8_8_t));
+    clib_memset(mnat->in2out, 0, sizeof(clib_bihash_8_8_t));
     name = format(name, "%s-%u", "map_ce_nat44_in2out", map_domain_index);
     vec_validate_init_c_string (mnat->in2out_name, name, strlen ((char *) name));
-    clib_bihash_init_8_8 (&mnat->in2out, (char *)mnat->in2out_name, 
+    clib_bihash_init_8_8 (mnat->in2out, (char *)mnat->in2out_name,
                           MAP_NAT_HASH_BUCKETS, MAP_NAT_HASH_MEMORY_SIZE);
     vec_free(name);
 
+    mnat->out2in = clib_mem_alloc(sizeof(clib_bihash_8_8_t));
+    clib_memset(mnat->out2in, 0, sizeof(clib_bihash_8_8_t));
     name = format(name, "%s-%u", "map_ce_nat44_out2in", map_domain_index);
     vec_validate_init_c_string (mnat->out2in_name, name, strlen ((char *) name));
-    clib_bihash_init_8_8 (&mnat->out2in, (char *)mnat->out2in_name, 
+    clib_bihash_init_8_8 (mnat->out2in, (char *)mnat->out2in_name,
                           MAP_NAT_HASH_BUCKETS, MAP_NAT_HASH_MEMORY_SIZE);
     vec_free(name);
 
+    mnat->users_hash = clib_mem_alloc(sizeof(clib_bihash_8_8_t));
+    clib_memset(mnat->users_hash, 0, sizeof(clib_bihash_8_8_t));
     name = format(name, "%s-%u", "map_ce_nat44_users", map_domain_index);
     vec_validate_init_c_string (mnat->users_hash_name, name, strlen ((char *) name));
-    clib_bihash_init_8_8 (&mnat->users_hash, (char *)mnat->users_hash_name, 
+    clib_bihash_init_8_8 (mnat->users_hash, (char *)mnat->users_hash_name,
                           MAP_NAT_HASH_BUCKETS, MAP_NAT_HASH_MEMORY_SIZE); //Consistent with session size
 
     vec_free(name);
 
-    clib_bihash_set_kvp_format_fn_8_8 (&mnat->static_in2out, format_map_nat44_ei_static_session_kvp);
-    clib_bihash_set_kvp_format_fn_8_8 (&mnat->static_out2in, format_map_nat44_ei_static_session_kvp);
-    clib_bihash_set_kvp_format_fn_8_8 (&mnat->in2out, format_map_nat44_ei_session_kvp);
-    clib_bihash_set_kvp_format_fn_8_8 (&mnat->out2in, format_map_nat44_ei_session_kvp);
-    clib_bihash_set_kvp_format_fn_8_8 (&mnat->users_hash, format_map_nat44_ei_user_kvp);
+    clib_bihash_set_kvp_format_fn_8_8 (mnat->static_in2out, format_map_nat44_ei_static_session_kvp);
+    clib_bihash_set_kvp_format_fn_8_8 (mnat->static_out2in, format_map_nat44_ei_static_session_kvp);
+    clib_bihash_set_kvp_format_fn_8_8 (mnat->in2out, format_map_nat44_ei_session_kvp);
+    clib_bihash_set_kvp_format_fn_8_8 (mnat->out2in, format_map_nat44_ei_session_kvp);
+    clib_bihash_set_kvp_format_fn_8_8 (mnat->users_hash, format_map_nat44_ei_user_kvp);
 
     /* Pool alloc */
     pool_alloc(mnat->static_mappings, MAP_NAT_STATIC_SESSION_MAX);
@@ -421,8 +431,12 @@ map_ce_nat44_domain_remove(u32 map_domain_index)
     pool_free (mnat->static_mappings);
 
     /* free static hash*/
-    clib_bihash_free_8_8 (&mnat->static_in2out);
-    clib_bihash_free_8_8 (&mnat->static_out2in);
+    clib_bihash_free_8_8 (mnat->static_in2out);
+    clib_bihash_free_8_8 (mnat->static_out2in);
+    clib_mem_free(mnat->static_in2out);
+    clib_mem_free(mnat->static_out2in);
+    mnat->static_in2out = NULL;
+    mnat->static_out2in = NULL;
     vec_free (mnat->static_in2out_name);
     vec_free (mnat->static_out2in_name);
 
@@ -438,15 +452,21 @@ map_ce_nat44_domain_remove(u32 map_domain_index)
     pool_free (mnat->sessions);
 
     /* free dynamic hash*/
-    clib_bihash_free_8_8 (&mnat->in2out);
-    clib_bihash_free_8_8 (&mnat->out2in);
+    clib_bihash_free_8_8 (mnat->in2out);
+    clib_bihash_free_8_8 (mnat->out2in);
+    clib_mem_free(mnat->in2out);
+    clib_mem_free(mnat->out2in);
+    mnat->in2out = NULL;
+    mnat->out2in = NULL;
     vec_free (mnat->in2out_name);
     vec_free (mnat->out2in_name);
 
     /* free user */
     pool_free (mnat->list_pool);
     pool_free (mnat->users);
-    clib_bihash_free_8_8 (&mnat->users_hash);
+    clib_bihash_free_8_8 (mnat->users_hash);
+    clib_mem_free(mnat->users_hash);
+    mnat->users_hash = NULL;
     vec_free (mnat->users_hash_name);
 
     /* free addresses */

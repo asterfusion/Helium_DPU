@@ -51,7 +51,7 @@ map_nat44_i2o_is_idle_session_cb (clib_bihash_kv_8_8_t * kv, void *arg)
     if (ctx->now >= sess_timeout_time)
     {
         init_map_nat_o2i_k (&s_kv, s);
-        if (clib_bihash_add_del_8_8 (&mnat->out2in, &s_kv, 0))
+        if (clib_bihash_add_del_8_8 (mnat->out2in, &s_kv, 0))
         {
             clib_warning ("map nat out2in key del failed");
         }
@@ -87,7 +87,7 @@ map_nat44_o2i_is_idle_session_cb (clib_bihash_kv_8_8_t * kv, void *arg)
     if (ctx->now >= sess_timeout_time)
     {
         init_map_nat_i2o_k (&s_kv, s);
-        if (clib_bihash_add_del_8_8 (&mnat->in2out, &s_kv, 0))
+        if (clib_bihash_add_del_8_8 (mnat->in2out, &s_kv, 0))
         {
             clib_warning ("map nat in2out key del failed");
         }
@@ -136,7 +136,7 @@ map_nat44_ei_static_mapping_match (map_nat44_ei_domain_t *mnat,
     if (by_external)
     {
         init_map_nat_k (&kv, match_addr, match_port, match_protocol);
-        if (clib_bihash_search_8_8 (&mnat->static_out2in, &kv, &value))
+        if (clib_bihash_search_8_8 (mnat->static_out2in, &kv, &value))
         {
             return 1;
         }
@@ -148,7 +148,7 @@ map_nat44_ei_static_mapping_match (map_nat44_ei_domain_t *mnat,
     else
     {
         init_map_nat_k (&kv, match_addr, match_port, match_protocol);
-        if (clib_bihash_search_8_8 (&mnat->static_in2out, &kv, &value))
+        if (clib_bihash_search_8_8 (mnat->static_in2out, &kv, &value))
         {
             return 1;
         }
@@ -176,7 +176,7 @@ map_nat44_ei_user_get_or_create (map_nat44_ei_domain_t *mnat,
     kv.key = user_key.as_u64;
 
     /* Ever heard of the "user" = src ip4 address before? */
-    if (clib_bihash_search_8_8 (&mnat->users_hash, &kv, &value))
+    if (clib_bihash_search_8_8 (mnat->users_hash, &kv, &value))
     {
         if (pool_elts (mnat->users) >= mnat->max_users)
         {
@@ -208,7 +208,7 @@ map_nat44_ei_user_get_or_create (map_nat44_ei_domain_t *mnat,
         kv.value = u - mnat->users;
 
         /* add user */
-        if (clib_bihash_add_del_8_8 (&mnat->users_hash, &kv, 1))
+        if (clib_bihash_add_del_8_8 (mnat->users_hash, &kv, 1))
         {
             map_nat44_ei_delete_user_with_no_session (mnat, u, false);
             return NULL;
@@ -355,12 +355,12 @@ map_nat44_ei_session_alloc_for_static_mapping (map_nat44_ei_domain_t *mnat,
 
     init_map_nat_i2o_kv (&kv, s, s - mnat->sessions);
     if (clib_bihash_add_or_overwrite_stale_8_8 (
-                &mnat->in2out, &kv, map_nat44_i2o_is_idle_session_cb, &ctx))
+                mnat->in2out, &kv, map_nat44_i2o_is_idle_session_cb, &ctx))
         clib_warning ("map nat44 ei in2out key add failed");
 
     init_map_nat_o2i_kv (&kv, s, s - mnat->sessions);
     if (clib_bihash_add_or_overwrite_stale_8_8 (
-                &mnat->out2in, &kv, map_nat44_o2i_is_idle_session_cb, &ctx))
+                mnat->out2in, &kv, map_nat44_o2i_is_idle_session_cb, &ctx))
         clib_warning ("map nat44 ei out2in key add failed");
 
     *sessionp = s;
@@ -493,13 +493,13 @@ map_nat44_mapping (map_ce_domain_t *d,
 
     init_map_nat_i2o_kv (&kv, s, s - mnat->sessions);
     if (clib_bihash_add_or_overwrite_stale_8_8 (
-                &mnat->in2out, &kv, 
+                mnat->in2out, &kv,
                 map_nat44_i2o_is_idle_session_cb, &ctx))
         clib_warning ("map nat44 ei in2out key add failed");
 
     init_map_nat_o2i_kv (&kv, s, s - mnat->sessions);
     if (clib_bihash_add_or_overwrite_stale_8_8 (
-                &mnat->out2in, &kv, 
+                mnat->out2in, &kv,
                 map_nat44_o2i_is_idle_session_cb, &ctx))
         clib_warning ("map nat44 ei out2in key add failed");
 
@@ -556,7 +556,7 @@ map_nat44_ei_icmp_in2out (map_ce_domain_t *d,
 
     init_map_nat_k (&kv, addr, port, proto);
 
-    if (clib_bihash_search_8_8 (&mnat->in2out, &kv, &value))
+    if (clib_bihash_search_8_8 (mnat->in2out, &kv, &value))
     {
         if (PREDICT_FALSE(
                map_ce_nat44_icmp_type_is_error_message(vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags)))
@@ -728,7 +728,7 @@ map_nat44_ei_tcp_udp_in2out (map_ce_domain_t *d,
 
     init_map_nat_k (&kv, ip->src_address, vnet_buffer (b)->ip.reass.l4_src_port, proto);
 
-    if (clib_bihash_search_8_8 (&mnat->in2out, &kv, &value))
+    if (clib_bihash_search_8_8 (mnat->in2out, &kv, &value))
     {
         error = map_nat44_mapping (d, mnat, 
                                    b, ip, ip->src_address, 
@@ -997,7 +997,7 @@ map_nat44_ei_icmp_out2in (map_ce_domain_t *d,
 
     init_map_nat_k (&kv, addr, port, proto);
 
-    if (clib_bihash_search_8_8 (&mnat->out2in, &kv, &value))
+    if (clib_bihash_search_8_8 (mnat->out2in, &kv, &value))
     {
         /* Try to match static mapping by external address and port,
            destination address and port in packet */
@@ -1172,7 +1172,7 @@ map_nat44_ei_tcp_udp_out2in (map_ce_domain_t *d,
 
     init_map_nat_k (&kv, ip->dst_address, l4_dst_port, proto);
 
-    if (clib_bihash_search_8_8 (&mnat->out2in, &kv, &value))
+    if (clib_bihash_search_8_8 (mnat->out2in, &kv, &value))
     {
 	  /* Try to match static mapping by external address and port,
 	     destination address and port in packet */

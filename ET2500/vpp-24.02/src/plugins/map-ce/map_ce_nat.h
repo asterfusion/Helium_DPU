@@ -180,20 +180,20 @@ typedef struct
     map_nat44_ei_session_t *sessions;
     u8 *in2out_name;
     u8 *out2in_name;
-    clib_bihash_8_8_t in2out;
-    clib_bihash_8_8_t out2in;
+    clib_bihash_8_8_t *in2out;
+    clib_bihash_8_8_t *out2in;
 
     /* Main Static lookup */
     map_nat44_ei_static_mapping_t *static_mappings;
     u8 *static_in2out_name;
     u8 *static_out2in_name;
-    clib_bihash_8_8_t static_in2out; 
-    clib_bihash_8_8_t static_out2in;
+    clib_bihash_8_8_t *static_in2out;
+    clib_bihash_8_8_t *static_out2in;
 
     /* User lokkup */
     map_nat44_ei_user_t *users;
     u8 *users_hash_name;
-    clib_bihash_8_8_t users_hash;
+    clib_bihash_8_8_t *users_hash;
 
     dlist_elt_t *list_pool;
 
@@ -379,7 +379,7 @@ map_nat44_ei_delete_user_with_no_session (map_nat44_ei_domain_t *mnat,
 
         if (hash_del)
         {
-            clib_bihash_add_del_8_8 (&mnat->users_hash, &kv, 0);
+            clib_bihash_add_del_8_8 (mnat->users_hash, &kv, 0);
         }
     }
 }
@@ -523,10 +523,10 @@ map_nat44_ei_free_session_data (map_nat44_ei_domain_t *mnat,
     /* session lookup tables */
 
     init_map_nat_i2o_k (&kv, s);
-    clib_bihash_add_del_8_8 (&mnat->in2out, &kv, 0);
+    clib_bihash_add_del_8_8 (mnat->in2out, &kv, 0);
 
     init_map_nat_o2i_k (&kv, s);
-    clib_bihash_add_del_8_8 (&mnat->out2in, &kv, 0);
+    clib_bihash_add_del_8_8 (mnat->out2in, &kv, 0);
 
     if ((s->flags & MAP_NAT_SESSION_FLAG_STATIC_MAPPING))
         return;
@@ -554,7 +554,7 @@ map_nat44_ei_delete_session (map_nat44_ei_domain_t *mnat, map_nat44_ei_session_t
     MAP_NAT_UNLOCK(mnat, sessions);
 
     kv.key = u_key.as_u64;
-    if (!clib_bihash_search_8_8 (&mnat->users_hash, &kv, &value))
+    if (!clib_bihash_search_8_8 (mnat->users_hash, &kv, &value))
     {
         u = pool_elt_at_index (mnat->users, value.value);
         MAP_NAT_LOCK(u, self);
