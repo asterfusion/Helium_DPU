@@ -29,6 +29,8 @@
 
 #include <hqos/fifo/fifo.h>
 
+//#define HQOS_DEBUG
+
 #define HQOS_NODE_PORT_MAX                (128)
 #define HQOS_NODE_MAX_SUBPORT_PER_PORT    (8)
 #define HQOS_NODE_MAX_PIPE_PER_SUBPORT    (4096)
@@ -110,6 +112,11 @@ typedef struct _hqos_port_fifo
 
 } hqos_port_fifo_t;
 
+typedef struct
+{
+    u64 *counters;
+} hqos_combined_counter_t;
+
 typedef struct _hqos_main
 {
     u32 hqos_node_port_max;
@@ -151,6 +158,10 @@ typedef struct _hqos_main
 
     /* Hqos PostProcess next_index recored */
     u16 *sw_if_tx_node_next_index;
+
+    /* Hqos port drop counter */
+    hqos_combined_counter_t *hqos_port_enqueue_drop;
+    hqos_combined_counter_t *hqos_port_dequeue_drop;
 
     /* convenience */
     vlib_main_t *vlib_main;

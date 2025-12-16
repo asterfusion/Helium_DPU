@@ -562,6 +562,7 @@ typedef struct _hqos_sched_port {
     vlib_buffer_t **pkts_out;
     u32 n_pkts_out;
     u32 subport_id;
+    u32 n_active_subports;
 
     /* Large data structures */
     hqos_sched_subport_profile *subport_profiles;

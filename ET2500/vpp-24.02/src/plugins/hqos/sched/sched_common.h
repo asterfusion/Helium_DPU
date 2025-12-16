@@ -23,6 +23,14 @@ extern "C" {
 
 #include <vnet/buffer.h>
 
+extern vlib_main_t *hqos_vlib_main;
+
+static_always_inline vlib_main_t *
+hqos_vlib_get_main()
+{
+    return hqos_vlib_main;
+}
+
 static_always_inline u32
 vlib_buffer_hqos_tc_get(vlib_buffer_t *b)
 {

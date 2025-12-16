@@ -39,7 +39,7 @@ hqos_classification_proc(vlib_main_t *vm,
                          u32 *throught_from,
                          u16 *throught_nexts)
 {
-    int rv_len;
+    int rv_num;
     vnet_main_t *vnm = vnet_get_main ();
     hqos_main_t *hm = &hqos_main;
     u32 arc_next;
@@ -131,17 +131,22 @@ hqos_classification_proc(vlib_main_t *vm,
     hqos_port_fifo = vec_elt_at_index(hm->hqos_port_fifo_vec, hqos_port_id);
 
     hqos_queue_id = hqos_get_queue_id(hqos_port, hqos_subport_id, hqos_pipe_id, 
-                                      user->tc_queue_mode[tc] == HQOS_TC_QUEUE_MODE_DWRR ? 
+                                      user->tc_queue_mode[tc] == HQOS_TC_QUEUE_MODE_SP ?
                                            tc : HQOS_SCHED_TRAFFIC_CLASS_BE + tc);
 
     vlib_buffer_hqos_tc_set(p, tc);
     vlib_buffer_hqos_color_set(p, HQOS_COLOR_GREEN);
     vlib_buffer_hqos_queue_set(p, hqos_queue_id);
 
-    rv_len = hqos_fifo_enqueue_mp(hqos_port_fifo->in_fifo, 1, (void *)&p);
-    if (rv_len != 8)
+    rv_num = hqos_fifo_enqueue_mp(hqos_port_fifo->in_fifo, 1, (void *)&p);
+    if (rv_num != 1)
     {
-        clib_warning("hqos port id %u hqos_port_fifo enqueue failed(%d)\n", hqos_mapping->hqos_port_id, rv_len);
+        throught_from[*throught_num] = vlib_get_buffer_index(vm, p);
+        throught_nexts[*throught_num] = HQOS_PREPROCESS_NEXT_ERROR_DROP;
+        (*throught_num)++;
+        p->error = node->errors[HQOS_ERROR_INTO_HQOS_QUEUE_FULL];
+        state = HQOS_ERROR_INTO_HQOS_QUEUE_FULL;
+        goto trace;
     }
 
     p->error = node->errors[HQOS_ERROR_INTO_HQOS];

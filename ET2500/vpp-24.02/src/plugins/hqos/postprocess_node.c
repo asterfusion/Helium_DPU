@@ -518,7 +518,8 @@ hqos_postprocess_input (vlib_main_t * vm,
 
         pkt_count = hqos_postprocess_hqos_port(vm, hm, hqos_port_id, buffers);
 
-        hqos_enqueue_to_tx_node (vm, node, buffers, pkt_count);
+        if (pkt_count)
+            hqos_enqueue_to_tx_node (vm, node, buffers, pkt_count);
 
         pkt_total += pkt_count;
 

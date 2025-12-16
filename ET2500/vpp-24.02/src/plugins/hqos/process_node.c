@@ -28,7 +28,7 @@
 #ifndef CLIB_MARCH_VARIANT
 
 static_always_inline void
-hqos_sched_thread_hqos_port(hqos_main_t *hm, u32 hqos_port_id)
+hqos_sched_thread_hqos_port(hqos_main_t *hm, u32 hqos_port_id, u32 thread_index)
 {
     vlib_buffer_t *enqueue_pkts[HQOS_DEFAULT_SUBPORT_TC_QSIZE];
     vlib_buffer_t *dequeue_pkts[HQOS_DEFAULT_SUBPORT_TC_QSIZE];
@@ -36,6 +36,8 @@ hqos_sched_thread_hqos_port(hqos_main_t *hm, u32 hqos_port_id)
     u32 to_hqos_success = 0;
     u32 to_output_num = 0;
     u32 to_output_success = 0;
+
+    u32 free_buffer_indices[HQOS_DEFAULT_SUBPORT_TC_QSIZE];
 
     hqos_port_fifo_t *hqos_port_fifo = &hm->hqos_port_fifo_vec[hqos_port_id];
     hqos_sched_port  *hqos_port = hm->hqos_port_ptr_vec[hqos_port_id];
@@ -48,31 +50,54 @@ hqos_sched_thread_hqos_port(hqos_main_t *hm, u32 hqos_port_id)
                                          HQOS_DEFAULT_SUBPORT_TC_QSIZE,
                                          (void *)enqueue_pkts);
 
-    to_hqos_success = hqos_sched_port_enqueue(hqos_port, 
-                                              enqueue_pkts, 
-                                              to_hqos_num);
-
-    if (to_hqos_num != to_hqos_success)
+    if (to_hqos_num > 0)
     {
-        clib_warning("Hqos -> to_hqos_num %u, to_hqos_success %u : Hqos Queue full, pkt drop %u!", 
-                     to_hqos_num, to_hqos_success, to_hqos_num - to_hqos_success);
+        to_hqos_success = hqos_sched_port_enqueue(hqos_port,
+                                                  enqueue_pkts,
+                                                  to_hqos_num);
+
+        if (to_hqos_num != to_hqos_success)
+        {
+#if 0
+            clib_warning("Hqos -> to_hqos_num %u, to_hqos_success %u : Hqos Queue full, pkt drop %u!",
+                         to_hqos_num, to_hqos_success, to_hqos_num - to_hqos_success);
+#endif
+            /*
+             * No need to free the buffer, as hQoS will free it after the enqueue fails
+             * only counter
+             */
+            hm->hqos_port_enqueue_drop[hqos_port_id].counters[thread_index] += (to_hqos_num - to_hqos_success);
+        }
     }
 
     /*
-     * Second dequeue fome hoqs shced port and 
+     * Second dequeue fome hoqs shced port and
      * enqueue to port_fifo out_fifo
      */
 
     to_output_num = hqos_sched_port_dequeue(hqos_port, dequeue_pkts, HQOS_DEFAULT_SUBPORT_TC_QSIZE);
 
-    to_output_success = hqos_fifo_enqueue_sp (hqos_port_fifo->out_fifo,
-                                              to_output_num,
-                                              (void *)dequeue_pkts);
-    
-    if (to_output_num != to_output_success)
+    if (to_output_num > 0)
     {
-        clib_warning("Hqos -> to_output_num %u, to_output_success %u : Hqos Port fifo full, pkt drop %u!", 
-                     to_output_num, to_output_success, to_output_num - to_output_success);
+        to_output_success = hqos_fifo_enqueue_sp (hqos_port_fifo->out_fifo,
+                                                  to_output_num,
+                                                  (void *)dequeue_pkts);
+
+        if (to_output_num != to_output_success)
+        {
+#if 0
+            clib_warning("Hqos -> to_output_num %u, to_output_success %u : Hqos Port fifo full, pkt drop %u!",
+                         to_output_num, to_output_success, to_output_num - to_output_success);
+#endif
+            hm->hqos_port_dequeue_drop[hqos_port_id].counters[thread_index] += (to_output_num - to_output_success);
+
+            vlib_get_buffer_indices(hm->vlib_main,
+                                    dequeue_pkts + to_output_success,
+                                    free_buffer_indices,
+                                    (to_output_num - to_output_success));
+
+            vlib_buffer_free(hm->vlib_main, free_buffer_indices, (to_output_num - to_output_success));
+        }
     }
 }
 
@@ -94,14 +119,14 @@ hqos_sched_thread_internal ()
         while(hqos_port_id != ~0)
         {
             //Check if the current hqos_port_id is attached to the current thread
-            if (hm->hqos_port_sched_mapping_thread[hqos_port_id] == (~0) || 
+            if (hm->hqos_port_sched_mapping_thread[hqos_port_id] == (~0) ||
                 hm->hqos_port_sched_mapping_thread[hqos_port_id] != thread_index)
             {
                 hqos_port_id = clib_bitmap_next_set(hm->hqos_port_bitmap, hqos_port_id + 1);
                 continue;
             }
 
-            hqos_sched_thread_hqos_port(hm, hqos_port_id);
+            hqos_sched_thread_hqos_port(hm, hqos_port_id, thread_index);
 
             hqos_port_id = clib_bitmap_next_set(hm->hqos_port_bitmap, hqos_port_id + 1);
         }
@@ -127,7 +152,7 @@ VLIB_REGISTER_THREAD (hqos_sched_reg, static) =
 #endif
 
 static_always_inline u32
-hqos_sched_worker_hqos_port(hqos_main_t *hm, u32 hqos_port_id)
+hqos_sched_worker_hqos_port(hqos_main_t *hm, u32 hqos_port_id, u32 thread_index)
 {
     vlib_buffer_t *enqueue_pkts[HQOS_DEFAULT_SUBPORT_TC_QSIZE];
     vlib_buffer_t *dequeue_pkts[HQOS_DEFAULT_SUBPORT_TC_QSIZE];
@@ -135,6 +160,8 @@ hqos_sched_worker_hqos_port(hqos_main_t *hm, u32 hqos_port_id)
     u32 to_hqos_success = 0;
     u32 to_output_num = 0;
     u32 to_output_success = 0;
+
+    u32 free_buffer_indices[HQOS_DEFAULT_SUBPORT_TC_QSIZE];
 
     hqos_port_fifo_t *hqos_port_fifo = &hm->hqos_port_fifo_vec[hqos_port_id];
     hqos_sched_port  *hqos_port = hm->hqos_port_ptr_vec[hqos_port_id];
@@ -147,31 +174,56 @@ hqos_sched_worker_hqos_port(hqos_main_t *hm, u32 hqos_port_id)
                                          HQOS_DEFAULT_SUBPORT_TC_QSIZE,
                                          (void *)enqueue_pkts);
 
-    to_hqos_success = hqos_sched_port_enqueue(hqos_port, 
-                                              enqueue_pkts, 
-                                              to_hqos_num);
-
-    if (to_hqos_num != to_hqos_success)
+    if (to_hqos_num > 0)
     {
-        clib_warning("Hqos -> to_hqos_num %u, to_hqos_success %u : Hqos Queue full, pkt drop %u!", 
-                     to_hqos_num, to_hqos_success, to_hqos_num - to_hqos_success);
+
+        to_hqos_success = hqos_sched_port_enqueue(hqos_port,
+                                                  enqueue_pkts,
+                                                  to_hqos_num);
+
+        if (to_hqos_num != to_hqos_success)
+        {
+#if 0
+            clib_warning("Hqos -> to_hqos_num %u, to_hqos_success %u : Hqos Queue full, pkt drop %u!",
+                         to_hqos_num, to_hqos_success, to_hqos_num - to_hqos_success);
+#endif
+            /*
+             * No need to free the buffer, as hQoS will free it after the enqueue fails
+             * only counter
+             */
+            hm->hqos_port_enqueue_drop[hqos_port_id].counters[thread_index] += (to_hqos_num - to_hqos_success);
+        }
     }
 
     /*
-     * Second dequeue fome hoqs shced port and 
+     * Second dequeue fome hoqs shced port and
      * enqueue to port_fifo out_fifo
      */
 
     to_output_num = hqos_sched_port_dequeue(hqos_port, dequeue_pkts, HQOS_DEFAULT_SUBPORT_TC_QSIZE);
 
-    to_output_success = hqos_fifo_enqueue_sp (hqos_port_fifo->out_fifo,
-                                              to_output_num,
-                                              (void *)dequeue_pkts);
-    
-    if (to_output_num != to_output_success)
+    if (to_output_num > 0)
     {
-        clib_warning("Hqos -> to_output_num %u, to_output_success %u : Hqos Port fifo full, pkt drop %u!", 
-                     to_output_num, to_output_success, to_output_num - to_output_success);
+
+        to_output_success = hqos_fifo_enqueue_sp (hqos_port_fifo->out_fifo,
+                                                  to_output_num,
+                                                  (void *)dequeue_pkts);
+
+        if (to_output_num != to_output_success)
+        {
+#if 0
+            clib_warning("Hqos -> to_output_num %u, to_output_success %u : Hqos Port fifo full, pkt drop %u!",
+                         to_output_num, to_output_success, to_output_num - to_output_success);
+#endif
+            hm->hqos_port_dequeue_drop[hqos_port_id].counters[thread_index] += (to_output_num - to_output_success);
+
+            vlib_get_buffer_indices(hm->vlib_main,
+                                    dequeue_pkts + to_output_success,
+                                    free_buffer_indices,
+                                    (to_output_num - to_output_success));
+
+            vlib_buffer_free(hm->vlib_main, free_buffer_indices, (to_output_num - to_output_success));
+        }
     }
 
     return to_output_success;
@@ -197,14 +249,14 @@ hqos_sched_worker_fn (vlib_main_t * vm,
     while(hqos_port_id != ~0)
     {
         //Check if the current hqos_port_id is attached to the current thread
-        if (hm->hqos_port_sched_mapping_thread[hqos_port_id] == (~0) || 
-                hm->hqos_port_sched_mapping_thread[hqos_port_id] != thread_index)
+        if (hm->hqos_port_sched_mapping_worker[hqos_port_id] == (~0) ||
+            hm->hqos_port_sched_mapping_worker[hqos_port_id] != thread_index)
         {
             hqos_port_id = clib_bitmap_next_set(hm->hqos_port_bitmap, hqos_port_id + 1);
             continue;
         }
 
-        output_pkt += hqos_sched_worker_hqos_port(hm, hqos_port_id);
+        output_pkt += hqos_sched_worker_hqos_port(hm, hqos_port_id, thread_index);
 
         hqos_port_id = clib_bitmap_next_set(hm->hqos_port_bitmap, hqos_port_id + 1);
     }

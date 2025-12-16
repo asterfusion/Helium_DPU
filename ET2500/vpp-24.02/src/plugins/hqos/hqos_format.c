@@ -113,10 +113,15 @@ format_hqos_port_detail(u8 *s, va_list *args)
 
     u32 subport_id;
     hqos_sched_subport *hqos_subport = NULL;
+    hqos_sched_subport_profile *subport_profile = NULL;
 
     u32 pipe_id;
     hqos_sched_pipe *hqos_pipe = NULL;
     hqos_sched_pipe_profile *pipe_profile = NULL;
+
+    u64 *counter;
+    u64 enqueue_drop_pkts = 0;
+    u64 dequeue_drop_pkts = 0;
 
     s = format(s, "Hqos Port %u:\n", hqos_port_id);
     s = format(s, "\tBasic:\n");
@@ -134,6 +139,7 @@ format_hqos_port_detail(u8 *s, va_list *args)
         hqos_subport = hqos_port->subports[subport_id];
         if (hqos_subport != NULL)
         {
+            subport_profile =  hqos_port->subport_profiles + hqos_subport->profile;
             s = format(s, "\t\tSubport %u:\n", subport_id);
             s = format(s, "\t\t\tRate = %u bytes/second\n", hqos_port->subport_profiles[hqos_subport->profile].orig_tb_rate);
             s = format(s, "\t\t\tNumber of enable pipes per subport = %u\n", hqos_subport->n_pipes_per_subport_enabled);
@@ -145,33 +151,33 @@ format_hqos_port_detail(u8 *s, va_list *args)
             s = format(s, "\t\t\t\tTC0 = %llu, TC1 = %llu, TC2 = %llu, TC3 = %llu bytes/second\n",
                     hqos_sched_time_ms_to_rate(
                         hqos_port->subport_profiles[hqos_subport->profile].orig_tc_period, 
-                        hqos_subport->tc_credits[0]),
+                        subport_profile->tc_credits_per_period[0]),
                     hqos_sched_time_ms_to_rate(
                         hqos_port->subport_profiles[hqos_subport->profile].orig_tc_period, 
-                        hqos_subport->tc_credits[1]),
+                        subport_profile->tc_credits_per_period[1]),
                     hqos_sched_time_ms_to_rate(
                         hqos_port->subport_profiles[hqos_subport->profile].orig_tc_period, 
-                        hqos_subport->tc_credits[2]),
+                        subport_profile->tc_credits_per_period[2]),
                     hqos_sched_time_ms_to_rate(
                         hqos_port->subport_profiles[hqos_subport->profile].orig_tc_period, 
-                        hqos_subport->tc_credits[3]));
+                        subport_profile->tc_credits_per_period[3]));
             s = format(s, "\t\t\t\tTC4 = %llu, TC5 = %llu, TC6 = %llu, TC7 = %llu bytes/second\n",
                     hqos_sched_time_ms_to_rate(
                         hqos_port->subport_profiles[hqos_subport->profile].orig_tc_period, 
-                        hqos_subport->tc_credits[4]),
+                        subport_profile->tc_credits_per_period[4]),
                     hqos_sched_time_ms_to_rate(
                         hqos_port->subport_profiles[hqos_subport->profile].orig_tc_period, 
-                        hqos_subport->tc_credits[5]),
+                        subport_profile->tc_credits_per_period[5]),
                     hqos_sched_time_ms_to_rate(
                         hqos_port->subport_profiles[hqos_subport->profile].orig_tc_period, 
-                        hqos_subport->tc_credits[6]),
+                        subport_profile->tc_credits_per_period[6]),
                     hqos_sched_time_ms_to_rate(
                         hqos_port->subport_profiles[hqos_subport->profile].orig_tc_period, 
-                        hqos_subport->tc_credits[7]));
+                        subport_profile->tc_credits_per_period[7]));
             s = format(s, "\t\t\t\tTC_BE = %llu bytes/second\n",
                     hqos_sched_time_ms_to_rate(
                         hqos_port->subport_profiles[hqos_subport->profile].orig_tc_period, 
-                        hqos_subport->tc_credits[8]));
+                        subport_profile->tc_credits_per_period[8]));
             s = format(s, "\t\t\tTC period = %llu milliseconds\n", 
                     hqos_port->subport_profiles[hqos_subport->profile].orig_tc_period);
             //PIPE
@@ -188,17 +194,17 @@ format_hqos_port_detail(u8 *s, va_list *args)
                     s = format(s, "\t\t\t\tToken bucket size = %u bytes\n", pipe_profile->tb_size);
                     s = format(s, "\t\t\t\tTraffic class rate:\n");
                     s = format(s, "\t\t\t\t\tTC0 = %llu, TC1 = %llu, TC2 = %llu, TC3 = %llu bytes/second\n",
-                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, hqos_pipe->tc_credits[0]),
-                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, hqos_pipe->tc_credits[1]),
-                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, hqos_pipe->tc_credits[2]),
-                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, hqos_pipe->tc_credits[3]));
+                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, pipe_profile->tc_credits_per_period[0]),
+                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, pipe_profile->tc_credits_per_period[1]),
+                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, pipe_profile->tc_credits_per_period[2]),
+                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, pipe_profile->tc_credits_per_period[3]));
                     s = format(s, "\t\t\t\t\tTC4 = %llu, TC5 = %llu, TC6 = %llu, TC7 = %llu bytes/second\n",
-                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, hqos_pipe->tc_credits[4]),
-                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, hqos_pipe->tc_credits[5]),
-                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, hqos_pipe->tc_credits[6]),
-                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, hqos_pipe->tc_credits[7]));
+                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, pipe_profile->tc_credits_per_period[4]),
+                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, pipe_profile->tc_credits_per_period[5]),
+                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, pipe_profile->tc_credits_per_period[6]),
+                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, pipe_profile->tc_credits_per_period[7]));
                     s = format(s, "\t\t\t\t\tTC_BE = %llu bytes/second\n",
-                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, hqos_pipe->tc_credits[8]));
+                        hqos_sched_time_ms_to_rate( pipe_profile->orig_tc_period, pipe_profile->tc_credits_per_period[8]));
                     s = format(s, "\t\t\t\t\tTC_BE WRR weights: TC_BE_0 = %u, TC_BE_1 = %u, TC_BE_2 = %u, TC_BE_3 = %u\n",
                                 pipe_profile->wrr_weights[0], pipe_profile->wrr_weights[1], 
                                 pipe_profile->wrr_weights[2], pipe_profile->wrr_weights[3]);
@@ -221,6 +227,19 @@ format_hqos_port_detail(u8 *s, va_list *args)
     s = format(s, "\tProc Fifo:\n");
     s = format(s, "\t\tIn Hqos fifo count: %u\n", hqos_fifo_count(hm->hqos_port_fifo_vec[hqos_port_id].in_fifo));
     s = format(s, "\t\tOut Hqos fifo count: %u\n", hqos_fifo_count(hm->hqos_port_fifo_vec[hqos_port_id].out_fifo));
+
+    vec_foreach(counter, hm->hqos_port_enqueue_drop[hqos_port_id].counters)
+    {
+        enqueue_drop_pkts += *counter;
+    }
+    vec_foreach(counter, hm->hqos_port_dequeue_drop[hqos_port_id].counters)
+    {
+        dequeue_drop_pkts += *counter;
+    }
+
+    s = format(s, "\tDrop Counter:\n");
+    s = format(s, "\t\tHqos enqueue drop: %llu pkts\n", enqueue_drop_pkts);
+    s = format(s, "\t\tHqos dequeue drop: %llu pkts\n", dequeue_drop_pkts);
 
     return s;
 }

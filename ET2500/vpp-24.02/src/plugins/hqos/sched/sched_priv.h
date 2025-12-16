@@ -12,6 +12,8 @@ extern "C" {
 
 #include "hqos/sched/sched.h"
 
+//#define HQOS_SCHED_DEBUG
+
 #ifdef HQOS_SCHED_DEBUG
 
 static_always_inline int
@@ -83,7 +85,10 @@ hqos_sched_port_queues_per_port(hqos_sched_port *port)
     u32 n_queues = 0, i;
 
     for (i = 0; i < port->n_subports_per_port; i++)
-        n_queues += hqos_sched_subport_pipe_queues(port->subports[i]);
+    {
+        if (port->subports[i])
+            n_queues += hqos_sched_subport_pipe_queues(port->subports[i]);
+    }
 
     return n_queues;
 }
@@ -125,7 +130,7 @@ hqos_sched_time_ms_to_bytes(u64 time_ms, u64 rate)
 static_always_inline void
 hqos_sched_subport_free(hqos_sched_port *port, hqos_sched_subport *subport)
 {
-    vlib_main_t *vm = vlib_get_main ();
+    vlib_main_t *vm = hqos_vlib_get_main ();
     u32 n_subport_pipe_queues;
     u32 qindex;
 
@@ -170,7 +175,7 @@ hqos_sched_port_update_subport_stats(hqos_sched_port *port,
                                      u32 qindex,
                                      vlib_buffer_t *pkt)
 {
-    vlib_main_t *vm = vlib_get_main ();
+    vlib_main_t *vm = hqos_vlib_get_main ();
     u32 tc_index = hqos_sched_port_pipe_tc(port, qindex);
     u32 pkt_len = vlib_buffer_length_in_chain(vm, pkt);
 
@@ -185,7 +190,7 @@ hqos_sched_port_update_subport_stats_on_drop(hqos_sched_port *port,
                                              vlib_buffer_t *pkt,
                                              u32 n_pkts_cman_dropped)
 {
-    vlib_main_t *vm = vlib_get_main ();
+    vlib_main_t *vm = hqos_vlib_get_main ();
     u32 tc_index = hqos_sched_port_pipe_tc(port, qindex);
     u32 pkt_len = vlib_buffer_length_in_chain(vm, pkt);
 
@@ -199,7 +204,7 @@ hqos_sched_port_update_queue_stats(hqos_sched_subport *subport,
                                    u32 qindex,
                                    vlib_buffer_t *pkt)
 {
-    vlib_main_t *vm = vlib_get_main ();
+    vlib_main_t *vm = hqos_vlib_get_main ();
     hqos_sched_queue_extra *qe = subport->queue_extra + qindex;
     u32 pkt_len = vlib_buffer_length_in_chain(vm, pkt);
 
@@ -213,7 +218,7 @@ hqos_sched_port_update_queue_stats_on_drop(hqos_sched_subport *subport,
                                            vlib_buffer_t *pkt,
                                            u32 n_pkts_cman_dropped)
 {
-    vlib_main_t *vm = vlib_get_main ();
+    vlib_main_t *vm = hqos_vlib_get_main ();
     hqos_sched_queue_extra *qe = subport->queue_extra + qindex;
     u32 pkt_len = vlib_buffer_length_in_chain(vm, pkt);
 
@@ -233,7 +238,7 @@ hqos_sched_port_cman_drop(hqos_sched_port *port,
     if (!subport->cman_enabled)
         return 0;
 
-    vlib_main_t *vm = vlib_get_main ();
+    vlib_main_t *vm = hqos_vlib_get_main ();
 
     hqos_sched_queue_extra *qe;
     u32 tc_index;
@@ -349,7 +354,7 @@ hqos_sched_port_enqueue_qwa(hqos_sched_port *port,
                             vlib_buffer_t **qbase,
                             vlib_buffer_t *pkt)
 {
-    vlib_main_t *vm = vlib_get_main ();
+    vlib_main_t *vm = hqos_vlib_get_main ();
     hqos_sched_queue *q;
     u16 qsize;
     u16 qlen;
@@ -519,7 +524,7 @@ hqos_grinder_credits_check(hqos_sched_port *port,
                            hqos_sched_subport *subport, 
                            u32 pos)
 {
-    vlib_main_t *vm = vlib_get_main ();
+    vlib_main_t *vm = hqos_vlib_get_main ();
 
     hqos_sched_grinder *grinder = subport->grinder + pos;
     hqos_sched_pipe *pipe = grinder->pipe;
@@ -557,7 +562,7 @@ hqos_grinder_credits_check_with_tc_ov(hqos_sched_port *port,
                                       hqos_sched_subport *subport, 
                                       u32 pos)
 {
-    vlib_main_t *vm = vlib_get_main ();
+    vlib_main_t *vm = hqos_vlib_get_main ();
 
     hqos_sched_grinder *grinder = subport->grinder + pos;
     hqos_sched_pipe *pipe = grinder->pipe;
@@ -609,7 +614,7 @@ hqos_grinder_schedule(hqos_sched_port *port,
                  hqos_sched_subport *subport, 
                  u32 pos)
 {
-    vlib_main_t *vm = vlib_get_main ();
+    vlib_main_t *vm = hqos_vlib_get_main ();
     hqos_sched_grinder *grinder = subport->grinder + pos;
     hqos_sched_queue *queue = grinder->queue[grinder->qpos];
     u32 qindex = grinder->qindex[grinder->qpos];
@@ -1107,7 +1112,10 @@ hqos_sched_port_time_resync(hqos_sched_port *port)
 
     /* Reset pipe loop detection */
     for (i = 0; i < port->n_subports_per_port; i++)
-        port->subports[i]->pipe_loop = HQOS_SCHED_PIPE_INVALID;
+    {
+        if (port->subports[i])
+            port->subports[i]->pipe_loop = HQOS_SCHED_PIPE_INVALID;
+    }
 }
 
 static_always_inline int

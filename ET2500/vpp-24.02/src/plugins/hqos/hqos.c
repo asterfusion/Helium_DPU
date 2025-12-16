@@ -125,13 +125,50 @@ free:
 static void 
 hqos_port_fifo_deinit(hqos_port_fifo_t *hqos_port_fifo)
 {
+    vlib_main_t *vm = vlib_get_main();
+    u32 fifo_count = 0;
+    u32 dequeue_count = 0;
+    vlib_buffer_t **pkts = vec_new(vlib_buffer_t *, HQOS_PER_PORT_FIFO_LENGTH);
+    u32 *free_buffer_indices = vec_new(u32, HQOS_PER_PORT_FIFO_LENGTH);
+
     if (hqos_port_fifo->in_fifo)
     {
+        fifo_count = hqos_fifo_count(hqos_port_fifo->in_fifo);
+        if (fifo_count > 0)
+        {
+            dequeue_count = hqos_fifo_dequeue_sc (hqos_port_fifo->in_fifo,
+                                                fifo_count,
+                                                (void *)pkts);
+
+            if (dequeue_count != fifo_count)
+            {
+                clib_warning("Hqos in-fifo has not been dequeue fully completed yet!!");
+            }
+
+            vlib_get_buffer_indices(vm, pkts, free_buffer_indices, dequeue_count);
+            vlib_buffer_free(vm, free_buffer_indices, dequeue_count);
+        }
+
         hqos_fifo_free(hqos_port_fifo->in_fifo);
         hqos_port_fifo->in_fifo = NULL;
     }
     if (hqos_port_fifo->out_fifo)
     {
+        if (hqos_fifo_count(hqos_port_fifo->out_fifo))
+        {
+            dequeue_count = hqos_fifo_dequeue_sc (hqos_port_fifo->out_fifo,
+                                                fifo_count,
+                                                (void *)pkts);
+
+            if (dequeue_count != fifo_count)
+            {
+                clib_warning("Hqos out-fifo has not been dequeue fully completed yet!!");
+            }
+
+            vlib_get_buffer_indices(vm, pkts, free_buffer_indices, dequeue_count);
+            vlib_buffer_free(vm, free_buffer_indices, dequeue_count);
+        }
+
         hqos_fifo_free(hqos_port_fifo->out_fifo);
         hqos_port_fifo->out_fifo = NULL;
     }
@@ -542,6 +579,9 @@ int hqos_port_add(u64 port_rate,
         return VNET_API_ERROR_INVALID_ARGUMENT;
     }
 
+    //Reset Counter
+    vec_zero(hm->hqos_port_enqueue_drop[tmp_port_id].counters);
+    vec_zero(hm->hqos_port_dequeue_drop[tmp_port_id].counters);
 
     //port fifo init
     rv = hqos_port_fifo_init(&hm->hqos_port_fifo_vec[tmp_port_id], HQOS_PER_PORT_FIFO_LENGTH);
@@ -553,12 +593,14 @@ int hqos_port_add(u64 port_rate,
     }
 
     hm->hqos_port_ptr_vec[tmp_port_id] = hqos_port;
+
+    *hqos_port_id = tmp_port_id;
+
     clib_bitmap_set_no_check(hm->hqos_port_bitmap, tmp_port_id, 1);
 
     //Configure hqos sched core
     hqos_attach_sched_core(hm, tmp_port_id);
 
-    *hqos_port_id = tmp_port_id;
     return 0;
 }
 
@@ -575,17 +617,18 @@ int hqos_port_del(u32 hqos_port_id)
 
     if (clib_bitmap_get_no_check(hm->hqos_port_bitmap, hqos_port_id))
     {
-        hqos_port = hm->hqos_port_ptr_vec[hqos_port_id];
-
-        hqos_sched_port_free(hqos_port);
-
-        //port fifo deinit
-        hqos_port_fifo_deinit(&hm->hqos_port_fifo_vec[hqos_port_id]);
+        //stop preprocess
+        clib_bitmap_set_no_check(hm->hqos_port_bitmap, hqos_port_id, 0);
 
         //Remove hoqs sched core
         hqos_detach_sched_core(hm, hqos_port_id);
 
-        clib_bitmap_set_no_check(hm->hqos_port_bitmap, hqos_port_id, 0);
+        hqos_port = hm->hqos_port_ptr_vec[hqos_port_id];
+
+        //port fifo deinit
+        hqos_port_fifo_deinit(&hm->hqos_port_fifo_vec[hqos_port_id]);
+
+        hqos_sched_port_free(hqos_port);
 
         hqos_port = NULL;
     }
@@ -1127,6 +1170,8 @@ hqos_init (vlib_main_t * vm)
 
     vlib_thread_main_t *tm = vlib_get_thread_main ();
 
+    hqos_combined_counter_t *hcc;
+
     memset (hm, 0, sizeof (*hm));
 
     hm->hqos_enabled_by_sw_if = 0;
@@ -1184,6 +1229,21 @@ hqos_init (vlib_main_t * vm)
         hm->hqos_sched_worker_first = tr_worker->first_index;
     }
 
+    /* Counter */
+
+    vec_validate (hm->hqos_port_enqueue_drop, hm->hqos_node_port_max);
+    vec_foreach (hcc, hm->hqos_port_enqueue_drop)
+    {
+        vec_validate(hcc->counters, tm->n_thread_stacks);
+        vec_zero(hcc->counters);
+    }
+    vec_validate (hm->hqos_port_dequeue_drop, hm->hqos_node_port_max);
+    vec_foreach (hcc, hm->hqos_port_dequeue_drop)
+    {
+        vec_validate(hcc->counters, tm->n_thread_stacks);
+        vec_zero(hcc->counters);
+    }
+
     /* prealloc default user and default user group*/
     hqos_default_user(hm);
     hqos_default_user_group(hm);
@@ -1191,6 +1251,7 @@ hqos_init (vlib_main_t * vm)
     hm->vnet_main = vnet_get_main ();
     hm->vlib_main = vm;
 
+    hqos_vlib_main = vm;
     error = hqos_plugin_api_hookup (vm);
 
     return error;

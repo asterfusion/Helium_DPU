@@ -8,6 +8,7 @@
 #include "hqos/sched/sched.h"
 #include "hqos/sched/sched_priv.h"
 
+vlib_main_t *hqos_vlib_main;
 
 static int
 hqos_pipe_profile_check(hqos_sched_pipe_params *params,
@@ -732,7 +733,7 @@ hqos_sched_port_config(hqos_sched_port_params *params)
     /* Subport profile table */
     hqos_sched_port_config_subport_profile_table(port, params, port->rate);
 
-    cycles_per_byte = (clib_cpu_time_now() << HQOS_SCHED_TIME_SHIFT) / params->rate;
+    cycles_per_byte = ((u64)os_cpu_clock_frequency() << HQOS_SCHED_TIME_SHIFT) / params->rate;
     port->inv_cycles_per_byte = hqos_reciprocal_value(cycles_per_byte); 
     port->cycles_per_byte = cycles_per_byte;
 
@@ -1047,9 +1048,6 @@ hqos_sched_subport_config(hqos_sched_port *port,
 
         n_subports++;
 
-        /* Port */
-        port->subports[subport_id] = s;
-
         s->tb_time = port->time;
 
         /* User parameters */
@@ -1115,6 +1113,10 @@ hqos_sched_subport_config(hqos_sched_port *port,
         s->tc_ov = 0;
         s->tc_ov_n = 0;
         s->tc_ov_rate = 0;
+
+        /* Port */
+        port->subports[subport_id] = s;
+        port->n_active_subports++;
     }
     {
         /* update subport parameters from subport profile table*/
@@ -1499,7 +1501,7 @@ hqos_sched_port_dequeue(hqos_sched_port *port, vlib_buffer_t **pkts, u32 n_pkts)
         if (count == n_pkts) {
             subport_id++;
 
-            if (subport_id == port->n_subports_per_port)
+            if (subport_id == port->n_active_subports)
                 subport_id = 0;
 
             port->subport_id = subport_id;
@@ -1512,10 +1514,10 @@ hqos_sched_port_dequeue(hqos_sched_port *port, vlib_buffer_t **pkts, u32 n_pkts)
             n_subports++;
         }
 
-        if (subport_id == port->n_subports_per_port)
+        if (subport_id == port->n_active_subports)
             subport_id = 0;
 
-        if (n_subports == port->n_subports_per_port) {
+        if (n_subports == port->n_active_subports) {
             port->subport_id = subport_id;
             break;
         }
