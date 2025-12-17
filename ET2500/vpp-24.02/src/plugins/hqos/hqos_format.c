@@ -18,6 +18,8 @@
 u8 *
 format_hqos_preprocess_trace(u8 *s, va_list *args)
 {
+    CLIB_UNUSED (vlib_main_t * vm) = va_arg (*args, vlib_main_t *);
+    CLIB_UNUSED (vlib_node_t * node) = va_arg (*args, vlib_node_t *);
     hqos_preprocess_trace_t *t = va_arg (*args, hqos_preprocess_trace_t *);
 
     s = format (s, "\tCurrent Pkt [%s]: tc %u, color %u, len %u\n", hqos_error_counters[t->state].name, 
@@ -58,6 +60,8 @@ format_hqos_preprocess_trace(u8 *s, va_list *args)
 u8 *
 format_hqos_postprocess_trace(u8 *s, va_list *args)
 {
+    CLIB_UNUSED (vlib_main_t * vm) = va_arg (*args, vlib_main_t *);
+    CLIB_UNUSED (vlib_node_t * node) = va_arg (*args, vlib_node_t *);
     hqos_postprocess_trace_t *t = va_arg (*args, hqos_postprocess_trace_t *);
     vnet_main_t *vnm = vnet_get_main ();
 

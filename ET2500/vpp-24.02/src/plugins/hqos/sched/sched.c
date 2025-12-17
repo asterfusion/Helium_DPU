@@ -231,8 +231,7 @@ hqos_sched_subport_check_params(hqos_sched_subport_params *params,
         params->n_pipe_profiles == 0 ||
         params->n_max_pipe_profiles == 0 ||
         params->n_pipe_profiles > params->n_max_pipe_profiles) {
-        clib_warning("%s: Incorrect value for pipe profiles", __func__);
-        return -EINVAL;
+        return 0;
     }
 
     for (i = 0; i < params->n_pipe_profiles; i++) {
