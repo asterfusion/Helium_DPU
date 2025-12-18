@@ -282,7 +282,7 @@ vl_api_hqos_port_subport_config_t_handler (vl_api_hqos_port_subport_config_t * m
 
     int rv = 0, i = 0;
 
-    u16 *qsize_vec;
+    u16 *qsize_vec = NULL;
 
     for (i = 0; i < HQOS_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++)
     {
