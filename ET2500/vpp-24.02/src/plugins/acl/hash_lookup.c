@@ -747,6 +747,7 @@ hash_acl_apply(acl_main_t *am, u32 lc_index, int acl_index, u32 acl_position)
     pae->action_expand_bitmap = ha->rules[i].action_expand_bitmap;
     pae->policer_index = ha->rules[i].policer_index;
     pae->set_tc_value = ha->rules[i].set_tc_value;
+    pae->set_hqos_user_id = ha->rules[i].set_hqos_user_id;
     pae->hitcount = 0;
     pae->hash_ace_info_index = i;
     /* we might link it in later */
@@ -1045,6 +1046,7 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
   hi->action_expand_bitmap = r->action_expand_bitmap;
   hi->policer_index = r->policer_index;
   hi->set_tc_value = r->set_tc_value;
+  hi->set_hqos_user_id = r->set_hqos_user_id;
 
   /* we will need to be matching based on lc_index and mask_type_index when applied */
   mask->pkt.lc_index = ~0;

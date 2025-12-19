@@ -620,6 +620,7 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       r->action_expand_bitmap = rules[i].action_expand_bitmap;
       r->policer_index = ntohl(rules[i].policer_index);
       r->set_tc_value = rules[i].set_tc_value;
+      r->set_hqos_user_id = ntohl(rules[i].set_hqos_user_id);
     }
 
   if (~0 == *acl_list_index)
@@ -3379,6 +3380,7 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
   u32 policer_index = 0;
   u32 tcpflags, tcpmask;
   u8  set_tc_value;
+  u32 set_hqos_user_id;
   ip_prefix_t src, dst;
   u32 src_sw_if_index = 0;
   
@@ -3489,6 +3491,12 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
 	  vec_validate_acl_rules (rules, rule_idx);
 	  rules[rule_idx].action_expand_bitmap |= (1 << ACL_ACTION_EXPAND_SET_TC);
 	  rules[rule_idx].set_tc_value = set_tc_value & 0xff;
+    }
+    else if (unformat (line_input, "hqos_user %u", &set_hqos_user_id))
+    {
+	  vec_validate_acl_rules (rules, rule_idx);
+	  rules[rule_idx].action_expand_bitmap |= (1 << ACL_ACTION_EXPAND_SET_HQOS_USER);
+	  rules[rule_idx].set_hqos_user_id = htonl(set_hqos_user_id);
     }
     else if (unformat (line_input, "src_sw_if_index %d", &src_sw_if_index))
     {

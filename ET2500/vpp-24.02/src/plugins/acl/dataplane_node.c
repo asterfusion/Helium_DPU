@@ -339,6 +339,7 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
     action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[0];
     action_expand->policer_index = match_acl_info->policer_index[0];
     action_expand->set_tc_value = match_acl_info->set_tc_value[0];
+    action_expand->set_hqos_user_id = match_acl_info->set_hqos_user_id[0];
     priority = match_acl_info->acl_priority[0];
 
     for (int i = 1; i < match_acl_info->acl_match_count; i++)
@@ -351,6 +352,7 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
             action_expand->policer_index = match_acl_info->policer_index[i];
             action_expand->set_tc_value = match_acl_info->set_tc_value[i];
+            action_expand->set_hqos_user_id = match_acl_info->set_hqos_user_id[i];
             priority = match_acl_info->acl_priority[i];
         }
     }
@@ -474,6 +476,11 @@ acl_action_expand_proc(vlib_main_t *vm, vlib_buffer_t *b, u16 *next, const match
     if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_SET_TC))
     {
         vnet_buffer2(b)->tc_index = action_expand->set_tc_value;
+    }
+
+    if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_SET_HQOS_USER))
+    {
+         vnet_buffer(b)->hqos.user_id = action_expand->set_hqos_user_id;
     }
     return;
 }
