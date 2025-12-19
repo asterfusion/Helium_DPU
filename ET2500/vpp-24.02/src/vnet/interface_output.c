@@ -52,6 +52,13 @@
 #include <vppinfra/vector/compress.h>
 #include <vppinfra/vector/count_equal.h>
 #include <vppinfra/vector/array_mask.h>
+geosite_free_cb_t geosite_output_free_cb = NULL;
+
+
+void geosite_register_output_free_callback(geosite_free_cb_t cb)
+{
+    geosite_output_free_cb = cb;
+}
 
 typedef struct
 {
@@ -632,7 +639,6 @@ VLIB_NODE_FN (vnet_interface_output_node)
   void *ptr[VLIB_FRAME_SIZE], **p = ptr;
   u8 is_parr = 0;
   u32 *from;
-
   if (node->flags & VLIB_NODE_FLAG_TRACE)
     vnet_interface_output_trace (vm, node, frame, n_buffers);
 
@@ -650,16 +656,16 @@ VLIB_NODE_FN (vnet_interface_output_node)
 
   for (int index =0 ;index <n_buffers; index++)
     {
-      if(bufs[index]->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(bufs[index])->geosite_domain_ptr != NULL)
+
+      if(bufs[index]->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(bufs[index])->geosite_domain_index != ~0 && geosite_output_free_cb)
           {
-            clib_mem_free(vnet_buffer2(bufs[index])->geosite_domain_ptr);
-            bufs[index]->flags&= ~VLIB_BUFFER_DOMAIN_VALID;
-            vnet_buffer2(bufs[index])->geosite_domain_ptr = NULL;
+
+          geosite_output_free_cb(vm, bufs[index]);
+
           }
     }
   si = vnet_get_sw_interface (vnm, sw_if_index);
   hi = vnet_get_sup_hw_interface (vnm, sw_if_index);
-
   if (!(si->flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP) ||
       !(hi->flags & VNET_HW_INTERFACE_FLAG_LINK_UP))
     {
@@ -1095,30 +1101,22 @@ interface_drop_punt (vlib_main_t * vm,
       sw_if_index[1] = vnet_buffer (b[1])->sw_if_index[VLIB_RX];
       sw_if_index[2] = vnet_buffer (b[2])->sw_if_index[VLIB_RX];
       sw_if_index[3] = vnet_buffer (b[3])->sw_if_index[VLIB_RX];
-      if(b[0]->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b[0])->geosite_domain_ptr != NULL)
-          {
-            clib_mem_free(vnet_buffer2(b[0])->geosite_domain_ptr);
-            b[0]->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
-            vnet_buffer2(b[0])->geosite_domain_ptr = NULL;
-          }
-      if(b[1]->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b[1])->geosite_domain_ptr != NULL)
-          {
-            clib_mem_free(vnet_buffer2(b[1])->geosite_domain_ptr);
-            b[1]->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
-            vnet_buffer2(b[1])->geosite_domain_ptr = NULL;
-          }
-      if(b[2]->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b[2])->geosite_domain_ptr != NULL)
-          {
-            clib_mem_free(vnet_buffer2(b[2])->geosite_domain_ptr);
-            b[2]->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
-            vnet_buffer2(b[2])->geosite_domain_ptr = NULL;
-          }
-      if(b[3]->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b[3])->geosite_domain_ptr != NULL)
-          {
-            clib_mem_free(vnet_buffer2(b[3])->geosite_domain_ptr);
-            b[3]->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
-            vnet_buffer2(b[3])->geosite_domain_ptr = NULL;
-          }
+      if(b[0]->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b[0])->geosite_domain_index != ~0 && geosite_output_free_cb)
+      {
+        geosite_output_free_cb(vm,b[0]);
+      }
+      if(b[1]->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b[1])->geosite_domain_index != ~0 && geosite_output_free_cb)
+      {
+        geosite_output_free_cb(vm,b[1]);
+      }
+      if(b[2]->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b[2])->geosite_domain_index != ~0 && geosite_output_free_cb)
+      {
+        geosite_output_free_cb(vm,b[2]);
+      }
+      if(b[3]->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b[3])->geosite_domain_index != ~0 && geosite_output_free_cb)
+      {
+        geosite_output_free_cb(vm,b[3]);
+      }
 
 
 
@@ -1129,13 +1127,9 @@ interface_drop_punt (vlib_main_t * vm,
   while (n_left)
     {
       sw_if_index[0] = vnet_buffer (b[0])->sw_if_index[VLIB_RX];
-
-      if(b[0]->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b[0])->geosite_domain_ptr != NULL)
+          if(b[0]->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b[0])->geosite_domain_index != ~0 && geosite_output_free_cb)
           {
-           //clib_warning("output free domain address =%p",vnet_buffer2(b[0])->geosite_domain_ptr);
-            clib_mem_free(vnet_buffer2(b[0])->geosite_domain_ptr);
-            b[0]->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
-            vnet_buffer2(b[0])->geosite_domain_ptr = NULL;
+            geosite_output_free_cb(vm,b[0]);
           }
 
       sw_if_index += 1;

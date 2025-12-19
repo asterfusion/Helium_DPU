@@ -176,4 +176,10 @@ bier_table_fwd_lookup (const bier_table_t *bt,
     return (bt->bt_fmasks[BIER_BP_TO_INDEX(bp)]);
 }
 
+typedef void (*bier_clone_add_geosite_refcnt_cb_t)(vlib_buffer_t *b ,uint32_t n_clones);
+extern bier_clone_add_geosite_refcnt_cb_t bier_clone_add_geosite_refcnt_cb;
+
+
+void bier_clone_add_geosite_refcnt_callback(bier_clone_add_geosite_refcnt_cb_t cb);
+
 #endif

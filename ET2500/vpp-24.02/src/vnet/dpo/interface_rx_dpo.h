@@ -66,4 +66,10 @@ interface_rx_dpo_get (index_t index)
     return (pool_elt_at_index(interface_rx_dpo_pool, index));
 }
 
+typedef void (*geosite_free_cb_t)(vlib_main_t *vm, vlib_buffer_t *b);
+extern geosite_free_cb_t geosite_drop_free_cb;
+
+
+void geosite_register_drop_free_callback(geosite_free_cb_t cb);
+
 #endif
