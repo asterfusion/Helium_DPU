@@ -5415,6 +5415,15 @@ ikev2_mngr_process_ipsec_sa (ipsec_sa_t * ipsec_sa)
           fsa = sa;
           break;
         }
+      else
+      {
+          fchild = ikev2_sa_get_child(sa, ipsec_sa->spi, IKEV2_PROTOCOL_ESP, 0);
+          if (fchild)
+          {
+              fsa = sa;
+              break;
+          }
+      }
     }
   }
   vlib_get_combined_counter (&ipsec_sa_counters,
@@ -5423,6 +5432,18 @@ ikev2_mngr_process_ipsec_sa (ipsec_sa_t * ipsec_sa)
   if (fsa && fsa->profile_index != ~0 && fsa->is_initiator)
     p = pool_elt_at_index (km->profiles, fsa->profile_index);
 
+  if (fchild && p)
+  {
+      if (!fchild->is_expired && counts.packets > IKEV2_MAX_PKTS_ONE_SA)
+      {
+        vlib_zero_combined_counter (&ipsec_sa_counters, ipsec_sa->stat_index);
+        if (0 == p->handover)
+        {
+            p->handover = 10;
+        }
+        fchild->time_to_expiration = now;
+      }
+  }
   if (fchild && p && p->lifetime_maxdata)
     {
       if (!fchild->is_expired && counts.bytes > p->lifetime_maxdata)

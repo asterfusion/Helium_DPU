@@ -135,6 +135,9 @@ cn10k_ipsec_sa_common_param_fill (union roc_ot_ipsec_sa_word2 *w2,
 	case IPSEC_CRYPTO_ALG_AES_CBC_256:
 	  w2->s.enc_type = ROC_IE_OT_SA_ENC_AES_CBC;
 	  break;
+        case IPSEC_CRYPTO_ALG_3DES_CBC:
+          w2->s.enc_type = ROC_IE_OT_SA_ENC_3DES_CBC;
+          break;
 	default:
 	  cnxk_ipsec_err ("Unsupported encryption algorithm");
 	  return -1;
@@ -151,6 +154,7 @@ cn10k_ipsec_sa_common_param_fill (union roc_ot_ipsec_sa_word2 *w2,
     case IPSEC_CRYPTO_ALG_AES_GCM_192:
     case IPSEC_CRYPTO_ALG_AES_CBC_192:
     case IPSEC_CRYPTO_ALG_AES_CTR_192:
+    case IPSEC_CRYPTO_ALG_3DES_CBC:
       w2->s.aes_key_len = ROC_IE_SA_AES_KEY_LEN_192;
       break;
     case IPSEC_CRYPTO_ALG_AES_GCM_256:
@@ -182,6 +186,14 @@ cn10k_ipsec_sa_common_param_fill (union roc_ot_ipsec_sa_word2 *w2,
 	case IPSEC_INTEG_ALG_SHA_512_256:
 	  w2->s.auth_type = ROC_IE_OT_SA_AUTH_SHA2_512;
 	  break;
+       // case IPSEC_INTEG_ALG_AES_128_GMAC:
+       // case IPSEC_INTEG_ALG_AES_192_GMAC:
+       // case IPSEC_INTEG_ALG_AES_256_GMAC:
+       //   w2->s.auth_type = ROC_IE_OT_SA_AUTH_AES_GMAC;
+       //   break;
+       // case IPSEC_INTEG_ALG_AES_XCBC_96:
+       //   w2->s.auth_type = ROC_IE_OT_SA_AUTH_AES_XCBC_128;
+       //   break;
 	default:
 	  cnxk_ipsec_err ("Unsupported authentication algorithm");
 	  return -1;

@@ -1558,8 +1558,19 @@ cnxk_crypto_iegroup_capability_read (union cpt_eng_caps hw_caps,
 	case IPSEC_CRYPTO_ALG_AES_CTR_128:
 	case IPSEC_CRYPTO_ALG_AES_CTR_192:
 	case IPSEC_CRYPTO_ALG_AES_CTR_256:
+        //case IPSEC_CRYPTO_ALG_RC5:
+        //case IPSEC_CRYPTO_ALG_IDEA:
+        //case IPSEC_CRYPTO_ALG_CAST:
+        //case IPSEC_CRYPTO_ALG_BLOWFISH:
+        //case IPSEC_CRYPTO_ALG_3IDEA:
 	  cipher_algos[calg].supported = hw_caps.aes;
 	  break;
+        case IPSEC_CRYPTO_ALG_DES_CBC:
+        case IPSEC_CRYPTO_ALG_3DES_CBC:
+        //case IPSEC_CRYPTO_ALG_DES_IV32:
+        //case IPSEC_CRYPTO_ALG_DES_IV64:
+         cipher_algos[calg].supported = hw_caps.des;
+         break;
 	default:
 	  cipher_algos[calg].supported = 0;
 	  break;
@@ -1585,6 +1596,17 @@ cnxk_crypto_iegroup_capability_read (union cpt_eng_caps hw_caps,
 	case IPSEC_INTEG_ALG_SHA_512_256:
 	  auth_algos[ialg].supported = hw_caps.sha1_sha2;
 	  break;
+       // case IPSEC_INTEG_ALG_DES_MAC:
+       //   auth_algos[ialg].supported = hw_caps.des;
+       //   break;
+       // case IPSEC_INTEG_ALG_AES_XCBC_96:
+       // case IPSEC_INTEG_ALG_SHA1_160:
+       // case IPSEC_INTEG_ALG_CMAC_96:
+       // case IPSEC_INTEG_ALG_AES_128_GMAC:
+       // case IPSEC_INTEG_ALG_AES_192_GMAC:
+       // case IPSEC_INTEG_ALG_AES_256_GMAC:
+       //   auth_algos[ialg].supported = hw_caps.aes;
+       //   break;
 	default:
 	  auth_algos[ialg].supported = 0;
 	  break;
