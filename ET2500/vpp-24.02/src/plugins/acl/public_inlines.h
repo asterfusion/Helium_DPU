@@ -1048,8 +1048,7 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
     u64 *pmask;
     u64 *pkey;
     int mask_type_index, order_index;
-    int j = 0;
-    int k = 0;
+    u32 curr_match_index = -1;
 
     u32 lc_index = match->pkt.lc_index;
     applied_hash_ace_entry_t **applied_hash_aces = vec_elt_at_index (am->hash_entry_vec_by_lc_index, lc_index);
@@ -1096,58 +1095,40 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
             applied_hash_ace_entry_t *pae = vec_elt_at_index ((*applied_hash_aces), curr_index);
             collision_match_rule_t *crs = pae->colliding_rules;
             int i;
-            u32 tmp_index = 0;
             applied_hash_ace_entry_t *tmp_pae = NULL;
 
             for (i = 0; i < vec_len (crs); i++)
             {
+                if (crs[i].applied_entry_index >= curr_match_index)
+                {
+                    continue;
+                }
                 if (single_rule_match_5tuple (&crs[i].rule, is_ip6, match))
                 {
-                    tmp_index = crs[i].applied_entry_index;
-                    tmp_pae = vec_elt_at_index ((*applied_hash_aces), tmp_index);
-
-                    for (j = 0; j < k; j++)
-                    {
-                        if (match_acl_info->acl_index[j] == tmp_pae->acl_index)
-                        {
-                            if (tmp_index < match_acl_info->curr_match_index[j])
-                            {
-                                match_acl_info->rule_index[j] = tmp_pae->ace_index;
-                                match_acl_info->action[j] = tmp_pae->action;
-                                match_acl_info->acl_pos[j] = tmp_pae->acl_position;
-                                match_acl_info->curr_match_index[j] = tmp_index;
-
-                                match_acl_info->action_expand_bitmap[j] = tmp_pae->action_expand_bitmap;
-                                match_acl_info->policer_index[j] = tmp_pae->policer_index;
-                                match_acl_info->set_tc_value[j] = tmp_pae->set_tc_value;
-                                match_acl_info->acl_priority[j] = tmp_pae->priority;
-                            }
-
-                            break;
-                        }
-                    }
-
-                    if (j == k)
-                    {
-                        match_acl_info->acl_index[k] = tmp_pae->acl_index;
-                        match_acl_info->rule_index[k] = tmp_pae->ace_index;
-                        match_acl_info->action[k] = tmp_pae->action;
-                        match_acl_info->acl_pos[k] = tmp_pae->acl_position;
-                        match_acl_info->curr_match_index[k] = tmp_index;
-
-                        match_acl_info->action_expand_bitmap[k] = tmp_pae->action_expand_bitmap;
-                        match_acl_info->policer_index[k] = tmp_pae->policer_index;
-                        match_acl_info->set_tc_value[k] = tmp_pae->set_tc_value;
-                        match_acl_info->acl_priority[k] = tmp_pae->priority;
-                        k++;
-                    }
+                    curr_match_index = crs[i].applied_entry_index;
                 }
+            }
+
+            if (-1 != curr_match_index)
+            {
+                tmp_pae = vec_elt_at_index ((*applied_hash_aces), curr_match_index);
+                match_acl_info->acl_index[0] = tmp_pae->acl_index;
+                match_acl_info->rule_index[0] = tmp_pae->ace_index;
+                match_acl_info->action[0] = tmp_pae->action;
+                match_acl_info->acl_pos[0] = tmp_pae->acl_position;
+                match_acl_info->curr_match_index[0] = curr_match_index;
+
+                match_acl_info->action_expand_bitmap[0] = tmp_pae->action_expand_bitmap;
+                match_acl_info->policer_index[0] = tmp_pae->policer_index;
+                match_acl_info->set_tc_value[0] = tmp_pae->set_tc_value;
+                match_acl_info->acl_priority[0] = tmp_pae->priority;
+                match_acl_info->acl_match_count = 1;
+                return 1;
             }
         }
     }
 
-    match_acl_info->acl_match_count = k;
-    return k;
+    return 0;
 }
 
 always_inline int
