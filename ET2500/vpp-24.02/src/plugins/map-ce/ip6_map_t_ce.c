@@ -44,7 +44,7 @@ mapt_ce_ip6_to_ip4_set_icmp_cb (ip6_header_t *ip6, ip4_header_t *ip4, void *arg)
     // the request.
     ip4_dadr = map_ce_get_ip4 (ctx->d, &ip6->dst_address);
     if (ip6->dst_address.as_u64[0] != map_ce_get_pfx_net (ctx->d, ip4_dadr, ctx->dst_port) || 
-        ip6->src_address.as_u64[1] != map_ce_get_sfx_net (ctx->d, ip4_dadr, ctx->dst_port))
+        ip6->dst_address.as_u64[1] != map_ce_get_sfx_net (ctx->d, ip4_dadr, ctx->dst_port))
         return -1;
 
     ip4->src_address.as_u32 = ip6_map_t_ce_embedded_address (ctx->d, &ip6->src_address);
@@ -56,20 +56,16 @@ static int
 mapt_ce_ip6_to_ip4_set_inner_icmp_cb (ip6_header_t *ip6, ip4_header_t *ip4, void *arg)
 {
   mapt_ce_icmp6_to_icmp_ctx_t *ctx = arg;
-  u32 inner_ip4_dadr;
+  u32 inner_ip4_sadr;
 
   //Security check of inner packet
-  inner_ip4_dadr = map_ce_get_ip4 (ctx->d, &ip6->dst_address);
-  if (ip6->dst_address.as_u64[0] !=
-      map_ce_get_pfx_net (ctx->d, inner_ip4_dadr, ctx->dst_port)
-      || ip6->dst_address.as_u64[1] != map_ce_get_sfx_net (ctx->d,
-							inner_ip4_dadr,
-							ctx->dst_port))
+  inner_ip4_sadr = map_ce_get_ip4 (ctx->d, &ip6->src_address);
+  if (ip6->src_address.as_u64[0] != map_ce_get_pfx_net (ctx->d, inner_ip4_sadr, ctx->dst_port) || 
+      ip6->src_address.as_u64[1] != map_ce_get_sfx_net (ctx->d, inner_ip4_sadr, ctx->dst_port))
     return -1;
 
-  ip4->dst_address.as_u32 = inner_ip4_dadr;
-  ip4->src_address.as_u32 =
-    ip6_map_t_ce_embedded_address (ctx->d, &ip6->src_address);
+  ip4->src_address.as_u32 = inner_ip4_sadr;
+  ip4->dst_address.as_u32 = ip6_map_t_ce_embedded_address (ctx->d, &ip6->dst_address);
 
   return 0;
 }
