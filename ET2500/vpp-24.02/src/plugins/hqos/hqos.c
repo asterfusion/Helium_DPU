@@ -386,12 +386,6 @@ int hqos_interface_mapping_user_group_to_hqos_subport(u32 sw_if_index, u32 user_
         return VNET_API_ERROR_INVALID_VALUE;
     }
 
-    if (hqos_subport_id >= hm->hqos_node_max_subport_per_port)
-    {
-        clib_warning ("%s :current hqos_subport_id invalid", __FUNCTION__);
-        return VNET_API_ERROR_INVALID_VALUE;
-    }
-
     vec_validate(hm->interface_mapping_vec, sw_if_index);
 
     interface_hqos_mapping = vec_elt_at_index(hm->interface_mapping_vec, sw_if_index);
@@ -403,6 +397,12 @@ int hqos_interface_mapping_user_group_to_hqos_subport(u32 sw_if_index, u32 user_
             hash_unset(interface_hqos_mapping->user_group_id_to_hqos_subport_id, user_group_id);
 
         return 0;
+    }
+
+    if (hqos_subport_id >= hm->hqos_node_max_subport_per_port)
+    {
+        clib_warning ("%s :current hqos_subport_id invalid", __FUNCTION__);
+        return VNET_API_ERROR_INVALID_VALUE;
     }
 
     hash_set(interface_hqos_mapping->user_group_id_to_hqos_subport_id,  user_group_id, hqos_subport_id);
@@ -425,12 +425,6 @@ int hqos_interface_mapping_user_to_hqos_pipe(u32 sw_if_index, u32 user_id, u32 h
         return VNET_API_ERROR_INVALID_VALUE;
     }
 
-    if (hqos_pipe_id >= hm->hqos_node_max_pipe_per_subport)
-    {
-        clib_warning ("%s :current hqos_pipe_id invalid", __FUNCTION__);
-        return VNET_API_ERROR_INVALID_VALUE;
-    }
-
     vec_validate(hm->interface_mapping_vec, sw_if_index);
 
     interface_hqos_mapping = vec_elt_at_index(hm->interface_mapping_vec, sw_if_index);
@@ -442,6 +436,12 @@ int hqos_interface_mapping_user_to_hqos_pipe(u32 sw_if_index, u32 user_id, u32 h
             hash_unset(interface_hqos_mapping->user_id_to_hqos_pipe_id, user_id);
 
         return 0;
+    }
+
+    if (hqos_pipe_id >= hm->hqos_node_max_pipe_per_subport)
+    {
+        clib_warning ("%s :current hqos_pipe_id invalid", __FUNCTION__);
+        return VNET_API_ERROR_INVALID_VALUE;
     }
 
     hash_set(interface_hqos_mapping->user_id_to_hqos_pipe_id,  user_id, hqos_pipe_id);
