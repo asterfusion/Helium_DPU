@@ -761,7 +761,7 @@ submit_fail:
   return n_noop;
 }
 
-#if 0
+#if 1
 static_always_inline u32
 cn10k_ipsec_outbound_sort (vlib_main_t *vm, vlib_node_runtime_t *node,
 			   vlib_frame_t *f, cnxk_per_thread_data_t *ptd,

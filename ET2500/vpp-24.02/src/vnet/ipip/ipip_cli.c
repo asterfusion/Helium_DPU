@@ -115,7 +115,7 @@ create_ipip_tunnel_command_fn (vlib_main_t * vm,
 			    &src,
 			    &dst,
 			    fib_index,
-			    flags, IP_DSCP_CS0, mode, &sw_if_index);
+			    flags, IP_DSCP_CS0, mode, &sw_if_index, &instance);
     }
 
   switch (rv)

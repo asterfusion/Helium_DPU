@@ -719,7 +719,7 @@ int
 ipip_add_tunnel (ipip_transport_t transport,
 		 u32 instance, ip46_address_t * src, ip46_address_t * dst,
 		 u32 fib_index, tunnel_encap_decap_flags_t flags,
-		 ip_dscp_t dscp, tunnel_mode_t tmode, u32 * sw_if_indexp)
+		 ip_dscp_t dscp, tunnel_mode_t tmode, u32 * sw_if_indexp, u32 *instance_p)
 {
   ipip_main_t *gm = &ipip_main;
   vnet_main_t *vnm = gm->vnet_main;
@@ -803,6 +803,8 @@ ipip_add_tunnel (ipip_transport_t transport,
 
   if (sw_if_indexp)
     *sw_if_indexp = sw_if_index;
+  if (instance_p)
+      *instance_p = u_idx;
 
   if (t->transport == IPIP_TRANSPORT_IP6 && !gm->ip6_protocol_registered)
     {
