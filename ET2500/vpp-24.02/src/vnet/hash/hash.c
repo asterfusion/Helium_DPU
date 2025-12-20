@@ -10,6 +10,11 @@
 
 vnet_hash_main_t vnet_hash_main;
 
+void hash_set_global_seed (u32 seed)
+{
+  vnet_hash_main.hash_seed = seed;
+}
+
 u8 *
 format_vnet_hash (u8 *s, va_list *args)
 {
@@ -70,6 +75,7 @@ vnet_hash_function_from_func (vnet_hash_fn_t fn, vnet_hash_fn_type_t ftype)
 static clib_error_t *
 vnet_hash_init (vlib_main_t *vm)
 {
+  vnet_hash_main.hash_seed = 0;
   return (0);
 }
 

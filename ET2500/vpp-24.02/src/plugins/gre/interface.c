@@ -357,7 +357,7 @@ gre_tunnel_add_teib_walk (index_t nei, void *ctx)
 
 static int
 vnet_gre_tunnel_add (vnet_gre_tunnel_add_del_args_t *a, u32 outer_fib_index,
-		     u32 *sw_if_indexp)
+		     u32 *sw_if_indexp, u32 *instance_p)
 {
   gre_main_t *gm = &gre_main;
   vnet_main_t *vnm = gm->vnet_main;
@@ -508,6 +508,8 @@ vnet_gre_tunnel_add (vnet_gre_tunnel_add_del_args_t *a, u32 outer_fib_index,
     }
   if (sw_if_indexp)
     *sw_if_indexp = sw_if_index;
+  if (instance_p)
+      *instance_p = u_idx;
 
   /* register gre46-input nodes */
   ip4_register_protocol (IP_PROTOCOL_GRE, gre4_input_node.index);
@@ -573,7 +575,7 @@ vnet_gre_tunnel_delete (vnet_gre_tunnel_add_del_args_t *a, u32 outer_fib_index,
 }
 
 int
-vnet_gre_tunnel_add_del (vnet_gre_tunnel_add_del_args_t *a, u32 *sw_if_indexp)
+vnet_gre_tunnel_add_del (vnet_gre_tunnel_add_del_args_t *a, u32 *sw_if_indexp, u32 *instance_p)
 {
   u32 outer_fib_index;
 
@@ -590,7 +592,7 @@ vnet_gre_tunnel_add_del (vnet_gre_tunnel_add_del_args_t *a, u32 *sw_if_indexp)
     return (VNET_API_ERROR_INVALID_DST_ADDRESS);
 
   if (a->is_add)
-    return (vnet_gre_tunnel_add (a, outer_fib_index, sw_if_indexp));
+    return (vnet_gre_tunnel_add (a, outer_fib_index, sw_if_indexp, instance_p));
   else
     return (vnet_gre_tunnel_delete (a, outer_fib_index, sw_if_indexp));
 }
@@ -716,7 +718,7 @@ create_gre_tunnel_command_fn (vlib_main_t *vm, unformat_input_t *input,
   clib_memcpy (&a->src, &src, sizeof (a->src));
   clib_memcpy (&a->dst, &dst, sizeof (a->dst));
 
-  rv = vnet_gre_tunnel_add_del (a, &sw_if_index);
+  rv = vnet_gre_tunnel_add_del (a, &sw_if_index, &instance);
 
   switch (rv)
     {

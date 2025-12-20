@@ -98,6 +98,10 @@ static uword sf_wireguard_thread_fn(vlib_main_t *vm,
                         peer->output_sw_index = out_sw_if_index;
                     }
                 }
+
+                peer->rewrite = wg_build_rewrite (&peer->src.addr, peer->src.port,
+                                    &peer->dst.addr, peer->dst.port, is_ip4);
+                wg_timers_send_first_handshake (peer);
             }
         }
     }

@@ -258,6 +258,18 @@ cn10k_ipsec_inbound_prepare_inst (vlib_main_t *vm, vlib_buffer_t *b,
   sa_dec_post = onp_esp_post_data (b);
   sa_dec_post->pre_ipsec_l3_hdr_sz = l3_hdr_sz;
 
+  ip4_header_t *ip4 = vlib_buffer_get_current (b) ;
+  if ((ip4->ip_version_and_header_length & 0xf0) == 0x40)
+  {
+      b->current_length = clib_net_to_host_u16(ip4->length);
+  }
+
+  else
+  {
+      ip6_header_t *ip6 = vlib_buffer_get_current (b);
+      b->current_length = clib_net_to_host_u16 (ip6->payload_length) + sizeof (ip6_header_t);;
+  }
+
   clib_memcpy_fast (inst, &sess->inst, sizeof (struct cpt_inst_s));
 
   pkt_meta =
@@ -300,6 +312,8 @@ cn10k_ipsec_inbound_prepare_inst (vlib_main_t *vm, vlib_buffer_t *b,
   inst->w2.u64 = 0;
 
   onp_esp_post_data2 (b)->res_ptr = (u64 *) res;
+  b->current_data += l3_hdr_sz;
+  b->current_length -= l3_hdr_sz;
 }
 
 static_always_inline void
@@ -335,6 +349,30 @@ cn10k_ipsec_inbound_prepare_inst_x2 (vlib_main_t *vm, vlib_buffer_t *b0,
 
   sa0_dec_post->pre_ipsec_l3_hdr_sz = l3_hdr_sz0;
   sa1_dec_post->pre_ipsec_l3_hdr_sz = l3_hdr_sz1;
+
+  ip4_header_t *ip40 = vlib_buffer_get_current (b0);
+  ip4_header_t *ip41 = vlib_buffer_get_current (b1);
+  if ((ip40->ip_version_and_header_length & 0xf0) == 0x40)
+  {
+      b0->current_length = clib_net_to_host_u16(ip40->length);
+  }
+
+  else
+  {
+      ip6_header_t *ip60 = vlib_buffer_get_current (b0);
+      b0->current_length = clib_net_to_host_u16 (ip60->payload_length) + sizeof (ip6_header_t);;
+  }
+
+  if ((ip41->ip_version_and_header_length & 0xf0) == 0x40)
+  {
+      b1->current_length = clib_net_to_host_u16(ip41->length);
+  }
+
+  else
+  {
+      ip6_header_t *ip61 = vlib_buffer_get_current (b1);
+      b1->current_length = clib_net_to_host_u16 (ip61->payload_length) + sizeof (ip6_header_t);;
+  }
 
   clib_memcpy_fast (inst0, &sess0->inst, sizeof (struct cpt_inst_s));
   clib_memcpy_fast (inst1, &sess1->inst, sizeof (struct cpt_inst_s));
@@ -410,6 +448,11 @@ cn10k_ipsec_inbound_prepare_inst_x2 (vlib_main_t *vm, vlib_buffer_t *b0,
 
   onp_esp_post_data2 (b0)->res_ptr = (u64 *) res0;
   onp_esp_post_data2 (b1)->res_ptr = (u64 *) res1;
+
+  b0->current_data += l3_hdr_sz0;
+  b1->current_data += l3_hdr_sz1;
+  b0->current_length -= l3_hdr_sz0;
+  b1->current_length -= l3_hdr_sz1;
 }
 
 static_always_inline i32
@@ -439,7 +482,9 @@ cn10k_ipsec_enqueue_inbound (vlib_main_t *vm, vlib_node_runtime_t *node,
 
   if (PREDICT_FALSE (cnxk_ipsec_sched_frame_alloc (
 		       vm, crypto_dev, crypto_queue, &vec_header) < 0))
+  {
     goto free_all_pkts;
+  }
 
   vec_header->user_ptr = crypto_queue;
   vec_header->next_node = ptd->next1[0];

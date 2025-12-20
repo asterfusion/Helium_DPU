@@ -116,6 +116,56 @@ vl_api_bond_create2_t_handler (vl_api_bond_create2_t * mp)
   /* *INDENT-ON* */
 }
 
+int bond_set_lb (uint32_t sw_if_index, uint8_t lb)
+{
+  // vnet_main_t *vnm = vnet_get_main ();
+  // vnet_hw_interface_t *hw;
+  bond_if_t *bif;
+
+  // hw = vnet_get_sup_hw_interface (vnm, sw_if_index);
+  // if (hw == NULL || bond_dev_class.index != hw->dev_class_index)
+  // {
+  //   return VNET_API_ERROR_INVALID_SW_IF_INDEX;
+  // }
+    
+  bif = bond_get_bond_if_by_sw_if_index (sw_if_index);
+  if (!bif)
+  {
+   return VNET_API_ERROR_INVALID_INTERFACE;
+  }
+  else
+  {
+    bif->lb = lb;
+    if (bif->lb == BOND_LB_L2)
+    {
+      bif->hash_func = vnet_hash_function_from_name ("hash-eth-l2", VNET_HASH_FN_TYPE_ETHERNET);
+    }
+    else if (bif->lb == BOND_LB_L34)
+    {
+      bif->hash_func = vnet_hash_function_from_name ("hash-eth-l34", VNET_HASH_FN_TYPE_ETHERNET);
+    }
+    else if (bif->lb == BOND_LB_L23)
+    {
+      bif->hash_func = vnet_hash_function_from_name ("hash-eth-l23", VNET_HASH_FN_TYPE_ETHERNET);
+    }
+    return 0;
+  }
+}
+
+static void
+vl_api_bond_set_lb_algo_t_handler (vl_api_bond_set_lb_algo_t * mp)
+{
+  
+  int rv;
+  vl_api_bond_set_lb_algo_reply_t *rmp;
+  uint32_t sw_if_index = ntohl (mp->sw_if_index);
+  uint8_t lb = ntohl (mp->lb);
+  
+  rv = bond_set_lb (sw_if_index, lb);
+  
+  REPLY_MACRO (VL_API_BOND_SET_LB_ALGO_REPLY);
+}
+
 static void
 vl_api_bond_add_member_t_handler (vl_api_bond_add_member_t * mp)
 {

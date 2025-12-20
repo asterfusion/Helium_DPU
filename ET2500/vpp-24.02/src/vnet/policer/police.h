@@ -32,6 +32,9 @@ typedef enum
   QOS_ACTION_HANDOFF
 } __clib_packed qos_action_type_en;
 
+/* Misc Policer specific definitions */
+#define QOS_POLICER_FIXED_PKT_SIZE 256
+
 // This is the hardware representation of the policer.
 // To be multithread-safe, the policer is accessed through a spin-lock
 // on the lock field. (For a policer update operation, 24B needs to be
@@ -80,7 +83,8 @@ typedef struct
   u32 scale;			// power-of-2 shift amount for lower rates
   qos_action_type_en action[3];
   ip_dscp_t mark_dscp[3];
-  u8 pad[2];
+  u8 is_pps_type;
+  u8 pad[1];
 
   // Fields are marked as 2R if they are only used for a 2-rate policer,
   // and MOD if they are modified as part of the update operation.

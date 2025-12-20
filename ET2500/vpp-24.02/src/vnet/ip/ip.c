@@ -18,6 +18,8 @@
 
 u32 ip_flow_hash_router_id;
 
+u32 vxlan_hash_config = IP_FLOW_HASH_DEFAULT;
+
 ethernet_type_t
 ip_address_family_to_ether_type (ip_address_family_t af)
 {
@@ -215,6 +217,8 @@ ip_flow_hash_set (ip_address_family_t af, u32 table_id, u32 flow_hash_config)
     return VNET_API_ERROR_NO_SUCH_FIB;
 
   fib_table_set_flow_hash_config (fib_index, fproto, flow_hash_config);
+
+  vxlan_hash_config = flow_hash_config;
 
   return 0;
 }

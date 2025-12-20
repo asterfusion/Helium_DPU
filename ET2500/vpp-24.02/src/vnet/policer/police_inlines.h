@@ -117,8 +117,13 @@ vnet_policer_police (vlib_main_t *vm, vlib_buffer_t *b, u32 policer_index,
 	return QOS_ACTION_HANDOFF;
     }
 
-  len = vlib_buffer_length_in_chain (vm, b);
-  len += VPP_POLICER_DEFAULT_ADJUST;
+  if (pol->is_pps_type)
+      len = QOS_POLICER_FIXED_PKT_SIZE;
+  else
+  {
+      len = vlib_buffer_length_in_chain (vm, b);
+      len += VPP_POLICER_DEFAULT_ADJUST;
+  }
   col = vnet_police_packet (pol, len, packet_color, time_in_policer_periods);
   act = pol->action[col];
   vlib_increment_combined_counter (&policer_counters[col], vm->thread_index,

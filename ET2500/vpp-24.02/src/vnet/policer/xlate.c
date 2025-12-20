@@ -106,8 +106,6 @@
 
 /* End of constants copied from sse_ipe_desc_fmt.h */
 
-/* Misc Policer specific definitions */
-#define QOS_POLICER_FIXED_PKT_SIZE 256
 
 #define QOS_POL_TICKS_PER_SEC 1000LL /* 1 tick = 1 ms */
 
@@ -1090,6 +1088,7 @@ pol_logical_2_physical (const qos_pol_cfg_params_st *cfg, policer_t *phys)
 	(u32) cfg->rb.pps.cb_ms, kbps_cfg.rb.kbps.cir_kbps);
       kbps_cfg.rb.kbps.eb_bytes = qos_convert_burst_ms_to_bytes (
 	(u32) cfg->rb.pps.eb_ms, kbps_cfg.rb.kbps.eir_kbps);
+      phys->is_pps_type = 1;
       break;
     default:
       QOS_DEBUG_ERROR ("Illegal rate type");

@@ -1,0 +1,57 @@
+This application will test the all 3 algorithms of MSNS.
+CGX interface has been configured for loop mode.
+
+Algorithm RTE_PMD_CNXK_SEC_ACTION_ALG0:
+======================================
+Application will allocate 1 SA index for inbound and 1 for outbound using
+cnxk_sa_index_alloc and configure sa_index using session create as SPI
+value and update the real SPI ((0x1 << 28 | sa_index) using session update API.
+And will create a flow rule to match all ESP packets and action as security
+and will configure the sa_hi as ((spi >> 16) & 0xffff) and sa_lo as 0x0 using
+rte_pmd_cnxk_sec_action as config parameter for flow action.
+And will send 1 plain packet by setting tx offload to RTE_MBUF_F_TX_SEC_OFFLOAD.
+And expects the received packet to be decrypted.
+
+Algorithm RTE_PMD_CNXK_SEC_ACTION_ALG1:
+======================================
+Application will allocate 2 SA index for inbound and 1 for outbound using
+cnxk_sa_index_alloc and configure sa_index using session create as SPI
+value and update the real SPI ((sa_index << 28) | 0x0000001) using session update API.
+For inbound case using higher index of cnxk_sa_index_alloc as sa_index.
+And will create a flow rule to match all ESP packets and action as security
+and will configure the sa_hi as ((spi >> 16) & 0xffff) and sa_lo as 0x0001 using
+rte_pmd_cnxk_sec_action as config parameter for flow action.
+And will send 1 plain packet by setting tx offload to RTE_MBUF_F_TX_SEC_OFFLOAD.
+And expects the received packet to be decrypted.
+
+Algorithm RTE_PMD_CNXK_SEC_ACTION_ALG2:
+======================================
+Application will allocate 3 SA index for inbound and 1 for outbound using
+cnxk_sa_index_alloc and configure sa_index using session create as SPI
+value and update the real SPI ((sa_index << 25) | 0x0000001) using session update API.
+For inbound case using higher index of cnxk_sa_index_alloc as sa_index.
+And will create a flow rule to match all ESP packets and action as security
+and will configure the sa_hi as ((spi >> 16) & 0xffff) and sa_lo as 0x0001 using
+rte_pmd_cnxk_sec_action as config parameter for flow action.
+And will send 1 plain packet by setting tx offload to RTE_MBUF_F_TX_SEC_OFFLOAD.
+And expects the received packet to be decrypted.
+
+Usage:
+======
+./cnxk_ipsec_msns -a 0002:02:00.0,custom_sa_act=1 -a 0002:1d:00.0 -a 0002:20:00.1 -- [--perf] [--pfc] [--nb-mbufs]
+
+Perf mode:
+==========
+When "--perf" argument is given, the application runs in perf mode by creating one inbound SA per
+ALG for each port and then listening on the inbound inline traffic and forwarding successfully
+decrypted packets. To generate the pcap for matching SPI, ipsec_msns/gentraffic.py script can be
+used. pcap_gen.sh can be used to generate for 7 ports.
+
+PFC:
+====
+When "--pfc" argument is given, each port would be assigned a PFC channel sequentially and PFC
+would be enabled.
+
+MBUF COUNT:
+==========
+When "--nb-mbufs" argument is given, packet pool will be created for specified count.

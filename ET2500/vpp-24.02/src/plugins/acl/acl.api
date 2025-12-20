@@ -555,3 +555,22 @@ autoreply define acl_reflect_timeout
   u32 udp_idle_timeout;
   u32 tcp_transient_timeout;
 };
+
+/** \brief Replace an existing ACL in-place or create a new ACL
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - interface for which the ACL is applied
+    @param in_count - number of iacl
+    @param count - number of acl
+    @acls - Index and priority for access-list
+*/
+
+autoreply define acl_set_priority
+{
+  u32 client_index;
+  u32 context;
+  u32 sw_if_index;
+  u32 in_count;
+  u32 count;
+  vl_api_acl_index_prio_t acls[count];
+};

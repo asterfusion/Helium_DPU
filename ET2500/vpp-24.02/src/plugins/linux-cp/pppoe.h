@@ -45,6 +45,8 @@ typedef struct
 
 #define PPPOE_VER_TYPE 0x11
 #define PPPOE_PADS 0x65
+#define PPPOE_PADR 0x19
+#define PPPOE_PADT 0xa7
 
 typedef struct
 {
@@ -181,6 +183,7 @@ typedef struct
   vlib_main_t *vlib_main;
   vnet_main_t *vnet_main;
 
+  u32 policer_id;
 } pppoe_main_t;
 
 extern pppoe_main_t pppoe_main;

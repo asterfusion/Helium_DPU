@@ -25,6 +25,8 @@
 #include <plugins/linux-cp/pppoe.h>
 
 #include <vnet/ppp/packet.h>
+#include <vnet/policer/policer.h>
+#include <vnet/policer/police_inlines.h>
 
 pppoe_main_t pppoe_main;
 
@@ -364,6 +366,15 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
               sw_if_index, 1, NULL, 0);
       vnet_feature_enable_disable("ip6-multicast", "linux-cp-bfdv6-phy",
               sw_if_index, 1, NULL, 0);
+      /* disable ip-not-enable */
+      vnet_feature_enable_disable("ip4-unicast", "ip4-not-enabled",
+              sw_if_index, 0, NULL, 0);
+      vnet_feature_enable_disable("ip4-multicast", "ip4-not-enabled",
+              sw_if_index, 0, NULL, 0);
+      vnet_feature_enable_disable("ip6-unicast", "ip6-not-enabled",
+              sw_if_index, 0, NULL, 0);
+      vnet_feature_enable_disable("ip6-multicast", "ip6-not-enabled",
+              sw_if_index, 0, NULL, 0);
 
   }
   else
@@ -1166,6 +1177,11 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
 
+  u64 time_in_policer_periods;
+  time_in_policer_periods = clib_cpu_time_now () >> POLICER_TICKS_PER_PERIOD_SHIFT;
+  pppoe_main_t *pem = &pppoe_main;
+  u32 policer_id = pem->policer_id;
+
   while (n_left_from > 0)
   {
       u32 n_left_to_next;
@@ -1185,6 +1201,12 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
           u32 is_host0 = 0;
           u32 is_host1 = 0;
           u8 len0, len1;
+          u8 act1;
+          u8 act0;
+          pppoe_header_t * pppoe0;
+          pppoe_header_t * pppoe1;
+          u8 is_need_policer0 = 0;
+          u8 is_need_policer1 = 0;
 
           bi0 = from[0];
           bi1 = from[1];
@@ -1195,6 +1217,16 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
           b0 = vlib_get_buffer (vm, bi0);
           b1 = vlib_get_buffer (vm, bi1);
 
+          pppoe0 = (pppoe_header_t*)( vlib_buffer_get_current(b0) );
+          if ( pppoe0->code == PPPOE_PADR || pppoe0->code == PPPOE_PADT)
+          {
+              is_need_policer0 = 1;
+          }
+          pppoe1 = (pppoe_header_t*)( vlib_buffer_get_current(b1) );
+          if ( pppoe1->code == PPPOE_PADR || pppoe1->code == PPPOE_PADT)
+          {
+              is_need_policer1 = 1;
+          }
           next0 = next1 = LCP_PPPOE_NEXT_DROP;
 
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
@@ -1268,6 +1300,26 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               t->sw_if_index = sw_if_index1;
           }
 
+          if ( is_host1 == 0 && is_need_policer1 == 1)
+          {
+              act1 = vnet_policer_police (vm, b1, policer_id, time_in_policer_periods,
+                      POLICE_CONFORM, false);
+              if (PREDICT_FALSE (act1 == QOS_ACTION_DROP))
+              {
+                  next1 = LCP_PPPOE_NEXT_DROP;
+              }
+          }
+
+          if ( is_host0 == 0 && is_need_policer0 == 1)
+          {
+              act0 = vnet_policer_police (vm, b0, policer_id, time_in_policer_periods,
+                      POLICE_CONFORM, false);
+              if (PREDICT_FALSE (act0 == QOS_ACTION_DROP))
+              {
+                  next0 = LCP_PPPOE_NEXT_DROP;
+              }
+          }
+
           from += 2;
           n_left_from -= 2;
           to_next += 2;
@@ -1287,12 +1339,21 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
 	      lcp_itf_pair_t *lip0 = NULL;
 	      u32 lipi0 = 0;
           u32 is_host0 = 0;
+          u8 act0;
+          pppoe_header_t * pppoe0;
+          u8 is_need_policer0 = 0;
 	  u8 len0;
 
           bi0 = from[0];
           to_next[0] = bi0;
 
           b0 = vlib_get_buffer (vm, bi0);
+
+          pppoe0 = (pppoe_header_t*)( vlib_buffer_get_current(b0) );
+          if ( pppoe0->code == PPPOE_PADR || pppoe0->code == PPPOE_PADT)
+          {
+              is_need_policer0 = 1;
+          }
 
           next0 = LCP_PPPOE_NEXT_DROP;
 
@@ -1333,6 +1394,15 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
                   vlib_add_trace (vm, node, b0, sizeof (*t));
 
               t->sw_if_index = sw_if_index0;
+          }
+          if ( is_host0 == 0 && is_need_policer0 == 1)
+          {
+              act0 = vnet_policer_police (vm, b0, policer_id, time_in_policer_periods,
+                      POLICE_CONFORM, false);
+              if (PREDICT_FALSE (act0 == QOS_ACTION_DROP))
+              {
+                  next0 = LCP_PPPOE_NEXT_DROP;
+              }
           }
 
           from += 1;
@@ -1575,6 +1645,7 @@ lcp_pppoe_init (vlib_main_t *vm)
 
   pem->vnet_main = vnet_get_main ();
   pem->vlib_main = vm;
+  pem->policer_id = UINT32_MAX;
 
   BV (clib_bihash_init) (&pem->session_table, "pppoe session table",
 			 PPPOE_NUM_BUCKETS, PPPOE_MEMORY_SIZE);
@@ -1589,6 +1660,30 @@ lcp_pppoe_init (vlib_main_t *vm)
 
   ethernet_register_input_type (vm, ETHERNET_TYPE_PPPOE_SESSION,
       pppoe_input_node.index);
+
+  /* create pppoe_policer for punt packets */
+  qos_pol_cfg_params_st c;
+  u32 pi;
+  int rv = 0;
+  clib_memset(&c, 0, sizeof(c));
+  c.conform_action.dscp = IP_DSCP_INVALID;
+  c.conform_action.pcp = UINT8_MAX;
+  c.conform_action.action_type = QOS_ACTION_TRANSMIT;
+  c.exceed_action.dscp = IP_DSCP_INVALID;
+  c.exceed_action.pcp = UINT8_MAX;
+  c.exceed_action.action_type = QOS_ACTION_DROP;
+  c.violate_action.dscp = IP_DSCP_INVALID;
+  c.violate_action.pcp = UINT8_MAX;
+  c.violate_action.action_type = QOS_ACTION_DROP;
+  c.rate_type = QOS_RATE_PPS;
+  c.rfc = QOS_POLICER_TYPE_1R3C_RFC_2697;
+  c.rb.pps.cir_pps = 33;
+  c.rb.pps.cb_ms = 33;
+  rv = policer_add (pem->vlib_main, (const u8*)"pppoe_policer", &c, &pi);
+  if ( rv == 0)
+  {
+      pem->policer_id = pi;
+  }
   return NULL;
 }
 
