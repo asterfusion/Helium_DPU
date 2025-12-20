@@ -31,6 +31,8 @@
 #define IKEV2_GCM_IV_SIZE (IKEV2_GCM_NONCE_SIZE - IKEV2_GCM_SALT_SIZE)
 #define IKEV2_L2_L3_L4_TOTAL_LEN (14 + 20 + 8)
 
+#define IKEV2_MAX_PKTS_ONE_SA  4000000000
+
 typedef u8 v8;
 
 typedef CLIB_PACKED (struct {
