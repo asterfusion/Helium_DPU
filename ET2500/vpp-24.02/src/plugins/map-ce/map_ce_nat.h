@@ -30,14 +30,15 @@
 
 #define MAP_NAT_STATIC_HASH_BUCKETS   (1024)
 #define MAP_NAT_STATIC_HASH_MEMORY_SIZE (64 << 20) //64M
-#define MAP_NAT_HASH_BUCKETS   (4096)
+#define MAP_NAT_HASH_BUCKETS   (512 * 1024)
 #define MAP_NAT_HASH_MEMORY_SIZE (0) //no limit
 
-#define MAP_NAT_STATIC_SESSION_MAX (1024)
-#define MAP_NAT_SESSION_MAX (10 * 1024)
+#define MAP_NAT_STATIC_SESSION_MAX (8192)
 
-#define MAP_NAT_USER_INITIAL_NUM (1024)
+#define MAP_NAT_USER_MAX    (5 * 1024)
+#define MAP_NAT_SESSION_MAX_PER_USER (512)
 
+#define MAP_NAT_SESSION_MAX (MAP_NAT_USER_MAX * MAP_NAT_SESSION_MAX_PER_USER)
 
 #define MAP_NAT_UDP_TIMEOUT 300
 #define MAP_NAT_TCP_TIMEOUT 300
@@ -179,20 +180,20 @@ typedef struct
     map_nat44_ei_session_t *sessions;
     u8 *in2out_name;
     u8 *out2in_name;
-    clib_bihash_8_8_t in2out;
-    clib_bihash_8_8_t out2in;
+    clib_bihash_8_8_t *in2out;
+    clib_bihash_8_8_t *out2in;
 
     /* Main Static lookup */
     map_nat44_ei_static_mapping_t *static_mappings;
     u8 *static_in2out_name;
     u8 *static_out2in_name;
-    clib_bihash_8_8_t static_in2out; 
-    clib_bihash_8_8_t static_out2in;
+    clib_bihash_8_8_t *static_in2out;
+    clib_bihash_8_8_t *static_out2in;
 
     /* User lokkup */
     map_nat44_ei_user_t *users;
     u8 *users_hash_name;
-    clib_bihash_8_8_t users_hash;
+    clib_bihash_8_8_t *users_hash;
 
     dlist_elt_t *list_pool;
 
@@ -378,7 +379,7 @@ map_nat44_ei_delete_user_with_no_session (map_nat44_ei_domain_t *mnat,
 
         if (hash_del)
         {
-            clib_bihash_add_del_8_8 (&mnat->users_hash, &kv, 0);
+            clib_bihash_add_del_8_8 (mnat->users_hash, &kv, 0);
         }
     }
 }
@@ -445,7 +446,7 @@ map_nat44_ei_alloc_map_addr_port (map_nat44_ei_domain_t *mnat,
     map_nat44_ei_address_t *a;
     u16 m, ports, portnum, A, j;
     m = 16 - (mnat->psid_offset + mnat->psid_length);
-    ports = (1 << (16 - mnat->psid_length)) - (1 << m);
+    ports = mnat->psid_length == 0 ? (0xffff - 1024) : (1 << (16 - mnat->psid_length)) - (1 << m);
 
     if (!vec_len (mnat->addresses))
         goto exhausted;
@@ -457,9 +458,16 @@ map_nat44_ei_alloc_map_addr_port (map_nat44_ei_domain_t *mnat,
         {
             while (1)
             {
-                A = map_nat_random_port (&mnat->random_seed, 1, pow2_mask (mnat->psid_offset));
-                j = map_nat_random_port (&mnat->random_seed, 0, pow2_mask (m));
-                portnum = A | (mnat->psid << mnat->psid_offset) | (j << (16 - m));
+                if (mnat->psid_length != 0)
+                {
+                    A = map_nat_random_port (&mnat->random_seed, 1, pow2_mask (mnat->psid_offset));
+                    j = map_nat_random_port (&mnat->random_seed, 0, pow2_mask (m));
+                    portnum = A | (mnat->psid << mnat->psid_offset) | (j << (16 - m));
+                }
+                else
+                {
+                    portnum = 1024 + map_nat_random_port (&mnat->random_seed, 0, ports);
+                }
                 if (clib_bitmap_get (a->busy_port_bitmap[proto], portnum))
                     continue;
                 a->busy_port_bitmap[proto] = clib_bitmap_set (a->busy_port_bitmap[proto], portnum, 1);
@@ -515,10 +523,10 @@ map_nat44_ei_free_session_data (map_nat44_ei_domain_t *mnat,
     /* session lookup tables */
 
     init_map_nat_i2o_k (&kv, s);
-    clib_bihash_add_del_8_8 (&mnat->in2out, &kv, 0);
+    clib_bihash_add_del_8_8 (mnat->in2out, &kv, 0);
 
     init_map_nat_o2i_k (&kv, s);
-    clib_bihash_add_del_8_8 (&mnat->out2in, &kv, 0);
+    clib_bihash_add_del_8_8 (mnat->out2in, &kv, 0);
 
     if ((s->flags & MAP_NAT_SESSION_FLAG_STATIC_MAPPING))
         return;
@@ -546,7 +554,7 @@ map_nat44_ei_delete_session (map_nat44_ei_domain_t *mnat, map_nat44_ei_session_t
     MAP_NAT_UNLOCK(mnat, sessions);
 
     kv.key = u_key.as_u64;
-    if (!clib_bihash_search_8_8 (&mnat->users_hash, &kv, &value))
+    if (!clib_bihash_search_8_8 (mnat->users_hash, &kv, &value))
     {
         u = pool_elt_at_index (mnat->users, value.value);
         MAP_NAT_LOCK(u, self);
