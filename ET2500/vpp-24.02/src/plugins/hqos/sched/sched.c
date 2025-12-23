@@ -702,6 +702,7 @@ hqos_sched_port_config(hqos_sched_port_params *params)
     port->n_max_subport_profiles = params->n_max_subport_profiles;
     port->n_pipes_per_subport = params->n_pipes_per_subport;
     port->n_pipes_per_subport_log2 = hqos_count_trailing_zeros_32(params->n_pipes_per_subport);
+    port->n_queue_size = params->n_queue_size;
 
     for (i = 0; i < HQOS_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++)
         port->pipe_queue[i] = i;

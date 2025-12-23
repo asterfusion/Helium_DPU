@@ -188,6 +188,7 @@ vl_api_hqos_port_add_t_handler (vl_api_hqos_port_add_t * mp)
                        ntohl(mp->n_subports_per_port), 
                        ntohl(mp->n_max_subport_profiles), 
                        ntohl(mp->n_pipes_per_subport), 
+                       ntohl(mp->n_queue_size),
                        ntohl(mp->mtu), ntohl(mp->frame_overhead),
                        &hqos_port_id);
 
@@ -492,6 +493,295 @@ vl_api_hqos_queue_stat_dump_t_handler (vl_api_hqos_queue_stat_dump_t * mp)
                                  htonl(mp->hqos_queue_id));
     return; 
 }
+
+void
+vl_api_hqos_user_dscp_tc_map_t_handler (vl_api_hqos_user_dscp_tc_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_dscp_tc_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_set_dscp_tc_map(ntohl(mp->user_id), mp->dscp, mp->tc);
+
+  REPLY_MACRO (VL_API_HQOS_USER_DSCP_TC_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_dscp_color_map_t_handler (vl_api_hqos_user_dscp_color_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_dscp_color_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_set_dscp_color_map(ntohl(mp->user_id), mp->dscp, mp->color);
+
+  REPLY_MACRO (VL_API_HQOS_USER_DSCP_COLOR_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_dot1p_tc_map_t_handler (vl_api_hqos_user_dot1p_tc_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_dot1p_tc_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_set_dot1p_tc_map(ntohl(mp->user_id), mp->dot1p, mp->tc);
+
+  REPLY_MACRO (VL_API_HQOS_USER_DOT1P_TC_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_dot1p_color_map_t_handler (vl_api_hqos_user_dot1p_color_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_dot1p_color_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_set_dot1p_color_map(ntohl(mp->user_id), mp->dot1p, mp->color);
+
+  REPLY_MACRO (VL_API_HQOS_USER_DOT1P_COLOR_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_mpls_exp_tc_map_t_handler (vl_api_hqos_user_mpls_exp_tc_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_mpls_exp_tc_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_set_mpls_exp_tc_map(ntohl(mp->user_id), mp->mpls_exp, mp->tc);
+
+  REPLY_MACRO (VL_API_HQOS_USER_MPLS_EXP_TC_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_mpls_exp_color_map_t_handler (vl_api_hqos_user_mpls_exp_color_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_mpls_exp_color_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_set_mpls_exp_color_map(ntohl(mp->user_id), mp->mpls_exp, mp->color);
+
+  REPLY_MACRO (VL_API_HQOS_USER_MPLS_EXP_COLOR_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_remove_dscp_tc_map_t_handler (vl_api_hqos_user_remove_dscp_tc_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_remove_dscp_tc_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_remove_dscp_tc_map(ntohl(mp->user_id));
+
+  REPLY_MACRO (VL_API_HQOS_USER_REMOVE_DSCP_TC_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_remove_dscp_color_map_t_handler (vl_api_hqos_user_remove_dscp_color_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_remove_dscp_color_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_remove_dscp_color_map(ntohl(mp->user_id));
+
+  REPLY_MACRO (VL_API_HQOS_USER_REMOVE_DSCP_COLOR_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_remove_dot1p_tc_map_t_handler (vl_api_hqos_user_remove_dot1p_tc_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_remove_dot1p_tc_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_remove_dot1p_tc_map(ntohl(mp->user_id));
+
+  REPLY_MACRO (VL_API_HQOS_USER_REMOVE_DOT1P_TC_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_remove_dot1p_color_map_t_handler (vl_api_hqos_user_remove_dot1p_color_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_remove_dot1p_color_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_remove_dot1p_color_map(ntohl(mp->user_id));
+
+  REPLY_MACRO (VL_API_HQOS_USER_REMOVE_DOT1P_COLOR_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_remove_mpls_exp_tc_map_t_handler (vl_api_hqos_user_remove_mpls_exp_tc_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_remove_mpls_exp_tc_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_remove_mpls_exp_tc_map(ntohl(mp->user_id));
+
+  REPLY_MACRO (VL_API_HQOS_USER_REMOVE_MPLS_EXP_TC_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_remove_mpls_exp_color_map_t_handler (vl_api_hqos_user_remove_mpls_exp_color_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_remove_mpls_exp_color_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_remove_mpls_exp_color_map(ntohl(mp->user_id));
+
+  REPLY_MACRO (VL_API_HQOS_USER_REMOVE_MPLS_EXP_COLOR_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_group_dscp_tc_map_t_handler (vl_api_hqos_user_group_dscp_tc_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_group_dscp_tc_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_group_set_dscp_tc_map(ntohl(mp->user_group_id), mp->dscp, mp->tc);
+
+  REPLY_MACRO (VL_API_HQOS_USER_GROUP_DSCP_TC_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_group_dscp_color_map_t_handler (vl_api_hqos_user_group_dscp_color_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_group_dscp_color_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_group_set_dscp_color_map(ntohl(mp->user_group_id), mp->dscp, mp->color);
+
+  REPLY_MACRO (VL_API_HQOS_USER_GROUP_DSCP_COLOR_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_group_dot1p_tc_map_t_handler (vl_api_hqos_user_group_dot1p_tc_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_group_dot1p_tc_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_group_set_dot1p_tc_map(ntohl(mp->user_group_id), mp->dot1p, mp->tc);
+
+  REPLY_MACRO (VL_API_HQOS_USER_GROUP_DOT1P_TC_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_group_dot1p_color_map_t_handler (vl_api_hqos_user_group_dot1p_color_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_group_dot1p_color_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_group_set_dot1p_color_map(ntohl(mp->user_group_id), mp->dot1p, mp->color);
+
+  REPLY_MACRO (VL_API_HQOS_USER_GROUP_DOT1P_COLOR_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_group_mpls_exp_tc_map_t_handler (vl_api_hqos_user_group_mpls_exp_tc_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_group_mpls_exp_tc_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_group_set_mpls_exp_tc_map(ntohl(mp->user_group_id), mp->mpls_exp, mp->tc);
+
+  REPLY_MACRO (VL_API_HQOS_USER_GROUP_MPLS_EXP_TC_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_group_mpls_exp_color_map_t_handler (vl_api_hqos_user_group_mpls_exp_color_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_group_mpls_exp_color_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_group_set_mpls_exp_color_map(ntohl(mp->user_group_id), mp->mpls_exp, mp->color);
+
+  REPLY_MACRO (VL_API_HQOS_USER_GROUP_MPLS_EXP_COLOR_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_group_remove_dscp_tc_map_t_handler (vl_api_hqos_user_group_remove_dscp_tc_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_group_remove_dscp_tc_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_group_remove_dscp_tc_map(ntohl(mp->user_group_id));
+
+  REPLY_MACRO (VL_API_HQOS_USER_GROUP_REMOVE_DSCP_TC_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_group_remove_dscp_color_map_t_handler (vl_api_hqos_user_group_remove_dscp_color_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_group_remove_dscp_color_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_group_remove_dscp_color_map(ntohl(mp->user_group_id));
+
+  REPLY_MACRO (VL_API_HQOS_USER_GROUP_REMOVE_DSCP_COLOR_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_group_remove_dot1p_tc_map_t_handler (vl_api_hqos_user_group_remove_dot1p_tc_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_group_remove_dot1p_tc_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_group_remove_dot1p_tc_map(ntohl(mp->user_group_id));
+
+  REPLY_MACRO (VL_API_HQOS_USER_GROUP_REMOVE_DOT1P_TC_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_group_remove_dot1p_color_map_t_handler (vl_api_hqos_user_group_remove_dot1p_color_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_group_remove_dot1p_color_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_group_remove_dot1p_color_map(ntohl(mp->user_group_id));
+
+  REPLY_MACRO (VL_API_HQOS_USER_GROUP_REMOVE_DOT1P_COLOR_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_group_remove_mpls_exp_tc_map_t_handler (vl_api_hqos_user_group_remove_mpls_exp_tc_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_group_remove_mpls_exp_tc_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_group_remove_mpls_exp_tc_map(ntohl(mp->user_group_id));
+
+  REPLY_MACRO (VL_API_HQOS_USER_GROUP_REMOVE_MPLS_EXP_TC_MAP_REPLY);
+}
+
+void
+vl_api_hqos_user_group_remove_mpls_exp_color_map_t_handler (vl_api_hqos_user_group_remove_mpls_exp_color_map_t * mp)
+{
+  hqos_main_t *hm = &hqos_main;
+  vl_api_hqos_user_group_remove_mpls_exp_color_map_reply_t *rmp;
+  int rv = 0;
+
+  rv = hqos_user_group_remove_mpls_exp_color_map(ntohl(mp->user_group_id));
+
+  REPLY_MACRO (VL_API_HQOS_USER_GROUP_REMOVE_MPLS_EXP_COLOR_MAP_REPLY);
+}
+
 
 /* API definitions */
 #include <vnet/format_fns.h>

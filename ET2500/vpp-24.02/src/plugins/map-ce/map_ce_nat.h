@@ -28,7 +28,7 @@
 
 /* Fixed Resource DB define */
 
-#define MAP_NAT_STATIC_HASH_BUCKETS   (1024)
+#define MAP_NAT_STATIC_HASH_BUCKETS   (8192)
 #define MAP_NAT_STATIC_HASH_MEMORY_SIZE (64 << 20) //64M
 #define MAP_NAT_HASH_BUCKETS   (512 * 1024)
 #define MAP_NAT_HASH_MEMORY_SIZE (0) //no limit
@@ -170,6 +170,13 @@ typedef struct
     /* lock */
     clib_spinlock_t lock_self;
 }__attribute__ ((packed)) map_nat44_ei_session_t;
+
+typedef struct
+{
+    u32 max_static_session;
+    u32 max_user;
+    u32 max_session_per_user;
+} map_nat44_ei_config_t;
 
 typedef struct 
 {
@@ -567,7 +574,7 @@ map_nat44_ei_delete_session (map_nat44_ei_domain_t *mnat, map_nat44_ei_session_t
     }
 }
 
-void map_ce_nat44_domain_create(u32 map_domain_index);
+void map_ce_nat44_domain_create(u32 map_domain_index, map_nat44_ei_config_t *config);
 void map_ce_nat44_domain_remove(u32 map_domain_index);
 void map_ce_nat44_domain_update_psid(u32 map_domain_index, u16 psid);
 

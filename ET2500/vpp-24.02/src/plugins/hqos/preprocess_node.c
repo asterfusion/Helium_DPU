@@ -20,6 +20,7 @@
 #include <vlib/vlib.h>
 #include <vlib/threads.h>
 #include <vnet/vnet.h>
+#include <vnet/dpo/dpo.h>
 #include <vppinfra/error.h>
 #include <vnet/feature/feature.h>
 
@@ -52,12 +53,19 @@ hqos_classification_proc(vlib_main_t *vm,
     u32 hqos_port_id = ~0;
 
     uword *user_group_id_ptr = NULL;
+    hqos_user_group_t *user_group = NULL;
     u32 user_group_id = ~0;
 
     hqos_user_t *user = NULL;
     u32 user_id = ~0;
 
     u32 tc = 0;
+    u32 color = HQOS_COLOR_GREEN;
+
+    uword *qosmap_tc_hash = NULL;
+    uword *qosmap_color_hash = NULL;
+    uword *tc_uword = NULL;
+    uword *color_uword = NULL;
 
     hqos_sched_port *hqos_port = NULL;
     uword *hqos_subport_id_ptr = NULL;
@@ -72,8 +80,6 @@ hqos_classification_proc(vlib_main_t *vm,
 
     sw_if_index = vnet_buffer (p)->sw_if_index[VLIB_TX];
     hi = vnet_get_sup_hw_interface (vnm, sw_if_index);
-
-    tc = vnet_buffer2(p)->tc_index;
 
     if (!hi)
     {
@@ -126,7 +132,72 @@ hqos_classification_proc(vlib_main_t *vm,
     else
         hqos_pipe_id = 0;
 
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
     user = pool_elt_at_index(hm->user_pool, user_id);
+
+    //GET TC
+    if (p->flags & VLIB_BUFFER_ACL_SET_TC_VALID)
+    {
+        tc = vnet_buffer2(p)->tc_index & HQOS_TC_MASK;
+    }
+    else if (p->flags & VNET_BUFFER_F_QOS_DATA_VALID)
+    {
+        switch(vnet_buffer2(p)->tc_index_dpo)
+        {
+        case DPO_PROTO_IP4:
+        case DPO_PROTO_IP6:
+            {
+                if (user->dscp_to_tc)
+                    qosmap_tc_hash = user->dscp_to_tc;
+                else if (user_group->dscp_to_tc)
+                    qosmap_tc_hash = user_group->dscp_to_tc;
+
+                if (user->dscp_to_color)
+                    qosmap_color_hash = user->dscp_to_color;
+                else if (user_group->dscp_to_color)
+                    qosmap_color_hash = user_group->dscp_to_color;
+            }
+            break;
+        case DPO_PROTO_ETHERNET:
+            {
+                if (user->dot1p_to_tc)
+                    qosmap_tc_hash = user->dot1p_to_tc;
+                else if (user_group->dot1p_to_tc)
+                    qosmap_tc_hash = user_group->dot1p_to_tc;
+
+                if (user->dot1p_to_color)
+                    qosmap_color_hash = user->dot1p_to_color;
+                else if (user_group->dot1p_to_color)
+                    qosmap_color_hash = user_group->dot1p_to_color;
+            }
+            break;
+        case DPO_PROTO_MPLS:
+            {
+                if (user->mpls_exp_to_tc)
+                    qosmap_tc_hash = user->mpls_exp_to_tc;
+                else if (user_group->mpls_exp_to_tc)
+                    qosmap_tc_hash = user_group->mpls_exp_to_tc;
+
+                if (user->mpls_exp_to_color)
+                    qosmap_color_hash = user->mpls_exp_to_color;
+                else if (user_group->mpls_exp_to_color)
+                    qosmap_color_hash = user_group->mpls_exp_to_color;
+            }
+            break;
+        }
+
+        if (qosmap_tc_hash)
+        {
+            tc_uword = hash_get(qosmap_tc_hash, vnet_buffer2(p)->qos.bits);
+            tc = tc_uword ? (tc_uword[0] & HQOS_TC_MASK): 0;
+        }
+        if (qosmap_color_hash)
+        {
+            color_uword = hash_get(qosmap_color_hash, vnet_buffer2(p)->qos.bits);
+            color = color_uword ? (color_uword[0] < HQOS_COLORS ? color_uword[0] : HQOS_COLOR_RED): 0;
+        }
+    }
+
     hqos_port = hm->hqos_port_ptr_vec[hqos_port_id];
     hqos_port_fifo = vec_elt_at_index(hm->hqos_port_fifo_vec, hqos_port_id);
 
@@ -135,7 +206,7 @@ hqos_classification_proc(vlib_main_t *vm,
                                            tc : HQOS_SCHED_TRAFFIC_CLASS_BE + tc);
 
     vlib_buffer_hqos_tc_set(p, tc);
-    vlib_buffer_hqos_color_set(p, HQOS_COLOR_GREEN);
+    vlib_buffer_hqos_color_set(p, color);
     vlib_buffer_hqos_queue_set(p, hqos_queue_id);
 
     rv_num = hqos_fifo_enqueue_mp(hqos_port_fifo->in_fifo, 1, (void *)&p);
@@ -160,7 +231,7 @@ trace:
         t->tc = tc;
         t->user_id = user_id;
         t->user_group_id = user_group_id;
-        t->color = HQOS_COLOR_GREEN;
+        t->color = color;
         t->hqos_port_id = hqos_port_id;
         t->hqos_subport_id = hqos_subport_id;
         t->hqos_pipe_id = hqos_pipe_id;

@@ -476,6 +476,7 @@ acl_action_expand_proc(vlib_main_t *vm, vlib_buffer_t *b, u16 *next, const match
     if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_SET_TC))
     {
         vnet_buffer2(b)->tc_index = action_expand->set_tc_value;
+        b->flags |= VLIB_BUFFER_ACL_SET_TC_VALID;
     }
 
     if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_SET_HQOS_USER))

@@ -308,6 +308,272 @@ VLIB_CLI_COMMAND (qos_record_show_command, static) = {
   .is_mp_safe = 1,
 };
 
+static clib_error_t*
+qos_map_set_dscp_tc_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) {
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+  u32 dscp, tc;
+
+  if (!unformat(input, " %U %d %d", unformat_vnet_hw_interface, vnm, &hw_if_index, &dscp, &tc)) 
+  {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_set(hi->dscp_to_tc, dscp, tc);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND(set_qos_map_dscp_tc_map_command, static) = {
+  .path = "set qos-map dscp-to-tc",
+  .short_help = "set qos-map dscp-to-tc <hw-interface> <dscp> <tc>",
+  .function = qos_map_set_dscp_tc_map,
+};
+
+static clib_error_t*
+qos_map_set_dot1p_tc_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) 
+{
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+  u32 dot1p, tc;
+
+  if (!unformat(input, " %U %d %d", unformat_vnet_hw_interface, vnm, &hw_if_index, &dot1p, &tc)) 
+  {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_set(hi->dot1p_to_tc, dot1p, tc);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND(set_qos_map_dot1p_tc_map_command, static) = {
+  .path = "set qos-map dot1p-to-tc",
+  .short_help = "qos-map dot1p-to-tc <interface> <dot1p> <tc>",
+  .function = qos_map_set_dot1p_tc_map,
+};
+
+static clib_error_t*
+qos_map_set_mpls_exp_tc_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) 
+{
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+  u32 mpls_exp, tc;
+
+  if (!unformat(input, " %U %d %d", unformat_vnet_hw_interface, vnm, &hw_if_index, &mpls_exp, &tc)) 
+  {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_set(hi->mpls_exp_to_tc, mpls_exp, tc);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND(set_qos_map_mpls_exp_tc_map_command, static) = {
+  .path = "set qos-map mplsexp-to-tc",
+  .short_help = "qos-map mplsexp-to-tc <interface> <exp> <tc>",
+  .function = qos_map_set_mpls_exp_tc_map,
+};
+
+static clib_error_t*
+qos_map_set_tc_queue_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) 
+{
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+  u32 queue, tc;
+
+  if (!unformat(input, "%d %d %U",unformat_vnet_hw_interface, vnm, &hw_if_index, &tc, &queue)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_set(hi->tc_to_queue, tc, queue);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND(set_qos_map_tc_queue_map_command, static) = {
+  .path = "set qos-map tc-to-queue",
+  .short_help = "set qos-map tc-to-queue <interface> <tc> <queue>",
+  .function = qos_map_set_tc_queue_map,
+};
+
+static clib_error_t*
+qos_map_del_dscp_tc_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) 
+{
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+
+  if (!unformat(input, "%U", unformat_vnet_hw_interface, vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_free(hi->dscp_to_tc);
+  hi->dscp_to_tc = NULL;
+  return error;
+}
+
+VLIB_CLI_COMMAND(delete_qos_map_dscp_tc_map_command, static) = {
+  .path = "delete qos-map dscp-to-tc",
+  .short_help = "delete qos-map dscp-to-tc <interface>",
+  .function = qos_map_del_dscp_tc_map,
+};
+
+static clib_error_t*
+qos_map_del_dot1p_tc_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) 
+{
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+
+  if (!unformat(input, "%U", unformat_vnet_hw_interface, vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_free(hi->dot1p_to_tc);
+  hi->dot1p_to_tc = NULL;
+  return error;
+}
+
+VLIB_CLI_COMMAND(delete_qos_map_dot1p_tc_map_command, static) = {
+  .path = "delete qos-map dot1p-to-tc",
+  .short_help = "delete qos-map dot1p-to-tc <interface>",
+  .function = qos_map_del_dot1p_tc_map,
+};
+
+static clib_error_t*
+qos_map_del_mpls_exp_tc_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) 
+{
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+
+  if (!unformat(input, "%U", unformat_vnet_hw_interface, vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_free(hi->mpls_exp_to_tc);
+  hi->mpls_exp_to_tc = NULL;
+  return error;
+}
+
+VLIB_CLI_COMMAND(delete_qos_map_mpls_exp_tc_map_command, static) = {
+  .path = "delete qos-map mplsexp-to-tc",
+  .short_help = "delete qos-map mplsexp-to-tc <interface>",
+  .function = qos_map_del_mpls_exp_tc_map,
+};
+
+static clib_error_t*
+qos_map_del_tc_queue_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) 
+{
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+
+  if (!unformat(input, "%U", unformat_vnet_hw_interface, vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_free(hi->tc_to_queue);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND(delete_qos_map_tc_queue_map_command, static) = {
+  .path = "delete qos-map tc-to-queue",
+  .short_help = "delete qos-map tc-to-queue <interface>",
+  .function = qos_map_del_tc_queue_map,
+};
+
+static clib_error_t*
+qos_map_show_map(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd) 
+{
+  clib_error_t* error = 0;
+  u32 hw_if_index;
+  vnet_main_t* vnm = vnet_get_main();
+  u32 key, value;
+
+  if (!unformat(input, "%U",unformat_vnet_hw_interface, vnm, &hw_if_index)) {
+    return clib_error_return(0, "Please specify interface.");
+  }
+  vnet_hw_interface_t* hi = vnet_get_hw_interface(vnm, hw_if_index);
+  hash_foreach(key, value, hi->tc_to_queue, ({
+  vlib_cli_output(vm, "%U tc_to_queue (%d):%d",
+      format_vnet_sw_if_index_name, vnm, hw_if_index,
+      key,value); }));
+  hash_foreach(key, value, hi->dscp_to_tc, ({
+  vlib_cli_output(vm, "%U dscp_to_tc (%d):%d",
+      format_vnet_sw_if_index_name, vnm, hw_if_index,
+      key,value); }));
+  hash_foreach(key, value, hi->dot1p_to_tc, ({
+  vlib_cli_output(vm, "%U dot1p_to_tc (%d):%d",
+      format_vnet_sw_if_index_name, vnm, hw_if_index,
+      key,value); }));
+  return error;
+}
+
+VLIB_CLI_COMMAND(show_qos_map_command, static) = {
+  .path = "show qos-map",
+  .short_help = "show qos-map <interface>",
+  .function = qos_map_show_map,
+};
+
+static clib_error_t *
+qos_map_set_traffic_class_enable(vlib_main_t *vm, unformat_input_t *input, vlib_cli_command_t *cmd)
+{
+  clib_error_t *error = 0;
+  u32 hw_if_index = UINT32_MAX;
+  vnet_main_t *vnm = vnet_get_main();
+  u8 enable_disable = 0;
+  u32 flags = 0;
+  unformat_input_t _line_input, *line_input = &_line_input;
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input(line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "%U", unformat_vnet_hw_interface, vnm, &hw_if_index))
+      ;
+    else if (unformat(line_input, "enable"))
+      enable_disable = 1;
+    else if (unformat(line_input, "disable"))
+      enable_disable = 0;
+    else
+    {
+      error = clib_error_return(0, "unknown input '%U'",
+                                format_unformat_error, line_input);
+      goto done;
+    }
+  }
+
+  if (enable_disable)
+  {
+    flags |= VNET_HW_INTERFACE_FLAG_USE_TC;
+  }
+  else
+  {
+    flags = 0;
+  }
+
+  vnet_hw_interface_set_tc_flags(vnm, hw_if_index, flags);
+
+done:
+  unformat_free(line_input);
+  return error;
+}
+
+VLIB_CLI_COMMAND(set_qos_map_tc_traffic_command_command, static) = {
+  .path = "set tc-traffic",
+  .short_help = "set tc-traffic <interface> [enable|disable]",
+  .function = qos_map_set_traffic_class_enable,
+};
+
 static clib_error_t *
 qos_check_sw_interface_add_del(vnet_main_t *vnm, u32 sw_if_index, u32 is_add)
 {

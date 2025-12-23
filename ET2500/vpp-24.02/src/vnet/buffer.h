@@ -67,13 +67,7 @@
   _ (18, GSO, "gso", 0)                                                       \
   _ (19, AVAIL1, "avail1", 1)                                                 \
   _ (20, AVAIL2, "avail2", 1)                                                 \
-  _ (21, AVAIL3, "avail3", 1)                                                 \
-  _ (22, AVAIL4, "avail4", 1)                                                 \
-  _ (23, AVAIL5, "avail5", 1)                                                 \
-  _ (24, AVAIL6, "avail6", 1)                                                 \
-  _ (25, AVAIL7, "avail7", 1)                                                 \
-  _ (26, AVAIL8, "avail8", 1)                                                 \
-  _ (27, AVAIL9, "avail9", 1)
+  _ (21, AVAIL3, "avail3", 1)
 
 /*
  * Please allocate the FIRST available bit, redefine
@@ -82,9 +76,7 @@
  */
 
 #define VNET_BUFFER_FLAGS_ALL_AVAIL                                           \
-  (VNET_BUFFER_F_AVAIL1 | VNET_BUFFER_F_AVAIL2 | VNET_BUFFER_F_AVAIL3 |       \
-   VNET_BUFFER_F_AVAIL4 | VNET_BUFFER_F_AVAIL5 | VNET_BUFFER_F_AVAIL6 |       \
-   VNET_BUFFER_F_AVAIL7 | VNET_BUFFER_F_AVAIL8 | VNET_BUFFER_F_AVAIL9)
+  (VNET_BUFFER_F_AVAIL1 | VNET_BUFFER_F_AVAIL2 | VNET_BUFFER_F_AVAIL3)
 
 #define VNET_BUFFER_FLAGS_VLAN_BITS \
   (VNET_BUFFER_F_VLAN_1_DEEP | VNET_BUFFER_F_VLAN_2_DEEP)
@@ -525,6 +517,7 @@ typedef struct
   u32 l2_rx_sw_if_index; /* store the orignal if index when bvi */
   u32 tc_index; /* store the traffic class index*/
   char *geosite_domain_ptr; /* store the domain pointer for geosite */  
+  u8 tc_index_dpo; /* store the traffic class dpo */
 
   };
 

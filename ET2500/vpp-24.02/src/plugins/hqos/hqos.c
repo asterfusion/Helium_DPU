@@ -200,12 +200,22 @@ int hqos_user_add (u8 * tag, u32 *user_id)
 int hqos_user_del (u32 user_id)
 {
     hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
 
     if (pool_is_free_index(hm->user_pool, user_id))
     {
         clib_warning ("%s :current hqos user id is free", __FUNCTION__);
         return 0;
     }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_free(user->dscp_to_tc);
+    hash_free(user->dscp_to_color);
+    hash_free(user->dot1p_to_tc);
+    hash_free(user->dot1p_to_color);
+    hash_free(user->mpls_exp_to_tc);
+    hash_free(user->mpls_exp_to_color);
 
     pool_put_index (hm->user_pool, user_id);
     return 0;
@@ -472,6 +482,7 @@ int hqos_port_add(u64 port_rate,
                   u32 n_subports_per_port, 
                   u32 n_max_subport_profiles, 
                   u32 n_pipes_per_subport,
+                  u32 n_queue_size,
                   u32 mtu, u32 frame_overhead, 
                   u32 *hqos_port_id)
 {
@@ -517,6 +528,7 @@ int hqos_port_add(u64 port_rate,
         .n_subports_per_port = n_subports_per_port,
         .n_max_subport_profiles = n_max_subport_profiles,
         .n_pipes_per_subport = n_pipes_per_subport,
+        .n_queue_size = n_queue_size,
         .n_subport_profiles = 1,
         .subport_profiles = &default_subport_profile_params,
     };
@@ -544,9 +556,9 @@ int hqos_port_add(u64 port_rate,
 
     hqos_sched_subport_params default_subport_params = {
         .n_pipes_per_subport_enabled = n_pipes_per_subport,
-        .qsize = { HQOS_DEFAULT_SUBPORT_TC_QSIZE, HQOS_DEFAULT_SUBPORT_TC_QSIZE, HQOS_DEFAULT_SUBPORT_TC_QSIZE, 
-                   HQOS_DEFAULT_SUBPORT_TC_QSIZE, HQOS_DEFAULT_SUBPORT_TC_QSIZE, HQOS_DEFAULT_SUBPORT_TC_QSIZE,
-                   HQOS_DEFAULT_SUBPORT_TC_QSIZE, HQOS_DEFAULT_SUBPORT_TC_QSIZE, HQOS_DEFAULT_SUBPORT_TC_QSIZE},
+        .qsize = { n_queue_size, n_queue_size, n_queue_size,
+                   n_queue_size, n_queue_size, n_queue_size,
+                   n_queue_size, n_queue_size, n_queue_size},
         .n_max_pipe_profiles = n_pipes_per_subport,
         .n_pipe_profiles = 1,
         .pipe_profiles = &default_pipe_params,
@@ -1086,6 +1098,426 @@ void hqos_queue_stat_get(u32 hqos_port_id, u32 hqos_subport_id, u32 hqos_pipe_id
     hqos_sched_queue_read_stats(hqos_port, queue_id, stat, &qlen);
 
     return;
+}
+
+int hqos_user_set_dscp_tc_map(u32 user_id, u8 dscp, u8 tc)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
+
+    if (pool_is_free_index(hm->user_pool, user_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_set(user->dscp_to_tc, dscp, tc);
+    return 0;
+}
+
+int hqos_user_set_dscp_color_map(u32 user_id, u8 dscp, u8 color)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
+
+    if (pool_is_free_index(hm->user_pool, user_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_set(user->dscp_to_color, dscp, color);
+    return 0;
+}
+
+int hqos_user_set_dot1p_tc_map(u32 user_id, u8 dot1p, u8 tc)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
+
+    if (pool_is_free_index(hm->user_pool, user_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_set(user->dot1p_to_tc, dot1p, tc);
+    return 0;
+}
+
+int hqos_user_set_dot1p_color_map(u32 user_id, u8 dot1p, u8 color)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
+
+    if (pool_is_free_index(hm->user_pool, user_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_set(user->dot1p_to_color, dot1p, color);
+    return 0;
+}
+
+int hqos_user_set_mpls_exp_tc_map(u32 user_id, u8 mpls_exp, u8 tc)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
+
+    if (pool_is_free_index(hm->user_pool, user_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_set(user->mpls_exp_to_tc, mpls_exp, tc);
+    return 0;
+}
+
+int hqos_user_set_mpls_exp_color_map(u32 user_id, u8 mpls_exp, u8 color)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
+
+    if (pool_is_free_index(hm->user_pool, user_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_set(user->mpls_exp_to_color, mpls_exp, color);
+    return 0;
+}
+
+int hqos_user_remove_dscp_tc_map(u32 user_id)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
+
+    if (pool_is_free_index(hm->user_pool, user_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_free(user->dscp_to_tc);
+    user->dscp_to_tc = NULL;
+    return 0;
+}
+
+int hqos_user_remove_dscp_color_map(u32 user_id)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
+
+    if (pool_is_free_index(hm->user_pool, user_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_free(user->dscp_to_color);
+    user->dscp_to_color = NULL;
+    return 0;
+}
+
+int hqos_user_remove_dot1p_tc_map(u32 user_id)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
+
+    if (pool_is_free_index(hm->user_pool, user_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_free(user->dot1p_to_tc);
+    user->dot1p_to_tc = NULL;
+    return 0;
+}
+
+int hqos_user_remove_dot1p_color_map(u32 user_id)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
+
+    if (pool_is_free_index(hm->user_pool, user_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_free(user->dot1p_to_color);
+    user->dot1p_to_color = NULL;
+    return 0;
+}
+
+int hqos_user_remove_mpls_exp_tc_map(u32 user_id)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
+
+    if (pool_is_free_index(hm->user_pool, user_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_free(user->mpls_exp_to_tc);
+    user->mpls_exp_to_tc = NULL;
+    return 0;
+}
+
+int hqos_user_remove_mpls_exp_color_map(u32 user_id)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_t *user = NULL;
+
+    if (pool_is_free_index(hm->user_pool, user_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user = pool_elt_at_index(hm->user_pool, user_id);
+
+    hash_free(user->mpls_exp_to_color);
+    user->mpls_exp_to_color = NULL;
+    return 0;
+}
+
+int hqos_user_group_set_dscp_tc_map(u32 user_group_id, u8 dscp, u8 tc)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current hqos user group id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_set(user_group->dscp_to_tc, dscp, tc);
+    return 0;
+}
+
+int hqos_user_group_set_dscp_color_map(u32 user_group_id, u8 dscp, u8 color)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current hqos user group id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_set(user_group->dscp_to_color, dscp, color);
+    return 0;
+}
+
+int hqos_user_group_set_dot1p_tc_map(u32 user_group_id, u8 dot1p, u8 tc)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current hqos user group id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_set(user_group->dot1p_to_tc, dot1p, tc);
+    return 0;
+}
+
+int hqos_user_group_set_dot1p_color_map(u32 user_group_id, u8 dot1p, u8 color)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current hqos user group id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_set(user_group->dot1p_to_color, dot1p, color);
+    return 0;
+}
+
+int hqos_user_group_set_mpls_exp_tc_map(u32 user_group_id, u8 mpls_exp, u8 tc)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current hqos user group id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_set(user_group->mpls_exp_to_tc, mpls_exp, tc);
+    return 0;
+}
+
+int hqos_user_group_set_mpls_exp_color_map(u32 user_group_id, u8 mpls_exp, u8 color)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current hqos user group id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_set(user_group->mpls_exp_to_color, mpls_exp, color);
+    return 0;
+}
+
+int hqos_user_group_remove_dscp_tc_map(u32 user_group_id)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_free(user_group->dscp_to_tc);
+    user_group->dscp_to_tc = NULL;
+    return 0;
+}
+
+int hqos_user_group_remove_dscp_color_map(u32 user_group_id)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_free(user_group->dscp_to_color);
+    user_group->dscp_to_color = NULL;
+    return 0;
+}
+
+int hqos_user_group_remove_dot1p_tc_map(u32 user_group_id)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_free(user_group->dot1p_to_tc);
+    user_group->dot1p_to_tc = NULL;
+    return 0;
+}
+
+int hqos_user_group_remove_dot1p_color_map(u32 user_group_id)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_free(user_group->dot1p_to_color);
+    user_group->dot1p_to_color = NULL;
+    return 0;
+}
+
+int hqos_user_group_remove_mpls_exp_tc_map(u32 user_group_id)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_free(user_group->mpls_exp_to_tc);
+    user_group->mpls_exp_to_tc = NULL;
+    return 0;
+}
+
+int hqos_user_group_remove_mpls_exp_color_map(u32 user_group_id)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current hqos user id is free", __FUNCTION__);
+        return 0;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_free(user_group->mpls_exp_to_color);
+    user_group->mpls_exp_to_color = NULL;
+    return 0;
 }
 
 /*

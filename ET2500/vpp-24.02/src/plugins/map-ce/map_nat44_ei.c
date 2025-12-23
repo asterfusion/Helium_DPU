@@ -248,7 +248,7 @@ map_nat44_ei_del_dynamic_mapping (map_nat44_ei_domain_t *mnat, map_nat44_ei_sess
 }
 
 void 
-map_ce_nat44_domain_create(u32 map_domain_index)
+map_ce_nat44_domain_create(u32 map_domain_index, map_nat44_ei_config_t *config)
 {
     map_ce_main_t *mm = &map_ce_main;
     map_ce_domain_t *d;
@@ -256,6 +256,16 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     map_nat44_ei_address_t *address;
     int i;
     u8 *name = NULL;
+
+    u32 max_static_session = MAP_NAT_STATIC_SESSION_MAX;
+    u32 static_hash_buckets = MAP_NAT_STATIC_HASH_BUCKETS;
+    u32 static_hash_memory_size = MAP_NAT_STATIC_HASH_MEMORY_SIZE;
+
+    u32 max_user = MAP_NAT_USER_MAX;
+    u32 max_session_per_user = MAP_NAT_SESSION_MAX_PER_USER;
+    u32 hash_buckets = MAP_NAT_HASH_BUCKETS;
+
+    u32 max_translations = MAP_NAT_SESSION_MAX;
 
     if (map_domain_index == ~0)
     {
@@ -274,6 +284,27 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     mnat = vec_elt_at_index (mm->nat_domains, map_domain_index);
     clib_memset (mnat, 0, sizeof (*mnat));
 
+    if (config)
+    {
+        if (config->max_static_session != 0)
+        {
+            max_static_session = round_pow2(config->max_static_session, 128);
+            static_hash_buckets = max_static_session;
+            static_hash_memory_size = static_hash_buckets * 16 + 1024;
+        }
+
+        if (config->max_user != 0)
+        {
+            max_user = round_pow2(config->max_user, 2);
+        }
+        if (config->max_session_per_user != 0)
+        {
+            max_session_per_user = round_pow2(config->max_session_per_user, 2);
+        }
+
+        max_translations = max_user * max_session_per_user;
+        hash_buckets = max_user * max_session_per_user;
+    }
 
     /* Init Hash */
     mnat->static_in2out = clib_mem_alloc(sizeof(clib_bihash_8_8_t));
@@ -281,7 +312,7 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     name = format(name, "%s-%u", "map_ce_nat44_static_in2out", map_domain_index);
     vec_validate_init_c_string (mnat->static_in2out_name, name, strlen ((char *) name));
     clib_bihash_init_8_8 (mnat->static_in2out, (char *)mnat->static_in2out_name,
-                          MAP_NAT_STATIC_HASH_BUCKETS, MAP_NAT_STATIC_HASH_MEMORY_SIZE);
+                          static_hash_buckets, static_hash_memory_size);
     vec_free(name);
 
     mnat->static_out2in = clib_mem_alloc(sizeof(clib_bihash_8_8_t));
@@ -289,7 +320,7 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     name = format(name, "%s-%u", "map_ce_nat44_static_out2in", map_domain_index);
     vec_validate_init_c_string (mnat->static_out2in_name, name, strlen ((char *) name));
     clib_bihash_init_8_8 (mnat->static_out2in, (char *)mnat->static_out2in_name,
-                          MAP_NAT_STATIC_HASH_BUCKETS, MAP_NAT_STATIC_HASH_MEMORY_SIZE);
+                          static_hash_buckets, static_hash_memory_size);
     vec_free(name);
 
     mnat->in2out = clib_mem_alloc(sizeof(clib_bihash_8_8_t));
@@ -297,7 +328,7 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     name = format(name, "%s-%u", "map_ce_nat44_in2out", map_domain_index);
     vec_validate_init_c_string (mnat->in2out_name, name, strlen ((char *) name));
     clib_bihash_init_8_8 (mnat->in2out, (char *)mnat->in2out_name,
-                          MAP_NAT_HASH_BUCKETS, MAP_NAT_HASH_MEMORY_SIZE);
+                          hash_buckets, MAP_NAT_HASH_MEMORY_SIZE);
     vec_free(name);
 
     mnat->out2in = clib_mem_alloc(sizeof(clib_bihash_8_8_t));
@@ -305,7 +336,7 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     name = format(name, "%s-%u", "map_ce_nat44_out2in", map_domain_index);
     vec_validate_init_c_string (mnat->out2in_name, name, strlen ((char *) name));
     clib_bihash_init_8_8 (mnat->out2in, (char *)mnat->out2in_name,
-                          MAP_NAT_HASH_BUCKETS, MAP_NAT_HASH_MEMORY_SIZE);
+                          hash_buckets, MAP_NAT_HASH_MEMORY_SIZE);
     vec_free(name);
 
     mnat->users_hash = clib_mem_alloc(sizeof(clib_bihash_8_8_t));
@@ -313,7 +344,7 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     name = format(name, "%s-%u", "map_ce_nat44_users", map_domain_index);
     vec_validate_init_c_string (mnat->users_hash_name, name, strlen ((char *) name));
     clib_bihash_init_8_8 (mnat->users_hash, (char *)mnat->users_hash_name,
-                          MAP_NAT_HASH_BUCKETS, MAP_NAT_HASH_MEMORY_SIZE); //Consistent with session size
+                          max_user, MAP_NAT_HASH_MEMORY_SIZE); //Consistent with session size
 
     vec_free(name);
 
@@ -324,13 +355,13 @@ map_ce_nat44_domain_create(u32 map_domain_index)
     clib_bihash_set_kvp_format_fn_8_8 (mnat->users_hash, format_map_nat44_ei_user_kvp);
 
     /* Pool alloc */
-    pool_alloc(mnat->static_mappings, MAP_NAT_STATIC_SESSION_MAX);
-    pool_alloc(mnat->sessions, MAP_NAT_SESSION_MAX);
-    pool_alloc(mnat->users, MAP_NAT_USER_MAX);
+    pool_alloc(mnat->static_mappings, max_static_session);
+    pool_alloc(mnat->sessions, max_translations);
+    pool_alloc(mnat->users, max_user);
 
-    mnat->max_translations = MAP_NAT_SESSION_MAX;
-    mnat->max_translations_per_user = MAP_NAT_SESSION_MAX_PER_USER;
-    mnat->max_users = MAP_NAT_USER_MAX;
+    mnat->max_translations = max_translations;
+    mnat->max_translations_per_user = max_session_per_user;
+    mnat->max_users = max_user;
 
     /* Init port alg */
     mnat->psid_offset = d->psid_offset;

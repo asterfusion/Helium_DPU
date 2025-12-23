@@ -48,47 +48,42 @@ format_qos_record_trace (u8 * s, va_list * args)
 }
 
 static inline void
-qos_record_tc(vnet_hw_interface_t *hi, vlib_buffer_t *b0)
+qos_record_tc(vlib_buffer_t *b0, dpo_proto_t dproto, qos_bits_t qos)
 {
-  qos_bits_t qos0;
-  ethernet_header_t *eh;
-  u16 ethertype;
+    u32 sw_if_index0;
+    vnet_main_t* vnm;
+    vnet_hw_interface_t *hi;
 
-  if(!(hi->flags &VNET_HW_INTERFACE_FLAG_USE_TC))
-    return;
+    vnm = vnet_get_main ();
+    sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
+    hi = vnet_get_sup_hw_interface(vnm, sw_if_index0);
 
-  eh = ethernet_buffer_get_header(b0);
-  ethertype = clib_net_to_host_u16(eh->type);
+    uword *tc;
 
-  if (ethernet_frame_is_tagged(ethertype))
-  {
-    ethernet_vlan_header_t *vlan0 = (ethernet_vlan_header_t *) (eh + 1);
-    if (!hi->dscp_to_tc && hi->dot1p_to_tc)
+    if(!(hi->flags &VNET_HW_INTERFACE_FLAG_USE_TC))
+        return;
+
+    if (DPO_PROTO_IP4 == dproto)
     {
-      qos0 = ethernet_vlan_header_get_priority_net_order(vlan0) >> 1;
-      uword *t0 = hash_get(hi->dot1p_to_tc, qos0);
-      vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
-      return;
+        tc = hash_get(hi->dscp_to_tc, qos);
+        vnet_buffer2(b0)->tc_index = tc ? tc[0] : 0;
     }
-    ethertype = clib_net_to_host_u16(vlan0->type);
-  }
-
-  if (ethertype == ETHERNET_TYPE_IP4)
-  {
-    i16 l3_hdr_offset = vnet_buffer(b0)->l3_hdr_offset;
-    ip4_header_t *ip4h = (ip4_header_t *)(b0->data + l3_hdr_offset);
-    qos0 = ip4h->tos >> 2;
-    uword *t0 = hash_get(hi->dscp_to_tc, qos0);
-    vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
-  }
-  else if (ethertype == ETHERNET_TYPE_IP6)
-  {
-    i16 l3_hdr_offset = vnet_buffer(b0)->l3_hdr_offset;
-    ip6_header_t *ip6h = (ip6_header_t *)(b0->data + l3_hdr_offset);
-    qos0 = ip6_traffic_class_network_order(ip6h);
-    uword *t0 = hash_get(hi->dscp_to_tc, qos0);
-    vnet_buffer2(b0)->tc_index = t0 ? t0[0] : 0;
-  }
+    else if (DPO_PROTO_IP6 == dproto)
+    {
+        tc = hash_get(hi->dscp_to_tc, qos);
+        vnet_buffer2(b0)->tc_index = tc ? tc[0] : 0;
+    }
+    else if (DPO_PROTO_ETHERNET == dproto)
+    {
+        tc = hash_get(hi->dot1p_to_tc, qos);
+        vnet_buffer2(b0)->tc_index = tc ? tc[0] : 0;
+    }
+    else if (DPO_PROTO_MPLS == dproto)
+    {
+        tc = hash_get(hi->mpls_exp_to_tc, qos);
+        vnet_buffer2(b0)->tc_index = tc ? tc[0] : 0;
+    }
+    vnet_buffer2(b0)->tc_index_dpo = dproto;
 }
 
 static inline uword
@@ -115,11 +110,8 @@ qos_record_inline (vlib_main_t * vm,
 	  ip6_header_t *ip6_0;
 	  vlib_buffer_t *b0;
 	  u32 next0, bi0;
-    u32 sw_if_index0;
-	  qos_bits_t qos0;
+	  qos_bits_t qos0 = 0;
 	  u8 l2_len;
-    vnet_main_t* vnm;
-    vnet_hw_interface_t *hi;
 
 	  next0 = 0;
 	  bi0 = from[0];
@@ -130,12 +122,6 @@ qos_record_inline (vlib_main_t * vm,
 	  n_left_to_next -= 1;
 
 	  b0 = vlib_get_buffer (vm, bi0);
-
-    vnm = vnet_get_main ();
-    sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
-    hi = vnet_get_sup_hw_interface(vnm, sw_if_index0);
-
-    qos_record_tc(hi,b0);
 
 	  if (is_l2)
 	    {
@@ -177,13 +163,16 @@ qos_record_inline (vlib_main_t * vm,
 
 	      qos0 = ethernet_vlan_header_get_priority_net_order (vlan0);
 	    }
-	  else if (DPO_PROTO_MPLS)
+	  else if (DPO_PROTO_MPLS == dproto)
 	    {
 	      mpls_unicast_header_t *mh;
 
 	      mh = vlib_buffer_get_current (b0);
 	      qos0 = vnet_mpls_uc_get_exp (mh->label_exp_s_ttl);
 	    }
+
+
+      qos_record_tc(b0, qos0, dproto);
 
 	  vnet_buffer2 (b0)->qos.bits = qos0;
 	  vnet_buffer2 (b0)->qos.source = qos_src;

@@ -204,6 +204,7 @@ autoreply define hqos_interface_enable_disable
     @param n_subports_per_port -  Number of subports 
     @param n_max_subport_profiles - Max allowed profiles in the port profile table 
     @param n_pipes_per_subport - Maximum number of subport pipes. 
+    @param n_queue_size - this port default queue size.
     @param mtu - Maximum Ethernet frame size (measured in bytes).
     @param frame_overhead - Framing overhead per packet (measured in bytes)
 */
@@ -215,6 +216,7 @@ define hqos_port_add
     u32 n_subports_per_port;
     u32 n_max_subport_profiles;
     u32 n_pipes_per_subport;
+    u32 n_queue_size;
     u32 mtu [default=9100];
     u32 frame_overhead;
 };
@@ -465,6 +467,390 @@ define hqos_queue_stat_details
   u64 drop_pkts;
   u64 drop_bytes;
   u64 cman_drop_pkts;
+};
+
+/**
+ * @brief Set user dscp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ * @param[in] dscp              - dscp value
+ * @param[in] tc                - tc value
+ */
+autoreply define hqos_user_dscp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+  u8 dscp;
+  u8 tc;
+};
+
+/**
+ * @brief Set user dscp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ * @param[in] dscp              - dscp value
+ * @param[in] color             - color value
+ */
+autoreply define hqos_user_dscp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+  u8 dscp;
+  u8 color;
+};
+
+/**
+ * @brief Set user dot1p to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ * @param[in] dscp              - dot1p value
+ * @param[in] tc                - tc value
+ */
+autoreply define hqos_user_dot1p_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+  u8 dot1p;
+  u8 tc;
+};
+
+/**
+ * @brief Set user dot1p to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ * @param[in] dscp              - dot1p value
+ * @param[in] color             - color value
+ */
+autoreply define hqos_user_dot1p_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+  u8 dot1p;
+  u8 color;
+};
+
+/**
+ * @brief Set user mpls_exp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ * @param[in] mpls_exp          - mpls_exp value
+ * @param[in] tc                - tc value
+ */
+autoreply define hqos_user_mpls_exp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+  u8 mpls_exp;
+  u8 tc;
+};
+
+/**
+ * @brief Set user mpls_exp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ * @param[in] mpls_exp          - mpls_exp value
+ * @param[in] color             - color value
+ */
+autoreply define hqos_user_mpls_exp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+  u8 mpls_exp;
+  u8 color;
+};
+
+/**
+ * @brief remove user dscp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ */
+autoreply define hqos_user_remove_dscp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+};
+
+/**
+ * @brief remove user dscp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ */
+autoreply define hqos_user_remove_dscp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+};
+
+/**
+ * @brief remove user dot1p to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ */
+autoreply define hqos_user_remove_dot1p_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+};
+
+/**
+ * @brief remove user dot1p to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ */
+autoreply define hqos_user_remove_dot1p_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+};
+
+/**
+ * @brief remove user mpls_exp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ */
+autoreply define hqos_user_remove_mpls_exp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+};
+
+/**
+ * @brief remove user mpls_exp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ */
+autoreply define hqos_user_remove_mpls_exp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+};
+
+/**
+ * @brief Set user_group dscp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ * @param[in] dscp              - dscp value
+ * @param[in] tc                - tc value
+ */
+autoreply define hqos_user_group_dscp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+  u8 dscp;
+  u8 tc;
+};
+
+/**
+ * @brief Set user_group dscp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ * @param[in] dscp              - dscp value
+ * @param[in] color             - color value
+ */
+autoreply define hqos_user_group_dscp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+  u8 dscp;
+  u8 color;
+};
+
+/**
+ * @brief Set user_group dot1p to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ * @param[in] dscp              - dot1p value
+ * @param[in] tc                - tc value
+ */
+autoreply define hqos_user_group_dot1p_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+  u8 dot1p;
+  u8 tc;
+};
+
+/**
+ * @brief Set user_group dot1p to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ * @param[in] dscp              - dot1p value
+ * @param[in] color             - color value
+ */
+autoreply define hqos_user_group_dot1p_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+  u8 dot1p;
+  u8 color;
+};
+
+/**
+ * @brief Set user_group mpls_exp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ * @param[in] mpls_exp          - mpls_exp value
+ * @param[in] tc                - tc value
+ */
+autoreply define hqos_user_group_mpls_exp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+  u8 mpls_exp;
+  u8 tc;
+};
+
+/**
+ * @brief Set user_group mpls_exp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ * @param[in] mpls_exp          - mpls_exp value
+ * @param[in] color             - color value
+ */
+autoreply define hqos_user_group_mpls_exp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+  u8 mpls_exp;
+  u8 color;
+};
+
+/**
+ * @brief remove user_group dscp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ */
+autoreply define hqos_user_group_remove_dscp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+};
+
+/**
+ * @brief remove user_group dscp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ */
+autoreply define hqos_user_group_remove_dscp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+};
+
+/**
+ * @brief remove user_group dot1p to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ */
+autoreply define hqos_user_group_remove_dot1p_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+};
+
+/**
+ * @brief remove user_group dot1p to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ */
+autoreply define hqos_user_group_remove_dot1p_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+};
+
+/**
+ * @brief remove user_group mpls_exp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ */
+autoreply define hqos_user_group_remove_mpls_exp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+};
+
+/**
+ * @brief remove user_group mpls_exp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ */
+autoreply define hqos_user_group_remove_mpls_exp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
 };
 
 /*

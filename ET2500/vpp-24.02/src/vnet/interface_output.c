@@ -1376,19 +1376,31 @@ VLIB_NODE_FN (vnet_interface_output_arc_end_node)
 
   while (n_left >= 8)
     {
+      vnet_hw_interface_t *hi0, *hi1, *hi2, *hi3;
+
       vlib_prefetch_buffer_header (b[4], LOAD);
       vlib_prefetch_buffer_header (b[5], LOAD);
       vlib_prefetch_buffer_header (b[6], LOAD);
       vlib_prefetch_buffer_header (b[7], LOAD);
 
-      p[0] = vlib_buffer_get_current (b[0]);
-      p[1] = vlib_buffer_get_current (b[1]);
-      p[2] = vlib_buffer_get_current (b[2]);
-      p[3] = vlib_buffer_get_current (b[3]);
       sw_if_index[0] = vnet_buffer (b[0])->sw_if_index[VLIB_TX];
       sw_if_index[1] = vnet_buffer (b[1])->sw_if_index[VLIB_TX];
       sw_if_index[2] = vnet_buffer (b[2])->sw_if_index[VLIB_TX];
       sw_if_index[3] = vnet_buffer (b[3])->sw_if_index[VLIB_TX];
+
+      hi0 = vnet_get_sup_hw_interface (vnm, sw_if_index[0]);
+      hi1 = vnet_get_sup_hw_interface (vnm, sw_if_index[1]);
+      hi2 = vnet_get_sup_hw_interface (vnm, sw_if_index[2]);
+      hi3 = vnet_get_sup_hw_interface (vnm, sw_if_index[3]);
+
+      p[0] = hi0->flags & VNET_HW_INTERFACE_FLAG_USE_TC ?
+             &vnet_buffer2(b[0])->tc_index : vlib_buffer_get_current (b[0]);
+      p[1] = hi1->flags & VNET_HW_INTERFACE_FLAG_USE_TC ?
+             &vnet_buffer2(b[1])->tc_index : vlib_buffer_get_current (b[1]);
+      p[2] = hi2->flags & VNET_HW_INTERFACE_FLAG_USE_TC ?
+             &vnet_buffer2(b[2])->tc_index : vlib_buffer_get_current (b[2]);
+      p[3] = hi3->flags & VNET_HW_INTERFACE_FLAG_USE_TC ?
+             &vnet_buffer2(b[3])->tc_index : vlib_buffer_get_current (b[3]);
 
       p += 4;
       b += 4;
@@ -1398,8 +1410,15 @@ VLIB_NODE_FN (vnet_interface_output_arc_end_node)
 
   while (n_left)
     {
-      p[0] = vlib_buffer_get_current (b[0]);
+      vnet_hw_interface_t *hi0;
+
       sw_if_index[0] = vnet_buffer (b[0])->sw_if_index[VLIB_TX];
+
+      hi0 = vnet_get_sup_hw_interface (vnm, sw_if_index[0]);
+
+      p[0] = hi0->flags & VNET_HW_INTERFACE_FLAG_USE_TC ?
+             &vnet_buffer2(b[0])->tc_index : vlib_buffer_get_current (b[0]);
+
       p++;
       b++;
       sw_if_index++;

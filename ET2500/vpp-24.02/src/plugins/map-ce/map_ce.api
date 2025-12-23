@@ -45,6 +45,9 @@ autoendian define map_ce_add_domain
   u8 psid_offset;
   u8 psid_length;
   u16 mtu [default=1280];
+  u32 nat_max_static_session;
+  u32 nat_max_user;
+  u32 nat_max_session_per_user;
   string tag[64];
 };
 

@@ -159,7 +159,7 @@ hqos_user_update_queue_mode_command_fn (vlib_main_t *vm, unformat_input_t *input
     {
         if (unformat (line_input, "index %u", &user_id));
         else if (unformat (line_input, "queue %u", &tc_queue_id));
-        else if (unformat (line_input, "mode sp")) 
+        else if (unformat (line_input, "mode sp"))
         {
             is_dwrr = false;
         }
@@ -214,13 +214,13 @@ show_hqos_user_command_fn (vlib_main_t * vm, unformat_input_t *input, vlib_cli_c
         for (tc_queue_id = 0; tc_queue_id < HQOS_SCHED_BE_QUEUES_PER_PIPE; tc_queue_id ++)
         {
             if (user->tc_queue_mode[tc_queue_id] == HQOS_TC_QUEUE_MODE_DWRR)
-            vlib_cli_output (vm, "\t TCQUEUE%u: mode %U weight %u", 
-                                  tc_queue_id, 
+            vlib_cli_output (vm, "\t TCQUEUE%u: mode %U weight %u",
+                                  tc_queue_id,
                                   format_hqos_tc_queue_mode, &user->tc_queue_mode[tc_queue_id],
                                   user->tc_queue_weight[tc_queue_id]);
             else
-            vlib_cli_output (vm, "\t TCQUEUE%u: mode %U", 
-                                  tc_queue_id, 
+            vlib_cli_output (vm, "\t TCQUEUE%u: mode %U",
+                                  tc_queue_id,
                                   format_hqos_tc_queue_mode, &user->tc_queue_mode[tc_queue_id]);
         }
     }
@@ -481,7 +481,7 @@ show_hqos_interface_user_mapping_user_group_command_fn (vlib_main_t * vm, unform
         user = pool_elt_at_index(hm->user_pool, user_id);
         user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
 
-        vlib_cli_output (vm, "User %u[%s] ---> User Group %u[%s] ", 
+        vlib_cli_output (vm, "User %u[%s] ---> User Group %u[%s] ",
                               user_id, user->tag, user_group_id, user_group->tag);
     }));
 
@@ -511,6 +511,7 @@ hqos_port_add_command_fn (vlib_main_t *vm, unformat_input_t *input, vlib_cli_com
     u32 n_subports_per_port = 8;
     u32 n_max_subport_profiles = 16;
     u32 n_pipes_per_subport = 1024;
+    u32 n_queue_size = HQOS_DEFAULT_SUBPORT_TC_QSIZE;
     u32 mtu = 9100;
     u32 frame_overhead = 24;
 
@@ -523,6 +524,7 @@ hqos_port_add_command_fn (vlib_main_t *vm, unformat_input_t *input, vlib_cli_com
         else if (unformat (line_input, "subport %u", &n_subports_per_port));
         else if (unformat (line_input, "max-subport-profile %u", &n_max_subport_profiles));
         else if (unformat (line_input, "pipe-pre-subport %u", &n_pipes_per_subport));
+        else if (unformat (line_input, "queue-size %u", &n_queue_size));
         else if (unformat (line_input, "mtu %u", &mtu));
         else if (unformat (line_input, "overhead %u", &frame_overhead));
         else
@@ -538,11 +540,12 @@ hqos_port_add_command_fn (vlib_main_t *vm, unformat_input_t *input, vlib_cli_com
         goto done;
     }
 
-    rv = hqos_port_add(port_rate, 
-                       n_subports_per_port, 
-                       n_max_subport_profiles, 
-                       n_pipes_per_subport,  
-                       mtu, 
+    rv = hqos_port_add(port_rate,
+                       n_subports_per_port,
+                       n_max_subport_profiles,
+                       n_pipes_per_subport,
+                       n_queue_size,
+                       mtu,
                        frame_overhead,
             &hqos_port_id);
     if(rv)
@@ -561,7 +564,7 @@ done:
 VLIB_CLI_COMMAND (hqos_port_add_command, static) = {
     .path = "hqos port add",
     .short_help = "hqos port add rate <bytes> "
-                  "[subport <num>] [max-subport-profile <num>] [ pipe-pre-subport <num> ] [mtu <value>] [overhead <value>]",
+                  "[subport <num>] [max-subport-profile <num>] [ pipe-pre-subport <num> ] [mtu <value>] [overhead <value>] [queue-size <size>]",
     .function = hqos_port_add_command_fn,
 };
 
@@ -675,8 +678,8 @@ hqos_subport_profile_add_command_fn (vlib_main_t *vm, unformat_input_t *input, v
         vec_add1(tc_rate_vec, tb_rate);
     }
 
-    rv = hqos_port_subport_profile_add(hqos_port_id, 
-                                       tb_rate, tb_size, tc_rate_vec,  tc_period, 
+    rv = hqos_port_subport_profile_add(hqos_port_id,
+                                       tb_rate, tb_size, tc_rate_vec,  tc_period,
                                        &hqos_port_subport_profile_id);
     if(rv)
     {
@@ -688,7 +691,7 @@ hqos_subport_profile_add_command_fn (vlib_main_t *vm, unformat_input_t *input, v
 done:
 
     if (tc_rate_vec) vec_free(tc_rate_vec);
-    
+
     unformat_free (line_input);
 
   return error;
@@ -783,7 +786,7 @@ hqos_subport_profile_update_command_fn (vlib_main_t *vm, unformat_input_t *input
 done:
 
     if (tc_rate_vec) vec_free(tc_rate_vec);
-    
+
     unformat_free (line_input);
 
   return error;
@@ -868,7 +871,7 @@ hqos_subport_config_command_fn (vlib_main_t *vm, unformat_input_t *input, vlib_c
 done:
 
     if (qsize_vec) vec_free(qsize_vec);
-    
+
     unformat_free (line_input);
 
   return error;
@@ -1026,9 +1029,9 @@ hqos_pipe_profile_add_command_fn (vlib_main_t *vm, unformat_input_t *input, vlib
         vec_add1(tc_rate_vec, tb_rate);
     }
 
-    rv = hqos_subport_pipe_profile_add(hqos_port_id, hqos_subport_id, 
-                                       tb_rate, tb_size, 
-                                       tc_rate_vec,  
+    rv = hqos_subport_pipe_profile_add(hqos_port_id, hqos_subport_id,
+                                       tb_rate, tb_size,
+                                       tc_rate_vec,
                                        tc_period, tc_ov_weight,
                                        weight_vec,
                                        &hqos_pipe_profile_id);
@@ -1043,7 +1046,7 @@ done:
 
     if (weight_vec) vec_free(weight_vec);
     if (tc_rate_vec) vec_free(tc_rate_vec);
-    
+
     unformat_free (line_input);
 
   return error;
@@ -1141,8 +1144,8 @@ hqos_pipe_profile_update_command_fn (vlib_main_t *vm, unformat_input_t *input, v
     }
 
     rv = hqos_subport_pipe_profile_update(hqos_port_id, hqos_subport_id, hqos_pipe_profile_id,
-                                       tb_rate, tb_size, 
-                                       tc_rate_vec,  
+                                       tb_rate, tb_size,
+                                       tc_rate_vec,
                                        tc_period, tc_ov_weight,
                                        weight_vec);
     if(rv)
@@ -1154,7 +1157,7 @@ hqos_pipe_profile_update_command_fn (vlib_main_t *vm, unformat_input_t *input, v
 done:
 
     if (tc_rate_vec) vec_free(tc_rate_vec);
-    
+
     unformat_free (line_input);
 
   return error;
@@ -1517,3 +1520,846 @@ VLIB_CLI_COMMAND (hqos_interface_enable_disable_command, static) = {
   .function = hqos_interface_enable_disable_command_fn,
 };
 
+static clib_error_t *
+hqos_user_qosmap_show (vlib_main_t * vm,
+		 unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+    unformat_input_t _line_input, *line_input = &_line_input;
+    clib_error_t *error = 0;
+    hqos_main_t *hm = &hqos_main;
+
+    u32 user_id = (~0);
+
+    hqos_user_t *user = NULL;
+
+    u32 key, value;
+
+    if (!unformat_user (input, unformat_line_input, line_input))
+        return clib_error_return (0, HQOS_EXPECTED_ARGUMENT);
+
+    while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+        if (unformat (line_input, "%u", &user_id));
+        else
+        {
+            error = clib_error_return (0, "unknown input '%U'", format_unformat_error, line_input);
+            goto done;
+        }
+    }
+
+    if (user_id != (~0))
+    {
+        if (pool_is_free_index(hm->user_pool, user_id))
+        {
+            vlib_cli_output (vm, "current user not create");
+            goto done;
+        }
+
+        user = pool_elt_at_index(hm->user_pool, user_id);
+
+        vlib_cli_output(vm, "Id: %u(%s) dscp_to_tc:", user_id, user->tag);
+        hash_foreach(key, value, user->dscp_to_tc, (
+        {
+            vlib_cli_output(vm, "\t dscp %u : tc %u", key, value);
+        }));
+
+        vlib_cli_output(vm, "Id: %u(%s) dscp_to_color:", user_id, user->tag);
+        hash_foreach(key, value, user->dscp_to_color, (
+        {
+            vlib_cli_output(vm, "\t dscp %u : color %u", key, value);
+        }));
+
+        vlib_cli_output(vm, "Id: %u(%s) dot1p_to_tc:", user_id, user->tag);
+        hash_foreach(key, value, user->dot1p_to_tc, (
+        {
+            vlib_cli_output(vm, "\t dot1p %u : tc %u", key, value);
+        }));
+
+        vlib_cli_output(vm, "Id: %u(%s) dot1p_to_color:", user_id, user->tag);
+        hash_foreach(key, value, user->dot1p_to_color, (
+        {
+            vlib_cli_output(vm, "\t dot1p %u : color %u", key, value);
+        }));
+
+        vlib_cli_output(vm, "Id: %u(%s) mpls_exp_to_tc:", user_id, user->tag);
+        hash_foreach(key, value, user->mpls_exp_to_tc, (
+        {
+            vlib_cli_output(vm, "\t mpls-exp %u : tc %u", key, value);
+        }));
+
+        vlib_cli_output(vm, "Id: %u(%s) mpls_exp_to_color:", user_id, user->tag);
+        hash_foreach(key, value, user->mpls_exp_to_color, (
+        {
+            vlib_cli_output(vm, "\t mpls-exp %u : color %u", key, value);
+        }));
+    }
+    else
+    {
+        error = clib_error_return (0, "Missing index or name");
+        goto done;
+    }
+
+done:
+    unformat_free (line_input);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND (hqos_user_qosmap_show_command, static) = {
+  .path = "show hqos qosmap user",
+  .short_help = "show hqos qosmap user <user_id>",
+  .function = hqos_user_qosmap_show,
+};
+
+static clib_error_t *
+hqos_user_group_qosmap_show_fn (vlib_main_t * vm,
+		 unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+    unformat_input_t _line_input, *line_input = &_line_input;
+    clib_error_t *error = 0;
+    hqos_main_t *hm = &hqos_main;
+
+    u32 user_group_id = (~0);
+
+    hqos_user_group_t *user_group = NULL;
+
+    u32 key, value;
+
+    if (!unformat_user (input, unformat_line_input, line_input))
+        return clib_error_return (0, HQOS_EXPECTED_ARGUMENT);
+
+    while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+        if (unformat (line_input, "%u", &user_group_id));
+        else
+        {
+            error = clib_error_return (0, "unknown input '%U'", format_unformat_error, line_input);
+            goto done;
+        }
+    }
+
+    if (user_group_id != (~0))
+    {
+        if (pool_is_free_index(hm->user_group_pool, user_group_id))
+        {
+            vlib_cli_output (vm, "current user group not create");
+            goto done;
+        }
+
+        user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+        vlib_cli_output(vm, "Id: %u(%s) dscp_to_tc:", user_group_id, user_group->tag);
+        hash_foreach(key, value, user_group->dscp_to_tc, (
+        {
+            vlib_cli_output(vm, "\t dscp %u : tc %u", key, value);
+        }));
+
+        vlib_cli_output(vm, "Id: %u(%s) dscp_to_color:", user_group_id, user_group->tag);
+        hash_foreach(key, value, user_group->dscp_to_color, (
+        {
+            vlib_cli_output(vm, "\t dscp %u : color %u", key, value);
+        }));
+
+        vlib_cli_output(vm, "Id: %u(%s) dot1p_to_tc:", user_group_id, user_group->tag);
+        hash_foreach(key, value, user_group->dot1p_to_tc, (
+        {
+            vlib_cli_output(vm, "\t dot1p %u : tc %u", key, value);
+        }));
+
+        vlib_cli_output(vm, "Id: %u(%s) dot1p_to_color:", user_group_id, user_group->tag);
+        hash_foreach(key, value, user_group->dot1p_to_color, (
+        {
+            vlib_cli_output(vm, "\t dot1p %u : color %u", key, value);
+        }));
+
+        vlib_cli_output(vm, "Id: %u(%s) mpls_exp_to_tc:", user_group_id, user_group->tag);
+        hash_foreach(key, value, user_group->mpls_exp_to_tc, (
+        {
+            vlib_cli_output(vm, "\t mpls-exp %u : tc %u", key, value);
+        }));
+
+        vlib_cli_output(vm, "Id: %u(%s) mpls_exp_to_color:", user_group_id, user_group->tag);
+        hash_foreach(key, value, user_group->mpls_exp_to_color, (
+        {
+            vlib_cli_output(vm, "\t mpls-exp %u : color %u", key, value);
+        }));
+    }
+    else
+    {
+        error = clib_error_return (0, "Missing index or name");
+        goto done;
+    }
+
+done:
+    unformat_free (line_input);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND (hqos_user_group_qosmap_show_command, static) = {
+  .path = "show hqos qosmap user_group",
+  .short_help = "show hqos qosmap user_group <user_group_id>",
+  .function = hqos_user_group_qosmap_show_fn,
+};
+
+static clib_error_t*
+hqos_user_set_dscp_tc_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 user_id = (~0);
+    u32 dscp, tc;
+
+    int rv = 0;
+
+    if (!unformat(input, " %u %u %u", &user_id, &dscp, &tc))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_set_dscp_tc_map(user_id, dscp, tc);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_set_dscp_tc_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_set_dscp_tc_map_command, static) = {
+  .path = "hqos user set dscp-to-tc",
+  .short_help = "hqos user set dscp-to-tc <user_id> <dscp> <tc>",
+  .function = hqos_user_set_dscp_tc_map_fn,
+};
+
+static clib_error_t*
+hqos_user_set_dscp_color_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 user_id = (~0);
+    u32 dscp, color;
+
+    int rv = 0;
+
+    if (!unformat(input, " %u %u %u", &user_id, &dscp, &color))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_set_dscp_color_map(user_id, dscp, color);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_set_dscp_color_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_set_dscp_color_map_command, static) = {
+  .path = "hqos user set dscp-to-color",
+  .short_help = "hqos user set dscp-to-color <user_id> <dscp> <color>",
+  .function = hqos_user_set_dscp_color_map_fn,
+};
+
+
+static clib_error_t*
+hqos_user_set_dot1p_tc_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 user_id = (~0);
+    u32 dot1p, tc;
+
+    int rv = 0;
+
+    if (!unformat(input, " %u %u %u", &user_id, &dot1p, &tc))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_set_dot1p_tc_map(user_id, dot1p, tc);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_set_dot1p_tc_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_set_dot1p_tc_map_command, static) = {
+  .path = "hqos user set dot1p-to-tc",
+  .short_help = "hqos user set dot1p-to-tc <user_id> <dot1p> <tc>",
+  .function = hqos_user_set_dot1p_tc_map_fn,
+};
+
+static clib_error_t*
+hqos_user_set_dot1p_color_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 user_id = (~0);
+    u32 dot1p, color;
+
+    int rv = 0;
+
+    if (!unformat(input, " %u %u %u", &user_id, &dot1p, &color))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_set_dot1p_color_map(user_id, dot1p, color);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_set_dot1p_color_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_set_dot1p_color_map_command, static) = {
+  .path = "hqos user set dot1p-to-color",
+  .short_help = "hqos user set dot1p-to-color <user_id> <dot1p> <color>",
+  .function = hqos_user_set_dot1p_color_map_fn,
+};
+
+static clib_error_t*
+hqos_user_set_mpls_exp_tc_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 user_id = (~0);
+    u32 mpls_exp, tc;
+
+    int rv = 0;
+
+    if (!unformat(input, " %u %u %u", &user_id, &mpls_exp, &tc))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_set_mpls_exp_tc_map(user_id, mpls_exp, tc);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_set_mpls_exp_tc_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_set_mpls_exp_tc_map_command, static) = {
+  .path = "hqos user set mplsexp-to-tc",
+  .short_help = "hqos user set mplsexp-to-tc <user_id> <mpls_exp> <tc>",
+  .function = hqos_user_set_mpls_exp_tc_map_fn,
+};
+
+static clib_error_t*
+hqos_user_set_mpls_exp_color_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 user_id = (~0);
+    u32 mpls_exp, color;
+
+    int rv = 0;
+
+    if (!unformat(input, " %u %u %u", &user_id, &mpls_exp, &color))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_set_mpls_exp_color_map(user_id, mpls_exp, color);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_set_mpls_exp_color_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_set_mpls_exp_color_map_command, static) = {
+  .path = "hqos user set mplsexp-to-color",
+  .short_help = "hqos user set mplsexp-to-color <user_id> <mpls_exp> <color>",
+  .function = hqos_user_set_mpls_exp_color_map_fn,
+};
+
+static clib_error_t*
+hqos_user_remove_dscp_tc_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 id = (~0);
+
+    int rv = 0;
+
+    if (!unformat(input, " %u", &id))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_remove_dscp_tc_map(id);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_remove_dscp_tc_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_remove_dscp_tc_map_command, static) = {
+  .path = "hqos user remove dscp-to-tc",
+  .short_help = "hqos user remove dscp-to-tc <user_id>",
+  .function = hqos_user_remove_dscp_tc_map_fn,
+};
+
+static clib_error_t*
+hqos_user_remove_dscp_color_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 id = (~0);
+
+    int rv = 0;
+
+    if (!unformat(input, " %u", &id))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_remove_dscp_color_map(id);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_remove_dscp_color_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_remove_dscp_color_map_command, static) = {
+  .path = "hqos user remove dscp-to-color",
+  .short_help = "hqos user remove dscp-to-color <user_id>",
+  .function = hqos_user_remove_dscp_color_map_fn,
+};
+
+static clib_error_t*
+hqos_user_remove_dot1p_tc_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 id = (~0);
+
+    int rv = 0;
+
+    if (!unformat(input, " %u", &id))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_remove_dot1p_tc_map(id);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_remove_dot1p_tc_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_remove_dot1p_tc_map_command, static) = {
+  .path = "hqos user remove dot1p-to-tc",
+  .short_help = "hqos user remove dot1p-to-tc <user_id>",
+  .function = hqos_user_remove_dot1p_tc_map_fn,
+};
+
+static clib_error_t*
+hqos_user_remove_dot1p_color_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 id = (~0);
+
+    int rv = 0;
+
+    if (!unformat(input, " %u", &id))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_remove_dot1p_color_map(id);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_remove_dot1p_color_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_remove_dot1p_color_map_command, static) = {
+  .path = "hqos user remove dot1p-to-color",
+  .short_help = "hqos user remove dot1p-to-color <user_id>",
+  .function = hqos_user_remove_dot1p_color_map_fn,
+};
+
+static clib_error_t*
+hqos_user_remove_mpls_exp_tc_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 id = (~0);
+
+    int rv = 0;
+
+    if (!unformat(input, " %u", &id))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_remove_mpls_exp_tc_map(id);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_remove_mpls_exp_tc_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_remove_mpls_exp_tc_map_command, static) = {
+  .path = "hqos user remove mplsexp-to-tc",
+  .short_help = "hqos user remove mplsexp-to-tc <user_id>",
+  .function = hqos_user_remove_mpls_exp_tc_map_fn,
+};
+
+static clib_error_t*
+hqos_user_remove_mpls_exp_color_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 id = (~0);
+
+    int rv = 0;
+
+    if (!unformat(input, " %u", &id))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_remove_mpls_exp_color_map(id);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_remove_mpls_exp_color_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_remove_mpls_exp_color_map_command, static) = {
+  .path = "hqos user remove mplsexp-to-color",
+  .short_help = "hqos user remove mplsexp-to-color <user_id>",
+  .function = hqos_user_remove_mpls_exp_color_map_fn,
+};
+
+static clib_error_t*
+hqos_user_group_set_dscp_tc_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 user_group_id = (~0);
+    u32 dscp, tc;
+
+    int rv = 0;
+
+    if (!unformat(input, " %u %u %u", &user_group_id, &dscp, &tc))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_group_set_dscp_tc_map(user_group_id, dscp, tc);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_group_set_dscp_tc_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_group_set_dscp_tc_map_command, static) = {
+  .path = "hqos user_group set dscp-to-tc",
+  .short_help = "hqos user_group set dscp-to-tc <user_id> <dscp> <tc>",
+  .function = hqos_user_group_set_dscp_tc_map_fn,
+};
+
+static clib_error_t*
+hqos_user_group_set_dscp_color_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 user_group_id = (~0);
+    u32 dscp, color;
+
+    int rv = 0;
+
+    if (!unformat(input, " %u %u %u", &user_group_id, &dscp, &color))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_group_set_dscp_color_map(user_group_id, dscp, color);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_group_set_dscp_color_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_group_set_dscp_color_map_command, static) = {
+  .path = "hqos user_group set dscp-to-color",
+  .short_help = "hqos user_group set dscp-to-color <user_group_id> <dscp> <color>",
+  .function = hqos_user_group_set_dscp_color_map_fn,
+};
+
+
+static clib_error_t*
+hqos_user_group_set_dot1p_tc_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 user_group_id = (~0);
+    u32 dot1p, tc;
+
+    int rv = 0;
+
+    if (!unformat(input, " %u %u %u", &user_group_id, &dot1p, &tc))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_group_set_dot1p_tc_map(user_group_id, dot1p, tc);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_group_set_dot1p_tc_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_group_set_dot1p_tc_map_command, static) = {
+  .path = "hqos user_group set dot1p-to-tc",
+  .short_help = "hqos user_group set dot1p-to-tc <user_group_id> <dot1p> <tc>",
+  .function = hqos_user_group_set_dot1p_tc_map_fn,
+};
+
+static clib_error_t*
+hqos_user_group_set_dot1p_color_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 user_group_id = (~0);
+    u32 dot1p, color;
+
+    int rv = 0;
+
+    if (!unformat(input, " %u %u %u", &user_group_id, &dot1p, &color))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_group_set_dot1p_color_map(user_group_id, dot1p, color);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_group_set_dot1p_color_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_group_set_dot1p_color_map_command, static) = {
+  .path = "hqos user_group set dot1p-to-color",
+  .short_help = "hqos user_group set dot1p-to-color <user_group_id> <dot1p> <color>",
+  .function = hqos_user_group_set_dot1p_color_map_fn,
+};
+
+static clib_error_t*
+hqos_user_group_set_mpls_exp_tc_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 user_group_id = (~0);
+    u32 mpls_exp, tc;
+
+    int rv = 0;
+
+    if (!unformat(input, " %u %u %u", &user_group_id, &mpls_exp, &tc))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_group_set_mpls_exp_tc_map(user_group_id, mpls_exp, tc);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_group_set_mpls_exp_tc_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_group_set_mpls_exp_tc_map_command, static) = {
+  .path = "hqos user_group set mplsexp-to-tc",
+  .short_help = "hqos user_group set mplsexp-to-tc <user_group_id> <mpls_exp> <tc>",
+  .function = hqos_user_group_set_mpls_exp_tc_map_fn,
+};
+
+static clib_error_t*
+hqos_user_group_set_mpls_exp_color_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 user_group_id = (~0);
+    u32 mpls_exp, color;
+
+    int rv = 0;
+
+    if (!unformat(input, " %u %u %u", &user_group_id, &mpls_exp, &color))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_group_set_mpls_exp_color_map(user_group_id, mpls_exp, color);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_group_set_mpls_exp_color_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_group_set_mpls_exp_color_map_command, static) = {
+  .path = "hqos user_group set mplsexp-to-color",
+  .short_help = "hqos user_group set mplsexp-to-color <user_group_id> <mpls_exp> <color>",
+  .function = hqos_user_group_set_mpls_exp_color_map_fn,
+};
+
+static clib_error_t*
+hqos_user_group_remove_dscp_tc_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 id = (~0);
+
+    int rv = 0;
+
+    if (!unformat(input, " %u", &id))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_group_remove_dscp_tc_map(id);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_group_remove_dscp_tc_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_group_remove_dscp_tc_map_command, static) = {
+  .path = "hqos user_group remove dscp-to-tc",
+  .short_help = "hqos user_group remove dscp-to-tc <user_group_id>",
+  .function = hqos_user_group_remove_dscp_tc_map_fn,
+};
+
+static clib_error_t*
+hqos_user_group_remove_dscp_color_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 id = (~0);
+
+    int rv = 0;
+
+    if (!unformat(input, " %u", &id))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_group_remove_dscp_color_map(id);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_group_remove_dscp_color_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_group_remove_dscp_color_map_command, static) = {
+  .path = "hqos user_group remove dscp-to-color",
+  .short_help = "hqos user_group remove dscp-to-color <user_group_id>",
+  .function = hqos_user_group_remove_dscp_color_map_fn,
+};
+
+static clib_error_t*
+hqos_user_group_remove_dot1p_tc_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 id = (~0);
+
+    int rv = 0;
+
+    if (!unformat(input, " %u", &id))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_group_remove_dot1p_tc_map(id);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_group_remove_dot1p_tc_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_group_remove_dot1p_tc_map_command, static) = {
+  .path = "hqos user_group remove dot1p-to-tc",
+  .short_help = "hqos user_group remove dot1p-to-tc <user_group_id>",
+  .function = hqos_user_group_remove_dot1p_tc_map_fn,
+};
+
+static clib_error_t*
+hqos_user_group_remove_dot1p_color_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 id = (~0);
+
+    int rv = 0;
+
+    if (!unformat(input, " %u", &id))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_group_remove_dot1p_color_map(id);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_group_remove_dot1p_color_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_group_remove_dot1p_color_map_command, static) = {
+  .path = "hqos user_group remove dot1p-to-color",
+  .short_help = "hqos user_group remove dot1p-to-color <user_group_id>",
+  .function = hqos_user_group_remove_dot1p_color_map_fn,
+};
+
+static clib_error_t*
+hqos_user_group_remove_mpls_exp_tc_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 id = (~0);
+
+    int rv = 0;
+
+    if (!unformat(input, " %u", &id))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_group_remove_mpls_exp_tc_map(id);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_group_remove_mpls_exp_tc_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_group_remove_mpls_exp_tc_map_command, static) = {
+  .path = "hqos user_group remove mplsexp-to-tc",
+  .short_help = "hqos user_group remove mplsexp-to-tc <user_group_id>",
+  .function = hqos_user_group_remove_mpls_exp_tc_map_fn,
+};
+
+static clib_error_t*
+hqos_user_group_remove_mpls_exp_color_map_fn(vlib_main_t* vm, unformat_input_t* input, vlib_cli_command_t* cmd)
+{
+    clib_error_t* error = 0;
+    u32 id = (~0);
+
+    int rv = 0;
+
+    if (!unformat(input, " %u", &id))
+    {
+        return clib_error_return(0, "Please specify interface.");
+    }
+
+    rv = hqos_user_group_remove_mpls_exp_color_map(id);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos_user_group_remove_mpls_exp_color_map (rv = %d).", rv);
+    }
+    return error;
+}
+
+VLIB_CLI_COMMAND(hqos_user_group_remove_mpls_exp_color_map_command, static) = {
+  .path = "hqos user_group remove mplsexp-to-color",
+  .short_help = "hqos user_group remove mplsexp-to-color <user_group_id>",
+  .function = hqos_user_group_remove_mpls_exp_color_map_fn,
+};

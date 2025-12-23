@@ -57,7 +57,8 @@ vl_api_map_ce_add_domain_t_handler (vl_api_map_ce_add_domain_t * mp)
                 (ip6_address_t *) & mp->end_user_ip6_prefix.address, 
                 mp->end_user_ip6_prefix.len, 
                 mp->ea_bits_len, mp->psid_offset, mp->psid_length, 
-                &index, mp->mtu, flags, mp->tag);
+                &index, mp->mtu, flags, mp->tag,
+                mp->nat_max_static_session, mp->nat_max_user, mp->nat_max_session_per_user);
 
     /* *INDENT-OFF* */
     REPLY_MACRO2_END(VL_API_MAP_CE_ADD_DOMAIN_REPLY,

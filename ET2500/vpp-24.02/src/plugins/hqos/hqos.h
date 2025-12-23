@@ -42,7 +42,7 @@
 
 #define HQOS_DEFAULT_BUCKET_SIZE          (16 * 1000 * 1000) //16MB
 #define HQOS_DEFAULT_TC_PERIOD            (10) //10ms
-#define HQOS_DEFAULT_SUBPORT_TC_QSIZE     (512)
+#define HQOS_DEFAULT_SUBPORT_TC_QSIZE     (64)
 #define HQOS_DEFAULT_BE_TC_OV_WEIGHT      (1)
 
 #define HQOS_DEFAULT_SUBPORT_ID           (0)
@@ -51,6 +51,9 @@
 #define HQOS_DEFAULT_PIPE_PROFILE_ID      (0)
 
 #define HQOS_PER_PORT_FIFO_LENGTH     (16384)
+
+#define HQOS_TC_NUM                       (HQOS_SCHED_BE_QUEUES_PER_PIPE)
+#define HQOS_TC_MASK                      (HQOS_SCHED_BE_QUEUES_PER_PIPE - 1)
 
 typedef enum _hqos_tc_queue_mode
 {
@@ -77,22 +80,52 @@ typedef struct _hqos_user
      * default is SP
      */
     hqos_tc_queue_mode_e tc_queue_mode[HQOS_SCHED_BE_QUEUES_PER_PIPE];
+
+    /* Hash table for dscp to tc mapping. */
+    uword* dscp_to_tc;
+    /* Hash table for dscp to color mapping. */
+    uword* dscp_to_color;
+
+    /* Hash table for dot1p to tc mapping. */
+    uword* dot1p_to_tc;
+    /* Hash table for dot1p to color mapping. */
+    uword* dot1p_to_color;
+
+    /* Hash table for mpls exp to tc mapping. */
+    uword* mpls_exp_to_tc;
+    /* Hash table for mpls exp to color mapping. */
+    uword* mpls_exp_to_color;
+
     u8 tc_queue_weight[HQOS_SCHED_BE_QUEUES_PER_PIPE];
-
     u8 tag[32];
-
 } hqos_user_t;
 
-STATIC_ASSERT ((sizeof (hqos_user_t) <= CLIB_CACHE_LINE_BYTES),
+STATIC_ASSERT ((sizeof (hqos_user_t) <= CLIB_CACHE_LINE_BYTES * 2),
 	       "hqos user fits in one cacheline");
 
 typedef struct _hqos_user_group
 {
     u32 user_group_id;
+
+    /* Hash table for dscp to tc mapping. */
+    uword* dscp_to_tc;
+    /* Hash table for dscp to color mapping. */
+    uword* dscp_to_color;
+
+    /* Hash table for dot1p to tc mapping. */
+    uword* dot1p_to_tc;
+    /* Hash table for dot1p to color mapping. */
+    uword* dot1p_to_color;
+
+    /* Hash table for mpls exp to tc mapping. */
+    uword* mpls_exp_to_tc;
+    /* Hash table for mpls exp to color mapping. */
+    uword* mpls_exp_to_color;
+
     u8 tag[32];
 } hqos_user_group_t;
 
-STATIC_ASSERT ((sizeof (hqos_user_group_t) <= CLIB_CACHE_LINE_BYTES),
+STATIC_ASSERT ((sizeof (hqos_user_group_t) <= CLIB_CACHE_LINE_BYTES * 2),
 	       "hqos user group fits in one cacheline");
 
 typedef struct _hqos_interface_hqos_mapping
@@ -231,6 +264,7 @@ int hqos_port_add(u64 port_rate,
                   u32 n_subports_per_port, 
                   u32 n_max_subport_profiles, 
                   u32 n_pipes_per_subport,
+                  u32 n_queue_size,
                   u32 mtu, u32 frame_overhead, 
                   u32 *hqos_port_id);
 int hqos_port_del(u32 hqos_port_id);
@@ -289,6 +323,34 @@ void hqos_queue_stat_get(u32 hqos_port_id,
                          u32 hqos_pipe_id, 
                          u32 hqos_queue_id, 
                          hqos_sched_queue_stats *stat);
+
+int hqos_user_set_dscp_tc_map(u32 user_id, u8 dscp, u8 tc);
+int hqos_user_set_dscp_color_map(u32 user_id, u8 dscp, u8 color);
+int hqos_user_set_dot1p_tc_map(u32 user_id, u8 dot1p, u8 tc);
+int hqos_user_set_dot1p_color_map(u32 user_id, u8 dot1p, u8 color);
+int hqos_user_set_mpls_exp_tc_map(u32 user_id, u8 mpls_exp, u8 tc);
+int hqos_user_set_mpls_exp_color_map(u32 user_id, u8 mpls_exp, u8 color);
+
+int hqos_user_remove_dscp_tc_map(u32 user_id);
+int hqos_user_remove_dscp_color_map(u32 user_id);
+int hqos_user_remove_dot1p_tc_map(u32 user_id);
+int hqos_user_remove_dot1p_color_map(u32 user_id);
+int hqos_user_remove_mpls_exp_tc_map(u32 user_id);
+int hqos_user_remove_mpls_exp_color_map(u32 user_id);
+
+int hqos_user_group_set_dscp_tc_map(u32 user_group_id, u8 dscp, u8 tc);
+int hqos_user_group_set_dscp_color_map(u32 user_group_id, u8 dscp, u8 color);
+int hqos_user_group_set_dot1p_tc_map(u32 user_group_id, u8 dot1p, u8 tc);
+int hqos_user_group_set_dot1p_color_map(u32 user_group_id, u8 dot1p, u8 color);
+int hqos_user_group_set_mpls_exp_tc_map(u32 user_group_id, u8 mpls_exp, u8 tc);
+int hqos_user_group_set_mpls_exp_color_map(u32 user_group_id, u8 mpls_exp, u8 color);
+
+int hqos_user_group_remove_dscp_tc_map(u32 user_group_id);
+int hqos_user_group_remove_dscp_color_map(u32 user_group_id);
+int hqos_user_group_remove_dot1p_tc_map(u32 user_group_id);
+int hqos_user_group_remove_dot1p_color_map(u32 user_group_id);
+int hqos_user_group_remove_mpls_exp_tc_map(u32 user_group_id);
+int hqos_user_group_remove_mpls_exp_color_map(u32 user_group_id);
 
 /* inline func */
 

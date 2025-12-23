@@ -757,6 +757,8 @@ typedef struct vnet_hw_interface_t
   uword* dscp_to_tc;
   /* Hash table for dot1p to tc mapping. */
   uword* dot1p_to_tc;
+  /* Hash table for mpls exp to tc mapping. */
+  uword* mpls_exp_to_tc;
   /* Hash table for tc to queue mapping. */
   uword* tc_to_queue;
 

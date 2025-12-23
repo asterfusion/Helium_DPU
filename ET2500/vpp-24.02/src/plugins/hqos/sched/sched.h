@@ -283,6 +283,9 @@ typedef struct _hqos_sched_port_params {
      * the subports of the same port.
      */
     u32 n_pipes_per_subport;
+
+    /** Default tc queue size. */
+    u32 n_queue_size;
 } hqos_sched_port_params;
 
 
@@ -542,6 +545,7 @@ typedef struct _hqos_sched_port {
     u32 n_subports_per_port;
     u32 n_pipes_per_subport;
     u32 n_pipes_per_subport_log2;
+    u32 n_queue_size;
     u16 pipe_queue[HQOS_SCHED_TRAFFIC_CLASSES_PER_PIPE];
     u8 pipe_tc[HQOS_SCHED_QUEUES_PER_PIPE];
     u8 tc_queue[HQOS_SCHED_QUEUES_PER_PIPE];
