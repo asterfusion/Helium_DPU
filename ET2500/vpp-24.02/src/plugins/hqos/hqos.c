@@ -280,12 +280,22 @@ int hqos_user_group_add (u8 * tag, u32 *user_group_id)
 int hqos_user_group_del (u32 user_group_id)
 {
     hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
 
     if (pool_is_free_index(hm->user_group_pool, user_group_id))
     {
         clib_warning ("%s :current hqos user group id is free", __FUNCTION__);
         return 0;
     }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    hash_free(user_group->dscp_to_tc);
+    hash_free(user_group->dscp_to_color);
+    hash_free(user_group->dot1p_to_tc);
+    hash_free(user_group->dot1p_to_color);
+    hash_free(user_group->mpls_exp_to_tc);
+    hash_free(user_group->mpls_exp_to_color);
 
     pool_put_index (hm->user_group_pool, user_group_id);
     return 0;
