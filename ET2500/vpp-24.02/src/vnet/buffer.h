@@ -66,8 +66,7 @@
   _ (17, QOS_DATA_VALID, "qos-data-valid", 0)                                 \
   _ (18, GSO, "gso", 0)                                                       \
   _ (19, AVAIL1, "avail1", 1)                                                 \
-  _ (20, AVAIL2, "avail2", 1)                                                 \
-  _ (21, AVAIL3, "avail3", 1)
+  _ (20, AVAIL2, "avail2", 1)
 
 /*
  * Please allocate the FIRST available bit, redefine
@@ -76,7 +75,7 @@
  */
 
 #define VNET_BUFFER_FLAGS_ALL_AVAIL                                           \
-  (VNET_BUFFER_F_AVAIL1 | VNET_BUFFER_F_AVAIL2 | VNET_BUFFER_F_AVAIL3)
+  (VNET_BUFFER_F_AVAIL1 | VNET_BUFFER_F_AVAIL2)
 
 #define VNET_BUFFER_FLAGS_VLAN_BITS \
   (VNET_BUFFER_F_VLAN_1_DEEP | VNET_BUFFER_F_VLAN_2_DEEP)
@@ -418,11 +417,7 @@ typedef struct
     {
       u32 tc_index;
       u32 color;
-      union
-      {
-          u32 user_id; //in
-          u32 queue_id; //to mapping (subport-pipe-queue)
-      };
+      u32 queue_id; //to mapping (subport-pipe-queue) 
     } hqos;
 
     u32 unused[6];
@@ -517,6 +512,7 @@ typedef struct
   u32 l2_rx_sw_if_index; /* store the orignal if index when bvi */
   u32 tc_index; /* store the traffic class index*/
   char *geosite_domain_ptr; /* store the domain pointer for geosite */  
+  u32 hqos_user_id;  /* store the hqos user id */
   u8 tc_index_dpo; /* store the traffic class dpo */
 
   };

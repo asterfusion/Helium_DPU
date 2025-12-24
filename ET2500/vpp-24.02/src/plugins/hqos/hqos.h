@@ -358,7 +358,7 @@ static_always_inline u32
 hqos_get_queue_id(hqos_sched_port *hqos_port, u32 hqos_subport_id, u32 hqos_pipe_id, u32 hqos_queue_id)
 {
     return (hqos_subport_id << (hqos_port->n_pipes_per_subport_log2 + HQOS_SCHED_QUEUES_PER_PIPE_LOG2)) |
-           (hqos_pipe_id  << (hqos_port->n_pipes_per_subport_log2) ) | 
+           (hqos_pipe_id  << (HQOS_SCHED_QUEUES_PER_PIPE_LOG2) ) |
            hqos_queue_id;
 }
 

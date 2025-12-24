@@ -58,7 +58,9 @@ vlib_buffer_hqos_color_set(vlib_buffer_t *b, u32 color)
 static_always_inline u32
 vlib_buffer_hqos_user_get(vlib_buffer_t *b)
 {
-    return vnet_buffer(b)->hqos.user_id;
+    if (b->flags & VLIB_BUFFER_ACL_SET_USER_VALID)
+        return vnet_buffer2(b)->hqos_user_id;
+    return (~0);
 }
 
 static_always_inline u32

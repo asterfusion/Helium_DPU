@@ -80,7 +80,8 @@
   _ (7, NOT_PHY_INTF, "not-phy-intf")                                         \
   _ (8, SPI_SESSION_VALID, "spi-session-valid")                               \
   _ (9, DOMAIN_VALID, "domain-valid")                                         \
-  _ (10, ACL_SET_TC_VALID, "acl-set-tc-valid")
+  _ (10, ACL_SET_TC_VALID, "acl-set-tc-valid")                                \
+  _ (11, ACL_SET_USER_VALID, "acl-set-user-valid")
 
 /* NOTE: only buffer generic flags should be defined here, please consider
    using user flags. i.e. src/vnet/buffer.h */
@@ -102,7 +103,7 @@ enum
   /* User defined buffer flags. */
 #define LOG2_VLIB_BUFFER_FLAG_USER(n) (32 - (n))
 #define VLIB_BUFFER_FLAG_USER(n) (1 << LOG2_VLIB_BUFFER_FLAG_USER(n))
-#define VLIB_BUFFER_FLAGS_ALL (0x7ff)
+#define VLIB_BUFFER_FLAGS_ALL (0xfff)
 
 /** \brief Compile time buffer trajectory tracing option
     Turn this on if you run into "bad monkey" contexts,

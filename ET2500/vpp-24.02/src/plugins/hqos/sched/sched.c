@@ -1604,7 +1604,7 @@ hqos_sched_queue_read_stats(hqos_sched_port *port,
         return -EINVAL;
     }
 
-    subport_qmask = port->n_pipes_per_subport_log2 + 4; //4 is queue log2
+    subport_qmask = port->n_pipes_per_subport_log2 + HQOS_SCHED_QUEUES_PER_PIPE_LOG2; //4 is queue log2
     subport_id = (queue_id >> subport_qmask) & (port->n_subports_per_port - 1);
 
     s = port->subports[subport_id];
