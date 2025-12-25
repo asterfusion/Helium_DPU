@@ -30,24 +30,25 @@
 static_always_inline void
 hqos_sched_thread_hqos_port(hqos_main_t *hm, u32 hqos_port_id, u32 thread_index)
 {
-    vlib_buffer_t *enqueue_pkts[HQOS_DEFAULT_SUBPORT_TC_QSIZE];
-    vlib_buffer_t *dequeue_pkts[HQOS_DEFAULT_SUBPORT_TC_QSIZE];
     u32 to_hqos_num = 0;
     u32 to_hqos_success = 0;
     u32 to_output_num = 0;
     u32 to_output_success = 0;
 
-    u32 free_buffer_indices[HQOS_DEFAULT_SUBPORT_TC_QSIZE];
 
     hqos_port_fifo_t *hqos_port_fifo = &hm->hqos_port_fifo_vec[hqos_port_id];
     hqos_sched_port  *hqos_port = hm->hqos_port_ptr_vec[hqos_port_id];
+
+    vlib_buffer_t *enqueue_pkts[hqos_port->n_queue_size];
+    vlib_buffer_t *dequeue_pkts[hqos_port->n_queue_size];
+    u32 free_buffer_indices[hqos_port->n_queue_size];
 
     /*
      * First get vlib_buffer_t ptr from port_fifo and
      * enqueue to hqos sched port
      */
     to_hqos_num = hqos_fifo_dequeue_sc (hqos_port_fifo->in_fifo,
-                                         HQOS_DEFAULT_SUBPORT_TC_QSIZE,
+                                        hqos_port->n_queue_size,
                                          (void *)enqueue_pkts);
 
     if (to_hqos_num > 0)
@@ -75,7 +76,7 @@ hqos_sched_thread_hqos_port(hqos_main_t *hm, u32 hqos_port_id, u32 thread_index)
      * enqueue to port_fifo out_fifo
      */
 
-    to_output_num = hqos_sched_port_dequeue(hqos_port, dequeue_pkts, HQOS_DEFAULT_SUBPORT_TC_QSIZE);
+    to_output_num = hqos_sched_port_dequeue(hqos_port, dequeue_pkts, hqos_port->n_queue_size);
 
     if (to_output_num > 0)
     {
@@ -154,24 +155,24 @@ VLIB_REGISTER_THREAD (hqos_sched_reg, static) =
 static_always_inline u32
 hqos_sched_worker_hqos_port(hqos_main_t *hm, u32 hqos_port_id, u32 thread_index)
 {
-    vlib_buffer_t *enqueue_pkts[HQOS_DEFAULT_SUBPORT_TC_QSIZE];
-    vlib_buffer_t *dequeue_pkts[HQOS_DEFAULT_SUBPORT_TC_QSIZE];
     u32 to_hqos_num = 0;
     u32 to_hqos_success = 0;
     u32 to_output_num = 0;
     u32 to_output_success = 0;
 
-    u32 free_buffer_indices[HQOS_DEFAULT_SUBPORT_TC_QSIZE];
-
     hqos_port_fifo_t *hqos_port_fifo = &hm->hqos_port_fifo_vec[hqos_port_id];
     hqos_sched_port  *hqos_port = hm->hqos_port_ptr_vec[hqos_port_id];
+
+    vlib_buffer_t *enqueue_pkts[hqos_port->n_queue_size];
+    vlib_buffer_t *dequeue_pkts[hqos_port->n_queue_size];
+    u32 free_buffer_indices[hqos_port->n_queue_size];
 
     /*
      * First get vlib_buffer_t ptr from port_fifo and
      * enqueue to hqos sched port
      */
     to_hqos_num = hqos_fifo_dequeue_sc (hqos_port_fifo->in_fifo,
-                                         HQOS_DEFAULT_SUBPORT_TC_QSIZE,
+                                         hqos_port->n_queue_size,
                                          (void *)enqueue_pkts);
 
     if (to_hqos_num > 0)
@@ -200,7 +201,7 @@ hqos_sched_worker_hqos_port(hqos_main_t *hm, u32 hqos_port_id, u32 thread_index)
      * enqueue to port_fifo out_fifo
      */
 
-    to_output_num = hqos_sched_port_dequeue(hqos_port, dequeue_pkts, HQOS_DEFAULT_SUBPORT_TC_QSIZE);
+    to_output_num = hqos_sched_port_dequeue(hqos_port, dequeue_pkts, hqos_port->n_queue_size);
 
     if (to_output_num > 0)
     {
