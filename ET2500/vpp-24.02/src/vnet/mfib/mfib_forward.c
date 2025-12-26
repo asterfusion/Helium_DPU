@@ -232,7 +232,7 @@ typedef struct mfib_forward_rpf_trace_t_ {
 } mfib_forward_rpf_trace_t;
 
 typedef enum mfib_forward_rpf_next_t_ {
-    MFIB_FORWARD_RPF_NEXT_DROP,
+    MFIB_FORWARD_RPF_NEXT_PUNT,
     MFIB_FORWARD_RPF_N_NEXT,
 } mfib_forward_rpf_next_t;
 
@@ -342,7 +342,7 @@ mfib_forward_rpf (vlib_main_t * vm,
         error_node = vlib_node_get_runtime (vm, ip6_input_node.index);
     from = vlib_frame_vector_args (frame);
     n_left_from = frame->n_vectors;
-    next = MFIB_FORWARD_RPF_NEXT_DROP;
+    next = MFIB_FORWARD_RPF_NEXT_PUNT;
 
     while (n_left_from > 0)
     {
@@ -442,7 +442,7 @@ mfib_forward_rpf (vlib_main_t * vm,
             }
             else
             {
-                next0 = MFIB_FORWARD_RPF_NEXT_DROP;
+                next0 = MFIB_FORWARD_RPF_NEXT_PUNT;
 		error0 =
 		  (is_v4 ? IP4_ERROR_RPF_FAILURE : IP6_ERROR_RPF_FAILURE);
 	    }
@@ -491,7 +491,7 @@ VLIB_REGISTER_NODE (ip4_mfib_forward_rpf_node) = {
 
     .n_next_nodes = MFIB_FORWARD_RPF_N_NEXT,
     .next_nodes = {
-        [MFIB_FORWARD_RPF_NEXT_DROP] = "ip4-drop",
+        [MFIB_FORWARD_RPF_NEXT_PUNT] = "linux-cp-punt",
     },
 };
 
@@ -511,7 +511,7 @@ VLIB_REGISTER_NODE (ip6_mfib_forward_rpf_node) = {
 
     .n_next_nodes = MFIB_FORWARD_RPF_N_NEXT,
     .next_nodes = {
-        [MFIB_FORWARD_RPF_NEXT_DROP] = "ip6-drop",
+        [MFIB_FORWARD_RPF_NEXT_PUNT] = "linux-cp-punt",
     },
 };
 
