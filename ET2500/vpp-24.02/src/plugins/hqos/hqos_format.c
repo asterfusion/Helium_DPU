@@ -105,6 +105,7 @@ format_hqos_port(u8 *s, va_list *args)
     s = format(s, "\t\tNumber of pipes per subport = %u\n", hqos_port->n_pipes_per_subport);
     s = format(s, "\t\tNumber of max subport profiles = %u\n", hqos_port->n_max_subport_profiles);
     s = format(s, "\t\tNumber of current subport profiles = %u\n", hqos_port->n_subport_profiles);
+    s = format(s, "\t\tTc queue size = %u\n", hqos_port->n_queue_size);
     return s;
 }
 
@@ -136,6 +137,7 @@ format_hqos_port_detail(u8 *s, va_list *args)
     s = format(s, "\t\tNumber of pipes per subport = %u\n", hqos_port->n_pipes_per_subport);
     s = format(s, "\t\tNumber of max subport profiles = %u\n", hqos_port->n_max_subport_profiles);
     s = format(s, "\t\tNumber of current subport profiles = %u\n", hqos_port->n_subport_profiles);
+    s = format(s, "\t\tTc queue size = %u\n", hqos_port->n_queue_size);
 
     s = format(s, "\tSubport:\n");
     for (subport_id = 0; subport_id < hqos_port->n_subports_per_port; subport_id++)

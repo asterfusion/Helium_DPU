@@ -468,6 +468,7 @@ send_hqos_queue_stat_details (vl_api_registration_t * reg, u32 context,
 
     hqos_queue_stat_get(hqos_port_id, hqos_subport_id, hqos_pipe_id, hqos_queue_id, &stat);
 
+    mp->context = context;
     mp->pkts = clib_net_to_host_u64(stat.n_pkts);
     mp->bytes = clib_net_to_host_u64(stat.n_bytes);
     mp->drop_pkts = clib_net_to_host_u64(stat.n_pkts_dropped);
