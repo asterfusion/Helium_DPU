@@ -375,7 +375,7 @@ typedef struct
 } vnet_gre_tunnel_add_del_args_t;
 
 extern int vnet_gre_tunnel_add_del (vnet_gre_tunnel_add_del_args_t * a,
-				    u32 * sw_if_indexp);
+				    u32 * sw_if_indexp ,u32 * instancep);
 
 static inline void
 gre_mk_key4 (ip4_address_t src,
