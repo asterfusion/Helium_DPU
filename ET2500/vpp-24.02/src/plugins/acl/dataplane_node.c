@@ -619,6 +619,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
                   action_expand.action_expand_bitmap = sess->action_expand.action_expand_bitmap;
                   action_expand.policer_index = sess->action_expand.policer_index;
                   action_expand.set_tc_value = sess->action_expand.set_tc_value;
+                  action_expand.set_hqos_user_id = sess->action_expand.set_hqos_user_id;
 
 		  /* expose the session id to the tracer */
 		  if (node_trace_on)

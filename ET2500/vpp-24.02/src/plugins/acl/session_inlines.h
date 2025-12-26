@@ -596,6 +596,7 @@ acl_fa_add_session (acl_main_t * am, int is_input, int is_ip6,
   sess->action_expand.action_expand_bitmap = action_expand->action_expand_bitmap;
   sess->action_expand.policer_index = action_expand->policer_index;
   sess->action_expand.set_tc_value = action_expand->set_tc_value;
+  sess->action_expand.set_hqos_user_id = action_expand->set_hqos_user_id;
 
   acl_fa_conn_list_add_session (am, f_sess_id, now);
 
