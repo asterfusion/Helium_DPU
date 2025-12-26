@@ -605,7 +605,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 						 node_trace_on,
 						 &trace_bitmap);
 
-                   fa_session_t *sess = get_session_ptr (am, thread_index, f_sess_id.session_index);
+                   fa_session_t *sess = get_session_ptr (am, f_sess_id.thread_index, f_sess_id.session_index);
                   saved_byte_count = vlib_buffer_length_in_chain (vm, b[0]);
 
                   if (!is_l2_path && is_input)
@@ -614,8 +614,11 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
                   }
 
                   /* prefetch the counter that we are going to increment */
-                  sess->hitcount_pkts += 1;
-                  sess->hitcount_bytes += saved_byte_count;
+                  clib_atomic_fetch_add (&sess->hitcount_pkts, 1);
+                  clib_atomic_fetch_add (&sess->hitcount_bytes, saved_byte_count);
+                  action_expand.action_expand_bitmap = sess->action_expand.action_expand_bitmap;
+                  action_expand.policer_index = sess->action_expand.policer_index;
+                  action_expand.set_tc_value = sess->action_expand.set_tc_value;
 
 		  /* expose the session id to the tracer */
 		  if (node_trace_on)
@@ -780,7 +783,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 			acl_fa_add_session (am, is_input, is_ip6,
 					    sw_if_index[0],
 					    now, &fa_5tuple[0],
-					    current_policy_epoch);
+					    current_policy_epoch, &action_expand);
 
 		      /* perform the accounting for the newly added session */
 		      process_established_session (vm, am,

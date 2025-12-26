@@ -483,14 +483,6 @@ single_acl_match_5tuple (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5tupl
   return 0;
 }
 
-typedef struct match_rule_expand
-{
-    u64 action_expand_bitmap;
-    u32 policer_index;
-    u32 set_hqos_user_id;
-    u8  set_tc_value;
-} match_rule_expand_t;
-
 always_inline int
 single_acl_match_5tuple_sai (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5tuple,
 		  int is_ip6, u8 * r_action, u32 * r_acl_match_p,
