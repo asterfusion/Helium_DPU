@@ -73,7 +73,6 @@ define gre_tunnel_add_del
     @param context - sender context, to match reply w/ request.
     @param retval - return code for the request.
     @param sw_if_index - the interface corresponding to the affected tunnel.
-    @param instance - the instance for gre tunnel
 */
 define gre_tunnel_add_del_reply
 {
