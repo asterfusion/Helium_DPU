@@ -28,13 +28,6 @@
 #include "geoip_trie.h"
 
 typedef struct {
-    u32 refcnt;
-    char str[256];  
-} geosite_domain_t;
-
-typedef void (*geosite_free_cb_t)(vlib_main_t *vm, vlib_buffer_t *b);
-
-typedef struct {
     /* API message ID base */
     u16 msg_id_base;
 
@@ -50,8 +43,6 @@ typedef struct {
 
     domain_trie_t * domain_trie;
     geoip_db_t *geoip_trie;
-
-    geosite_domain_t *pool;
 } geosite_main_t;
 
 extern geosite_main_t geosite_main;
@@ -91,7 +82,7 @@ u16 geosite_get_index_by_country_code(char *country_code);
 char  *geosite_get_country_code_by_index(u16 index);
 u16 geoip_get_index_by_country_code(char *country_code);
 char  *geoip_get_country_code_by_index(u16 index);
-u32 *geosite_get_country_index_by_domain(vlib_buffer_t *b,char **domain_name);
+u32 *geosite_get_country_index_by_domain(char *domain);
 u32 *geoip_get_country_code_by_ip4(ip4_address_t ip4);
 u32 *geoip_get_country_code_by_ip6(ip6_address_t ip6);
 // char *get_domain_by_index(u32 index);

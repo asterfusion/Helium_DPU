@@ -178,11 +178,4 @@ replicate_get_bucket_i (const replicate_t *rep,
 
 extern void replicate_module_init(void);
 
-typedef void (*replicate_clone_add_geosite_refcnt_cb_t)(vlib_buffer_t *b ,uint32_t n_clones);
-extern replicate_clone_add_geosite_refcnt_cb_t replicate_clone_add_geosite_refcnt_cb;
-
-
-void replicate_clone_add_geosite_refcnt_callback(replicate_clone_add_geosite_refcnt_cb_t cb);
-
-
 #endif

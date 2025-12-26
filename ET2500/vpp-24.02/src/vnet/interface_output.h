@@ -146,11 +146,6 @@ vnet_calc_outer_checksums_inline (vlib_main_t *vm, vlib_buffer_t *b)
     }
 }
 #endif
-typedef void (*geosite_free_cb_t)(vlib_main_t *vm, vlib_buffer_t *b);
-extern geosite_free_cb_t geosite_output_free_cb;
-
-
-void geosite_register_output_free_callback(geosite_free_cb_t cb);
 
 /*
  * fd.io coding-style-patch-verification: ON
