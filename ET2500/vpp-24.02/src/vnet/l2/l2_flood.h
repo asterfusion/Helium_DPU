@@ -26,11 +26,6 @@ l2flood_register_input_type (vlib_main_t * vm,
 			     ethernet_type_t type, u32 node_index);
 #endif
 
-typedef void (*l2flood_clone_add_geosite_refcnt_cb_t)(vlib_buffer_t *b ,uint32_t n_clones);
-extern l2flood_clone_add_geosite_refcnt_cb_t l2flood_clone_add_geosite_refcnt_cb;
-
-
-void l2flood_clone_add_geosite_refcnt_callback(l2flood_clone_add_geosite_refcnt_cb_t cb);
 /*
  * fd.io coding-style-patch-verification: ON
  *

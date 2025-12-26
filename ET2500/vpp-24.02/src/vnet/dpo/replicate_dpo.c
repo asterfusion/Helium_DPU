@@ -19,13 +19,7 @@
 #include <vnet/dpo/receive_dpo.h>
 #include <vnet/adj/adj.h>
 #include <vnet/mpls/mpls_types.h>
-replicate_clone_add_geosite_refcnt_cb_t replicate_clone_add_geosite_refcnt_cb = NULL;
 
-
-void replicate_clone_add_geosite_refcnt_callback(replicate_clone_add_geosite_refcnt_cb_t cb)
-{
-    replicate_clone_add_geosite_refcnt_cb = cb;
-}
 /**
  * the logger
  */
@@ -786,10 +780,7 @@ replicate_inline (vlib_main_t * vm,
 	    num_cloned = vlib_buffer_clone (vm, bi0, rm->clones[thread_index],
                                             rep0->rep_n_buckets,
 					    VLIB_BUFFER_CLONE_HEAD_SIZE);
-		 	if(replicate_clone_add_geosite_refcnt_cb)
-			 {
-				 replicate_clone_add_geosite_refcnt_cb(b0,num_cloned);
-			 }
+
 	    if (num_cloned != rep0->rep_n_buckets)
 	      {
 		vlib_node_increment_counter

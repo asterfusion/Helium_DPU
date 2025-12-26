@@ -20,13 +20,6 @@
 #ifndef CLIB_MARCH_VARIANT
 interface_rx_dpo_t *interface_rx_dpo_pool;
 
-geosite_free_cb_t geosite_drop_free_cb = NULL;
-
-
-void geosite_register_drop_free_callback(geosite_free_cb_t cb)
-{
-    geosite_drop_free_cb = cb;
-}
 /*
  * The 'DB' of interface DPOs.
  * There is only one  per-interface per-protocol, so this is a per-interface
@@ -326,13 +319,17 @@ interface_rx_dpo_inline (vlib_main_t * vm,
                 tr1 = vlib_add_trace (vm, node, b1, sizeof (*tr1));
                 tr1->sw_if_index = ido1->ido_sw_if_index;
             }
-            if (b0->flags &VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_index != ~0  && geosite_drop_free_cb )
+            if (b0->flags &VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL)
             {
-                     geosite_drop_free_cb(vm, b0);
+                clib_mem_free(vnet_buffer2(b0)->geosite_domain_ptr);
+                b0->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
+                vnet_buffer2(b0)->geosite_domain_ptr = NULL;
             }
-            if (b1->flags &VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b1)->geosite_domain_index != ~0  && geosite_drop_free_cb )
+            if (b1->flags &VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b1)->geosite_domain_ptr != NULL)
             {
-                     geosite_drop_free_cb(vm, b1);
+                clib_mem_free(vnet_buffer2(b1)->geosite_domain_ptr);
+                b1->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
+                vnet_buffer2(b1)->geosite_domain_ptr = NULL;
             }
 
 
@@ -380,10 +377,11 @@ interface_rx_dpo_inline (vlib_main_t * vm,
                 tr = vlib_add_trace (vm, node, b0, sizeof (*tr));
                 tr->sw_if_index = ido0->ido_sw_if_index;
             }
-            if (b0->flags &VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_index != ~0  && geosite_drop_free_cb )
+            if (b0->flags &VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL)
             {
-
-                     geosite_drop_free_cb(vm, b0);
+                clib_mem_free(vnet_buffer2(b0)->geosite_domain_ptr);
+                b0->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
+                vnet_buffer2(b0)->geosite_domain_ptr = NULL;
             }
         }
         vlib_put_next_frame (vm, node, next_index, n_left_to_next);

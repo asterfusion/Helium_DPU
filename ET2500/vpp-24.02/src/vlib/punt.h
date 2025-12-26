@@ -112,11 +112,6 @@ extern u16 **punt_dp_db;
  */
 extern vlib_combined_counter_main_t punt_counters;
 
-typedef void (*punt_clone_add_geosite_refcnt_cb_t)(vlib_buffer_t *b ,uint32_t n_clones);
-extern punt_clone_add_geosite_refcnt_cb_t punt_clone_add_geosite_refcnt_cb;
-
-
-void punt_clone_add_geosite_refcnt_callback(punt_clone_add_geosite_refcnt_cb_t cb);
 #endif
 
 /*

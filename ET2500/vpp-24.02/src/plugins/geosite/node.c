@@ -715,9 +715,8 @@ VLIB_NODE_FN (geosite_node) (vlib_main_t * vm,
         domain[0] ='\0';
         b0 = vlib_get_buffer (vm, bi0);
         sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
-        geosite_domain_t *geosite_domain;
+
         get_l4_payload_offset(b0,&l4_payload_offset,&ip_proto,&dport,&payload_length);
-        vnet_buffer2(b0)->geosite_domain_index =~0;
 
         if(l4_payload_offset != 0)
         {
@@ -783,12 +782,12 @@ end_process:        vnet_feature_next (&next0, b0);
 
           b0->flags|=VLIB_BUFFER_DOMAIN_VALID ; 
           
-            pool_get(geosite_main.pool, geosite_domain);
-            clib_memset(geosite_domain, 0, sizeof(*geosite_domain));
-            geosite_domain->refcnt =1;
-            strncpy(geosite_domain->str, domain, sizeof(geosite_domain->str) - 1);
-            u32 idx = geosite_domain - geosite_main.pool ; 
-           vnet_buffer2(b0)->geosite_domain_index = idx;
+        if( vnet_buffer2(b0)->geosite_domain_ptr != NULL)
+            clib_mem_free(vnet_buffer2(b0)->geosite_domain_ptr);
+
+
+           vnet_buffer2(b0)->geosite_domain_ptr = domain;
+     
         }
         else{
             clib_mem_free(domain);

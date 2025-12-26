@@ -37,14 +37,6 @@ typedef struct bier_lookup_main_t_
  */
 static bier_lookup_main_t bier_lookup_main;
 
-bier_clone_add_geosite_refcnt_cb_t bier_clone_add_geosite_refcnt_cb = NULL;
-
-
-void bier_clone_add_geosite_refcnt_callback(bier_clone_add_geosite_refcnt_cb_t cb)
-{
-    bier_clone_add_geosite_refcnt_cb = cb;
-}
-
 static char * bier_lookup_error_strings[] = {
 #define bier_error(n,s) s,
 #include <vnet/bier/bier_lookup_error.def>
@@ -233,10 +225,7 @@ bier_lookup (vlib_main_t * vm,
                                                n_clones,
 					       VLIB_BUFFER_CLONE_HEAD_SIZE);
 
-                if(bier_clone_add_geosite_refcnt_cb)
-                {
-                    bier_clone_add_geosite_refcnt_cb(b0,num_cloned);
-                }
+
                 if (num_cloned != n_clones)
                 {
                     vec_set_len(blm->blm_clones[thread_index], num_cloned);
