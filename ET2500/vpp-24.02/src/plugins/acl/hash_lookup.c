@@ -86,13 +86,15 @@ first_mask_contains_second_mask(int is_ip6, fa_5tuple_t * mask1, fa_5tuple_t * m
 {
   if (is_ip6)
     {
-      u32 padcheck = 0;
+      u8 padcheck = 0;
       int i;
-      for (i=0; i<1; i++) {
+      for (i=0; i<3; i++) {
         padcheck |= mask1->l3_zero_pad_1[i];
         padcheck |= mask2->l3_zero_pad_1[i];
       }
       if (padcheck != 0)
+        return 0;
+      if ((mask1->dscp_v6 & mask2->dscp_v6) != mask1->dscp_v6)
         return 0;
       if ((mask1->mac6_addr[0].u.first_4 & mask2->mac6_addr[0].u.first_4) != mask1->mac6_addr[0].u.first_4)
         return 0;
@@ -115,13 +117,15 @@ first_mask_contains_second_mask(int is_ip6, fa_5tuple_t * mask1, fa_5tuple_t * m
   else
     {
       /* check the pads, both masks must have it 0 */
-      u32 padcheck = 0;
+      u8 padcheck = 0;
       int i;
-      for (i=0; i<7; i++) {
+      for (i=0; i<27; i++) {
         padcheck |= mask1->l3_zero_pad[i];
         padcheck |= mask2->l3_zero_pad[i];
       }
       if (padcheck != 0)
+        return 0;
+      if ((mask1->dscp_v4 & mask2->dscp_v4) != mask1->dscp_v4)
         return 0;
       if ((mask1->mac4_addr[0].u.first_4 & mask2->mac4_addr[0].u.first_4) != mask1->mac4_addr[0].u.first_4)
         return 0;
@@ -1057,7 +1061,7 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
   hi->match.pkt.is_ip6 = r->is_ipv6;
   
   if (r->is_ipv6) {
-    clib_memset(hi->match.l3_zero_pad_1, 0, sizeof(u32) * 1);
+    clib_memset(hi->match.l3_zero_pad_1, 0, sizeof(u8) * 3);
     if (r->src_mac_len != 0)
     {
         clib_memcpy(&hi->match.mac6_addr[0], r->src_mac, 6);
@@ -1079,8 +1083,13 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
     hi->match.ip6_addr[0] = r->src.ip6;
     make_ip6_address_mask(&mask->ip6_addr[1], r->dst_prefixlen);
     hi->match.ip6_addr[1] = r->dst.ip6;
+    if (r->dscp != 0)
+    {
+        mask->dscp_v6 = ~0;
+        hi->match.dscp_v6 = r->dscp;
+    }
   } else {
-    clib_memset(hi->match.l3_zero_pad, 0, sizeof(u32) * 7);
+    clib_memset(hi->match.l3_zero_pad, 0, sizeof(u8) * 27);
     if (r->src_mac_len != 0)
     {
         clib_memcpy(&hi->match.mac4_addr[0], r->src_mac, 6);
@@ -1102,6 +1111,11 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
     hi->match.ip4_addr[0] = r->src.ip4;
     make_ip4_address_mask(&mask->ip4_addr[1], r->dst_prefixlen);
     hi->match.ip4_addr[1] = r->dst.ip4;
+    if (r->dscp != 0)
+    {
+        mask->dscp_v4 = ~0;
+        hi->match.dscp_v4 = r->dscp;
+    }
   }
 
   if (r->src_sw_if_index != 0) {

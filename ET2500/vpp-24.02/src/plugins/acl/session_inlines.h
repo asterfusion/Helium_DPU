@@ -268,8 +268,14 @@ acl_fa_restart_timer_for_session (acl_main_t * am, u64 now,
 always_inline int
 is_ip6_5tuple (fa_5tuple_t * p5t)
 {
-  return (p5t->l3_zero_pad[0] | p5t->l3_zero_pad[1] | p5t->l3_zero_pad[2] | p5t->l3_zero_pad[3] |
-	  p5t->l3_zero_pad[4] | p5t->l3_zero_pad[5] | p5t->l3_zero_pad[6]) != 0;
+  u8 resule = 0;
+
+  for (int i = 0; i < 27; i++)
+  {
+    resule |= p5t->l3_zero_pad[i];
+  }
+
+  return resule != 0;
 }
 
 always_inline u8

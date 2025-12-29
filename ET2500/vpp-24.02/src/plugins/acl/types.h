@@ -46,6 +46,7 @@ typedef struct
   u32 policer_index;
   u32 set_hqos_user_id;
   u8  set_tc_value;
+  u8  dscp;
 } acl_rule_t;
 
 

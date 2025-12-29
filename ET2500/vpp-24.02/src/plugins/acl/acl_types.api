@@ -64,6 +64,7 @@ typedef acl_rule
   u8 dst_mac_len;
   vl_api_prefix_t src_prefix;
   vl_api_prefix_t dst_prefix;
+  u8 dscp;
 
 /*
  * Independent and action extension actions.

@@ -203,6 +203,7 @@ acl_print_acl_x (acl_vector_print_func_t vpr, vlib_main_t * vm,
         r->src_mac[0], r->src_mac[1], r->src_mac[2], r->src_mac[3], r->src_mac[4], r->src_mac[5]);
       out0 = format (out0, " dmac %02x:%02x:%02x:%02x:%02x:%02x ",
         r->dst_mac[0], r->dst_mac[1], r->dst_mac[2], r->dst_mac[3], r->dst_mac[4], r->dst_mac[5]);
+      out0 = format (out0, " dscp %d ", r->dscp);
       out0 = format (out0, " src %U/%d", format_ip46_address, &r->src,
 		     r->is_ipv6 ? IP46_TYPE_IP6 : IP46_TYPE_IP4,
 		     r->src_prefixlen);
@@ -621,6 +622,7 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       r->policer_index = ntohl(rules[i].policer_index);
       r->set_tc_value = rules[i].set_tc_value;
       r->set_hqos_user_id = ntohl(rules[i].set_hqos_user_id);
+      r->dscp = rules[i].dscp;
     }
 
   if (~0 == *acl_list_index)

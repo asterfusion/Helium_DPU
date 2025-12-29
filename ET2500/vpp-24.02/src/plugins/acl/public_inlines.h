@@ -77,22 +77,24 @@ acl_fill_5tuple_l2_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
     if (is_ip6)
     {
         int ii;
-        for(ii = 0; ii < 1; ii++)
+        for(ii = 0; ii < 3; ii++)
         {
             p5tuple_pkt->l3_zero_pad_1[ii] = 0;
         }
 
+        p5tuple_pkt->dscp_v6 = 0;
         clib_memcpy(&p5tuple_pkt->mac6_addr[0], mac_addr->src_address, 6);
         clib_memcpy(&p5tuple_pkt->mac6_addr[1], mac_addr->dst_address, 6);
     }
     else
     {
         int ii;
-        for(ii = 0; ii < 7; ii++)
+        for(ii = 0; ii < 27; ii++)
         {
             p5tuple_pkt->l3_zero_pad[ii] = 0;
         }
 
+        p5tuple_pkt->dscp_v4 = 0;
         clib_memcpy(&p5tuple_pkt->mac4_addr[0], mac_addr->src_address, 6);
         clib_memcpy(&p5tuple_pkt->mac4_addr[1], mac_addr->dst_address, 6);
     }
@@ -105,14 +107,17 @@ acl_fill_5tuple_l3_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
   if (is_ip6)
     {
       ip6_header_t *ip6 = vlib_buffer_get_current (b0) + l3_offset;
+      u32 ip_version_traffic_class_and_flow_label = ntohl(ip6->ip_version_traffic_class_and_flow_label);
       p5tuple_pkt->ip6_addr[0] = ip6->src_address;
       p5tuple_pkt->ip6_addr[1] = ip6->dst_address;
+      p5tuple_pkt->dscp_v6 = (ip_version_traffic_class_and_flow_label & 0x0ff00000) >> 22;
     }
   else
     {
       ip4_header_t *ip4 = vlib_buffer_get_current (b0) + l3_offset;
       p5tuple_pkt->ip4_addr[0] = ip4->src_address;
       p5tuple_pkt->ip4_addr[1] = ip4->dst_address;
+      p5tuple_pkt->dscp_v4 = (ip4->tos >> 2) & 0x3f
     }
 }
 
@@ -1123,6 +1128,7 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
                 match_acl_info->set_tc_value[0] = tmp_pae->set_tc_value;
                 match_acl_info->set_hqos_user_id[0] = tmp_pae->set_hqos_user_id;
                 match_acl_info->acl_priority[0] = tmp_pae->priority;
+                pae->hitcount++;
                 match_acl_info->acl_match_count = 1;
                 return 1;
             }
