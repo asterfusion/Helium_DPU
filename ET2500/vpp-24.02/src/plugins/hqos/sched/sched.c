@@ -314,7 +314,7 @@ hqos_sched_subport_config_qsize(hqos_sched_subport *subport)
         subport->qsize_add[i] = subport->qsize_add[i-1] + subport->qsize[i-1];
 
     /* Best-effort traffic class */
-    for (i = HQOS_SCHED_TRAFFIC_CLASSES_PER_PIPE; i < HQOS_SCHED_BE_QUEUES_PER_PIPE; i++)
+    for (i = HQOS_SCHED_TRAFFIC_CLASSES_PER_PIPE; i < HQOS_SCHED_QUEUES_PER_PIPE; i++)
     {
         subport->qsize_add[i] = subport->qsize_add[i - 1] + subport->qsize[HQOS_SCHED_TRAFFIC_CLASS_BE];
     }
@@ -1311,7 +1311,7 @@ hqos_sched_port_enqueue(hqos_sched_port *port, vlib_buffer_t **pkts, u32 n_pkts)
     u32 result, i;
 
     result = 0;
-    subport_qmask = (1 << (port->n_pipes_per_subport_log2 + 4)) - 1;
+    subport_qmask = (1 << (port->n_pipes_per_subport_log2 + HQOS_SCHED_QUEUES_PER_PIPE_LOG2)) - 1;
 
     /*
      * Less then 6 input packets available, which is not enough to
