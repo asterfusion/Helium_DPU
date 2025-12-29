@@ -117,7 +117,7 @@ acl_fill_5tuple_l3_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
       ip4_header_t *ip4 = vlib_buffer_get_current (b0) + l3_offset;
       p5tuple_pkt->ip4_addr[0] = ip4->src_address;
       p5tuple_pkt->ip4_addr[1] = ip4->dst_address;
-      p5tuple_pkt->dscp_v4 = (ip4->tos >> 2) & 0x3f
+      p5tuple_pkt->dscp_v4 = (ip4->tos >> 2) & 0x3f;
     }
 }
 
