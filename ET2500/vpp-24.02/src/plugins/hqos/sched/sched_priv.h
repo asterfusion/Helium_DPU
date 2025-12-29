@@ -64,7 +64,7 @@ hqos_sched_subport_pipe_queues(hqos_sched_subport *subport)
 static_always_inline vlib_buffer_t **
 hqos_sched_subport_pipe_qbase(hqos_sched_subport *subport, u32 qindex)
 {
-    u32 pindex = qindex >> 4;
+    u32 pindex = qindex >> HQOS_SCHED_QUEUES_PER_PIPE_LOG2;
     u32 qpos = qindex & (HQOS_SCHED_QUEUES_PER_PIPE - 1);
 
     return (subport->queue_array + pindex *
@@ -162,9 +162,9 @@ hqos_sched_port_qindex(hqos_sched_port *port,
                        u32 subport, u32 pipe, u32 traffic_class, u32 queue)
 {
     return ((subport & (port->n_subports_per_port - 1)) <<
-        (port->n_pipes_per_subport_log2 + 4)) |
+        (port->n_pipes_per_subport_log2 + HQOS_SCHED_QUEUES_PER_PIPE_LOG2)) |
         ((pipe &
-        (port->subports[subport]->n_pipes_per_subport_enabled - 1)) << 4) |
+        (port->subports[subport]->n_pipes_per_subport_enabled - 1)) << HQOS_SCHED_QUEUES_PER_PIPE_LOG2) |
         ((hqos_sched_port_pipe_queue(port, traffic_class) + queue) &
         (HQOS_SCHED_QUEUES_PER_PIPE - 1));
 }
@@ -305,7 +305,7 @@ hqos_sched_port_subport(hqos_sched_port *port,
                         vlib_buffer_t *pkt)
 {
     u32 queue_id = vlib_buffer_hqos_queue_get(pkt);
-    u32 subport_id = queue_id >> (port->n_pipes_per_subport_log2 + 4);
+    u32 subport_id = queue_id >> (port->n_pipes_per_subport_log2 + HQOS_SCHED_QUEUES_PER_PIPE_LOG2);
 
     return port->subports[subport_id];
 }
@@ -833,7 +833,7 @@ hqos_grinder_next_pipe(hqos_sched_port *port,
     }
 
     /* Install new pipe in the grinder */
-    grinder->pindex = pipe_qindex >> 4;
+    grinder->pindex = pipe_qindex >> HQOS_SCHED_QUEUES_PER_PIPE_LOG2;
     grinder->subport = subport;
     grinder->pipe = subport->pipe + grinder->pindex;
     grinder->pipe_params = NULL; /* to be set after the pipe structure is prefetched */
