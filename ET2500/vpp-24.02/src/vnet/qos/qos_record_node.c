@@ -63,14 +63,9 @@ qos_record_tc(vlib_buffer_t *b0, dpo_proto_t dproto, qos_bits_t qos)
     if(!(hi->flags &VNET_HW_INTERFACE_FLAG_USE_TC))
         return;
 
-    if (DPO_PROTO_IP4 == dproto)
+    if (DPO_PROTO_IP4 == dproto || DPO_PROTO_IP6 == dproto)
     {
-        tc = hash_get(hi->dscp_to_tc, qos);
-        vnet_buffer2(b0)->tc_index = tc ? tc[0] : 0;
-    }
-    else if (DPO_PROTO_IP6 == dproto)
-    {
-        tc = hash_get(hi->dscp_to_tc, qos);
+        tc = hash_get(hi->dscp_to_tc, (qos >> 2));
         vnet_buffer2(b0)->tc_index = tc ? tc[0] : 0;
     }
     else if (DPO_PROTO_ETHERNET == dproto)

@@ -73,6 +73,7 @@ hqos_classification_proc(vlib_main_t *vm,
     u32 hqos_subport_id = ~0;
     u32 hqos_pipe_id = ~0;
     u32 hqos_queue_id = ~0;
+    u8 qos_bit = ~0;
 
     hqos_port_fifo_t *hqos_port_fifo = NULL;
 
@@ -142,11 +143,14 @@ hqos_classification_proc(vlib_main_t *vm,
     }
     else if (p->flags & VNET_BUFFER_F_QOS_DATA_VALID)
     {
+        tc = vnet_buffer2(p)->tc_index & HQOS_TC_MASK;
+        qos_bit = vnet_buffer2(p)->qos.bits;
         switch(vnet_buffer2(p)->tc_index_dpo)
         {
         case DPO_PROTO_IP4:
         case DPO_PROTO_IP6:
             {
+                qos_bit = qos_bit >> 2;
                 if (user->dscp_to_tc)
                     qosmap_tc_hash = user->dscp_to_tc;
                 else if (user_group->dscp_to_tc)
@@ -188,12 +192,12 @@ hqos_classification_proc(vlib_main_t *vm,
 
         if (qosmap_tc_hash)
         {
-            tc_uword = hash_get(qosmap_tc_hash, vnet_buffer2(p)->qos.bits);
+            tc_uword = hash_get(qosmap_tc_hash, qos_bit);
             tc = tc_uword ? (tc_uword[0] & HQOS_TC_MASK): 0;
         }
         if (qosmap_color_hash)
         {
-            color_uword = hash_get(qosmap_color_hash, vnet_buffer2(p)->qos.bits);
+            color_uword = hash_get(qosmap_color_hash, qos_bit);
             color = color_uword ? (color_uword[0] < HQOS_COLORS ? color_uword[0] : HQOS_COLOR_RED): 0;
         }
     }
