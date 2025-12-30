@@ -1115,7 +1115,6 @@ hqos_sched_subport_config(hqos_sched_port *port,
             s->grinder_base_bmp_pos[i] = HQOS_SCHED_PIPE_INVALID;
 
         /* TC oversubscription */
-        s->tc_ov_wm_min = port->mtu;
         s->tc_ov_period_id = 0;
         s->tc_ov = 0;
         s->tc_ov_n = 0;
@@ -1143,6 +1142,7 @@ hqos_sched_subport_config(hqos_sched_port *port,
             else
                 profile->tc_credits_per_period[i] = 0;
 
+        s->tc_ov_wm_min = hqos_sched_time_ms_to_bytes(profile->tc_period, port->mtu);
         s->tc_ov_wm_max = hqos_sched_time_ms_to_bytes(profile->tc_period, s->pipe_tc_be_rate_max);
         s->tc_ov_wm = s->tc_ov_wm_max;
         s->profile = subport_profile_id;
