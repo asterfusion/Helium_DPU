@@ -632,8 +632,10 @@ hqos_grinder_schedule(hqos_sched_port *port,
             return 0;
     }
 
+#if 0
     /* Advance port time */
     port->time += pkt_len;
+#endif
 
     /* Send packet */
     port->pkts_out[port->n_pkts_out++] = pkt;
@@ -1102,7 +1104,7 @@ hqos_sched_port_time_resync(hqos_sched_port *port)
 
     cycles_diff = cycles - port->time_cpu_cycles;
     /* Compute elapsed time in bytes */
-    bytes_diff = hqos_reciprocal_divide(cycles_diff << HQOS_SCHED_TIME_SHIFT, port->inv_cycles_per_byte);
+    bytes_diff = hqos_reciprocal_divide_u64(cycles_diff << HQOS_SCHED_TIME_SHIFT, &port->inv_cycles_per_byte);
 
     /* Advance port time */
     port->time_cpu_cycles += (bytes_diff * port->cycles_per_byte) >> HQOS_SCHED_TIME_SHIFT;

@@ -663,9 +663,10 @@ hqos_sched_port_get_memory_footprint(hqos_sched_port_params *port_params,
 hqos_sched_port *
 hqos_sched_port_config(hqos_sched_port_params *params)
 {
+    vlib_main_t *vm = hqos_vlib_get_main ();
     hqos_sched_port *port = NULL;
     u32 size0, size1, size2;
-    u32 cycles_per_byte;
+    u64 cycles_per_byte;
     u32 i, j;
     int status;
 
@@ -733,8 +734,8 @@ hqos_sched_port_config(hqos_sched_port_params *params)
     /* Subport profile table */
     hqos_sched_port_config_subport_profile_table(port, params, port->rate);
 
-    cycles_per_byte = ((u64)os_cpu_clock_frequency() << HQOS_SCHED_TIME_SHIFT) / params->rate;
-    port->inv_cycles_per_byte = hqos_reciprocal_value(cycles_per_byte); 
+    cycles_per_byte = ((u64)vm->clib_time.clocks_per_second << HQOS_SCHED_TIME_SHIFT) / params->rate;
+    port->inv_cycles_per_byte = hqos_reciprocal_value_u64(cycles_per_byte);
     port->cycles_per_byte = cycles_per_byte;
 
     /* Grinders */
@@ -864,6 +865,7 @@ hqos_sched_subport_pipe_profile_add(hqos_sched_port *port,
 {
     hqos_sched_subport *s;
     hqos_sched_pipe_profile *pp;
+    hqos_sched_subport_profile *sp;
     int status;
 
     /* Port */
@@ -886,15 +888,17 @@ hqos_sched_subport_pipe_profile_add(hqos_sched_port *port,
         return -EINVAL;
     }
 
+    sp = port->subport_profiles + s->profile;
+
     /* Pipe params */
-    status = hqos_pipe_profile_check(params, port->rate, &s->qsize[0]);
+    status = hqos_pipe_profile_check(params, sp->orig_tb_rate, &s->qsize[0]);
     if (status != 0) {
         clib_warning("%s: Pipe profile check failed(%d)", __func__, status);
         return -EINVAL;
     }
 
     pp = &s->pipe_profiles[s->n_pipe_profiles];
-    hqos_sched_pipe_profile_convert(s, params, pp, port->rate);
+    hqos_sched_pipe_profile_convert(s, params, pp, sp->orig_tb_rate);
 
     /* Pipe profile commit */
     *pipe_profile_id = s->n_pipe_profiles;
@@ -916,6 +920,7 @@ hqos_sched_subport_pipe_profile_update(hqos_sched_port *port,
 {
     hqos_sched_subport *s;
     hqos_sched_pipe_profile *pp;
+    hqos_sched_subport_profile *sp;
     int status;
 
     /* Port */
@@ -938,6 +943,8 @@ hqos_sched_subport_pipe_profile_update(hqos_sched_port *port,
         return -EINVAL;
     }
 
+    sp = port->subport_profiles + s->profile;
+
     /* Pipe profile id valid */
     if (pipe_profile_id >= s->n_pipe_profiles)
     {
@@ -946,14 +953,14 @@ hqos_sched_subport_pipe_profile_update(hqos_sched_port *port,
     }
 
     /* Pipe params */
-    status = hqos_pipe_profile_check(params, port->rate, &s->qsize[0]);
+    status = hqos_pipe_profile_check(params, sp->orig_tb_rate, &s->qsize[0]);
     if (status != 0) {
         clib_warning("%s: Pipe profile check failed(%d)", __func__, status);
         return -EINVAL;
     }
 
     pp = &s->pipe_profiles[pipe_profile_id];
-    hqos_sched_pipe_profile_convert(s, params, pp, port->rate);
+    hqos_sched_pipe_profile_convert(s, params, pp, sp->orig_tb_rate);
 
     if (s->pipe_tc_be_rate_max < params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE])
         s->pipe_tc_be_rate_max = params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE];
@@ -1125,6 +1132,8 @@ hqos_sched_subport_config(hqos_sched_port *port,
         s = port->subports[subport_id];
 
         s->tb_credits = profile->tb_size / 2;
+
+        s->tb_time = port->time;
 
         s->tc_time = port->time + profile->tc_period;
 

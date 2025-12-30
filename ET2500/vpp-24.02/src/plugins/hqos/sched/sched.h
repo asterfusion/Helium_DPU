@@ -407,7 +407,7 @@ typedef struct _hqos_sched_pipe {
     u64 tc_credits[HQOS_SCHED_TRAFFIC_CLASSES_PER_PIPE];
 
     /* Weighted Round Robin (WRR) */
-    u8 wrr_tokens[HQOS_SCHED_BE_QUEUES_PER_PIPE];
+    u16 wrr_tokens[HQOS_SCHED_BE_QUEUES_PER_PIPE];
 
     /* TC oversubscription */
     u64 tc_ov_credits;
@@ -559,7 +559,7 @@ typedef struct _hqos_sched_port {
     u64 time_cpu_cycles;     /* Current CPU time measured in CPU cycles */
     u64 time_cpu_bytes;      /* Current CPU time measured in bytes */
     u64 time;                /* Current NIC TX time measured in bytes */
-    hqos_reciprocal inv_cycles_per_byte; /* CPU cycles per byte */ 
+    hqos_reciprocal_u64 inv_cycles_per_byte; /* CPU cycles per byte */
     u64 cycles_per_byte;
 
     /* Grinders */
