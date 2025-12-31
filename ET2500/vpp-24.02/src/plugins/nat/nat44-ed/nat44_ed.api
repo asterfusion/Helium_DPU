@@ -1071,6 +1071,7 @@ define nat44_user_session_v4_details {
     @param last_ip_address - o2i end daddr
     @param inside_vrf_id - VRF_ID
     @param outside_vrf_id - VRF_ID
+    @param max_count - max return session count
 */
 define nat44_user_session_v4_dump {
   u32 client_index;
@@ -1081,4 +1082,5 @@ define nat44_user_session_v4_dump {
   vl_api_ip4_address_t last_ip_address;
   u32 inside_vrf_id;
   u32 outside_vrf_id;
+  u32 max_count;
 };

@@ -1851,6 +1851,8 @@ vl_api_nat44_user_session_v4_dump_t_handler (
   u8 match_flag = 0;
   u32 start_host_order, end_host_order;
   u32 *tmp;
+  u32 count = 0;
+  u32 max_count = 0;
   int i;
 
 
@@ -1870,6 +1872,7 @@ vl_api_nat44_user_session_v4_dump_t_handler (
   start_host_order = clib_host_to_net_u32 (tmp[0]);
   tmp = (u32 *) mp->last_ip_address;
   end_host_order = clib_host_to_net_u32 (tmp[0]);
+  max_count = ntohl(mp->max_count);
 
   vec_foreach_index (i, sm->per_thread_data)
   {
@@ -1912,7 +1915,12 @@ vl_api_nat44_user_session_v4_dump_t_handler (
 
           if(match_flag)
           {
+              count ++;
               send_nat44_user_session_v4_details (s, reg, mp->context);
+          }
+          if(max_count && count > max_count)
+          {
+              return;
           }
       }
   }
