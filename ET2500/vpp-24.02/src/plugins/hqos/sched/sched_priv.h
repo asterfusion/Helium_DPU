@@ -632,8 +632,10 @@ hqos_grinder_schedule(hqos_sched_port *port,
             return 0;
     }
 
+#if 0
     /* Advance port time */
     port->time += pkt_len;
+#endif
 
     /* Send packet */
     port->pkts_out[port->n_pkts_out++] = pkt;
@@ -960,15 +962,23 @@ hqos_grinder_prefetch_tc_queue_arrays(hqos_sched_subport *subport, u32 pos)
     qr[1] = grinder->queue[1]->qr & (qsize - 1);
     qr[2] = grinder->queue[2]->qr & (qsize - 1);
     qr[3] = grinder->queue[3]->qr & (qsize - 1);
+    qr[4] = grinder->queue[4]->qr & (qsize - 1);
+    qr[5] = grinder->queue[5]->qr & (qsize - 1);
+    qr[6] = grinder->queue[6]->qr & (qsize - 1);
+    qr[7] = grinder->queue[7]->qr & (qsize - 1);
 
     clib_prefetch_load(grinder->qbase[0] + qr[0]);
     clib_prefetch_load(grinder->qbase[1] + qr[1]);
+    clib_prefetch_load(grinder->qbase[2] + qr[2]);
+    clib_prefetch_load(grinder->qbase[3] + qr[3]);
 
     hqos_grinder_wrr_load(subport, pos);
     hqos_grinder_wrr(subport, pos);
 
-    clib_prefetch_load(grinder->qbase[2] + qr[2]);
-    clib_prefetch_load(grinder->qbase[3] + qr[3]);
+    clib_prefetch_load(grinder->qbase[4] + qr[4]);
+    clib_prefetch_load(grinder->qbase[5] + qr[5]);
+    clib_prefetch_load(grinder->qbase[6] + qr[6]);
+    clib_prefetch_load(grinder->qbase[7] + qr[7]);
 }
 
 static_always_inline void
@@ -1102,7 +1112,7 @@ hqos_sched_port_time_resync(hqos_sched_port *port)
 
     cycles_diff = cycles - port->time_cpu_cycles;
     /* Compute elapsed time in bytes */
-    bytes_diff = hqos_reciprocal_divide(cycles_diff << HQOS_SCHED_TIME_SHIFT, port->inv_cycles_per_byte);
+    bytes_diff = hqos_reciprocal_divide_u64(cycles_diff << HQOS_SCHED_TIME_SHIFT, &port->inv_cycles_per_byte);
 
     /* Advance port time */
     port->time_cpu_cycles += (bytes_diff * port->cycles_per_byte) >> HQOS_SCHED_TIME_SHIFT;

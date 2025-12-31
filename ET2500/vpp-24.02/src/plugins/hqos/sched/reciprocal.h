@@ -56,7 +56,7 @@ mullhi_u64(uint64_t x, uint64_t y)
 }
 
 static inline __attribute__ ((__always_inline__)) uint64_t
-rte_reciprocal_divide_u64(uint64_t a, const hqos_reciprocal_u64 *R)
+hqos_reciprocal_divide_u64(uint64_t a, const hqos_reciprocal_u64 *R)
 {
     uint64_t t = mullhi_u64(a, R->m);
 
