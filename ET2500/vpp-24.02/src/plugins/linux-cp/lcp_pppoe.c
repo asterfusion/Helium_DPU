@@ -323,6 +323,23 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
 	    (vnm, pppoe_device_class.index, t - pem->sessions,
 	     pppoe_hw_class.index, t - pem->sessions);
 	  hi = vnet_get_hw_interface (vnm, hw_if_index);
+
+	  sw_if_index = hi->sw_if_index;
+	  /* add default punt feature */
+	  vnet_feature_enable_disable("ip4-multicast", "linux-cp-ospfv2-phy",
+	          sw_if_index, 1, NULL, 0);
+	  vnet_feature_enable_disable("ip6-multicast", "linux-cp-ospfv3-phy",
+	          sw_if_index, 1, NULL, 0);
+	  /* enable bfd/bfdv6 punt for interfaces */
+	  vnet_feature_enable_disable("ip4-unicast", "linux-cp-bfd-phy",
+	          sw_if_index, 1, NULL, 0);
+	  vnet_feature_enable_disable("ip4-multicast", "linux-cp-bfd-phy",
+	          sw_if_index, 1, NULL, 0);
+	  vnet_feature_enable_disable("ip6-unicast", "linux-cp-bfdv6-phy",
+	          sw_if_index, 1, NULL, 0);
+	  vnet_feature_enable_disable("ip6-multicast", "linux-cp-bfdv6-phy",
+	          sw_if_index, 1, NULL, 0);
+
 	}
 
       t->hw_if_index = hw_if_index;
@@ -349,21 +366,6 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
 				   VNET_SW_INTERFACE_FLAG_ADMIN_UP);
       vnet_set_interface_l3_output_node (vnm->vlib_main, sw_if_index,
 					 (u8 *) "tunnel-output");
-
-      /* add default punt feature */
-      vnet_feature_enable_disable("ip4-multicast", "linux-cp-ospfv2-phy",
-              sw_if_index, 1, NULL, 0);
-      vnet_feature_enable_disable("ip6-multicast", "linux-cp-ospfv3-phy",
-              sw_if_index, 1, NULL, 0);
-      /* enable bfd/bfdv6 punt for interfaces */
-      vnet_feature_enable_disable("ip4-unicast", "linux-cp-bfd-phy",
-              sw_if_index, 1, NULL, 0);
-      vnet_feature_enable_disable("ip4-multicast", "linux-cp-bfd-phy",
-              sw_if_index, 1, NULL, 0);
-      vnet_feature_enable_disable("ip6-unicast", "linux-cp-bfdv6-phy",
-              sw_if_index, 1, NULL, 0);
-      vnet_feature_enable_disable("ip6-multicast", "linux-cp-bfdv6-phy",
-              sw_if_index, 1, NULL, 0);
 
   }
   else
