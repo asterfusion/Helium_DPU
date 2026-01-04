@@ -22,7 +22,7 @@
 typedef enum ip4_options_next_t_
 {
   IP4_OPTIONS_NEXT_PUNT,
-  IP4_OPTIONS_NEXT_LOCAL,
+  IP4_OPTIONS_NEXT_XC,
   IP4_OPTIONS_N_NEXT,
 } ip4_options_next_t;
 
@@ -89,7 +89,7 @@ VLIB_NODE_FN (ip4_options_node) (vlib_main_t * vm,
 		{
 		  ip_lookup_set_buffer_fib_index (
 		    ip4_main.fib_index_by_sw_if_index, b);
-		  next = IP4_OPTIONS_NEXT_LOCAL;
+		  next = IP4_OPTIONS_NEXT_XC;
 		}
 	      break;
 	    default:
@@ -135,7 +135,7 @@ VLIB_REGISTER_NODE (ip4_options_node) = {
   .n_next_nodes = IP4_OPTIONS_N_NEXT,
   .next_nodes = {
     [IP4_OPTIONS_NEXT_PUNT] = "ip4-punt",
-    [IP4_OPTIONS_NEXT_LOCAL] = "ip4-local",
+    [IP4_OPTIONS_NEXT_XC] = "linux-cp-igmp-xc",
   },
   .format_buffer = format_ip4_header,
   .format_trace = format_ip4_options_trace,

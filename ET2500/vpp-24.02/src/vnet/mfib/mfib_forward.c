@@ -30,6 +30,65 @@ typedef struct mfib_forward_lookup_trace_t_ {
     u32 fib_index;
 } mfib_forward_lookup_trace_t;
 
+#define MAX_TABLE_ID 256
+
+typedef struct {
+    bool punt_enabled[MAX_TABLE_ID];
+    bool valid[MAX_TABLE_ID];  
+    u32 max_table_id;         
+} table_punt_array_t;
+
+static table_punt_array_t *table_punt_array = NULL;
+
+int table_punt_array_init(void) {
+    if (table_punt_array) {
+        return 0;
+    }
+    
+    table_punt_array = (table_punt_array_t *)calloc(1, sizeof(table_punt_array_t));
+    if (!table_punt_array) {
+        return -1;
+    }
+    
+    memset(table_punt_array->valid, 0, sizeof(table_punt_array->valid));
+    memset(table_punt_array->punt_enabled, 0, sizeof(table_punt_array->punt_enabled));
+    table_punt_array->max_table_id = 0;
+    
+    return 0;
+}
+
+int table_punt_array_set(u32 table_id, bool punt_enabled) {
+    if (!table_punt_array) {
+        int ret = table_punt_array_init();
+        if (ret != 0) return ret;
+    }
+    
+    if (table_id >= MAX_TABLE_ID) {
+        return -1; 
+    }
+    
+    table_punt_array->punt_enabled[table_id] = punt_enabled;
+    table_punt_array->valid[table_id] = true;
+    
+    if (table_id > table_punt_array->max_table_id) {
+        table_punt_array->max_table_id = table_id;
+    }
+    
+    return 0;
+}
+
+bool table_punt_array_get(u32 table_id) {
+    if (!table_punt_array || table_id >= MAX_TABLE_ID) {
+        return false; 
+    }
+    
+    if (!table_punt_array->valid[table_id]) {
+        return false;
+    }
+    
+    return table_punt_array->punt_enabled[table_id];
+}
+
 static u8 *
 format_mfib_forward_lookup_trace (u8 * s, va_list * args)
 {
@@ -233,6 +292,7 @@ typedef struct mfib_forward_rpf_trace_t_ {
 
 typedef enum mfib_forward_rpf_next_t_ {
     MFIB_FORWARD_RPF_NEXT_PUNT,
+    MFIB_FORWARD_RPF_NEXT_DROP,
     MFIB_FORWARD_RPF_N_NEXT,
 } mfib_forward_rpf_next_t;
 
@@ -442,7 +502,24 @@ mfib_forward_rpf (vlib_main_t * vm,
             }
             else
             {
-                next0 = MFIB_FORWARD_RPF_NEXT_PUNT;
+                u32 table_id = 0;
+                if(is_v4)
+                {
+                    table_id = mfib_table_get_table_id(mfe0->mfe_fib_index, FIB_PROTOCOL_IP4);
+                }
+                else
+                {
+                    table_id = mfib_table_get_table_id(mfe0->mfe_fib_index, FIB_PROTOCOL_IP6);
+                }
+                
+                if(table_punt_array_get(table_id))
+                {
+                    next0 = MFIB_FORWARD_RPF_NEXT_PUNT;
+                }
+                else
+                {
+                    next0 = MFIB_FORWARD_RPF_NEXT_DROP;
+                }
 		error0 =
 		  (is_v4 ? IP4_ERROR_RPF_FAILURE : IP6_ERROR_RPF_FAILURE);
 	    }
@@ -491,6 +568,7 @@ VLIB_REGISTER_NODE (ip4_mfib_forward_rpf_node) = {
 
     .n_next_nodes = MFIB_FORWARD_RPF_N_NEXT,
     .next_nodes = {
+        [MFIB_FORWARD_RPF_NEXT_DROP] = "ip4-drop",
         [MFIB_FORWARD_RPF_NEXT_PUNT] = "linux-cp-punt",
     },
 };
@@ -511,6 +589,7 @@ VLIB_REGISTER_NODE (ip6_mfib_forward_rpf_node) = {
 
     .n_next_nodes = MFIB_FORWARD_RPF_N_NEXT,
     .next_nodes = {
+        [MFIB_FORWARD_RPF_NEXT_DROP] = "ip4-drop",
         [MFIB_FORWARD_RPF_NEXT_PUNT] = "linux-cp-punt",
     },
 };

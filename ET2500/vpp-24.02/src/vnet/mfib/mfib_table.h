@@ -576,5 +576,11 @@ extern u8 * format_mfib_table_memory(u8 * s, va_list * args);
 extern u32 mfib_table_get_n_routes(fib_node_index_t index,
                                    fib_protocol_t proto);
 
+extern int table_punt_array_init(void);
+
+extern int table_punt_array_set(u32 table_id, bool punt_enabled);
+
+extern bool table_punt_array_get(u32 table_id);
+
 
 #endif
