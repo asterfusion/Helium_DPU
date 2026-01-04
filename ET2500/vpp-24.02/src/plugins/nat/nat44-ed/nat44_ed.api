@@ -1083,4 +1083,7 @@ define nat44_user_session_v4_dump {
   u32 inside_vrf_id;
   u32 outside_vrf_id;
   u32 max_count;
+  u16 outside_port;
+  u16 inside_port;
+  u16 protocol;
 };

@@ -1771,7 +1771,7 @@ vl_api_nat44_user_session_v3_dump_t_handler (
     }
 }
 
-static void
+static u8 
 send_nat44_user_session_v4_details (snat_session_t *s,
 				    vl_api_registration_t *reg, u32 context)
 {
@@ -1831,10 +1831,11 @@ send_nat44_user_session_v4_details (snat_session_t *s,
   if (rmp->create_status == 2)
   {
       vl_msg_api_free(rmp);
-      return;
+      return 1;
   }
 
   vl_api_send_msg (reg, (u8 *) rmp);
+  return 0;
 }
 
 static void
@@ -1854,6 +1855,9 @@ vl_api_nat44_user_session_v4_dump_t_handler (
   u32 count = 0;
   u32 max_count = 0;
   int i;
+  u16 protocol = 0;
+  u16 inside_port = 0;
+  u16 outside_port = 0;
 
 
   reg = vl_api_client_index_to_registration (mp->client_index);
@@ -1873,6 +1877,9 @@ vl_api_nat44_user_session_v4_dump_t_handler (
   tmp = (u32 *) mp->last_ip_address;
   end_host_order = clib_host_to_net_u32 (tmp[0]);
   max_count = ntohl(mp->max_count);
+  protocol = ntohs(mp->protocol);
+  inside_port = ntohs(mp->inside_port);
+  outside_port = ntohs(mp->outside_port);
 
   vec_foreach_index (i, sm->per_thread_data)
   {
@@ -1896,13 +1903,35 @@ vl_api_nat44_user_session_v4_dump_t_handler (
                       inside_key.addr.as_u32 == s->i2o.match.saddr.as_u32 &&
                       inside_key.fib_index == s->i2o.match.fib_index)
               {
-                  match_flag = 1;
+                  if(protocol && inside_port)
+                  {
+                      if( protocol == s->proto &&
+                          inside_port == s->in2out.port)
+                      {
+                          match_flag = 1;
+                      }
+                  }
+                  else
+                  {
+                      match_flag = 1;
+                  }
               }
               else if(outside_key.addr.as_u32 &&
                       outside_key.addr.as_u32 == s->o2i.match.daddr.as_u32 &&
                       outside_key.fib_index == s->o2i.match.fib_index)
               {
-                  match_flag = 1;
+                  if(protocol && outside_port)
+                  {
+                      if( protocol == s->proto &&
+                          outside_port == s->out2in.port)
+                      {
+                          match_flag = 1;
+                      }
+                  }
+                  else
+                  {
+                      match_flag = 1;
+                  }
               }
               else if(start_host_order &&
                       clib_host_to_net_u32(s->o2i.match.daddr.as_u32) >= start_host_order &&
@@ -1915,8 +1944,10 @@ vl_api_nat44_user_session_v4_dump_t_handler (
 
           if(match_flag)
           {
-              count ++;
-              send_nat44_user_session_v4_details (s, reg, mp->context);
+              if(send_nat44_user_session_v4_details (s, reg, mp->context) == 0)
+              {
+                  count ++;
+              }
           }
           if(max_count && count > max_count)
           {
