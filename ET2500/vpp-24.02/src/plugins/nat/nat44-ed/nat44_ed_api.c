@@ -1906,7 +1906,7 @@ vl_api_nat44_user_session_v4_dump_t_handler (
                   if(protocol && inside_port)
                   {
                       if( protocol == s->proto &&
-                          inside_port == s->in2out.port)
+                          mp->inside_port == s->in2out.port)
                       {
                           match_flag = 1;
                       }
@@ -1923,7 +1923,7 @@ vl_api_nat44_user_session_v4_dump_t_handler (
                   if(protocol && outside_port)
                   {
                       if( protocol == s->proto &&
-                          outside_port == s->out2in.port)
+                          mp->outside_port == s->out2in.port)
                       {
                           match_flag = 1;
                       }
