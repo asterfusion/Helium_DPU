@@ -1773,7 +1773,7 @@ vl_api_nat44_user_session_v3_dump_t_handler (
 
 static u8 
 send_nat44_user_session_v4_details (snat_session_t *s,
-				    vl_api_registration_t *reg, u32 context)
+				    vl_api_registration_t *reg, u32 context, u16 get_count)
 {
   vl_api_nat44_user_session_v4_details_t *rmp;
   snat_main_t *sm = &snat_main;
@@ -1828,7 +1828,7 @@ send_nat44_user_session_v4_details (snat_session_t *s,
     s->create_status = 2;//for timeout status
   }
 
-  if (rmp->create_status == 2)
+  if (rmp->create_status == 2 && get_count == 0)
   {
       vl_msg_api_free(rmp);
       return 1;
@@ -1944,7 +1944,7 @@ vl_api_nat44_user_session_v4_dump_t_handler (
 
           if(match_flag)
           {
-              if(send_nat44_user_session_v4_details (s, reg, mp->context) == 0)
+              if(send_nat44_user_session_v4_details (s, reg, mp->context, mp->get_count) == 0)
               {
                   count ++;
               }
