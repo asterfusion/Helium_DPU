@@ -37,7 +37,7 @@
 #include <vnet/mfib/mfib_signal.h>
 #include <vnet/mfib/mfib_entry.h>
 #include <vnet/mfib/mfib_api.h>
-#include <vnet/mfib/mfib_table.h>
+#include <vnet/mfib/mfib_table_punt.h>
 #include <vnet/ip/ip_source_and_port_range_check.h>
 #include <vnet/fib/fib_path_list.h>
 #include <vnet/ip/ip6_hop_by_hop.h>
