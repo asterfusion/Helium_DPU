@@ -60,7 +60,12 @@ qos_record_tc(vlib_buffer_t *b0, dpo_proto_t dproto, qos_bits_t qos)
 
     uword *tc;
 
+    vnet_buffer2(b0)->tc_index_dpo = dproto;
+
     if(!(hi->flags &VNET_HW_INTERFACE_FLAG_USE_TC))
+        return;
+
+    if(hi->flags & VLIB_BUFFER_ACL_SET_TC_VALID)
         return;
 
     if (DPO_PROTO_IP4 == dproto || DPO_PROTO_IP6 == dproto)
@@ -78,7 +83,6 @@ qos_record_tc(vlib_buffer_t *b0, dpo_proto_t dproto, qos_bits_t qos)
         tc = hash_get(hi->mpls_exp_to_tc, qos);
         vnet_buffer2(b0)->tc_index = tc ? tc[0] : 0;
     }
-    vnet_buffer2(b0)->tc_index_dpo = dproto;
 }
 
 static inline uword
@@ -167,7 +171,7 @@ qos_record_inline (vlib_main_t * vm,
 	    }
 
 
-      qos_record_tc(b0, qos0, dproto);
+      qos_record_tc(b0, dproto, qos0);
 
 	  vnet_buffer2 (b0)->qos.bits = qos0;
 	  vnet_buffer2 (b0)->qos.source = qos_src;
@@ -278,6 +282,7 @@ VLIB_REGISTER_NODE (ip4_qos_record_node) = {
 VNET_FEATURE_INIT (ip4_qos_record_node, static) = {
     .arc_name = "ip4-unicast",
     .node_name = "ip4-qos-record",
+    .runs_before = VNET_FEATURES ("acl-plugin-in-ip4-fa"),
 };
 VNET_FEATURE_INIT (ip4m_qos_record_node, static) = {
     .arc_name = "ip4-multicast",
@@ -301,6 +306,7 @@ VLIB_REGISTER_NODE (ip6_qos_record_node) = {
 VNET_FEATURE_INIT (ip6_qos_record_node, static) = {
     .arc_name = "ip6-unicast",
     .node_name = "ip6-qos-record",
+    .runs_before = VNET_FEATURES ("acl-plugin-in-ip6-fa"),
 };
 VNET_FEATURE_INIT (ip6m_qos_record_node, static) = {
     .arc_name = "ip6-multicast",
