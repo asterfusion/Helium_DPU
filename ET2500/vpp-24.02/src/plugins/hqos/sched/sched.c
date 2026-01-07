@@ -838,12 +838,6 @@ hqos_sched_port_subport_profile_update(hqos_sched_port *port,
 
     dst = port->subport_profiles + subport_profile_id;
 
-    /* Subport profiles exceeds the max limit */
-    if (port->n_subport_profiles >= port->n_max_subport_profiles) {
-        clib_warning("%s: Number of subport profiles exceeds the max limit", __func__);
-        return -EINVAL;
-    }
-
     status = hqos_subport_profile_check(params, port->rate);
     if (status != 0) {
         clib_warning("%s: subport profile check failed(%d)", __func__, status);
@@ -936,12 +930,6 @@ hqos_sched_subport_pipe_profile_update(hqos_sched_port *port,
     }
 
     s = port->subports[subport_id];
-
-    /* Pipe profiles exceeds the max limit */
-    if (s->n_pipe_profiles >= s->n_max_pipe_profiles) {
-        clib_warning("%s: Number of pipe profiles exceeds the max limit", __func__);
-        return -EINVAL;
-    }
 
     sp = port->subport_profiles + s->profile;
 
