@@ -792,10 +792,13 @@ vl_api_hqos_user_group_remove_mpls_exp_color_map_t_handler (vl_api_hqos_user_gro
 clib_error_t *
 hqos_plugin_api_hookup (vlib_main_t * vm)
 {
+    api_main_t *am = vlibapi_get_main ();
     hqos_main_t *hm = &hqos_main;
 
     hm->msg_id_base = setup_message_id_table ();
 
+    vl_api_set_msg_thread_safe(am, hm->msg_id_base + VL_API_HQOS_SUBPORT_STAT_DUMP, 1);
+    vl_api_set_msg_thread_safe(am, hm->msg_id_base + VL_API_HQOS_QUEUE_STAT_DUMP, 1);
     return 0;
 }
 

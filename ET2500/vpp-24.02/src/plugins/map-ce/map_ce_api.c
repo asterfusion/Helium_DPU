@@ -909,10 +909,12 @@ vl_api_map_ce_if_enable_disable_t_handler (vl_api_map_ce_if_enable_disable_t * m
 clib_error_t *
 map_ce_plugin_api_hookup (vlib_main_t * vm)
 {
+    api_main_t *am = vlibapi_get_main ();
     map_ce_main_t *mm = &map_ce_main;
 
     mm->msg_id_base = setup_message_id_table ();
 
+    vl_api_set_msg_thread_safe(am, mm->msg_id_base + VL_API_MAP_CE_DOMAIN_STATS, 1);
     return 0;
 }
 
