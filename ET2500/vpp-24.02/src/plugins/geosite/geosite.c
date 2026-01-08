@@ -395,6 +395,8 @@ show_geosite_stats_command_fn(vlib_main_t *vm,
         {
             show_details = true;
         }
+        else
+            break;
     }
 
     u32 cc_total = pool_elts(gmp->domain_trie->country_codes);
@@ -572,6 +574,8 @@ show_geoip_stats_command_fn(vlib_main_t *vm,
         {
             show_details = true;
         }
+        else
+            break;
     }
 
     u32 cc_total = pool_elts(gmp->geoip_trie->country_codes);
@@ -826,9 +830,6 @@ u32 *geoip_get_country_code_by_ip4(ip4_address_t ip4)
         return NULL;
     }
   
-     u8 *ip_str = format(0, "%U", format_ip4_address, &ip4);
-    vec_free(ip_str);
-        
         cc_indices = geoip_lookup_v4 (db, &ip4);
         if (vec_len(cc_indices) != 0) {
          
