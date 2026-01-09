@@ -318,6 +318,15 @@ vl_api_lcp_set_interface_punt_feature_t_handler (
   vnet_feature_enable_disable("ip6-multicast", "linux-cp-vrrp6",
           sw_if_index, punt_on, NULL, 0);
 
+  vnet_feature_enable_disable("ip4-unicast", "linux-cp-rip-phy",
+          sw_if_index, punt_on, NULL, 0);
+  vnet_feature_enable_disable("ip4-multicast", "linux-cp-rip-phy",
+          sw_if_index, punt_on, NULL, 0);
+  vnet_feature_enable_disable("ip6-unicast", "linux-cp-ripv6-phy",
+          sw_if_index, punt_on, NULL, 0);
+  vnet_feature_enable_disable("ip6-multicast", "linux-cp-ripv6-phy",
+          sw_if_index, punt_on, NULL, 0);
+
   BAD_SW_IF_INDEX_LABEL;
   REPLY_MACRO (VL_API_LCP_SET_INTERFACE_PUNT_FEATURE_REPLY);
 }
