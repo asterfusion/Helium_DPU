@@ -399,8 +399,6 @@ acl_get_country_index_by_domain(vlib_buffer_t **b, u32 **cc_indices, u32 **dns_c
     for (int i = 0; i < vec_len(rn); i++)
     {
       dns_resolve_name_t *_rn = &rn[i];
-      u8 *ip_str = format(0, "%U", format_ip4_address, &_rn->address.ip.ip4);
-      vec_free(ip_str);
       u32 *cc_indices_tmp;
       if (is_ipv6)
       {
@@ -435,8 +433,6 @@ always_inline u8
 acl_get_country_index_by_dip4(vlib_buffer_t **b, u32 **cc_indices, ip4_address_t ip4)
 {
   u8 result = 0;
-  u8 *ip_str = format(0, "%U", format_ip4_address, &ip4);
-  vec_free(ip_str);
   *cc_indices = ((__typeof__(geoip_get_country_code_by_ip4) *)geoip_get_country_code_by_ip4_ptr)(ip4);
   if (*cc_indices)
   {
@@ -450,8 +446,6 @@ always_inline u8
 acl_get_country_index_by_dip6(vlib_buffer_t **b, u32 **cc_indices, ip6_address_t ip6)
 {
   u8 result = 0;
-  u8 *ip_str = format(0, "%U", format_ip6_address, &ip6);
-  vec_free(ip_str);
   *cc_indices = ((__typeof__(geoip_get_country_code_by_ip6) *)geoip_get_country_code_by_ip6_ptr)(ip6);
   if (*cc_indices)
   {

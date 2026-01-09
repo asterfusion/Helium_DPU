@@ -3321,7 +3321,6 @@ dns_query_domain_name (u8  * domain,dns_resolve_name_t **rn)
   dns_pending_request_t _t0 = { 0 }, *t0 = &_t0;
   int rv;
  dns_resolve_name_t *rn2 = NULL;
-  dns_resolve_name_t *_rn;
 
 
  
@@ -3334,13 +3333,6 @@ dns_query_domain_name (u8  * domain,dns_resolve_name_t **rn)
   t0->client_context = 0;
   t0->qp_type = DNS_TYPE_A;
   rv = dns_resolve_name_ex (domain, &ep, t0, &rn2);
-           for(int i=0; i< vec_len(rn2); i++)
-           {
-              _rn = &rn2[i];
-              u8 *ip_str = format(0, "%U", format_ip4_address, &_rn->address.ip.ip4);
-              vec_free(ip_str); 
-            
-           }
            
   /* Error, e.g. not enabled? Tell the user */
   if (rv < 0)
