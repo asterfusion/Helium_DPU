@@ -4487,7 +4487,7 @@ acl_init (vlib_main_t * vm)
   /* use the new fancy hash-based matching */
   am->use_hash_acl_matching = 1;
   /* use tuplemerge by default */
-  am->use_tuple_merge = 1;
+  //am->use_tuple_merge = 1;
   /* Set the default threshold */
   am->tuple_merge_split_threshold = TM_SPLIT_THRESHOLD;
 

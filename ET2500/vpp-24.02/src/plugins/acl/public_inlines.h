@@ -892,7 +892,7 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
     {
       return 0;
     }
-
+#if 0
   if (is_ip6)
     {
       if (!fa_acl_match_ip6_addr
@@ -938,6 +938,7 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
 	      r->tcp_flags_value))
 	return 0;
     }
+#endif
   /* everything matches! */
   return 1;
 }
