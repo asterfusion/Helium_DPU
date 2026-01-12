@@ -899,7 +899,12 @@ hqos_sched_subport_pipe_profile_add(hqos_sched_port *port,
     s->n_pipe_profiles++;
 
     if (s->pipe_tc_be_rate_max < params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE])
+    {
         s->pipe_tc_be_rate_max = params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE];
+        s->tc_ov_wm_max = hqos_sched_time_ms_to_bytes(sp->tc_period, s->pipe_tc_be_rate_max);
+        s->tc_ov_wm = s->tc_ov_wm_max;
+    }
+
 
     hqos_sched_port_log_pipe_profile(s, *pipe_profile_id);
 
@@ -951,7 +956,11 @@ hqos_sched_subport_pipe_profile_update(hqos_sched_port *port,
     hqos_sched_pipe_profile_convert(s, params, pp, sp->orig_tb_rate);
 
     if (s->pipe_tc_be_rate_max < params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE])
+    {
         s->pipe_tc_be_rate_max = params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE];
+        s->tc_ov_wm_max = hqos_sched_time_ms_to_bytes(sp->tc_period, s->pipe_tc_be_rate_max);
+        s->tc_ov_wm = s->tc_ov_wm_max;
+    }
 
     hqos_sched_port_log_pipe_profile(s, pipe_profile_id);
 
