@@ -766,6 +766,17 @@ ip4_full_reass_finalize (vlib_main_t * vm, vlib_node_runtime_t * node,
   ip->flags_and_fragment_offset = 0;
   ip->length = clib_host_to_net_u16 (first_b->current_length + total_length);
   ip->checksum = ip4_header_checksum (ip);
+  // if pppoe header, need update payload length
+  if(first_b->current_data > 20)
+  {
+      u16 *type = (u16*)((u8 *)vlib_buffer_get_current(first_b) - 10);
+      if (clib_net_to_host_u16(*type) == ETHERNET_TYPE_PPPOE_SESSION)
+      {
+          u16 *ppp_length = (u16*)((u8*)type + 6);
+          u16 ppp_payload_len = clib_net_to_host_u16(*ppp_length) + total_length;
+          *ppp_length = clib_host_to_net_u16(ppp_payload_len);
+      }
+  }
   if (!vlib_buffer_chain_linearize (vm, first_b))
     {
       return IP4_REASS_RC_NO_BUF;
