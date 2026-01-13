@@ -507,7 +507,7 @@ ip4_map_t_ce (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame
             vlib_increment_combined_counter (cm + MAP_CE_DOMAIN_COUNTER_TX,
                                              thread_index,
                                              map_domain_index0, 1,
-                                             clib_net_to_host_u16(ip40->length) + 20);
+                                             ip4_len0 + 20);
 	trace:
             if (PREDICT_FALSE (p0->flags & VLIB_BUFFER_IS_TRACED))
             {

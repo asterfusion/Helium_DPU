@@ -234,8 +234,11 @@ vl_api_spi_get_session_number_t_handler (vl_api_spi_get_session_number_t * mp)
 clib_error_t *
 spi_api_hookup (vlib_main_t *vm)
 {
+    api_main_t *am = vlibapi_get_main ();
     spi_main_t *spim = &spi_main;
     spim->msg_id_base = setup_message_id_table ();
+
+    vl_api_set_msg_thread_safe(am, spim->msg_id_base + VL_API_SPI_GET_SESSION_NUMBER, 1);
     return 0;
 }
 

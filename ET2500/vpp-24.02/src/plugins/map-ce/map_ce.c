@@ -280,11 +280,13 @@ map_ce_create_domain (ip4_address_t * ip4_prefix, u8 ip4_prefix_len,
                       ip6_address_t * ip6_dst, u8 ip6_dst_len,
                       ip6_address_t * end_user_prefix, u8 end_user_prefix_len,
                       u8 ea_bits_len, u8 psid_offset, u8 psid_length,
-                      u32 * map_domain_index, u16 mtu, u8 flags, u8 * tag)
+                      u32 * map_domain_index, u16 mtu, u8 flags, u8 * tag,
+                      u32 nat_max_static_session, u32 nat_max_user, u32 nat_max_session_per_user)
 {
     u8 suffix_len, suffix_shift;
     map_ce_main_t *mm = &map_ce_main;
     map_ce_domain_t *d;
+    map_nat44_ei_config_t nat_config;
 
     /* How many, and which bits to grab from the IPv4 SA */
     if (ip4_prefix_len + ea_bits_len < 32)
@@ -346,7 +348,11 @@ map_ce_create_domain (ip4_address_t * ip4_prefix, u8 ip4_prefix_len,
     if (tag)
         map_ce_save_extras (*map_domain_index, tag);
 
-    map_ce_nat44_domain_create(*map_domain_index);
+    clib_memset(&nat_config, 0, sizeof(nat_config));
+    nat_config.max_static_session = nat_max_static_session;
+    nat_config.max_user = nat_max_user;
+    nat_config.max_session_per_user = nat_max_session_per_user;
+    map_ce_nat44_domain_create(*map_domain_index, &nat_config);
 
     /* Validate packet/byte counters */
     map_ce_domain_counter_lock (mm);
@@ -668,6 +674,7 @@ map_ce_add_domain_command_fn (vlib_main_t * vm,
     u32 ip6_prefix_len = 0, ip4_prefix_len = 0, ip6_dst_len = 128, end_user_prefix_len = 0;
     u32 map_domain_index;
     u32 num_m_args = 0;
+    u32 nat_max_static_session = 0, nat_max_user = 0, nat_max_session_per_user = 0;
 
     /* Optional arguments */
     u32 ea_bits_len = 0, psid_offset = 0, psid_length = 0;
@@ -703,6 +710,12 @@ map_ce_add_domain_command_fn (vlib_main_t * vm,
             flags |= MAP_CE_DOMAIN_TRANSLATION;
         else if (unformat (line_input, "tag %s", &tag))
             ;
+        else if (unformat (line_input, "nat-static-map-session %u", &nat_max_static_session))
+            ;
+        else if (unformat (line_input, "nat-user %u", &nat_max_user))
+            ;
+        else if (unformat (line_input, "nat-user-session %u", &nat_max_session_per_user))
+            ;
         else
         {
             error = clib_error_return (0, "unknown input `%U'",
@@ -722,7 +735,7 @@ map_ce_add_domain_command_fn (vlib_main_t * vm,
                           &ip6_dst, ip6_dst_len,
                           &end_user_prefix, end_user_prefix_len,
                           ea_bits_len, psid_offset, psid_length, &map_domain_index,
-                          mtu, flags, tag);
+                          mtu, flags, tag, nat_max_static_session, nat_max_user, nat_max_session_per_user);
 
 done:
     vec_free (tag);
@@ -1959,7 +1972,7 @@ VLIB_CLI_COMMAND(map_ce_add_domain_command, static) = {
       "ip6-dst <ip6-pfx> "
       "end-user-prefix <end-user-prefix> "
       "ea-bits-len <n> psid-offset <n> psid-len <n> "
-      "[mtu <mtu>] [map-t]",
+      "[mtu <mtu>] [map-t] [nat-static-map-session <num>] [nat-user <num>] [nat-user-session <num>]",
   .function = map_ce_add_domain_command_fn,
 };
 

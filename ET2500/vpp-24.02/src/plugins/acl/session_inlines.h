@@ -268,8 +268,14 @@ acl_fa_restart_timer_for_session (acl_main_t * am, u64 now,
 always_inline int
 is_ip6_5tuple (fa_5tuple_t * p5t)
 {
-  return (p5t->l3_zero_pad[0] | p5t->l3_zero_pad[1] | p5t->l3_zero_pad[2] | p5t->l3_zero_pad[3] |
-	  p5t->l3_zero_pad[4] | p5t->l3_zero_pad[5] | p5t->l3_zero_pad[6]) != 0;
+  u8 resule = 0;
+
+  for (int i = 0; i < 27; i++)
+  {
+    resule |= p5t->l3_zero_pad[i];
+  }
+
+  return resule != 0;
 }
 
 always_inline u8
@@ -542,7 +548,7 @@ acl_fa_try_recycle_session (acl_main_t * am, int is_input, u16 thread_index,
 always_inline fa_full_session_id_t
 acl_fa_add_session (acl_main_t * am, int is_input, int is_ip6,
 		    u32 sw_if_index, u64 now, fa_5tuple_t * p5tuple,
-		    u16 current_policy_epoch)
+		    u16 current_policy_epoch, match_rule_expand_t *action_expand)
 {
   fa_full_session_id_t f_sess_id;
   uword thread_index = os_get_thread_index ();
@@ -593,6 +599,10 @@ acl_fa_add_session (acl_main_t * am, int is_input, int is_ip6,
   sess->ip_protocol = p5tuple->l4.proto;
   sess->hitcount_bytes = 0;
   sess->hitcount_pkts = 0;
+  sess->action_expand.action_expand_bitmap = action_expand->action_expand_bitmap;
+  sess->action_expand.policer_index = action_expand->policer_index;
+  sess->action_expand.set_tc_value = action_expand->set_tc_value;
+  sess->action_expand.set_hqos_user_id = action_expand->set_hqos_user_id;
 
   acl_fa_conn_list_add_session (am, f_sess_id, now);
 

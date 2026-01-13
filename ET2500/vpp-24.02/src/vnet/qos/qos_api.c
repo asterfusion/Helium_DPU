@@ -85,6 +85,265 @@ vl_api_qos_record_enable_disable_t_handler (vl_api_qos_record_enable_disable_t
   REPLY_MACRO (VL_API_QOS_RECORD_ENABLE_DISABLE_REPLY);
 }
 
+void
+vl_api_qos_record_port_dscp_tc_map_t_handler (vl_api_qos_record_port_dscp_tc_map_t * mp)
+{
+  vnet_main_t* vnm = vnet_get_main();
+  vl_api_qos_record_port_dscp_tc_map_reply_t *rmp;
+  int rv = 0;
+  vnet_sw_interface_t *sw = NULL;
+  vnet_hw_interface_t *hi = NULL;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+
+  sw = vnet_get_sup_sw_interface (vnm, sw_if_index);
+
+  hi = vnet_get_hw_interface_or_null(vnm, sw->hw_if_index);
+
+  if (hi != NULL)
+  {
+      u8 dscp = mp->dscp;
+      u8 tc = mp->tc;
+      hash_set(hi->dscp_to_tc, dscp, tc);
+  }
+
+  BAD_SW_IF_INDEX_LABEL;
+  REPLY_MACRO (VL_API_QOS_RECORD_PORT_DSCP_TC_MAP_REPLY);
+}
+
+void
+vl_api_qos_record_port_dot1p_tc_map_t_handler (vl_api_qos_record_port_dot1p_tc_map_t * mp)
+{
+  vnet_main_t* vnm = vnet_get_main();
+  vl_api_qos_record_port_dot1p_tc_map_reply_t *rmp;
+  int rv = 0;
+  vnet_sw_interface_t *sw = NULL;
+  vnet_hw_interface_t *hi = NULL;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+
+  sw = vnet_get_sup_sw_interface (vnm, sw_if_index);
+
+  hi = vnet_get_hw_interface_or_null(vnm, sw->hw_if_index);
+
+  if (hi != NULL)
+  {
+      u8 dot1p = mp->dot1p;
+      u8 tc = mp->tc;
+      hash_set(hi->dot1p_to_tc, dot1p, tc);
+  }
+
+  BAD_SW_IF_INDEX_LABEL;
+  REPLY_MACRO (VL_API_QOS_RECORD_PORT_DOT1P_TC_MAP_REPLY);
+}
+
+void
+vl_api_qos_record_port_mpls_exp_tc_map_t_handler (vl_api_qos_record_port_mpls_exp_tc_map_t * mp)
+{
+  vnet_main_t* vnm = vnet_get_main();
+  vl_api_qos_record_port_mpls_exp_tc_map_reply_t *rmp;
+  int rv = 0;
+  vnet_sw_interface_t *sw = NULL;
+  vnet_hw_interface_t *hi = NULL;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+
+  sw = vnet_get_sup_sw_interface (vnm, sw_if_index);
+
+  hi = vnet_get_hw_interface_or_null(vnm, sw->hw_if_index);
+
+  if (hi != NULL)
+  {
+      u8 mpls_exp = mp->mpls_exp;
+      u8 tc = mp->tc;
+      hash_set(hi->mpls_exp_to_tc, mpls_exp, tc);
+  }
+
+  BAD_SW_IF_INDEX_LABEL;
+  REPLY_MACRO (VL_API_QOS_RECORD_PORT_MPLS_EXP_TC_MAP_REPLY);
+}
+
+void
+vl_api_qos_record_port_tc_queue_map_t_handler (vl_api_qos_record_port_tc_queue_map_t * mp)
+{
+  vnet_main_t* vnm = vnet_get_main();
+  vl_api_qos_record_port_tc_queue_map_reply_t *rmp;
+  int rv = 0;
+  vnet_sw_interface_t *sw = NULL;
+  vnet_hw_interface_t *hi = NULL;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+
+  sw = vnet_get_sup_sw_interface (vnm, sw_if_index);
+
+  hi = vnet_get_hw_interface_or_null(vnm, sw->hw_if_index);
+
+  if (hi != NULL)
+  {
+      u8 tc = mp->tc;
+      u8 queue = mp->queue;
+      hash_set(hi->tc_to_queue, tc, queue);
+  }
+
+  BAD_SW_IF_INDEX_LABEL;
+  REPLY_MACRO (VL_API_QOS_RECORD_PORT_TC_QUEUE_MAP_REPLY);
+}
+
+static void
+vl_api_qos_record_rm_port_dscp_tc_map_t_handler(vl_api_qos_record_rm_port_dscp_tc_map_t* mp) 
+{
+  vnet_main_t* vnm = vnet_get_main();
+  vl_api_qos_record_rm_port_dscp_tc_map_reply_t *rmp;
+  int rv = 0;
+  vnet_sw_interface_t *sw = NULL;
+  vnet_hw_interface_t *hi = NULL;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+
+  sw = vnet_get_sup_sw_interface (vnm, sw_if_index);
+
+  hi = vnet_get_hw_interface_or_null(vnm, sw->hw_if_index);
+
+  if (hi != NULL)
+  {
+      hash_free(hi->dscp_to_tc);
+      hi->dscp_to_tc = NULL;
+  }
+
+  BAD_SW_IF_INDEX_LABEL;
+
+  REPLY_MACRO (VL_API_QOS_RECORD_RM_PORT_DSCP_TC_MAP_REPLY);
+}
+
+static void
+vl_api_qos_record_rm_port_dot1p_tc_map_t_handler(vl_api_qos_record_rm_port_dot1p_tc_map_t* mp) 
+{
+  vnet_main_t* vnm = vnet_get_main();
+  vl_api_qos_record_rm_port_dot1p_tc_map_reply_t *rmp;
+  int rv = 0;
+  vnet_sw_interface_t *sw = NULL;
+  vnet_hw_interface_t *hi = NULL;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+
+  sw = vnet_get_sup_sw_interface (vnm, sw_if_index);
+
+  hi = vnet_get_hw_interface_or_null(vnm, sw->hw_if_index);
+
+  if (hi != NULL)
+  {
+      hash_free(hi->dot1p_to_tc);
+      hi->dot1p_to_tc = NULL;
+  }
+
+  BAD_SW_IF_INDEX_LABEL;
+
+  REPLY_MACRO (VL_API_QOS_RECORD_RM_PORT_DOT1P_TC_MAP_REPLY);
+}
+
+static void
+vl_api_qos_record_rm_port_mpls_exp_tc_map_t_handler(vl_api_qos_record_rm_port_mpls_exp_tc_map_t* mp) 
+{
+  vnet_main_t* vnm = vnet_get_main();
+  vl_api_qos_record_rm_port_mpls_exp_tc_map_reply_t *rmp;
+  int rv = 0;
+  vnet_sw_interface_t *sw = NULL;
+  vnet_hw_interface_t *hi = NULL;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+
+  sw = vnet_get_sup_sw_interface (vnm, sw_if_index);
+
+  hi = vnet_get_hw_interface_or_null(vnm, sw->hw_if_index);
+
+  if (hi != NULL)
+  {
+      hash_free(hi->mpls_exp_to_tc);
+      hi->mpls_exp_to_tc = NULL;
+  }
+
+  BAD_SW_IF_INDEX_LABEL;
+
+  REPLY_MACRO (VL_API_QOS_RECORD_RM_PORT_MPLS_EXP_TC_MAP_REPLY);
+}
+
+static void
+vl_api_qos_record_rm_port_tc_queue_map_t_handler(vl_api_qos_record_rm_port_tc_queue_map_t* mp) 
+{
+  vnet_main_t* vnm = vnet_get_main();
+  vl_api_qos_record_rm_port_tc_queue_map_reply_t *rmp;
+  int rv = 0;
+  vnet_sw_interface_t *sw = NULL;
+  vnet_hw_interface_t *hi = NULL;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+
+  sw = vnet_get_sup_sw_interface (vnm, sw_if_index);
+
+  hi = vnet_get_hw_interface_or_null(vnm, sw->hw_if_index);
+
+  if (hi != NULL)
+  {
+      hash_free(hi->tc_to_queue);
+      hi->tc_to_queue = NULL;
+  }
+
+  BAD_SW_IF_INDEX_LABEL;
+
+  REPLY_MACRO (VL_API_QOS_RECORD_RM_PORT_TC_QUEUE_MAP_REPLY);
+}
+
+static void
+vl_api_qos_record_tc_traffic_class_t_handler(vl_api_qos_record_tc_traffic_class_t *mp)
+{
+  int rv = 0;
+  vnet_main_t *vnm = vnet_get_main();
+  u32 flags = 0;
+  vl_api_qos_record_tc_traffic_class_reply_t *rmp;
+  vnet_sw_interface_t *sw = NULL;
+
+  VALIDATE_SW_IF_INDEX(mp);
+
+  bool enable = mp->enable;
+
+  u32 sw_if_index = ntohl(mp->sw_if_index);
+
+  sw = vnet_get_sup_sw_interface (vnm, sw_if_index);
+
+  if (vnet_hw_interface_is_valid(vnm, sw->hw_if_index))
+  {
+      if (enable)
+      {
+          flags |= VNET_HW_INTERFACE_FLAG_USE_TC;
+      }
+      else
+      {
+          flags = 0;
+      }
+      vnet_hw_interface_set_tc_flags(vnm, sw->hw_if_index, flags);
+  }
+
+  BAD_SW_IF_INDEX_LABEL;
+
+  REPLY_MACRO (VL_API_QOS_RECORD_TC_TRAFFIC_CLASS_REPLY);
+}
+
 typedef struct qos_record_send_walk_ctx_t_
 {
   vl_api_registration_t *reg;

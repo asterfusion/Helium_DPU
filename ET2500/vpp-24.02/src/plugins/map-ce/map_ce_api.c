@@ -57,7 +57,8 @@ vl_api_map_ce_add_domain_t_handler (vl_api_map_ce_add_domain_t * mp)
                 (ip6_address_t *) & mp->end_user_ip6_prefix.address, 
                 mp->end_user_ip6_prefix.len, 
                 mp->ea_bits_len, mp->psid_offset, mp->psid_length, 
-                &index, mp->mtu, flags, mp->tag);
+                &index, mp->mtu, flags, mp->tag,
+                mp->nat_max_static_session, mp->nat_max_user, mp->nat_max_session_per_user);
 
     /* *INDENT-OFF* */
     REPLY_MACRO2_END(VL_API_MAP_CE_ADD_DOMAIN_REPLY,
@@ -908,10 +909,12 @@ vl_api_map_ce_if_enable_disable_t_handler (vl_api_map_ce_if_enable_disable_t * m
 clib_error_t *
 map_ce_plugin_api_hookup (vlib_main_t * vm)
 {
+    api_main_t *am = vlibapi_get_main ();
     map_ce_main_t *mm = &map_ce_main;
 
     mm->msg_id_base = setup_message_id_table ();
 
+    vl_api_set_msg_thread_safe(am, mm->msg_id_base + VL_API_MAP_CE_DOMAIN_STATS, 1);
     return 0;
 }
 

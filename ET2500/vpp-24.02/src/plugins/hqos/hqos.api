@@ -1,0 +1,894 @@
+/* Hey Emacs use -*- mode: C -*- */
+/*
+ * Copyright 2024-2027 Asterfusion Network
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/** \file
+    This file defines the vpp control-plane API messages
+    used to control the hqos plugin
+*/
+
+option version = "1.0.0";
+
+import "vnet/interface_types.api";
+
+/** \brief Add HQOS user 
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param tag - A user field stored with the user
+*/
+
+define hqos_user_add
+{
+    u32 client_index;
+    u32 context;
+    string tag[32];
+};
+
+define hqos_user_add_reply
+{
+    u32 client_index;
+    u32 context;
+    i32 retval;
+    u32 user_id;
+};
+
+/** \brief Del HQOS user 
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param user_id - hqos user id
+*/
+
+autoreply define hqos_user_del
+{
+    u32 client_index;
+    u32 context;
+    u32 user_id;
+};
+
+
+/** \brief Update the queue mode of the HQOS pipe queue (based on the interface)
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param user_id - hqos user id
+    @param tc_queue_id - hqos tc_queue id
+    @param is_dwrr - mode(false is sp mode)
+    @param weight  - mode is dwrr weight
+*/
+
+autoreply define hqos_user_update_queue_mode
+{
+    u32 client_index;
+    u32 context;
+    u32 user_id;
+    u32 tc_queue_id;
+    bool is_dwrr;
+    u8  weight;
+};
+
+/** \brief Add HQOS user group
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param tag - A user field stored with the user group
+*/
+
+define hqos_user_group_add
+{
+    u32 client_index;
+    u32 context;
+    bool is_add;
+    string tag[32];
+};
+
+define hqos_user_group_add_reply
+{
+    u32 client_index;
+    u32 context;
+    i32 retval;
+    u32 user_group_id;
+};
+
+/** \brief Del HQOS user group
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param user_group_id - A user field stored with the user group
+*/
+
+autoreply define hqos_user_group_del
+{
+    u32 client_index;
+    u32 context;
+    u32 user_group_id;
+};
+
+/** \brief Update the user group to which the user belongs (based on the interface)
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - based on port
+    @param user_id - hqos user id
+    @param user_group_id - hqos user group id, zero means default user group, ~0 means unset user_id
+*/
+
+autoreply define hqos_interface_update_user_group_user
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u32 user_id;
+  u32 user_group_id;
+};
+
+/** \brief Update the interface to which the HQOS port belongs (based on the interface)
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - based on port
+    @param hqos_port_id - hqos port id, ~0 means unbind
+*/
+
+autoreply define hqos_interface_mapping_hqos_port
+{
+    u32 client_index;
+    u32 context;
+    vl_api_interface_index_t sw_if_index;
+    u32 hqos_port_id;
+};
+
+/** \brief Update the user group to which the HQOS subport belongs (based on the interface)
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - based on port
+    @param user_group_id - hqos user group id, zero means default user group
+    @param hqos_subport_id - hqos subport id, zero means default subport
+*/
+
+autoreply define hqos_interface_mapping_user_group_to_hqos_subport
+{
+    u32 client_index;
+    u32 context;
+    vl_api_interface_index_t sw_if_index;
+    u32 user_group_id;
+    u32 hqos_subport_id;
+};
+
+/** \brief Update the user to which the HQOS pipe belongs (based on the interface)
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - based on port
+    @param user_id - hqos user id
+    @param hqos_pipe_id - hqos pipe id
+*/
+
+autoreply define hqos_interface_mapping_user_to_hqos_pipe
+{
+    u32 client_index;
+    u32 context;
+    vl_api_interface_index_t sw_if_index;
+    u32 user_id;
+    u32 hqos_pipe_id;
+};
+
+/** \brief Enable/Disable the interface HQOS
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - based on port
+    @param is_enable - 0=disable, 1=enable interface
+*/
+
+autoreply define hqos_interface_enable_disable
+{
+    u32 client_index;
+    u32 context;
+    vl_api_interface_index_t sw_if_index;
+    bool is_enable;
+};
+
+/*
+ * HQOS node configuration
+ */
+
+/** \brief HQOS port create
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param port_rate - Output port rate (measured in bytes per second)
+    @param n_subports_per_port -  Number of subports 
+    @param n_max_subport_profiles - Max allowed profiles in the port profile table 
+    @param n_pipes_per_subport - Maximum number of subport pipes. 
+    @param n_queue_size - this port default queue size.
+    @param mtu - Maximum Ethernet frame size (measured in bytes).
+    @param frame_overhead - Framing overhead per packet (measured in bytes)
+*/
+define hqos_port_add
+{
+    u32 client_index;
+    u32 context;
+    u64 port_rate;
+    u32 n_subports_per_port;
+    u32 n_max_subport_profiles;
+    u32 n_pipes_per_subport;
+    u32 n_queue_size;
+    u32 mtu [default=9100];
+    u32 frame_overhead;
+};
+
+define hqos_port_add_reply
+{
+    u32 client_index;
+    u32 context;
+    i32 retval;
+    u32 hqos_port_id;
+};
+
+/** \brief HQOS port delete
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param hqos_port_id -  hqos port id
+*/
+autoreply define hqos_port_del
+{
+    u32 client_index;
+    u32 context;
+    u32 hqos_port_id;
+};
+
+/** \brief HQOS subport profile add
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param hqos_port_id -  hqos port id
+    @param tb_rate - Token bucket rate (measured in bytes per second)
+    @param tb_size - Token bucket size (measured in credits) 
+    @param tc_period - Enforcement period for rates (measured in milliseconds).
+    @param tc_rate - Traffic class rates (measured in bytes per second)
+*/
+define hqos_port_subport_profile_add
+{
+    u32 client_index;
+    u32 context;
+    u32 hqos_port_id;
+    u64 tb_rate;
+    u64 tb_size;
+    u64 tc_period;
+    u64 tc_rate[9];
+};
+
+define hqos_port_subport_profile_add_reply
+{
+    u32 client_index;
+    u32 context;
+    i32 retval;
+    u32 hqos_port_id;
+    u32 hqos_port_subport_profile_id;
+};
+
+/** \brief HQOS subport profile update
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param hqos_port_id -  hqos port id
+    @param hqos_subport_profile_id -  hqos subport profile id
+    @param tb_rate - Token bucket rate (measured in bytes per second)
+    @param tb_size - Token bucket size (measured in credits) 
+    @param tc_period - Enforcement period for rates (measured in milliseconds).
+    @param tc_rate - Traffic class rates (measured in bytes per second)
+*/
+autoreply define hqos_port_subport_profile_update
+{
+    u32 client_index;
+    u32 context;
+    u32 hqos_port_id;
+    u32 hqos_port_subport_profile_id;
+    u64 tb_rate;
+    u64 tb_size;
+    u64 tc_period;
+    u64 tc_rate[9];
+};
+
+/** \brief HQOS subport init 
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param hqos_port_id -  hqos port id
+    @param hqos_subport_id -  hqos subport id
+    @param hqos_subport_profile_id -  hqos subport profile id
+    @param n_pipes_per_subport_enabled - Number of subport pipes 
+    @param n_max_pipe_profiles - Max allowed profiles in the pipe profile table 
+    @param qsize - Packet queue size for each traffic class.
+ */
+autoreply define hqos_port_subport_config
+{
+    u32 client_index;
+    u32 context;
+
+    u32 hqos_port_id;
+    u32 hqos_subport_id;
+    u32 hqos_port_subport_profile_id;
+
+    u32 n_pipes_per_subport_enabled;
+    u32 n_max_pipe_profiles;
+
+    u16 qsize[9];
+};
+
+/** \brief HQOS subport profile update
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param hqos_port_id -  hqos port id
+    @param hqos_subport_id -  hqos subport id
+    @param hqos_subport_profile_id -  hqos subport profile id
+ */
+autoreply define hqos_port_subport_update_profile
+{
+    u32 client_index;
+    u32 context;
+
+    u32 hqos_port_id;
+    u32 hqos_subport_id;
+    u32 hqos_port_subport_profile_id;
+};
+
+/** \brief HQOS subport pipe profile add
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param hqos_port_id -  hqos port id
+    @param hqos_subport_id -  hqos subport id
+    @param tb_rate - Token bucket rate (measured in bytes per second)
+    @param tb_size - Token bucket size (measured in credits) 
+    @param tc_period - Enforcement period for rates (measured in milliseconds).
+    @param tc_rate - Traffic class rates (measured in bytes per second)
+    @param tc_ov_weight - Best-effort traffic class oversubscription weight.
+    @param wrr_weight - WRR weights of best-effort traffic class queues.
+*/
+define hqos_subport_pipe_profile_add
+{
+    u32 client_index;
+    u32 context;
+    u32 hqos_port_id;
+    u32 hqos_subport_id;
+    u64 tb_rate;
+    u64 tb_size;
+    u64 tc_period;
+    u64 tc_rate[9];
+    u8  tc_ov_weight;
+    u8  wrr_weight[8];
+};
+
+define hqos_subport_pipe_profile_add_reply
+{
+    u32 client_index;
+    u32 context;
+    i32 retval;
+    u32 hqos_port_id;
+    u32 hqos_subport_id;
+    u32 hqos_pipe_profile_id;
+};
+
+/** \brief HQOS subport pipe profile update 
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param hqos_port_id -  hqos port id
+    @param hqos_subport_id -  hqos subport id
+    @param hqos_pipe_profile_id -  hqos pipe profile id
+    @param tb_rate - Token bucket rate (measured in bytes per second)
+    @param tb_size - Token bucket size (measured in credits) 
+    @param tc_period - Enforcement period for rates (measured in milliseconds).
+    @param tc_rate - Traffic class rates (measured in bytes per second)
+    @param tc_ov_weight - Best-effort traffic class oversubscription weight.
+    @param wrr_weight - WRR weights of best-effort traffic class queues.
+*/
+autoreply define hqos_subport_pipe_profile_update
+{
+    u32 client_index;
+    u32 context;
+    u32 hqos_port_id;
+    u32 hqos_subport_id;
+    u32 hqos_pipe_profile_id;
+    u64 tb_rate;
+    u64 tb_size;
+    u64 tc_period;
+    u64 tc_rate[9];
+    u8  tc_ov_weight;
+    u8  wrr_weight[8];
+};
+
+/** \brief HQOS pipe profile update
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param hqos_port_id -  hqos port id
+    @param hqos_subport_id -  hqos subport id
+    @param hqos_pipe_id -  hqos pipe id
+    @param hqos_pipe_profile_id -  hqos pipe profile id
+ */
+autoreply define hqos_subport_pipe_update_profile
+{
+    u32 client_index;
+    u32 context;
+
+    u32 hqos_port_id;
+    u32 hqos_subport_id;
+    u32 hqos_pipe_id;
+    u32 hqos_pipe_profile_id;
+};
+
+/** \brief HQOS subport stats dump (read and clear)
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param hqos_port_id -  hqos port id
+    @param hqos_subport_id -  hqos subport id
+ */
+define hqos_subport_stat_dump
+{
+  u32 client_index;
+  u32 context;
+  u32 hqos_port_id;
+  u32 hqos_subport_id;
+};
+
+define hqos_subport_stat_details
+{
+  u32 context;
+  u64 tc_pkts[9];
+  u64 tc_bytes[9];
+  u64 tc_drop_pkts[9];
+  u64 tc_drop_bytes[9];
+  u64 cman_drop_pkts[9];
+};
+
+/** \brief HQOS queue stats dump (read and clear)
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param hqos_port_id -  hqos port id
+    @param hqos_subport_id -  hqos subport id
+    @param hqos_pipe_id -  hqos pipe id
+    @param hqos_queue_id -  hqos queue id
+ */
+define hqos_queue_stat_dump
+{
+  u32 client_index;
+  u32 context;
+  u32 hqos_port_id;
+  u32 hqos_subport_id;
+  u32 hqos_pipe_id;
+  u32 hqos_queue_id;
+};
+
+define hqos_queue_stat_details
+{
+  u32 context;
+  u64 pkts;
+  u64 bytes;
+  u64 drop_pkts;
+  u64 drop_bytes;
+  u64 cman_drop_pkts;
+};
+
+/**
+ * @brief Set user dscp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ * @param[in] dscp              - dscp value
+ * @param[in] tc                - tc value
+ */
+autoreply define hqos_user_dscp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+  u8 dscp;
+  u8 tc;
+};
+
+/**
+ * @brief Set user dscp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ * @param[in] dscp              - dscp value
+ * @param[in] color             - color value
+ */
+autoreply define hqos_user_dscp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+  u8 dscp;
+  u8 color;
+};
+
+/**
+ * @brief Set user dot1p to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ * @param[in] dscp              - dot1p value
+ * @param[in] tc                - tc value
+ */
+autoreply define hqos_user_dot1p_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+  u8 dot1p;
+  u8 tc;
+};
+
+/**
+ * @brief Set user dot1p to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ * @param[in] dscp              - dot1p value
+ * @param[in] color             - color value
+ */
+autoreply define hqos_user_dot1p_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+  u8 dot1p;
+  u8 color;
+};
+
+/**
+ * @brief Set user mpls_exp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ * @param[in] mpls_exp          - mpls_exp value
+ * @param[in] tc                - tc value
+ */
+autoreply define hqos_user_mpls_exp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+  u8 mpls_exp;
+  u8 tc;
+};
+
+/**
+ * @brief Set user mpls_exp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ * @param[in] mpls_exp          - mpls_exp value
+ * @param[in] color             - color value
+ */
+autoreply define hqos_user_mpls_exp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+  u8 mpls_exp;
+  u8 color;
+};
+
+/**
+ * @brief remove user dscp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ */
+autoreply define hqos_user_remove_dscp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+};
+
+/**
+ * @brief remove user dscp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ */
+autoreply define hqos_user_remove_dscp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+};
+
+/**
+ * @brief remove user dot1p to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ */
+autoreply define hqos_user_remove_dot1p_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+};
+
+/**
+ * @brief remove user dot1p to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ */
+autoreply define hqos_user_remove_dot1p_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+};
+
+/**
+ * @brief remove user mpls_exp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ */
+autoreply define hqos_user_remove_mpls_exp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+};
+
+/**
+ * @brief remove user mpls_exp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_id           - hqos user id
+ */
+autoreply define hqos_user_remove_mpls_exp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_id;
+};
+
+/**
+ * @brief Set user_group dscp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ * @param[in] dscp              - dscp value
+ * @param[in] tc                - tc value
+ */
+autoreply define hqos_user_group_dscp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+  u8 dscp;
+  u8 tc;
+};
+
+/**
+ * @brief Set user_group dscp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ * @param[in] dscp              - dscp value
+ * @param[in] color             - color value
+ */
+autoreply define hqos_user_group_dscp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+  u8 dscp;
+  u8 color;
+};
+
+/**
+ * @brief Set user_group dot1p to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ * @param[in] dscp              - dot1p value
+ * @param[in] tc                - tc value
+ */
+autoreply define hqos_user_group_dot1p_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+  u8 dot1p;
+  u8 tc;
+};
+
+/**
+ * @brief Set user_group dot1p to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ * @param[in] dscp              - dot1p value
+ * @param[in] color             - color value
+ */
+autoreply define hqos_user_group_dot1p_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+  u8 dot1p;
+  u8 color;
+};
+
+/**
+ * @brief Set user_group mpls_exp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ * @param[in] mpls_exp          - mpls_exp value
+ * @param[in] tc                - tc value
+ */
+autoreply define hqos_user_group_mpls_exp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+  u8 mpls_exp;
+  u8 tc;
+};
+
+/**
+ * @brief Set user_group mpls_exp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ * @param[in] mpls_exp          - mpls_exp value
+ * @param[in] color             - color value
+ */
+autoreply define hqos_user_group_mpls_exp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+  u8 mpls_exp;
+  u8 color;
+};
+
+/**
+ * @brief remove user_group dscp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ */
+autoreply define hqos_user_group_remove_dscp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+};
+
+/**
+ * @brief remove user_group dscp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ */
+autoreply define hqos_user_group_remove_dscp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+};
+
+/**
+ * @brief remove user_group dot1p to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ */
+autoreply define hqos_user_group_remove_dot1p_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+};
+
+/**
+ * @brief remove user_group dot1p to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ */
+autoreply define hqos_user_group_remove_dot1p_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+};
+
+/**
+ * @brief remove user_group mpls_exp to tc MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ */
+autoreply define hqos_user_group_remove_mpls_exp_tc_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+};
+
+/**
+ * @brief remove user_group mpls_exp to color MAP
+ *
+ * @param[in] client_index      - opaque cookie to identify the sender
+ * @param[in] context           - sender context, to match reply w/ request
+ * @param[in] user_group_id     - hqos user group id
+ */
+autoreply define hqos_user_group_remove_mpls_exp_color_map
+{
+  u32 client_index;
+  u32 context;
+  u32 user_group_id;
+};
+
+/*
+ * Hqos Error counters/messages
+ */
+counters hqos {
+  cut_througth {
+    severity info;
+    type counter64;
+    units "packets";
+    description "cut_througth";
+  };
+  into_hqos {
+    severity info;
+    type counter64;
+    units "packets";
+    description "into hqos scheduler";
+  };
+  invalid_hqos_user {
+    severity error;
+    type counter64;
+    units "packets";
+    description "invalid hqos user id";
+  };
+  not_hqos_port {
+    severity error;
+    type counter64;
+    units "packets";
+    description "not found hqos port";
+  };
+  into_hqos_queue_full {
+    severity info;
+    type counter64;
+    units "packets";
+    description "into hqos scheduler queue full";
+  };
+};
+
+paths {
+  "/err/hqos-preprocess" "hqos";
+};

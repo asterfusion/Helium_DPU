@@ -203,6 +203,7 @@ acl_print_acl_x (acl_vector_print_func_t vpr, vlib_main_t * vm,
         r->src_mac[0], r->src_mac[1], r->src_mac[2], r->src_mac[3], r->src_mac[4], r->src_mac[5]);
       out0 = format (out0, " dmac %02x:%02x:%02x:%02x:%02x:%02x ",
         r->dst_mac[0], r->dst_mac[1], r->dst_mac[2], r->dst_mac[3], r->dst_mac[4], r->dst_mac[5]);
+      out0 = format (out0, " dscp %d ", r->dscp);
       out0 = format (out0, " src %U/%d", format_ip46_address, &r->src,
 		     r->is_ipv6 ? IP46_TYPE_IP6 : IP46_TYPE_IP4,
 		     r->src_prefixlen);
@@ -620,6 +621,8 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       r->action_expand_bitmap = rules[i].action_expand_bitmap;
       r->policer_index = ntohl(rules[i].policer_index);
       r->set_tc_value = rules[i].set_tc_value;
+      r->set_hqos_user_id = ntohl(rules[i].set_hqos_user_id);
+      r->dscp = rules[i].dscp;
     }
 
   if (~0 == *acl_list_index)
@@ -3379,6 +3382,7 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
   u32 policer_index = 0;
   u32 tcpflags, tcpmask;
   u8  set_tc_value;
+  u32 set_hqos_user_id;
   ip_prefix_t src, dst;
   u32 src_sw_if_index = 0;
   
@@ -3489,6 +3493,12 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
 	  vec_validate_acl_rules (rules, rule_idx);
 	  rules[rule_idx].action_expand_bitmap |= (1 << ACL_ACTION_EXPAND_SET_TC);
 	  rules[rule_idx].set_tc_value = set_tc_value & 0xff;
+    }
+    else if (unformat (line_input, "hqos_user %u", &set_hqos_user_id))
+    {
+	  vec_validate_acl_rules (rules, rule_idx);
+	  rules[rule_idx].action_expand_bitmap |= (1 << ACL_ACTION_EXPAND_SET_HQOS_USER);
+	  rules[rule_idx].set_hqos_user_id = htonl(set_hqos_user_id);
     }
     else if (unformat (line_input, "src_sw_if_index %d", &src_sw_if_index))
     {
@@ -4477,7 +4487,7 @@ acl_init (vlib_main_t * vm)
   /* use the new fancy hash-based matching */
   am->use_hash_acl_matching = 1;
   /* use tuplemerge by default */
-  am->use_tuple_merge = 1;
+  //am->use_tuple_merge = 1;
   /* Set the default threshold */
   am->tuple_merge_split_threshold = TM_SPLIT_THRESHOLD;
 

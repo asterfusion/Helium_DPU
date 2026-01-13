@@ -33,6 +33,7 @@ typedef struct {
 
   u64 action_expand_bitmap;
   u32 policer_index;
+  u32 set_hqos_user_id;
   u8 set_tc_value;
 } hash_ace_info_t;
 
@@ -90,6 +91,7 @@ typedef struct {
    */
   u64 action_expand_bitmap;
   u32 policer_index;
+  u32 set_hqos_user_id;
   u8 set_tc_value;
   u16 priority;
 } applied_hash_ace_entry_t;

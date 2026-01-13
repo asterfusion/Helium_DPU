@@ -79,12 +79,14 @@ typedef union {
            after padding so we can still
            use them as (shorter) key together with
            L4 info */
-        u32 l3_zero_pad[7];
+        u8 l3_zero_pad[27];
+        u8 dscp_v4;
         mac_address_t mac4_addr[2];
         ip4_address_t ip4_addr[2];
       };
       struct {
-        u32 l3_zero_pad_1[1];
+        u8 l3_zero_pad_1[3];
+        u8 dscp_v6;
         mac_address_t mac6_addr[2];
         ip6_address_t ip6_addr[2];
       };
@@ -118,6 +120,14 @@ format_fa_session_l4_key(u8 * s, va_list * args)
                   l4->l4_flags, l4->port[0], l4->port[1]));
 }
 
+typedef struct match_rule_expand
+{
+    u64 action_expand_bitmap;
+    u32 policer_index;
+    u32 set_hqos_user_id;
+    u8  set_tc_value;
+} match_rule_expand_t;
+
 typedef struct {
   fa_5tuple_t info; /* (5+1)*8 = 48 bytes (8+1) * 8 = 72*/
   u64 last_active_time;   /* +8 bytes = 80 */
@@ -134,9 +144,11 @@ typedef struct {
   u8 deleted;             /* +1 bytes = 106 */
   u8 is_ip6;              /* +1 bytes = 107 */
   u8 ip_protocol;         /* +1 bytes = 108 */
-  u8 reserved1[4];        /* +4 bytes = 112 */
+  //u8 reserved1[4];        /* +4 bytes = 112 */
   u64 hitcount_pkts;      /* +4 bytes = 120 */
   u64 hitcount_bytes;     /* +4 bytes = 128 */
+  match_rule_expand_t action_expand;
+  u8 reserved1;
 } fa_session_t;
 
 #define FA_POLICY_EPOCH_MASK 0x7fff
@@ -173,7 +185,7 @@ CT_ASSERT_EQUAL(fa_l3_kv_size_is_72, sizeof(fa_5tuple_t), sizeof(clib_bihash_kv_
 //CT_ASSERT_EQUAL(fa_ip4_and_ip6_kv_value_match, offsetof(fa_5tuple_t, kv_16_8.value), offsetof(fa_5tuple_t, kv_40_8.value));
 
 /* Let's try to fit within two cachelines */
-CT_ASSERT_EQUAL(fa_session_t_size_is_128, sizeof(fa_session_t), 128);
+//CT_ASSERT_EQUAL(fa_session_t_size_is_128, sizeof(fa_session_t), 128);
 
 /* Session ID MUST be the same as u64 */
 CT_ASSERT_EQUAL(fa_full_session_id_size_is_64, sizeof(fa_full_session_id_t), sizeof(u64));

@@ -967,10 +967,12 @@ vl_api_map_if_enable_disable_t_handler (vl_api_map_if_enable_disable_t * mp)
 clib_error_t *
 map_plugin_api_hookup (vlib_main_t * vm)
 {
+  api_main_t *am = vlibapi_get_main ();
   map_main_t *mm = &map_main;
 
   mm->msg_id_base = setup_message_id_table ();
 
+  vl_api_set_msg_thread_safe(am, mm->msg_id_base + VL_API_MAP_DOMAIN_STATS, 1);
   return 0;
 }
 
