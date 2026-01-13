@@ -103,6 +103,8 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
       vlib_buffer_t *b0, *c0;
       u16 next0;
       ethernet_header_t *eh0;
+      u16 eh0_type;
+      uword is_ip, eh0_size;
       u32 bd_index0;
       l2_bridge_domain_t *config0;
 
@@ -127,7 +129,15 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
       next0 = vnet_l2_feature_next (b0, lmm->l2_input_feat_next,
                                     L2INPUT_FEAT_MULTICAST);
 
-      if (is_multicast_mac(eh0->dst_address)) 
+      eh0_type = clib_net_to_host_u16 (eh0->type);
+      eh0_size = ethernet_buffer_header_size (b0);
+
+      is_ip = (eh0_type == ETHERNET_TYPE_IP4 || eh0_type == ETHERNET_TYPE_IP6);
+
+      l2_bridge_domain_t *bd_config = vec_elt_at_index (l2input_main.bd_configs, vnet_buffer (b0)->l2.bd_index);
+      bool drop_flag = bd_config->drop_unknown_multicast;
+
+      if (is_multicast_mac(eh0->dst_address)&&(is_ip)) 
       {
         l2mc_group_t *group = NULL;
         
@@ -139,9 +149,29 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
           if (memcmp(l2mc_groups[i].dst_mac, eh0->dst_address, 6) != 0)
             continue;
 
-          if((l2mc_groups[i].type == L2MC_SG_TYPE) && (memcmp(l2mc_groups[i].src_mac, eh0->src_address, 6) != 0))
-            continue;
-
+          if(l2mc_groups[i].type == L2MC_SG_TYPE)
+          {
+            if((eh0_type == ETHERNET_TYPE_IP4 && l2mc_groups[i].ip_type == IP46_TYPE_IP6)||
+              (eh0_type == ETHERNET_TYPE_IP6 && l2mc_groups[i].ip_type == IP46_TYPE_IP4))
+              continue;
+            if(eh0_type == ETHERNET_TYPE_IP4)
+            {
+              ip4_header_t *ip_h = (ip4_header_t *)((u8 *)vlib_buffer_get_current(b0) + eh0_size);
+              if (memcmp(&l2mc_groups[i].src_ip.ip4, &ip_h->src_address, sizeof(ip4_address_t)) != 0)
+              {
+                  continue;
+              }
+            }
+            else if (eh0_type == ETHERNET_TYPE_IP6)
+            {
+              ip6_header_t *ip6_h = (ip6_header_t *)((u8 *)vlib_buffer_get_current(b0) + eh0_size);
+              
+              if (memcmp(&l2mc_groups[i].src_ip.ip6, &ip6_h->src_address, sizeof(ip6_address_t)) != 0)
+              {
+                  continue;
+              }
+            } 
+          }
           group = &l2mc_groups[i];
           break;
         }
@@ -159,16 +189,22 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
           
           if (valid_output_count == 0)
           {
-            /* No valid outputs - drop packet */
-            to_next[0] = bi0;
-            to_next += 1;
-            n_left_to_next -= 1;
+            if(drop_flag)
+            {
+              to_next[0] = bi0;
+              to_next += 1;
+              n_left_to_next -= 1;
 
-            b0->error = node->errors[L2MC_ERROR_DROP];
-            vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
-                    to_next, n_left_to_next,
-                    bi0, L2MC_NEXT_DROP);
-            continue;
+              b0->error = node->errors[L2MC_ERROR_DROP];
+              vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+                      to_next, n_left_to_next,
+                      bi0, L2MC_NEXT_DROP);
+              continue;
+            }
+            else
+            {
+              ci0 = bi0;
+            }
           }
           else
           {
@@ -257,8 +293,22 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
         }
         else
         {
-          /* No matching group found or group has no members, continue with normal processing */
-          ci0 = bi0;
+          if(drop_flag)
+          {
+            to_next[0] = bi0;
+            to_next += 1;
+            n_left_to_next -= 1;
+
+            b0->error = node->errors[L2MC_ERROR_DROP];
+            vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+                    to_next, n_left_to_next,
+                    bi0, L2MC_NEXT_DROP);
+            continue;
+          }
+          else
+          {
+            ci0 = bi0;
+          }
         }
       }
       else

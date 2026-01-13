@@ -57,10 +57,11 @@ typedef enum {
 
 typedef struct {
     u16 bd_id;
-    u8 src_mac[6];
+    ip46_address_t src_ip;
     u8 dst_mac[6];
     l2mc_type type;
     u32 *output_sw_if_indices;  
+    ip46_type_t ip_type;
 } l2mc_group_t;
 
 extern l2mc_group_t *l2mc_groups;
