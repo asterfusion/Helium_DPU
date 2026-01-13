@@ -104,9 +104,11 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
       u16 next0;
       ethernet_header_t *eh0;
       u16 eh0_type;
-      uword is_ip, eh0_size;
+      uword is_ip;
       u32 bd_index0;
       l2_bridge_domain_t *config0;
+      i16 l3_hdr_offset;
+      ethernet_vlan_header_t *vlanh;
 
       /* speculatively enqueue b0 to the current next frame */
       bi0 = from[0];
@@ -130,9 +132,18 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
                                     L2INPUT_FEAT_MULTICAST);
 
       eh0_type = clib_net_to_host_u16 (eh0->type);
-      eh0_size = ethernet_buffer_header_size (b0);
+      l3_hdr_offset = sizeof(ethernet_header_t);
+      if (eh0_type == ETHERNET_TYPE_VLAN)
+      {
+        vlanh = (ethernet_vlan_header_t *)(eh0 + 1);
+        eh0_type = clib_net_to_host_u16(vlanh->type);
+        l3_hdr_offset += sizeof(ethernet_vlan_header_t);
+      }
 
       is_ip = (eh0_type == ETHERNET_TYPE_IP4 || eh0_type == ETHERNET_TYPE_IP6);
+      clib_warning("eh0_type %d is_ip %d", eh0_type, is_ip);
+      bool mul = is_multicast_mac(eh0->dst_address);
+      clib_warning("is multicast %d", mul);
 
       l2_bridge_domain_t *bd_config = vec_elt_at_index (l2input_main.bd_configs, vnet_buffer (b0)->l2.bd_index);
       bool drop_flag = bd_config->drop_unknown_multicast;
@@ -143,20 +154,24 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
         
         for (int i = 0; i < vec_len(l2mc_groups); i++)
         {
+          clib_warning("group bd_id %d packet bd_index %d",l2mc_groups[i].bd_id, bd_index0);
           if(l2mc_groups[i].bd_id != bd_index0)
             continue;
           
+          clib_warning("group mac %U packet mac %U", l2mc_groups[i].dst_mac, eh0->dst_address);
           if (memcmp(l2mc_groups[i].dst_mac, eh0->dst_address, 6) != 0)
             continue;
 
           if(l2mc_groups[i].type == L2MC_SG_TYPE)
           {
+            clib_warning("group eth type %d packet type %d", l2mc_groups[i].ip_type, eh0_type);
             if((eh0_type == ETHERNET_TYPE_IP4 && l2mc_groups[i].ip_type == IP46_TYPE_IP6)||
               (eh0_type == ETHERNET_TYPE_IP6 && l2mc_groups[i].ip_type == IP46_TYPE_IP4))
               continue;
             if(eh0_type == ETHERNET_TYPE_IP4)
             {
-              ip4_header_t *ip_h = (ip4_header_t *)((u8 *)vlib_buffer_get_current(b0) + eh0_size);
+              ip4_header_t *ip_h = (ip4_header_t *)((u8 *)vlib_buffer_get_current(b0) + l3_hdr_offset);
+              clib_warning("group ip %U packet ip %U", l2mc_groups[i].src_ip.ip4, ip_h->src_address);
               if (memcmp(&l2mc_groups[i].src_ip.ip4, &ip_h->src_address, sizeof(ip4_address_t)) != 0)
               {
                   continue;
@@ -164,7 +179,7 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
             }
             else if (eh0_type == ETHERNET_TYPE_IP6)
             {
-              ip6_header_t *ip6_h = (ip6_header_t *)((u8 *)vlib_buffer_get_current(b0) + eh0_size);
+              ip6_header_t *ip6_h = (ip6_header_t *)((u8 *)vlib_buffer_get_current(b0) + l3_hdr_offset);
               
               if (memcmp(&l2mc_groups[i].src_ip.ip6, &ip6_h->src_address, sizeof(ip6_address_t)) != 0)
               {
@@ -178,6 +193,7 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
         
         if (group && vec_len (group->output_sw_if_indices) > 0) 
         {
+          clib_warning("group found");
           u32 *output_swif;
           u32 valid_output_count = 0;
           
@@ -186,9 +202,10 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
             if (*output_swif != sw_if_index0 && *output_swif != 0)
               valid_output_count++;
           }
-          
+          clib_warning("valid output count %d", valid_output_count);
           if (valid_output_count == 0)
           {
+            clib_warning("no valid output, drop flag %d",drop_flag);
             if(drop_flag)
             {
               to_next[0] = bi0;
@@ -208,6 +225,7 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
           }
           else
           {
+            clib_warning("valid output count %d", valid_output_count);
             next0 = L2MC_NEXT_L2_OUTPUT;
             
             /* Multiple outputs, need to clone buffers */
@@ -293,6 +311,8 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
         }
         else
         {
+          clib_warning("no group found,drop flag %d",drop_flag);
+          
           if(drop_flag)
           {
             to_next[0] = bi0;
@@ -313,6 +333,7 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
       }
       else
       {
+        clib_warning("not multicast packet");
         /* Not multicast, continue with normal processing */
         ci0 = bi0;
       }

@@ -60,8 +60,10 @@ igmp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
 {
   u32 n_left_from, *from, *to_next;
   u32 next_index = node->cached_next_index;
-  u32 copies[VLIB_FRAME_SIZE];
-  u32 n_copies = 0;
+  u32 punt_indices[VLIB_FRAME_SIZE];
+  u32 n_punts = 0;
+  u32 igmp_indices[VLIB_FRAME_SIZE];
+  u32 n_igmp = 0;
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
@@ -78,15 +80,11 @@ igmp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           vlib_buffer_t *b0, *b1;
           u32 next0, next1;
           ip4_header_t *ip40, *ip41;
-          vlib_buffer_t *c0, *c1;
-          word len0, len1;
           u32 sw_if_index0, sw_if_index1;
+          u32 is_igmp0 = 0, is_igmp1 = 0;
 
           bi0 = from[0];
           bi1 = from[1];
-
-          to_next[0] = bi0;
-          to_next[1] = bi1;
 
           b0 = vlib_get_buffer (vm, bi0);
           b1 = vlib_get_buffer (vm, bi1);
@@ -102,68 +100,94 @@ igmp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           {
               ip40 = vlib_buffer_get_current (b0) + vnet_buffer (b0)->l2.l2_len;
               ip41 = vlib_buffer_get_current (b1) + vnet_buffer (b1)->l2.l2_len;
-              len0 = 0;
-              len1 = 0;
           }
           else
           {
               ip40 = vlib_buffer_get_current (b0);
               ip41 = vlib_buffer_get_current (b1);
-              len0 = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
-              len1 = ((u8 *) vlib_buffer_get_current (b1) - (u8 *) ethernet_buffer_get_header (b1));
           }
 
           /* Check if IP protocol is IGMP (2) */
           if (PREDICT_FALSE(ip40->protocol == IP_PROTOCOL_IGMP))
           {
-              if (is_l2_path) {
-                  c0 = vlib_buffer_copy (vm, b0);
-              } else {
-                  vlib_buffer_advance (b0, -len0);
-                  c0 = vlib_buffer_copy (vm, b0);
-                  vlib_buffer_advance (b0, len0);
-              }
-              if (c0)
-              {
-                  copies[n_copies++] = vlib_get_buffer_index (vm, c0);
-              }
+              /* Mark as IGMP packet to punt */
+              is_igmp0 = 1;
+              next0 = LCP_IGMP_NEXT_PUNT;
+              igmp_indices[n_igmp++] = bi0;
+          }
+          else
+          {
+              /* Non-IGMP packet, enqueue normally */
+              to_next[0] = bi0;
+              to_next += 1;
+              n_left_to_next -= 1;
           }
 
           if (PREDICT_FALSE(ip41->protocol == IP_PROTOCOL_IGMP))
           {
-              if (is_l2_path) {
-                  c1 = vlib_buffer_copy (vm, b1);
-              } else {
-                  vlib_buffer_advance (b1, -len1);
-                  c1 = vlib_buffer_copy (vm, b1);
-                  vlib_buffer_advance (b1, len1);
-              }
-              if (c1)
-              {
-                  copies[n_copies++] = vlib_get_buffer_index (vm, c1);
-              }
+              /* Mark as IGMP packet to punt */
+              is_igmp1 = 1;
+              next1 = LCP_IGMP_NEXT_PUNT;
+              igmp_indices[n_igmp++] = bi1;
+          }
+          else
+          {
+              /* Non-IGMP packet, enqueue normally */
+              to_next[0] = bi1;
+              to_next += 1;
+              n_left_to_next -= 1;
           }
 
+          /* Enqueue IGMP packets to punt */
+          if (is_igmp0)
+          {
+              punt_indices[n_punts++] = bi0;
+          }
+          
+          if (is_igmp1)
+          {
+              punt_indices[n_punts++] = bi1;
+          }
+
+          /* Add trace for non-IGMP packets (or all packets if needed) */
           if (b0->flags & VLIB_BUFFER_IS_TRACED)
           {
               lcp_igmp_trace_t *t0 = vlib_add_trace (vm, node, b0, sizeof (*t0));
               t0->sw_if_index = sw_if_index0;
+              t0->is_igmp = is_igmp0;
           }
     
           if (b1->flags & VLIB_BUFFER_IS_TRACED)
           {
               lcp_igmp_trace_t *t1 = vlib_add_trace (vm, node, b1, sizeof (*t1));
               t1->sw_if_index = sw_if_index1;
+              t1->is_igmp = is_igmp1;
           }
 
           from += 2;
           n_left_from -= 2;
-          to_next += 2;
-          n_left_to_next -= 2;
 
-          vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
-                                           to_next, n_left_to_next,
-                                           bi0, bi1, next0, next1);
+          /* Only validate enqueue for non-IGMP packets */
+          if (!is_igmp0 && !is_igmp1)
+          {
+              vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
+                                               to_next, n_left_to_next,
+                                               bi0, bi1, next0, next1);
+          }
+          else if (!is_igmp0)
+          {
+              /* Only b0 is non-IGMP */
+              vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+                                               to_next, n_left_to_next,
+                                               bi0, next0);
+          }
+          else if (!is_igmp1)
+          {
+              /* Only b1 is non-IGMP */
+              vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+                                               to_next, n_left_to_next,
+                                               bi1, next1);
+          }
         }
 
       while (n_left_from > 0 && n_left_to_next > 0)
@@ -173,12 +197,9 @@ igmp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           u32 next0;
           ip4_header_t *ip4;
           u32 sw_if_index0;
-          vlib_buffer_t *c;
-          word len;
+          u32 is_igmp = 0;
 
           bi0 = from[0];
-          to_next[0] = bi0;
-
           b0 = vlib_get_buffer (vm, bi0);
 
           /* most packets will follow feature arc */
@@ -189,53 +210,56 @@ igmp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           if (is_l2_path)
           {
               ip4 = vlib_buffer_get_current (b0) + vnet_buffer (b0)->l2.l2_len;
-              len = 0;
           }
           else
           {
               ip4 = vlib_buffer_get_current (b0);
-              len = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
           }
 
           /* Check if IP protocol is IGMP (2) */
           if (PREDICT_FALSE(ip4->protocol == IP_PROTOCOL_IGMP))
           {
-              if (is_l2_path) {
-                  c = vlib_buffer_copy (vm, b0);
-              } else {
-                  vlib_buffer_advance (b0, -len);
-                  c = vlib_buffer_copy (vm, b0);
-                  vlib_buffer_advance (b0, len);
-              }
-              if (c)
-              {
-                  copies[n_copies++] = vlib_get_buffer_index (vm, c);
-              }
+              /* Mark as IGMP packet to punt */
+              is_igmp = 1;
+              next0 = LCP_IGMP_NEXT_PUNT;
+              igmp_indices[n_igmp++] = bi0;
+              punt_indices[n_punts++] = bi0;
+          }
+          else
+          {
+              /* Non-IGMP packet, enqueue normally */
+              to_next[0] = bi0;
+              to_next += 1;
+              n_left_to_next -= 1;
           }
 
           if (b0->flags & VLIB_BUFFER_IS_TRACED)
           {
               lcp_igmp_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
               t->sw_if_index = sw_if_index0;
+              t->is_igmp = is_igmp;
           }
 
           from += 1;
           n_left_from -= 1;
-          to_next += 1;
-          n_left_to_next -= 1;
 
-          vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
-                                           to_next, n_left_to_next,
-                                           bi0, next0);
+          /* Only validate enqueue for non-IGMP packets */
+          if (!is_igmp)
+          {
+              vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+                                               to_next, n_left_to_next,
+                                               bi0, next0);
+          }
         }
 
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
     }
 
-  if (PREDICT_FALSE(n_copies))
+  /* Punt IGMP packets to LCP_IGMP_NEXT_PUNT */
+  if (PREDICT_FALSE(n_punts > 0))
   {
-    vlib_buffer_enqueue_to_single_next (vm, node, copies,
-                                        LCP_IGMP_NEXT_PUNT, n_copies);
+    vlib_buffer_enqueue_to_single_next (vm, node, punt_indices,
+                                        LCP_IGMP_NEXT_PUNT, n_punts);
   }
 
   return frame->n_vectors;
@@ -246,8 +270,8 @@ mld_ip6_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fra
 {
   u32 n_left_from, *from, *to_next;
   u32 next_index = node->cached_next_index;
-  u32 copies[VLIB_FRAME_SIZE];
-  u32 n_copies = 0;
+  u32 punt_indices[VLIB_FRAME_SIZE];
+  u32 n_punts = 0;
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
@@ -264,16 +288,12 @@ mld_ip6_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fra
           vlib_buffer_t *b0, *b1;
           u32 next0, next1;
           ip6_header_t *ip60, *ip61;
-          icmp46_header_t *icmp0, *icmp1;
-          vlib_buffer_t *c0, *c1;
-          word len0, len1;
+          icmp46_header_t *icmp0 = NULL, *icmp1 = NULL;
           u32 sw_if_index0, sw_if_index1;
+          u32 is_mld0 = 0, is_mld1 = 0;
 
           bi0 = from[0];
           bi1 = from[1];
-
-          to_next[0] = bi0;
-          to_next[1] = bi1;
 
           b0 = vlib_get_buffer (vm, bi0);
           b1 = vlib_get_buffer (vm, bi1);
@@ -289,91 +309,102 @@ mld_ip6_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fra
           {
               ip60 = vlib_buffer_get_current (b0) + vnet_buffer (b0)->l2.l2_len;
               ip61 = vlib_buffer_get_current (b1) + vnet_buffer (b1)->l2.l2_len;
-              len0 = 0;
-              len1 = 0;
           }
           else
           {
               ip60 = vlib_buffer_get_current (b0);
               ip61 = vlib_buffer_get_current (b1);
-              len0 = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
-              len1 = ((u8 *) vlib_buffer_get_current (b1) - (u8 *) ethernet_buffer_get_header (b1));
           }
 
+          /* Check for MLD packets */
           icmp0 = ip6_ext_header_find(vm, b0, ip60, IP_PROTOCOL_ICMP6, NULL);
-          if(icmp0)
+          if (icmp0)
           {
-            if(PREDICT_FALSE(
+            if (PREDICT_FALSE(
                  ICMP6_multicast_listener_request == icmp0->type ||
                  ICMP6_multicast_listener_report == icmp0->type ||
                  ICMP6_multicast_listener_done == icmp0->type ||
                  ICMP6_multicast_listener_report_v2 == icmp0->type
                  ))
             {
-              if (is_l2_path) 
-              {
-                c0 = vlib_buffer_copy (vm, b0);
-              } 
-              else 
-              {
-                vlib_buffer_advance (b0, -len0);
-                c0 = vlib_buffer_copy (vm, b0);
-                vlib_buffer_advance (b0, len0);
-              }
-              if (c0)
-              {
-                copies[n_copies++] = vlib_get_buffer_index (vm, c0);
-              }
+              /* MLD packet - mark for punt */
+              is_mld0 = 1;
+              next0 = LCP_IGMP_NEXT_PUNT;
+              punt_indices[n_punts++] = bi0;
             }
           }
           
           icmp1 = ip6_ext_header_find(vm, b1, ip61, IP_PROTOCOL_ICMP6, NULL);
-          if(icmp1)
+          if (icmp1)
           {
-            if(PREDICT_FALSE(
+            if (PREDICT_FALSE(
                  ICMP6_multicast_listener_request == icmp1->type ||
                  ICMP6_multicast_listener_report == icmp1->type ||
                  ICMP6_multicast_listener_done == icmp1->type ||
                  ICMP6_multicast_listener_report_v2 == icmp1->type
                  ))
             {
-              if (is_l2_path) 
-              {
-                c1 = vlib_buffer_copy (vm, b1);
-              } 
-              else 
-              {
-                vlib_buffer_advance (b1, -len1);
-                c1 = vlib_buffer_copy (vm, b1);
-                vlib_buffer_advance (b1, len1);
-              }
-              if (c1)
-              {
-                copies[n_copies++] = vlib_get_buffer_index (vm, c1);
-              }
+              /* MLD packet - mark for punt */
+              is_mld1 = 1;
+              next1 = LCP_IGMP_NEXT_PUNT;
+              punt_indices[n_punts++] = bi1;
             }
           }
         
+          /* Enqueue non-MLD packets normally */
+          if (!is_mld0)
+          {
+              to_next[0] = bi0;
+              to_next += 1;
+              n_left_to_next -= 1;
+          }
+          
+          if (!is_mld1)
+          {
+              to_next[0] = bi1;
+              to_next += 1;
+              n_left_to_next -= 1;
+          }
+
+          /* Add trace for all packets */
           if (b0->flags & VLIB_BUFFER_IS_TRACED)
           {
               lcp_igmp_trace_t *t0 = vlib_add_trace (vm, node, b0, sizeof (*t0));
               t0->sw_if_index = sw_if_index0;
+              t0->is_igmp = is_mld0;  /* Reuse is_igmp field for MLD */
           }
     
           if (b1->flags & VLIB_BUFFER_IS_TRACED)
           {
               lcp_igmp_trace_t *t1 = vlib_add_trace (vm, node, b1, sizeof (*t1));
               t1->sw_if_index = sw_if_index1;
+              t1->is_igmp = is_mld1;  /* Reuse is_igmp field for MLD */
           }
 
           from += 2;
           n_left_from -= 2;
-          to_next += 2;
-          n_left_to_next -= 2;
 
-          vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
-                                           to_next, n_left_to_next,
-                                           bi0, bi1, next0, next1);
+          /* Only validate enqueue for non-MLD packets */
+          if (!is_mld0 && !is_mld1)
+          {
+              vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
+                                               to_next, n_left_to_next,
+                                               bi0, bi1, next0, next1);
+          }
+          else if (!is_mld0)
+          {
+              /* Only b0 is non-MLD */
+              vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+                                               to_next, n_left_to_next,
+                                               bi0, next0);
+          }
+          else if (!is_mld1)
+          {
+              /* Only b1 is non-MLD */
+              vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+                                               to_next, n_left_to_next,
+                                               bi1, next1);
+          }
         }
 
       while (n_left_from > 0 && n_left_to_next > 0)
@@ -382,14 +413,11 @@ mld_ip6_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fra
           vlib_buffer_t *b0;
           u32 next0;
           ip6_header_t *ip6;
-          icmp46_header_t *icmp;
+          icmp46_header_t *icmp = NULL;
           u32 sw_if_index0;
-          vlib_buffer_t *c;
-          word len;
+          u32 is_mld = 0;
 
           bi0 = from[0];
-          to_next[0] = bi0;
-
           b0 = vlib_get_buffer (vm, bi0);
 
           /* most packets will follow feature arc */
@@ -400,64 +428,64 @@ mld_ip6_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fra
           if (is_l2_path)
           {
               ip6 = vlib_buffer_get_current (b0) + vnet_buffer (b0)->l2.l2_len;
-              len = 0;
           }
           else
           {
               ip6 = vlib_buffer_get_current (b0);
-              len = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
           }
 
           icmp = ip6_ext_header_find(vm, b0, ip6, IP_PROTOCOL_ICMP6, NULL);
-          if(icmp)
+          if (icmp)
           {
-            if(PREDICT_FALSE(
+            if (PREDICT_FALSE(
                  ICMP6_multicast_listener_request == icmp->type ||
                  ICMP6_multicast_listener_report == icmp->type ||
                  ICMP6_multicast_listener_done == icmp->type ||
                  ICMP6_multicast_listener_report_v2 == icmp->type
                  ))
             {
-              if (is_l2_path) 
-              {
-                c = vlib_buffer_copy (vm, b0);
-              } 
-              else 
-              {
-                vlib_buffer_advance (b0, -len);
-                c = vlib_buffer_copy (vm, b0);
-                vlib_buffer_advance (b0, len);
-              }
-              if (c)
-              {
-                copies[n_copies++] = vlib_get_buffer_index (vm, c);
-              }
+              /* MLD packet - mark for punt */
+              is_mld = 1;
+              next0 = LCP_IGMP_NEXT_PUNT;
+              punt_indices[n_punts++] = bi0;
             }
           }
           
+          /* Enqueue non-MLD packets normally */
+          if (!is_mld)
+          {
+              to_next[0] = bi0;
+              to_next += 1;
+              n_left_to_next -= 1;
+          }
+
           if (b0->flags & VLIB_BUFFER_IS_TRACED)
           {
               lcp_igmp_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
               t->sw_if_index = sw_if_index0;
+              t->is_igmp = is_mld;  /* Reuse is_igmp field for MLD */
           }
 
           from += 1;
           n_left_from -= 1;
-          to_next += 1;
-          n_left_to_next -= 1;
 
-          vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
-                                           to_next, n_left_to_next,
-                                           bi0, next0);
+          /* Only validate enqueue for non-MLD packets */
+          if (!is_mld)
+          {
+              vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+                                               to_next, n_left_to_next,
+                                               bi0, next0);
+          }
         }
 
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
     }
 
-  if (PREDICT_FALSE(n_copies))
+  /* Punt MLD packets to LCP_IGMP_NEXT_PUNT */
+  if (PREDICT_FALSE(n_punts > 0))
   {
-    vlib_buffer_enqueue_to_single_next (vm, node, copies,
-                                        LCP_IGMP_NEXT_PUNT, n_copies);
+    vlib_buffer_enqueue_to_single_next (vm, node, punt_indices,
+                                        LCP_IGMP_NEXT_PUNT, n_punts);
   }
 
   return frame->n_vectors;

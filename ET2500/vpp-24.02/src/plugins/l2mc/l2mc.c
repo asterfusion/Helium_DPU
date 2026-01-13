@@ -155,7 +155,7 @@ vl_api_bridge_domain_add_del_multicast_t_handler (vl_api_bridge_domain_add_del_m
   int rv = 0;
 
   ip46_address_t src_ip, dst_ip;
-  u8 src_mac[6], dst_mac[6];
+  u8 dst_mac[6];
   l2mc_type type;
   ip46_type_t dst_itype;
   ip46_type_t src_itype;
@@ -194,8 +194,8 @@ vl_api_bridge_domain_add_del_multicast_t_handler (vl_api_bridge_domain_add_del_m
       goto reply;
   }
 
-  rv = l2mc_group_add_del_member(ntohl(mp->bd_id), src_mac, dst_mac, type,
-                                  ntohl(mp->sw_if_index), mp->is_add);
+  rv = l2mc_group_add_del_member(ntohl(mp->bd_id), &src_ip, dst_mac, type,
+                                  ntohl(mp->sw_if_index), dst_itype, mp->is_add);
     
   if (rv == 0)
       rv = VNET_API_ERROR_NO_SUCH_ENTRY;
