@@ -598,7 +598,11 @@ cnxk_pktio_mac_addr_add (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr)
 }
 
 i32
+#ifdef VPP_PLATFORM_ET2500
 cnxk_pktio_mac_addr_del (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr)
+#else
+cnxk_pktio_mac_addr_del (vlib_main_t *vm, cnxk_pktio_t *dev)
+#endif
 {
 #ifdef VPP_PLATFORM_ET2500
   struct roc_npc *npc = &dev->npc;

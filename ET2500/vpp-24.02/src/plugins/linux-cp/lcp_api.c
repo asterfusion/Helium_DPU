@@ -359,12 +359,13 @@ vl_api_lcp_set_interface_vlan_tag_t_handler (
 {
   vl_api_lcp_set_interface_vlan_tag_reply_t *rmp;
   int rv = 0;
-  u32 sw_if_index = ntohl (mp->sw_if_index);
-  u8 vlan_tag = mp->vlan_tag;
 
   VALIDATE_SW_IF_INDEX (mp);
 
 #ifdef SUPPORT_LCP_VLAN_TAG_ACT
+  u8 vlan_tag = mp->vlan_tag;
+  u32 sw_if_index = ntohl (mp->sw_if_index);
+
   lcp_itf_pair_t *pair = lcp_itf_pair_get (lcp_itf_pair_find_by_phy (sw_if_index));
 
   if (pair) {
@@ -382,12 +383,12 @@ vl_api_lcp_set_interface_pvlan_t_handler (
 {
   vl_api_lcp_set_interface_pvlan_reply_t *rmp;
   int rv = 0;
-  u32 sw_if_index = ntohl (mp->sw_if_index);
-  u16 pvlan = ntohs(mp->pvlan);
-
   VALIDATE_SW_IF_INDEX (mp);
 
 #ifdef SUPPORT_LCP_VLAN_TAG_ACT
+  u16 pvlan = ntohs(mp->pvlan);
+  u32 sw_if_index = ntohl (mp->sw_if_index);
+
   lcp_itf_pair_t *pair = lcp_itf_pair_get (lcp_itf_pair_find_by_phy (sw_if_index));
 
   if (pair) {

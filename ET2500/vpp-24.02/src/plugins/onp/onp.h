@@ -224,6 +224,28 @@ typedef struct
 
 STATIC_ASSERT (ONP_MAX_COUNTERS <= 64,
 	       "ONP_MAX_COUNTERS is larger than api counter array size");
+
+typedef enum
+{
+  ONP_PLATFORM_UNKNOWN = 0,
+  ONP_PLATFORM_ET2500,
+  ONP_PLATFORM_ET3600,
+} onp_platform_t;
+
+static_always_inline const char *
+onp_platform_to_string (onp_platform_t platform)
+{
+  switch (platform)
+    {
+    case ONP_PLATFORM_ET2500:
+      return "ONP_PLATFORM_ET2500";
+    case ONP_PLATFORM_ET3600:
+      return "ONP_PLATFORM_ET3600";
+    default:
+      return "ONP_PLATFORM_UNKNOWN";
+    }
+}
+
 typedef struct
 {
   /* Fast path per thread data */
@@ -258,6 +280,7 @@ typedef struct
   u8 onp_init_done;
 
   /* Convenience */
+  onp_platform_t platform_type;
   vlib_main_t *vlib_main;
   vnet_main_t *vnet_main;
   ethernet_main_t *ethernet_main;
@@ -319,6 +342,7 @@ unsigned int onp_get_per_thread_stats (u64 **stat, u64 *pool_stat,
 				       u64 *threads_with_stats);
 
 clib_error_t *onp_pktio_inl_inb_ipsec_flow_enable (vlib_main_t *vm);
+void onp_platform_ports_force_down (void);
 
 clib_error_t *onp_ipsec_reassembly_set (vlib_main_t *vm, u32 sa_index);
 
