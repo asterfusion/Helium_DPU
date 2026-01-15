@@ -305,6 +305,20 @@ autoreply define bridge_domain_set_learn_limit
   u32 learn_limit;
 };
 
+/** \brief L2 bridge domain set unknown unicast packet action
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param bd_id - the bridge domain idenntifier
+    @param drop - true to drop, false to flood
+*/
+autoreply define bridge_domain_set_unknown_multicast_packet_action
+{
+  u32 client_index;
+  u32 context;
+  u32 bd_id;
+  bool drop;
+};
+
 /** \brief L2 bridge domain add or delete request - will be deprecated
     @param client_index - opaque cookie to identify the sender
     @param context - sender context, to match reply w/ request

@@ -377,6 +377,18 @@ bd_set_learn_limit (vlib_main_t *vm, u32 bd_index, u32 learn_limit)
 }
 
 /**
+    Set unknown multicast packet action for the bridge domain.
+*/
+void
+bd_set_unknown_multicast_packet_action (vlib_main_t *vm, u32 bd_index, bool drop)
+{
+  l2_bridge_domain_t *bd_config;
+  vec_validate (l2input_main.bd_configs, bd_index);
+  bd_config = vec_elt_at_index (l2input_main.bd_configs, bd_index);
+  bd_config->drop_unknown_multicast = drop;
+}
+
+/**
     Set the tag for the bridge domain.
 */
 static void

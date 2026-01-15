@@ -1145,6 +1145,12 @@ api_bridge_domain_set_learn_limit (vat_main_t *vam)
 }
 
 static int
+api_bridge_domain_set_unknown_multicast_packet_action (vat_main_t *vam)
+{
+  return -1;
+}
+
+static int
 api_bd_ip_mac_add_del (vat_main_t *vam)
 {
   vl_api_address_t ip = VL_API_ZERO_ADDRESS;

@@ -34,6 +34,7 @@ import "vnet/ip/ip_types.api";
     @param context - sender context, to match reply w/ request
     @param bd_id -  the bridge domain to set the l2mc for
     @param sw_if_index - interface the operation is applied to
+    @param sw_bd_id -  the bridge domain to set the l2mc for the sw_if
     @param dst_ip - dst ipv4 or ipv6 multicast address for l2mc group
     @param src_ip - src ipv4 or ipv6 address for l2mc group
     @param sg_flag - sg flag for l2mc group
@@ -45,6 +46,7 @@ autoreply define bridge_domain_add_del_multicast
   u32 context;
   u32 bd_id;
   vl_api_interface_index_t sw_if_index;
+  u32 sw_bd_id;
   vl_api_address_t dst_ip;
   vl_api_address_t src_ip;
   bool sg_flag;

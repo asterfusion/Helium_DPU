@@ -465,6 +465,34 @@ out:
 }
 
 static void
+vl_api_bridge_domain_set_unknown_multicast_packet_action_t_handler (
+  vl_api_bridge_domain_set_unknown_multicast_packet_action_t *mp)
+{
+  vlib_main_t *vm = vlib_get_main ();
+  bd_main_t *bdm = &bd_main;
+  vl_api_bridge_domain_set_unknown_multicast_packet_action_reply_t *rmp;
+  int rv = 0;
+  u32 bd_id = ntohl (mp->bd_id);
+  uword *p;
+
+  if (bd_id == 0)
+    {
+      rv = VNET_API_ERROR_BD_NOT_MODIFIABLE;
+      goto out;
+    }
+
+  p = hash_get (bdm->bd_index_by_bd_id, bd_id);
+  if (p == 0)
+    {
+      rv = VNET_API_ERROR_NO_SUCH_ENTRY;
+      goto out;
+    }
+  bd_set_unknown_multicast_packet_action (vm, *p, mp->drop);
+out:
+  REPLY_MACRO (VL_API_BRIDGE_DOMAIN_SET_UNKNOWN_MULTICAST_PACKET_ACTION_REPLY);
+}
+
+static void
 vl_api_bridge_domain_set_mac_age_t_handler (vl_api_bridge_domain_set_mac_age_t
 					    * mp)
 {

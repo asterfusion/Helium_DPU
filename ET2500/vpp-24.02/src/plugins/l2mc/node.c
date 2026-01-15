@@ -20,6 +20,7 @@
 #include <vppinfra/error.h>
 #include <l2mc/l2mc.h>
 
+
 typedef struct {
   u32 sw_if_index;
   u32 bd_index;
@@ -78,6 +79,26 @@ static char *l2mc_error_strings[] = {
 };
 #endif /* CLIB_MARCH_VARIANT */
 
+static void
+modify_vlan_header_for_mapping(vlib_buffer_t *b, l2mc_output_mapping_t *mapping)
+{
+  ethernet_header_t *eh = vlib_buffer_get_current(b);
+  u16 eth_type = clib_net_to_host_u16(eh->type);
+  
+  if (eth_type == ETHERNET_TYPE_VLAN)
+  {
+    ethernet_vlan_header_t *vlanh = (ethernet_vlan_header_t *)(eh + 1);
+    
+    u16 priority_cfi_and_id = clib_net_to_host_u16(vlanh->priority_cfi_and_id);
+    
+    u16 new_priority_cfi_and_id = (priority_cfi_and_id & 0xF000) | 
+                                   (mapping->mapped_bd_id & 0x0FFF);
+    
+    vlanh->priority_cfi_and_id = clib_host_to_net_u16(new_priority_cfi_and_id);
+    
+  }
+}
+
 VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
                           vlib_node_runtime_t * node,
                           vlib_frame_t * frame)
@@ -103,8 +124,12 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
       vlib_buffer_t *b0, *c0;
       u16 next0;
       ethernet_header_t *eh0;
+      u16 eh0_type;
+      uword is_ip;
       u32 bd_index0;
       l2_bridge_domain_t *config0;
+      i16 l3_hdr_offset;
+      ethernet_vlan_header_t *vlanh;
 
       /* speculatively enqueue b0 to the current next frame */
       bi0 = from[0];
@@ -127,7 +152,25 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
       next0 = vnet_l2_feature_next (b0, lmm->l2_input_feat_next,
                                     L2INPUT_FEAT_MULTICAST);
 
-      if (is_multicast_mac(eh0->dst_address)) 
+      eh0_type = clib_net_to_host_u16 (eh0->type);
+      l3_hdr_offset = sizeof(ethernet_header_t);
+      u32 packet_has_vlan = 0;
+
+      if (eh0_type == ETHERNET_TYPE_VLAN)
+      {
+        packet_has_vlan = 1;
+        vlanh = (ethernet_vlan_header_t *)(eh0 + 1);
+        eh0_type = clib_net_to_host_u16(vlanh->type);
+        l3_hdr_offset += sizeof(ethernet_vlan_header_t);
+      }
+
+      is_ip = (eh0_type == ETHERNET_TYPE_IP4 || eh0_type == ETHERNET_TYPE_IP6);
+      bool mul = is_multicast_mac(eh0->dst_address);
+
+      l2_bridge_domain_t *bd_config = vec_elt_at_index (l2input_main.bd_configs, vnet_buffer (b0)->l2.bd_index);
+      bool drop_flag = bd_config->drop_unknown_multicast;
+
+      if (is_multicast_mac(eh0->dst_address)&&(is_ip)) 
       {
         l2mc_group_t *group = NULL;
         
@@ -139,36 +182,62 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
           if (memcmp(l2mc_groups[i].dst_mac, eh0->dst_address, 6) != 0)
             continue;
 
-          if((l2mc_groups[i].type == L2MC_SG_TYPE) && (memcmp(l2mc_groups[i].src_mac, eh0->src_address, 6) != 0))
-            continue;
-
+          if(l2mc_groups[i].type == L2MC_SG_TYPE)
+          {
+            if((eh0_type == ETHERNET_TYPE_IP4 && l2mc_groups[i].ip_type == IP46_TYPE_IP6)||
+              (eh0_type == ETHERNET_TYPE_IP6 && l2mc_groups[i].ip_type == IP46_TYPE_IP4))
+              continue;
+            if (eh0_type == ETHERNET_TYPE_IP4)
+            {
+                ip4_header_t *ip_h = (ip4_header_t *)((u8 *)vlib_buffer_get_current(b0) + l3_hdr_offset);
+                
+                if (memcmp(&l2mc_groups[i].src_ip.ip4, &ip_h->src_address, sizeof(ip4_address_t)) != 0)
+                {
+                    continue;
+                }
+            }
+            else if (eh0_type == ETHERNET_TYPE_IP6)
+            {
+              ip6_header_t *ip6_h = (ip6_header_t *)((u8 *)vlib_buffer_get_current(b0) + l3_hdr_offset);
+              
+              if (memcmp(&l2mc_groups[i].src_ip.ip6, &ip6_h->src_address, sizeof(ip6_address_t)) != 0)
+              {
+                  continue;
+              }
+            } 
+          }
           group = &l2mc_groups[i];
           break;
         }
         
-        if (group && vec_len (group->output_sw_if_indices) > 0) 
+        if (group && vec_len (group->output_mappings) > 0) 
         {
-          u32 *output_swif;
           u32 valid_output_count = 0;
+          l2mc_output_mapping_t *mapping;
           
-          vec_foreach (output_swif, group->output_sw_if_indices) 
+          vec_foreach (mapping, group->output_mappings) 
           {
-            if (*output_swif != sw_if_index0 && *output_swif != 0)
+            if (mapping->sw_if_index != sw_if_index0 && mapping->sw_if_index != 0)
               valid_output_count++;
           }
-          
           if (valid_output_count == 0)
           {
-            /* No valid outputs - drop packet */
-            to_next[0] = bi0;
-            to_next += 1;
-            n_left_to_next -= 1;
+            if(drop_flag)
+            {
+              to_next[0] = bi0;
+              to_next += 1;
+              n_left_to_next -= 1;
 
-            b0->error = node->errors[L2MC_ERROR_DROP];
-            vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
-                    to_next, n_left_to_next,
-                    bi0, L2MC_NEXT_DROP);
-            continue;
+              b0->error = node->errors[L2MC_ERROR_DROP];
+              vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+                      to_next, n_left_to_next,
+                      bi0, L2MC_NEXT_DROP);
+              continue;
+            }
+            else
+            {
+              ci0 = bi0;
+            }
           }
           else
           {
@@ -193,29 +262,40 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
               if (n_cloned == 0)
               {
                 ci0 = bi0;
-                vec_foreach (output_swif, group->output_sw_if_indices)
+                vec_foreach (mapping, group->output_mappings)
                 {
-                  if (*output_swif != sw_if_index0)
+                  if (mapping->sw_if_index != sw_if_index0)
                   {
-                    vnet_buffer (b0)->sw_if_index[VLIB_TX] = *output_swif;
+                    vnet_buffer (b0)->sw_if_index[VLIB_TX] = mapping->sw_if_index;
                     break;
                   }
                 }
+
+                if (packet_has_vlan)
+                {
+                  modify_vlan_header_for_mapping(b0, mapping);
+                }
+
                 goto enqueue_original_buffer;
               }
             }
 
             /* Send all clones */
             u32 clone_index = 0;
-            vec_foreach (output_swif, group->output_sw_if_indices)
+            vec_foreach (mapping, group->output_mappings)
             {
-              if (*output_swif == sw_if_index0 || *output_swif == 0)
+              if (mapping->sw_if_index == sw_if_index0 || mapping->sw_if_index == 0)
                 continue;
 
               if (clone_index < n_cloned)
               {
                 ci0 = lmm->clones[thread_index][clone_index];
                 c0 = vlib_get_buffer (vm, ci0);
+
+                if (packet_has_vlan)
+                {
+                  modify_vlan_header_for_mapping(c0, mapping);
+                }
 
                 to_next[0] = ci0;
                 to_next += 1;
@@ -235,7 +315,7 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
                 }
 
                 /* Set output interface for the clone */
-                vnet_buffer (c0)->sw_if_index[VLIB_TX] = *output_swif;
+                vnet_buffer (c0)->sw_if_index[VLIB_TX] = mapping->sw_if_index;
 
                 vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
                         to_next, n_left_to_next,
@@ -257,8 +337,22 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
         }
         else
         {
-          /* No matching group found or group has no members, continue with normal processing */
-          ci0 = bi0;
+          if(drop_flag)
+          {
+            to_next[0] = bi0;
+            to_next += 1;
+            n_left_to_next -= 1;
+
+            b0->error = node->errors[L2MC_ERROR_DROP];
+            vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
+                    to_next, n_left_to_next,
+                    bi0, L2MC_NEXT_DROP);
+            continue;
+          }
+          else
+          {
+            ci0 = bi0;
+          }
         }
       }
       else

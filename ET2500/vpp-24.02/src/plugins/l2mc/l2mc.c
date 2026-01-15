@@ -34,10 +34,8 @@ l2mc_main_t l2mc_main;
 l2mc_group_t *l2mc_groups;
 
 int
-l2mc_ip_to_mac (const ip46_address_t *src_ip, const ip46_address_t *dst_ip,
-                u8 *src_mac, u8 *dst_mac, l2mc_type type)
+l2mc_ip_to_mac (const ip46_address_t *dst_ip, u8 *dst_mac)
 {
-  memset(src_mac, 0, 6);
   memset(dst_mac, 0, 6);
   
   if (ip46_address_is_ip4(dst_ip))
@@ -51,17 +49,6 @@ l2mc_ip_to_mac (const ip46_address_t *src_ip, const ip46_address_t *dst_ip,
     dst_mac[3] = (ip_addr >> 16) & 0x7f; 
     dst_mac[4] = (ip_addr >> 8) & 0xff; 
     dst_mac[5] = ip_addr & 0xff;
-    
-    if (type == L2MC_SG_TYPE && src_ip && ip46_address_is_ip4(src_ip))
-    {
-      u32 src_ip_addr = clib_net_to_host_u32(src_ip->ip4.as_u32);
-      src_mac[0] = 0x00;
-      src_mac[1] = 0x00;
-      src_mac[2] = 0x5e;
-      src_mac[3] = (src_ip_addr >> 16) & 0xff; 
-      src_mac[4] = (src_ip_addr >> 8) & 0xff;
-      src_mac[5] = src_ip_addr & 0xff;
-    }
   }
   else
   {
@@ -70,19 +57,12 @@ l2mc_ip_to_mac (const ip46_address_t *src_ip, const ip46_address_t *dst_ip,
     
     memcpy(&dst_mac[2], &dst_ip->ip6.as_u8[12], 4);
     
-    if (type == L2MC_SG_TYPE && src_ip && !ip46_address_is_ip4(src_ip))
-    {
-      src_mac[0] = 0x00;
-      src_mac[1] = 0x00;
-      src_mac[2] = 0x5e;
-      memcpy(&src_mac[3], &src_ip->ip6.as_u8[13], 3);
-    }
   }
   return 0;
 }
 
 l2mc_group_t *
-l2mc_group_find (u32 bd_id, const u8 *src_mac, const u8 *dst_mac, l2mc_type type)
+l2mc_group_find (u32 bd_id, const ip46_address_t *src_ip, const u8 *dst_mac, l2mc_type type)
 {
     l2mc_group_t *group;
     
@@ -96,22 +76,24 @@ l2mc_group_find (u32 bd_id, const u8 *src_mac, const u8 *dst_mac, l2mc_type type
             
         if (group->type != type)
             continue;
-            
-        if (type == L2MC_SG_TYPE && memcmp(group->src_mac, src_mac, 6) != 0)
-            continue;
-            
+        
+        if((type == L2MC_SG_TYPE)&&(memcmp(&group->src_ip, src_ip, sizeof(ip46_address_t)) != 0))
+        {
+          continue;
+        }
+        
         return group;
     }
     
     return NULL;
 }
 int
-l2mc_group_add_del_member (u32 bd_id, const u8 *src_mac, const u8 *dst_mac,
-                          l2mc_type type, u32 sw_if_index, bool is_add)
+l2mc_group_add_del_member (u32 bd_id, u32 sw_bd_id, const ip46_address_t *src_ip, const u8 *dst_mac,
+                          l2mc_type type, u32 sw_if_index,ip46_type_t ip_type, bool is_add)
 {
     l2mc_group_t *group;
     
-    group = l2mc_group_find(bd_id, src_mac, dst_mac, type);
+    group = l2mc_group_find(bd_id, src_ip, dst_mac, type);
     
     if (is_add)
     {
@@ -121,21 +103,29 @@ l2mc_group_add_del_member (u32 bd_id, const u8 *src_mac, const u8 *dst_mac,
         memset(group, 0, sizeof(l2mc_group_t));
         
         group->bd_id = bd_id;
-        memcpy(group->src_mac, src_mac, 6);
+        memcpy(&group->src_ip, src_ip, sizeof(ip46_address_t));
         memcpy(group->dst_mac, dst_mac, 6);
         group->type = type;
+        group->ip_type = ip_type;
         
-        vec_validate(group->output_sw_if_indices, 0);
+        vec_validate(group->output_mappings, 0);
       }
       
-      u32 *swif;
-      vec_foreach(swif, group->output_sw_if_indices)
+      l2mc_output_mapping_t *mapping;
+      vec_foreach(mapping, group->output_mappings)
       {
-        if (*swif == sw_if_index)
-          return 0;
+          if (mapping->sw_if_index == sw_if_index)
+          {
+              mapping->mapped_bd_id = sw_bd_id;
+              return 0;
+          }
       }
       
-      vec_add1(group->output_sw_if_indices, sw_if_index);
+      l2mc_output_mapping_t new_mapping = {
+            .sw_if_index = sw_if_index,
+            .mapped_bd_id = sw_bd_id
+      };
+      vec_add1(group->output_mappings, new_mapping);
       
       return 1;
     }
@@ -145,20 +135,20 @@ l2mc_group_add_del_member (u32 bd_id, const u8 *src_mac, const u8 *dst_mac,
         return 0;
           
       u32 i;
-      for (i = 0; i < vec_len(group->output_sw_if_indices); i++)
+      for (i = 0; i < vec_len(group->output_mappings); i++)
       {
-        if (group->output_sw_if_indices[i] == sw_if_index)
-        {
-          vec_del1(group->output_sw_if_indices, i);
-          
-          if (vec_len(group->output_sw_if_indices) == 0)
+          if (group->output_mappings[i].sw_if_index == sw_if_index)
           {
-            vec_free(group->output_sw_if_indices);
-            pool_put(l2mc_groups, group);
+              vec_del1(group->output_mappings, i);
+              
+              if (vec_len(group->output_mappings) == 0)
+              {
+                  vec_free(group->output_mappings);
+                  pool_put(l2mc_groups, group);
+              }
+              
+              return 1;
           }
-          
-          return 1;
-        }
       }
       
       return 0;
@@ -172,7 +162,7 @@ vl_api_bridge_domain_add_del_multicast_t_handler (vl_api_bridge_domain_add_del_m
   int rv = 0;
 
   ip46_address_t src_ip, dst_ip;
-  u8 src_mac[6], dst_mac[6];
+  u8 dst_mac[6];
   l2mc_type type;
   ip46_type_t dst_itype;
   ip46_type_t src_itype;
@@ -204,16 +194,15 @@ vl_api_bridge_domain_add_del_multicast_t_handler (vl_api_bridge_domain_add_del_m
     type = L2MC_XG_TYPE;
   }
 
-  rv = l2mc_ip_to_mac((type == L2MC_SG_TYPE) ? &src_ip : NULL, 
-                        &dst_ip, src_mac, dst_mac, type);
+  rv = l2mc_ip_to_mac(&dst_ip, dst_mac);
   if (rv != 0)
   {
       rv = VNET_API_ERROR_INVALID_VALUE;
       goto reply;
   }
 
-  rv = l2mc_group_add_del_member(ntohl(mp->bd_id), src_mac, dst_mac, type,
-                                  ntohl(mp->sw_if_index), mp->is_add);
+  rv = l2mc_group_add_del_member(ntohl(mp->bd_id), ntohl(mp->sw_bd_id), &src_ip, dst_mac, type,
+                                  ntohl(mp->sw_if_index), dst_itype, mp->is_add);
     
   if (rv == 0)
       rv = VNET_API_ERROR_NO_SUCH_ENTRY;
