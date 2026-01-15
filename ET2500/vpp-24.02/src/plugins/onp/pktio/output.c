@@ -249,7 +249,7 @@ onp_platform_link_up_down (onp_main_t *om, u32 hw_if_index, bool is_up)
 	  return;
 	}
 
-      system (cmd);
+      (void) system (cmd);
     }
   else
     {
@@ -287,7 +287,7 @@ onp_platform_link_up_down (onp_main_t *om, u32 hw_if_index, bool is_up)
 	      rc = snprintf (cmd, sizeof (cmd), "gpioset gpiochip0 %d=0",
 			     gpio_offset);
 	      if (rc >= 0 && rc < (int) sizeof (cmd))
-		system (cmd);
+		(void) system (cmd);
 	    }
 	}
     }
