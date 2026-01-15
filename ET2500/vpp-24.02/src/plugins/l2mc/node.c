@@ -20,6 +20,7 @@
 #include <vppinfra/error.h>
 #include <l2mc/l2mc.h>
 
+
 typedef struct {
   u32 sw_if_index;
   u32 bd_index;
@@ -78,6 +79,33 @@ static char *l2mc_error_strings[] = {
 };
 #endif /* CLIB_MARCH_VARIANT */
 
+static void
+modify_vlan_header_for_mapping(vlib_buffer_t *b, l2mc_output_mapping_t *mapping)
+{
+  ethernet_header_t *eh = vlib_buffer_get_current(b);
+  u16 eth_type = clib_net_to_host_u16(eh->type);
+  
+  if (eth_type == ETHERNET_TYPE_VLAN)
+  {
+    ethernet_vlan_header_t *vlanh = (ethernet_vlan_header_t *)(eh + 1);
+    
+    u16 priority_cfi_and_id = clib_net_to_host_u16(vlanh->priority_cfi_and_id);
+    
+    u16 new_priority_cfi_and_id = (priority_cfi_and_id & 0xF000) | 
+                                   (mapping->mapped_bd_id & 0x0FFF);
+    
+    vlanh->priority_cfi_and_id = clib_host_to_net_u16(new_priority_cfi_and_id);
+    
+    clib_warning("Modified VLAN header: original=0x%04x, new=0x%04x, mapped_bd_id=%u", 
+                 priority_cfi_and_id, new_priority_cfi_and_id, mapping->mapped_bd_id);
+  }
+  else if (mapping->mapped_bd_id != 0)
+  {
+    clib_warning("Packet doesn't have VLAN header, but mapped_bd_id=%u. "
+                 "Need to insert VLAN header?", mapping->mapped_bd_id);
+  }
+}
+
 VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
                           vlib_node_runtime_t * node,
                           vlib_frame_t * frame)
@@ -133,8 +161,11 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
 
       eh0_type = clib_net_to_host_u16 (eh0->type);
       l3_hdr_offset = sizeof(ethernet_header_t);
+      u32 packet_has_vlan = 0;
+
       if (eh0_type == ETHERNET_TYPE_VLAN)
       {
+        packet_has_vlan = 1;
         vlanh = (ethernet_vlan_header_t *)(eh0 + 1);
         eh0_type = clib_net_to_host_u16(vlanh->type);
         l3_hdr_offset += sizeof(ethernet_vlan_header_t);
@@ -154,11 +185,16 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
         
         for (int i = 0; i < vec_len(l2mc_groups); i++)
         {
+          clib_warning("group mac %U packet mac %U", 
+             format_mac_address, l2mc_groups[i].dst_mac,
+             format_mac_address, eh0->dst_address);
           clib_warning("group bd_id %d packet bd_index %d",l2mc_groups[i].bd_id, bd_index0);
           if(l2mc_groups[i].bd_id != bd_index0)
             continue;
           
-          clib_warning("group mac %U packet mac %U", l2mc_groups[i].dst_mac, eh0->dst_address);
+          clib_warning("group mac %U packet mac %U", 
+             format_mac_address, l2mc_groups[i].dst_mac,
+             format_mac_address, eh0->dst_address);
           if (memcmp(l2mc_groups[i].dst_mac, eh0->dst_address, 6) != 0)
             continue;
 
@@ -168,14 +204,18 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
             if((eh0_type == ETHERNET_TYPE_IP4 && l2mc_groups[i].ip_type == IP46_TYPE_IP6)||
               (eh0_type == ETHERNET_TYPE_IP6 && l2mc_groups[i].ip_type == IP46_TYPE_IP4))
               continue;
-            if(eh0_type == ETHERNET_TYPE_IP4)
+            if (eh0_type == ETHERNET_TYPE_IP4)
             {
-              ip4_header_t *ip_h = (ip4_header_t *)((u8 *)vlib_buffer_get_current(b0) + l3_hdr_offset);
-              clib_warning("group ip %U packet ip %U", l2mc_groups[i].src_ip.ip4, ip_h->src_address);
-              if (memcmp(&l2mc_groups[i].src_ip.ip4, &ip_h->src_address, sizeof(ip4_address_t)) != 0)
-              {
-                  continue;
-              }
+                ip4_header_t *ip_h = (ip4_header_t *)((u8 *)vlib_buffer_get_current(b0) + l3_hdr_offset);
+                
+                clib_warning("group ip %U packet ip %U", 
+                            format_ip4_address, &l2mc_groups[i].src_ip.ip4,
+                            format_ip4_address, &ip_h->src_address);
+                
+                if (memcmp(&l2mc_groups[i].src_ip.ip4, &ip_h->src_address, sizeof(ip4_address_t)) != 0)
+                {
+                    continue;
+                }
             }
             else if (eh0_type == ETHERNET_TYPE_IP6)
             {
@@ -191,15 +231,15 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
           break;
         }
         
-        if (group && vec_len (group->output_sw_if_indices) > 0) 
+        if (group && vec_len (group->output_mappings) > 0) 
         {
           clib_warning("group found");
-          u32 *output_swif;
           u32 valid_output_count = 0;
+          l2mc_output_mapping_t *mapping;
           
-          vec_foreach (output_swif, group->output_sw_if_indices) 
+          vec_foreach (mapping, group->output_mappings) 
           {
-            if (*output_swif != sw_if_index0 && *output_swif != 0)
+            if (mapping->sw_if_index != sw_if_index0 && mapping->sw_if_index != 0)
               valid_output_count++;
           }
           clib_warning("valid output count %d", valid_output_count);
@@ -247,29 +287,40 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
               if (n_cloned == 0)
               {
                 ci0 = bi0;
-                vec_foreach (output_swif, group->output_sw_if_indices)
+                vec_foreach (mapping, group->output_mappings)
                 {
-                  if (*output_swif != sw_if_index0)
+                  if (mapping->sw_if_index != sw_if_index0)
                   {
-                    vnet_buffer (b0)->sw_if_index[VLIB_TX] = *output_swif;
+                    vnet_buffer (b0)->sw_if_index[VLIB_TX] = mapping->sw_if_index;
                     break;
                   }
                 }
+
+                if (packet_has_vlan)
+                {
+                  modify_vlan_header_for_mapping(b0, mapping);
+                }
+
                 goto enqueue_original_buffer;
               }
             }
 
             /* Send all clones */
             u32 clone_index = 0;
-            vec_foreach (output_swif, group->output_sw_if_indices)
+            vec_foreach (mapping, group->output_mappings)
             {
-              if (*output_swif == sw_if_index0 || *output_swif == 0)
+              if (mapping->sw_if_index == sw_if_index0 || mapping->sw_if_index == 0)
                 continue;
 
               if (clone_index < n_cloned)
               {
                 ci0 = lmm->clones[thread_index][clone_index];
                 c0 = vlib_get_buffer (vm, ci0);
+
+                if (packet_has_vlan)
+                {
+                  modify_vlan_header_for_mapping(c0, mapping);
+                }
 
                 to_next[0] = ci0;
                 to_next += 1;
@@ -289,7 +340,7 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
                 }
 
                 /* Set output interface for the clone */
-                vnet_buffer (c0)->sw_if_index[VLIB_TX] = *output_swif;
+                vnet_buffer (c0)->sw_if_index[VLIB_TX] = mapping->sw_if_index;
 
                 vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
                         to_next, n_left_to_next,

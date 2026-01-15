@@ -56,11 +56,16 @@ typedef enum {
 }l2mc_type;
 
 typedef struct {
+    u32 sw_if_index;
+    u32 mapped_bd_id;
+} l2mc_output_mapping_t;
+
+typedef struct {
     u16 bd_id;
     ip46_address_t src_ip;
     u8 dst_mac[6];
     l2mc_type type;
-    u32 *output_sw_if_indices;  
+    l2mc_output_mapping_t *output_mappings;
     ip46_type_t ip_type;
 } l2mc_group_t;
 

@@ -62,8 +62,6 @@ igmp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
   u32 next_index = node->cached_next_index;
   u32 punt_indices[VLIB_FRAME_SIZE];
   u32 n_punts = 0;
-  u32 igmp_indices[VLIB_FRAME_SIZE];
-  u32 n_igmp = 0;
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
@@ -113,7 +111,6 @@ igmp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
               /* Mark as IGMP packet to punt */
               is_igmp0 = 1;
               next0 = LCP_IGMP_NEXT_PUNT;
-              igmp_indices[n_igmp++] = bi0;
           }
           else
           {
@@ -128,7 +125,6 @@ igmp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
               /* Mark as IGMP packet to punt */
               is_igmp1 = 1;
               next1 = LCP_IGMP_NEXT_PUNT;
-              igmp_indices[n_igmp++] = bi1;
           }
           else
           {
@@ -154,14 +150,12 @@ igmp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           {
               lcp_igmp_trace_t *t0 = vlib_add_trace (vm, node, b0, sizeof (*t0));
               t0->sw_if_index = sw_if_index0;
-              t0->is_igmp = is_igmp0;
           }
     
           if (b1->flags & VLIB_BUFFER_IS_TRACED)
           {
               lcp_igmp_trace_t *t1 = vlib_add_trace (vm, node, b1, sizeof (*t1));
               t1->sw_if_index = sw_if_index1;
-              t1->is_igmp = is_igmp1;
           }
 
           from += 2;
@@ -222,7 +216,6 @@ igmp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
               /* Mark as IGMP packet to punt */
               is_igmp = 1;
               next0 = LCP_IGMP_NEXT_PUNT;
-              igmp_indices[n_igmp++] = bi0;
               punt_indices[n_punts++] = bi0;
           }
           else
@@ -237,7 +230,6 @@ igmp_ip4_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fr
           {
               lcp_igmp_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
               t->sw_if_index = sw_if_index0;
-              t->is_igmp = is_igmp;
           }
 
           from += 1;
@@ -371,14 +363,12 @@ mld_ip6_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fra
           {
               lcp_igmp_trace_t *t0 = vlib_add_trace (vm, node, b0, sizeof (*t0));
               t0->sw_if_index = sw_if_index0;
-              t0->is_igmp = is_mld0;  /* Reuse is_igmp field for MLD */
           }
     
           if (b1->flags & VLIB_BUFFER_IS_TRACED)
           {
               lcp_igmp_trace_t *t1 = vlib_add_trace (vm, node, b1, sizeof (*t1));
               t1->sw_if_index = sw_if_index1;
-              t1->is_igmp = is_mld1;  /* Reuse is_igmp field for MLD */
           }
 
           from += 2;
@@ -463,7 +453,6 @@ mld_ip6_node_fn(vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * fra
           {
               lcp_igmp_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
               t->sw_if_index = sw_if_index0;
-              t->is_igmp = is_mld;  /* Reuse is_igmp field for MLD */
           }
 
           from += 1;
