@@ -1148,7 +1148,7 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
         match_index = tmp_match_index;
         return 0;
       }
-      u32 tmp_match_index = ~0;
+      tmp_match_index = ~0;
       vec_foreach(dns_cc, dns_cc_indices) {
         pkt_5tuple->geosite_cc_index = 0;
         pkt_5tuple->geoip_cc_index =*dns_cc;
