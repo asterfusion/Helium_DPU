@@ -603,7 +603,7 @@ cnxk_pktio_mac_addr_del (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr)
 #ifdef VPP_PLATFORM_ET2500
   struct roc_npc *npc = &dev->npc;
   struct roc_npc_flow *npc_flow;
-  cnxk_pktio_second_mac_t *second_entry;
+  cnxk_pktio_second_mac_t *second_entry = NULL;
   int rv = 0;
 
   pool_foreach(second_entry, dev->second_mac_entries)
