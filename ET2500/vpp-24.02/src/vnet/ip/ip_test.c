@@ -413,6 +413,23 @@ api_ip_route_add_del (vat_main_t *vam)
   return (vam->retval);
 }
 
+static int 
+api_set_unknown_unicast_packet_action (vat_main_t *vam)
+{
+  vl_api_set_unknown_unicast_packet_action_t * mp;
+  int ret;
+
+  M(SET_UNKNOWN_UNICAST_PACKET_ACTION, mp);
+  mp->table_id = htonl (0);
+  mp->punt = true;
+
+  /* send it... */
+  S(mp);
+
+  /* Wait for a reply... */
+  W (ret);
+  return ret;
+}
 static int
 api_ip_table_add_del (vat_main_t *vam)
 {

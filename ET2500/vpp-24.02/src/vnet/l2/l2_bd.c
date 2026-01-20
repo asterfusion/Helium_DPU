@@ -322,6 +322,10 @@ bd_set_flags (vlib_main_t * vm, u32 bd_index, bd_flags_t flags, u32 enable)
     {
       feature_bitmap |= L2INPUT_FEAT_ARP_UFWD;
     }
+  if (flags & L2_MULTICAST)
+    {
+      feature_bitmap |= L2INPUT_FEAT_MULTICAST;
+    }
 
   if (enable)
     {
@@ -370,6 +374,18 @@ bd_set_learn_limit (vlib_main_t *vm, u32 bd_index, u32 learn_limit)
   vec_validate (l2input_main.bd_configs, bd_index);
   bd_config = vec_elt_at_index (l2input_main.bd_configs, bd_index);
   bd_config->learn_limit = learn_limit;
+}
+
+/**
+    Set unknown multicast packet action for the bridge domain.
+*/
+void
+bd_set_unknown_multicast_packet_action (vlib_main_t *vm, u32 bd_index, bool drop)
+{
+  l2_bridge_domain_t *bd_config;
+  vec_validate (l2input_main.bd_configs, bd_index);
+  bd_config = vec_elt_at_index (l2input_main.bd_configs, bd_index);
+  bd_config->drop_unknown_multicast = drop;
 }
 
 /**
@@ -1407,6 +1423,11 @@ bd_add_del (l2_bridge_domain_add_del_args_t * a)
 	enable_flags |= L2_ARP_UFWD;
       else
 	disable_flags |= L2_ARP_UFWD;
+
+      if (a->multicast)
+	enable_flags |= L2_MULTICAST;
+      else
+	disable_flags |= L2_MULTICAST;
 
       if (enable_flags)
 	bd_set_flags (vm, bd_index, enable_flags, 1 /* enable */ );

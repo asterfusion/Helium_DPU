@@ -1289,6 +1289,7 @@ list(APPEND VNET_SOURCES
   mfib/mfib_entry_src.c
   mfib/mfib_entry_src_rr.c
   mfib/mfib_table.c
+  mfib/mfib_table_punt.c
 )
 
 list(APPEND VNET_MULTIARCH_SOURCES

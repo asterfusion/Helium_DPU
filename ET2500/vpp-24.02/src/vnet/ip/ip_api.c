@@ -37,6 +37,7 @@
 #include <vnet/mfib/mfib_signal.h>
 #include <vnet/mfib/mfib_entry.h>
 #include <vnet/mfib/mfib_api.h>
+#include <vnet/mfib/mfib_table_punt.h>
 #include <vnet/ip/ip_source_and_port_range_check.h>
 #include <vnet/fib/fib_path_list.h>
 #include <vnet/ip/ip6_hop_by_hop.h>
@@ -1055,6 +1056,18 @@ vl_api_ip_mroute_add_del_t_handler (vl_api_ip_mroute_add_del_t * mp)
     rmp->stats_index = htonl (stats_index);
   }));
   /* *INDENT-ON* */
+}
+
+static void
+  vl_api_set_unknown_unicast_packet_action_t_handler
+  (vl_api_set_unknown_unicast_packet_action_t * mp)
+{
+  vl_api_set_unknown_unicast_packet_action_reply_t *rmp;
+  int rv = 0;
+
+  rv = table_punt_array_set(ntohl(mp->table_id), mp->punt);
+
+  REPLY_MACRO (VL_API_SET_UNKNOWN_UNICAST_PACKET_ACTION_REPLY);
 }
 
 static void
