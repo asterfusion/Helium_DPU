@@ -165,7 +165,6 @@ VLIB_NODE_FN (l2mc_node) (vlib_main_t * vm,
       }
 
       is_ip = (eh0_type == ETHERNET_TYPE_IP4 || eh0_type == ETHERNET_TYPE_IP6);
-      bool mul = is_multicast_mac(eh0->dst_address);
 
       l2_bridge_domain_t *bd_config = vec_elt_at_index (l2input_main.bd_configs, vnet_buffer (b0)->l2.bd_index);
       bool drop_flag = bd_config->drop_unknown_multicast;
