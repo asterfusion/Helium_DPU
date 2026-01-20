@@ -760,12 +760,12 @@ lcp_xfrm_create_ipip_tunnel (struct xfrmnl_sa *sa, int *sw_if_index,
   if (!dir)
     rv = ipip_add_tunnel (is_ipv6 ? IPIP_TRANSPORT_IP6 : IPIP_TRANSPORT_IP4,
 			  instance, &daddr->ip, &saddr->ip, fib_index, tflags,
-			  IP_DSCP_CS0, TUNNEL_MODE_P2P, (u32 *) sw_if_index);
+			  IP_DSCP_CS0, TUNNEL_MODE_P2P, (u32 *) sw_if_index, NULL);
 
   else
     rv = ipip_add_tunnel (is_ipv6 ? IPIP_TRANSPORT_IP6 : IPIP_TRANSPORT_IP4,
 			  instance, &saddr->ip, &daddr->ip, fib_index, tflags,
-			  IP_DSCP_CS0, TUNNEL_MODE_P2P, (u32 *) sw_if_index);
+			  IP_DSCP_CS0, TUNNEL_MODE_P2P, (u32 *) sw_if_index, NULL);
 
   if (rv == VNET_API_ERROR_IF_ALREADY_EXISTS)
     {

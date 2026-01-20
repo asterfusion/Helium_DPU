@@ -52,7 +52,8 @@ int map_ce_create_domain (ip4_address_t * ip4_prefix, u8 ip4_prefix_len,
 		       ip6_address_t * ip6_dst, u8 ip6_dst_len,
 		       ip6_address_t * end_user_prefix, u8 end_user_prefix_len,
 		       u8 ea_bits_len, u8 psid_offset, u8 psid_length,
-		       u32 * map_domain_index, u16 mtu, u8 flags, u8 * tag);
+		       u32 * map_domain_index, u16 mtu, u8 flags, u8 * tag,
+		       u32 nat_max_static_session, u32 nat_max_user, u32 nat_max_session_per_user);
 int map_ce_delete_domain (u32 map_domain_index);
 
 int map_ce_if_enable_disable (bool is_enable, u32 sw_if_index);

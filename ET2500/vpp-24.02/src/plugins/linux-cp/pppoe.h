@@ -31,7 +31,7 @@
 #include <vnet/adj/adj_types.h>
 #include <vnet/fib/fib_table.h>
 #include <vlib/vlib.h>
-#include <vppinfra/bihash_8_8.h>
+#include <vppinfra/bihash_16_8.h>
 
 
 typedef struct
@@ -125,15 +125,22 @@ typedef struct
     {
       u16 session_id;
       u8 mac[6];
+      u32 sw_if_index;
+      u16 vlan_id;
+      u16 unused;
     } fields;
     struct
     {
       u32 w0;
       u32 w1;
+      u32 w2;
+      u32 w3;
     } words;
-    u64 raw;
+    u64 raw[2];
   };
 } pppoe_entry_key_t;
+
+STATIC_ASSERT (sizeof (pppoe_entry_key_t) == 16, "pppoe Key size changed");
 /* *INDENT-ON* */
 
 /* *INDENT-OFF* */
@@ -290,14 +297,19 @@ pppoe_lookup_1 (BVT (clib_bihash) * table,
 		pppoe_entry_result_t * cached_result,
 		u8 * mac0,
 		u16 session_id0,
+        u32 sw_if_index,
+        u16 vlan_id,
 		pppoe_entry_key_t * key0,
 		u32 * bucket0, pppoe_entry_result_t * result0)
 {
   /* set up key */
-  key0->raw = pppoe_make_key (mac0, session_id0);
+  key0->raw[0] = pppoe_make_key (mac0, session_id0);
+  key0->raw[1] = 0;
+  key0->fields.sw_if_index = sw_if_index;
+  key0->fields.vlan_id = vlan_id;
   *bucket0 = ~0;
 
-  if (key0->raw == cached_key->raw)
+  if (key0->raw[0] == cached_key->raw[0] && key0->raw[1] == cached_key->raw[1])
     {
       /* Hit in the one-entry cache */
       result0->raw = cached_result->raw;
@@ -307,13 +319,15 @@ pppoe_lookup_1 (BVT (clib_bihash) * table,
       /* Do a regular session table lookup */
       BVT (clib_bihash_kv) kv;
 
-      kv.key = key0->raw;
+      kv.key[0] = key0->raw[0];
+      kv.key[1] = key0->raw[1];
       kv.value = ~0ULL;
       BV (clib_bihash_search_inline) (table, &kv);
       result0->raw = kv.value;
 
       /* Update one-entry cache */
-      cached_key->raw = key0->raw;
+      cached_key->raw[0] = key0->raw[0];
+      cached_key->raw[1] = key0->raw[1];
       cached_result->raw = result0->raw;
     }
 }
@@ -322,18 +336,24 @@ static_always_inline void
 pppoe_update_1 (BVT (clib_bihash) * table,
 		u8 * mac0,
 		u16 session_id0,
+        u32 sw_if_index,
+        u16 vlan_id,
 		pppoe_entry_key_t * key0,
-		u32 * bucket0, pppoe_entry_result_t * result0)
+		u32 * bucket0, pppoe_entry_result_t * result0, u8 is_add)
 {
   /* set up key */
-  key0->raw = pppoe_make_key (mac0, session_id0);
+  key0->raw[0] = pppoe_make_key (mac0, session_id0);
+  key0->raw[1] = 0;
+  key0->fields.sw_if_index = sw_if_index;
+  key0->fields.vlan_id = vlan_id;
   *bucket0 = ~0;
 
   /* Update the entry */
   BVT (clib_bihash_kv) kv;
-  kv.key = key0->raw;
+  kv.key[0] = key0->raw[0];
+  kv.key[1] = key0->raw[1];
   kv.value = result0->raw;
-  BV (clib_bihash_add_del) (table, &kv, 1 /* is_add */ );
+  BV (clib_bihash_add_del) (table, &kv, is_add);
 
 }
 

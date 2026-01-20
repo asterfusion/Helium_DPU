@@ -96,7 +96,7 @@ cnxk_drv_ipsec_outbound_sort_march (vlib_main_t *vm, vlib_node_runtime_t *node,
 				    cnxk_per_thread_data_t *ptd,
 				    const int is_ip6, const int is_tun)
 {
-#if 0
+#if 1
 
   ptd->out_npkts = 0;
   ptd->out_user_nstats = 0;

@@ -11,9 +11,88 @@
 
 #include <onp/onp.h>
 #include <onp/drv/inc/pool_fp.h>
+#include <vlib/vlib.h>
 
 onp_main_t onp_main;
 onp_config_main_t onp_config_main;
+
+#ifdef VPP_PLATFORM_ET2500
+#define SONIC_ENVIRONMENT_FILE "/etc/sonic/sonic-environment"
+#define SONIC_PLATFORM_KEY "PLATFORM="
+
+static void
+onp_trim_trailing_whitespace (char *value)
+{
+  size_t len;
+
+  if (!value)
+    return;
+
+  len = strlen (value);
+  while (len &&
+	 (value[len - 1] == '\n' || value[len - 1] == '\r' ||
+	  value[len - 1] == ' ' || value[len - 1] == '\t'))
+    value[--len] = 0;
+}
+
+static onp_platform_t
+onp_platform_from_value (const char *value)
+{
+  if (!value)
+    return ONP_PLATFORM_UNKNOWN;
+
+  if (strstr (value, "arm64-asterfusion_et2500-r0"))
+    return ONP_PLATFORM_ET2500;
+
+  if (strstr (value, "arm64-asterfusion_et3600-r0"))
+    return ONP_PLATFORM_ET3600;
+
+  return ONP_PLATFORM_UNKNOWN;
+}
+
+static void
+onp_platform_detect (onp_main_t *om)
+{
+  FILE *fp;
+  char *line = NULL;
+  size_t line_len = 0;
+
+  om->platform_type = ONP_PLATFORM_UNKNOWN;
+
+  fp = fopen (SONIC_ENVIRONMENT_FILE, "r");
+  if (!fp)
+    {
+      onp_pktio_notice ("platform detection: unable to open %s",
+			SONIC_ENVIRONMENT_FILE);
+      return;
+    }
+
+  while (getline (&line, &line_len, fp) != -1)
+    {
+      if (strncmp (line, SONIC_PLATFORM_KEY, strlen (SONIC_PLATFORM_KEY)))
+	continue;
+
+      char *value = line + strlen (SONIC_PLATFORM_KEY);
+      while (*value == ' ' || *value == '\t')
+	value++;
+
+      onp_trim_trailing_whitespace (value);
+      om->platform_type = onp_platform_from_value (value);
+      break;
+    }
+
+  if (line)
+    free (line);
+  fclose (fp);
+
+  if (om->platform_type != ONP_PLATFORM_UNKNOWN)
+    onp_pktio_notice ("platform detection: %s",
+		      onp_platform_to_string (om->platform_type));
+  else
+    onp_pktio_notice ("platform detection: no recognized platform in %s",
+		      SONIC_ENVIRONMENT_FILE);
+}
+#endif /* VPP_PLATFORM_ET2500 */
 
 clib_error_t *
 onp_uuid_parse (char *input, uuid_t uuid)
@@ -584,6 +663,11 @@ onp_plugin_init (vlib_main_t *vm)
   om->vlib_main = vm;
   om->vnet_main = vnet_get_main ();
   om->onp_conf = &onp_config_main;
+
+#ifdef VPP_PLATFORM_ET2500
+  onp_platform_detect (om);
+  onp_platform_ports_force_down ();
+#endif
 
   pool_alloc(om->scheduler_profile_pool, 512);
 

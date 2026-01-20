@@ -37,6 +37,7 @@ vl_api_ipip_add_tunnel_t_handler (vl_api_ipip_add_tunnel_t * mp)
   vl_api_ipip_add_tunnel_reply_t *rmp;
   int rv = 0;
   u32 fib_index, sw_if_index = ~0;
+  u32 instance;
   tunnel_encap_decap_flags_t flags;
   ip46_address_t src, dst;
   ip46_type_t itype[2];
@@ -76,13 +77,15 @@ vl_api_ipip_add_tunnel_t_handler (vl_api_ipip_add_tunnel_t * mp)
     }
   else
     {
+        instance = ntohl(mp->tunnel.instance);
+
       rv = ipip_add_tunnel ((itype[0] == IP46_TYPE_IP6 ?
 			     IPIP_TRANSPORT_IP6 :
 			     IPIP_TRANSPORT_IP4),
 			    ntohl (mp->tunnel.instance), &src, &dst,
 			    fib_index, flags,
 			    ip_dscp_decode (mp->tunnel.dscp), mode,
-			    &sw_if_index);
+			    &sw_if_index, &instance);
     }
 
 out:
@@ -90,6 +93,7 @@ out:
   REPLY_MACRO2(VL_API_IPIP_ADD_TUNNEL_REPLY,
   ({
     rmp->sw_if_index = ntohl(sw_if_index);
+    rmp->instance = ntohl(instance);
   }));
   /* *INDENT-ON* */
 }

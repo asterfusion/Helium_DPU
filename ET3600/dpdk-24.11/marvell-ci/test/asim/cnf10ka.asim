@@ -1,0 +1,73 @@
+#
+ASIM_USE_RPM=1
+ASIM_USE_SPI=1
+ASIM_USE_ML=0
+ASIM_GIC_PWRR=on
+ASIM_USE_CDN_EMMC=1
+FLASH_MODEL=mt25q512
+@${ASIM}/configs/cnf10ka-base.asim
+
+#
+# Set GPIO strap pins (boot method)
+# 24bit SPI
+#control n0.gpio0 set strap 0x100a
+# eMMC
+#control n0.gpio0 set strap 0x0008
+control n0.gpio0 set strap ${BOOT_STRAP}
+
+#
+## Below configuration is used for secure-boot
+## Note that GPIO_STRAPX[TRUSTED_MODE] (bit 10)
+## at asim-dev/Makefile needs to be set to boot
+## securely on ASIM
+#
+
+#
+# Load Firmware
+#
+# Load SPI image
+control n0.spi0 attach 0 ${FLASH_MODEL} ${ASIM_TARGET_IMAGES}/flash-cnf10ka.img
+control n0.spi0 attach 1 ${FLASH_MODEL} ${ASIM_TARGET_IMAGES}/flash-cnf10ka.img
+control n0.spi1 attach 0 ${FLASH_MODEL} ${ASIM_TARGET_IMAGES}/flash-cnf10ka.img
+
+
+# Load eMMC image
+control n0.emm0 connect ${ASIM_TARGET_IMAGES}/cn10k-dataplane-disk.img
+
+# Load the BDK symbols
+#symbols ${SYMBOL_IMAGE}
+
+#TAP interfaces for RPM0 LMACs
+control n0.rpm0 lmac 0 ${NIC0}
+
+#TAP interfaces for RPM1 LMACs
+control n0.rpm1 lmac 0 ${NIC1}
+
+#TAP interfaces for RPM2 LMACs
+control n0.rpm2 lmac 0 ${NIC2}
+control n0.rpm2 lmac 1 ${NIC3}
+control n0.rpm2 lmac 2 ${NIC4}
+control n0.rpm2 lmac 3 ${NIC5}
+
+# Tell the BDK how much memory is available at magic address 1GB
+# First byte is the enable mask for LMCs
+# Second byte is the size of each DIMM in GB
+# Third byte is the number of DIMMs per LMC (1 or 2)
+mm1 0x40000000 3 secure
+mm1 0x40000001 $(ASIM_DIMM_SIZE) secure
+mm1 0x40000002 $(ASIM_DIMM_PER_LMC) secure
+
+ASIM_UART_RAW ?= 0
+if ASIM_UART_RAW == 0 : control n0.uaa0 connect 2000 localhost bytestream
+if ASIM_UART_RAW != 0 : control n0.uaa0 connect 2000
+
+#control n0.uaa0 connect 0 /tmp/asim-uart0.txt
+#show devices
+#show addressmap
+#control n0.uaa0 wait
+
+trace output /tmp/asim_trace.log
+
+control n0.xcp0 load ${ASIM_TARGET_IMAGES}/scp_bl0.exe-cn10xx
+stop mcp
+start scp noap

@@ -34,6 +34,7 @@ enum acl_action_expand : u8
   ACL_ACTION_API_EXPAND_NO_NAT = 0,
   ACL_ACTION_API_EXPAND_POLICER = 1,
   ACL_ACTION_API_EXPAND_SET_TC = 2,
+  ACL_ACTION_API_EXPAND_SET_HQOS_USER = 3,
 };
 
 /** \brief Access List Rule entry
@@ -63,6 +64,7 @@ typedef acl_rule
   u8 dst_mac_len;
   vl_api_prefix_t src_prefix;
   vl_api_prefix_t dst_prefix;
+  u8 dscp;
 
 /*
  * Independent and action extension actions.
@@ -70,6 +72,7 @@ typedef acl_rule
  */
   u64 action_expand_bitmap;
   u32 policer_index;
+  u32 set_hqos_user_id;
   u8 set_tc_value;
 
 /*

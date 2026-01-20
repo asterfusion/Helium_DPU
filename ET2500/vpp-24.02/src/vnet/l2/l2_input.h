@@ -103,6 +103,8 @@ extern l2input_main_t l2input_main;
 
 extern vlib_node_registration_t l2input_node;
 
+extern u32 vxlan_hash_config;
+
 static_always_inline l2_bridge_domain_t *
 l2input_bd_config_from_index (l2input_main_t * l2im, u32 bd_index)
 {
@@ -343,9 +345,9 @@ vnet_l2_compute_flow_hash (vlib_buffer_t * b)
   u16 ethertype = clib_net_to_host_u16 (*(u16 *) (l3h - 2));
 
   if (ethertype == ETHERNET_TYPE_IP4)
-    return ip4_compute_flow_hash ((ip4_header_t *) l3h, IP_FLOW_HASH_DEFAULT);
+    return ip4_compute_flow_hash ((ip4_header_t *) l3h, vxlan_hash_config);
   else if (ethertype == ETHERNET_TYPE_IP6)
-    return ip6_compute_flow_hash ((ip6_header_t *) l3h, IP_FLOW_HASH_DEFAULT);
+    return ip6_compute_flow_hash ((ip6_header_t *) l3h, vxlan_hash_config);
   else
     {
       u32 a, b, c;

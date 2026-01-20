@@ -1,0 +1,6 @@
+abort - NORET
+plt_abort - NORET
+plt_panic - NORET
+plt_devargs_remove - FREE stdc $1 post: $$ EQ(0)
+plt_devargs_remove - FREE stdc $1->args post: $$ EQ(0)
+strdup - ALLOC ignore

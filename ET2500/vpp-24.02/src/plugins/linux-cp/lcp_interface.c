@@ -383,6 +383,16 @@ lcp_itf_pair_add (u32 host_sw_if_index, u32 phy_sw_if_index, u8 *host_name,
           lip->lip_phy_sw_if_index, 1, NULL, 0);
   vnet_feature_enable_disable("ip6-multicast", "linux-cp-pim6",
           lip->lip_phy_sw_if_index, 1, NULL, 0);
+          
+  /* enable rip/ripng punt for interface */
+  vnet_feature_enable_disable("ip4-unicast", "linux-cp-rip-phy",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable("ip4-multicast", "linux-cp-rip-phy",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable("ip6-unicast", "linux-cp-ripv6-phy",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable("ip6-multicast", "linux-cp-ripv6-phy",
+          lip->lip_phy_sw_if_index, 1, NULL, 0);
 
   /* enable ARP feature node for broadcast interfaces */
   if (lip->lip_host_type != LCP_ITF_HOST_TUN)

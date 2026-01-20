@@ -273,18 +273,45 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
   pppoe_entry_key_t key;
   pppoe_entry_result_t result;
 
-  cached_key.raw = ~0;
+  cached_key.raw[0] = ~0;
+  cached_key.raw[1] = ~0;
   cached_result.raw = ~0;	/* warning be gone */
+  
+  u32 encap_sup_sw_if_index = encap_sw_if_index;
+  u16 encap_vlan_id = 0;
+  vnet_sw_interface_t *encap_si = vnet_get_sw_interface (vnm, encap_sw_if_index);
+  if (encap_si && encap_si->type == VNET_SW_INTERFACE_TYPE_SUB)
+  {
+      encap_sup_sw_if_index = encap_si->sup_sw_if_index;
+      encap_vlan_id = encap_si->sub.eth.outer_vlan_id;
+  }
   /* lookup session_table */
   pppoe_lookup_1 (&pem->session_table, &cached_key, &cached_result,
 		  server_mac, clib_host_to_net_u16 (ppp_session_id),
+          encap_sup_sw_if_index, encap_vlan_id,
 		  &key, &bucket, &result);
 
   if(is_add)
   {
       /* adding a session: session must not already exist */
       if (result.fields.session_index != ~0)
+      {
+          //return current ppp interface
+          if(p_sw_if_index)
+          {
+              *p_sw_if_index = result.fields.sw_if_index;
+          }
+          if(sw_if_name)
+          {
+              t = pool_elt_at_index (pem->sessions, result.fields.session_index);
+              if (t)
+              {
+                  hi = vnet_get_hw_interface (vnm, t->hw_if_index);
+                  clib_memcpy(sw_if_name, hi->name, 16);
+              }
+          }
           return VNET_API_ERROR_TUNNEL_EXIST;
+      }
 
       pool_get_aligned (pem->sessions, t, CLIB_CACHE_LINE_BYTES);
       clib_memset (t, 0, sizeof (*t));
@@ -325,33 +352,8 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
 	    (vnm, pppoe_device_class.index, t - pem->sessions,
 	     pppoe_hw_class.index, t - pem->sessions);
 	  hi = vnet_get_hw_interface (vnm, hw_if_index);
-	}
 
-      t->hw_if_index = hw_if_index;
-      t->sw_if_index = sw_if_index = hi->sw_if_index;
-      if(sw_if_name)
-      {
-	  clib_memcpy(sw_if_name, hi->name, 16);
-      }
-
-      vec_validate_init_empty (pem->session_index_by_sw_if_index, sw_if_index,
-			       ~0);
-      pem->session_index_by_sw_if_index[sw_if_index] = t - pem->sessions;
-
-      /* update pppoe fib with session_index */
-      result.fields.session_index = t - pem->sessions;
-      result.fields.sw_if_index = sw_if_index;
-      pppoe_update_1 (&pem->session_table,
-		      server_mac, clib_host_to_net_u16 (ppp_session_id),
-		      &key, &bucket, &result);
-
-      vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, sw_if_index);
-      si->flags &= ~VNET_SW_INTERFACE_FLAG_HIDDEN;
-      vnet_sw_interface_set_flags (vnm, sw_if_index,
-				   VNET_SW_INTERFACE_FLAG_ADMIN_UP);
-      vnet_set_interface_l3_output_node (vnm->vlib_main, sw_if_index,
-					 (u8 *) "tunnel-output");
-
+      sw_if_index = hi->sw_if_index;
       /* add default punt feature */
       vnet_feature_enable_disable("ip4-multicast", "linux-cp-ospfv2-phy",
               sw_if_index, 1, NULL, 0);
@@ -375,6 +377,34 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
               sw_if_index, 0, NULL, 0);
       vnet_feature_enable_disable("ip6-multicast", "ip6-not-enabled",
               sw_if_index, 0, NULL, 0);
+
+	}
+
+      t->hw_if_index = hw_if_index;
+      t->sw_if_index = sw_if_index = hi->sw_if_index;
+      if(sw_if_name)
+      {
+	  clib_memcpy(sw_if_name, hi->name, 16);
+      }
+
+      vec_validate_init_empty (pem->session_index_by_sw_if_index, sw_if_index,
+			       ~0);
+      pem->session_index_by_sw_if_index[sw_if_index] = t - pem->sessions;
+
+      /* update pppoe fib with session_index */
+      result.fields.session_index = t - pem->sessions;
+      result.fields.sw_if_index = sw_if_index;
+      pppoe_update_1 (&pem->session_table,
+		      server_mac, clib_host_to_net_u16 (ppp_session_id),
+              encap_sup_sw_if_index, encap_vlan_id,
+              &key, &bucket, &result, 1);
+
+      vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, sw_if_index);
+      si->flags &= ~VNET_SW_INTERFACE_FLAG_HIDDEN;
+      vnet_sw_interface_set_flags (vnm, sw_if_index,
+				   VNET_SW_INTERFACE_FLAG_ADMIN_UP);
+      vnet_set_interface_l3_output_node (vnm->vlib_main, sw_if_index,
+					 (u8 *) "tunnel-output");
 
   }
   else
@@ -405,7 +435,8 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       result.fields.session_index = ~0;
       pppoe_update_1 (&pem->session_table,
 		      server_mac, clib_host_to_net_u16 (ppp_session_id),
-		      &key, &bucket, &result);
+              encap_sup_sw_if_index, encap_vlan_id,
+              &key, &bucket, &result, 0);
       pool_put (pem->sessions, t);
 
   }
@@ -1070,18 +1101,21 @@ pppoe_show_walk_cb (BVT (clib_bihash_kv) * kvp, void *arg)
     {
       ctx->first_entry = 0;
       vlib_cli_output (ctx->vm,
-		       "%=19s%=12s%=13s%=14s",
-		       "Mac-Address", "session_id", "sw_if_index",
+		       "%=19s%=12s%=15s%=12s%=13s%=14s",
+		       "Mac-Address", "session_id", "in_sw_if_index", "in_vlan_id", "sw_if_index",
 		       "session_index");
     }
 
-  key.raw = kvp->key;
+  key.raw[0] = kvp->key[0];
+  key.raw[1] = kvp->key[1];
   result.raw = kvp->value;
 
   vlib_cli_output (ctx->vm,
-		   "%=19U%=12d%=13d%=14d",
+		   "%=19U%=12d%=15d%=12d%=13d%=14d",
 		   format_ethernet_address, key.fields.mac,
 		   clib_net_to_host_u16 (key.fields.session_id),
+           key.fields.sw_if_index,
+           key.fields.vlan_id,
 		   result.fields.sw_if_index == ~0
 		   ? -1 : result.fields.sw_if_index,
 		   result.fields.session_index == ~0
@@ -1238,13 +1272,26 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
 	      lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0); 
           if (lipi0 == INDEX_INVALID)
           {
-              lipi0 = lcp_itf_pair_find_by_host (sw_if_index0);
-              if (lipi0 != INDEX_INVALID)
+              if (vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
               {
-                  is_host0 = 1;
-                  //set max tc priority
-                  lcp_set_max_tc(b0);
-                  lcp_set_max_tc(b1);
+                  u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
+
+                  vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
+                  if( si0 && si0->type == VNET_SW_INTERFACE_TYPE_SUB ) {
+                      l2_rx_sw_if_index0 = si0->sup_sw_if_index;
+                  }
+                  lipi0 = lcp_itf_pair_find_by_phy (l2_rx_sw_if_index0);
+                  vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
+              }
+              if (lipi0 == INDEX_INVALID)
+              {
+                  lipi0 = lcp_itf_pair_find_by_host (sw_if_index0);
+                  if (lipi0 != INDEX_INVALID)
+                  {
+                      is_host0 = 1;
+                      //set max tc priority
+                      lcp_set_max_tc(b0);
+                  }
               }
           }
           lip0 = lcp_itf_pair_get (lipi0);
@@ -1264,10 +1311,26 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
 	      lipi1 = lcp_itf_pair_find_by_phy ( sw_if_index1);
           if (lipi1 == INDEX_INVALID)
           {
-              lipi1 = lcp_itf_pair_find_by_host (sw_if_index1);
-              if (lipi1 != INDEX_INVALID)
+              if (vnet_buffer2(b1)->l2_rx_sw_if_index != ~0)
               {
-                  is_host1 = 1;
+                  u32 l2_rx_sw_if_index1 = vnet_buffer2(b1)->l2_rx_sw_if_index;
+
+                  vnet_sw_interface_t *si1 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index1);
+                  if( si1 && si1->type == VNET_SW_INTERFACE_TYPE_SUB ) {
+                      l2_rx_sw_if_index1 = si1->sup_sw_if_index;
+                  }
+                  lipi1 = lcp_itf_pair_find_by_phy (l2_rx_sw_if_index1);
+                  vnet_buffer2(b1)->l2_rx_sw_if_index = ~0;
+              }
+              if (lipi1 == INDEX_INVALID)
+              {
+                  lipi1 = lcp_itf_pair_find_by_host (sw_if_index1);
+                  if (lipi1 != INDEX_INVALID)
+                  {
+                      is_host1 = 1;
+                      //set max tc priority
+                      lcp_set_max_tc(b1);
+                  }
               }
           }
           lip1 = lcp_itf_pair_get (lipi1);
@@ -1365,12 +1428,26 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
 	      lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0); 
           if (lipi0 == INDEX_INVALID)
           {
-              lipi0 = lcp_itf_pair_find_by_host (sw_if_index0);
-              if (lipi0 != INDEX_INVALID)
+              if (vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
               {
-                  is_host0 = 1;
-                  //set max tc priority
-                  lcp_set_max_tc(b0);
+                  u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
+
+                  vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
+                  if( si0 && si0->type == VNET_SW_INTERFACE_TYPE_SUB ) {
+                      l2_rx_sw_if_index0 = si0->sup_sw_if_index;
+                  }
+                  lipi0 = lcp_itf_pair_find_by_phy (l2_rx_sw_if_index0);
+                  vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
+              }
+              if (lipi0 == INDEX_INVALID)
+              {
+                  lipi0 = lcp_itf_pair_find_by_host (sw_if_index0);
+                  if (lipi0 != INDEX_INVALID)
+                  {
+                      is_host0 = 1;
+                      //set max tc priority
+                      lcp_set_max_tc(b0);
+                  }
               }
           }
           lip0 = lcp_itf_pair_get (lipi0);
@@ -1462,6 +1539,9 @@ typedef struct {
   u32 session_index;
   u32 session_id;
   u32 error;
+  u32 rx_sw_if_index;
+  u32 next_sw_if_index;
+  u32 result_sw_if_index;
 } pppoe_rx_trace_t;
 
 static u8 * format_pppoe_rx_trace (u8 * s, va_list * args)
@@ -1472,13 +1552,15 @@ static u8 * format_pppoe_rx_trace (u8 * s, va_list * args)
 
   if (t->session_index != ~0)
     {
-      s = format (s, "PPPoE decap from ppp%d session_id %d next %d error %d",
-                  t->session_index, t->session_id, t->next_index, t->error);
+      s = format (s, "PPPoE decap from ppp%d session_id %d next %d error %d, sw_if_index %d:%d:%d",
+                  t->session_index, t->session_id, t->next_index, t->error,
+                  t->rx_sw_if_index, t->next_sw_if_index, t->result_sw_if_index);
     }
   else
     {
-      s = format (s, "PPPoE decap error - ppp%d session_id %d ",
-                  t->session_index, t->session_id);
+      s = format (s, "PPPoE decap error - ppp%d session_id %d, sw_if_index %d:%d:%d ",
+                  t->session_index, t->session_id,
+                  t->rx_sw_if_index, t->next_sw_if_index, t->result_sw_if_index);
     }
   return s;
 }
@@ -1498,7 +1580,8 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
   n_left_from = frame->n_vectors;
 
   /* Clear the one-entry cache in case session table was updated */
-  cached_key.raw = ~0;
+  cached_key.raw[0] = ~0;
+  cached_key.raw[1] = ~0;
   cached_result.raw = ~0;	/* warning be gone */
 
   while (n_left_from > 0)
@@ -1519,6 +1602,7 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
           u16 ppp_proto0 = 0;
           u16 type0;
           pppoe_session_t * t0;
+          u32 sw_if_index = 0;
 	  pppoe_entry_key_t key0;
 	  pppoe_entry_result_t result0;
 	  u32 bucket0;
@@ -1532,7 +1616,8 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
           /* get mac */
           vlib_buffer_reset(b0);
           h0 = vlib_buffer_get_current (b0);
-	  result0.fields.session_index = ~0;
+          result0.raw = ~0ULL;
+          result0.fields.session_index = ~0;
 
           /* get pppoe header */
           type0 = clib_net_to_host_u16(h0->type);
@@ -1559,8 +1644,19 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               goto trace00;
           }
 
+          if ((b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && (vnet_buffer2(b0)->l2_rx_sw_if_index != ~0))
+          {
+              sw_if_index = vnet_buffer2(b0)->l2_rx_sw_if_index;
+          }
+          else
+          {
+              sw_if_index = vnet_buffer(b0)->sw_if_index[VLIB_RX];
+          }
+
 	  pppoe_lookup_1 (&pem->session_table, &cached_key, &cached_result,
 			  h0->src_address, pppoe0->session_id,
+              sw_if_index,
+              vlan0 == 0 ? 0: (clib_net_to_host_u16(vlan0->priority_cfi_and_id) & 0x0fff),
 			  &key0, &bucket0, &result0);
 
           /* Pop Eth and PPPoE header */
@@ -1597,6 +1693,9 @@ trace00:
               tr->error = error0;
               tr->session_index = result0.fields.session_index;
               tr->session_id = clib_net_to_host_u16(pppoe0->session_id);
+              tr->rx_sw_if_index = vnet_buffer(b0)->sw_if_index[VLIB_RX];
+              tr->next_sw_if_index = vnet_buffer2(b0)->l2_rx_sw_if_index;
+              tr->result_sw_if_index = result0.fields.sw_if_index;
           }
           vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
              to_next, n_left_to_next,

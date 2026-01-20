@@ -149,7 +149,7 @@ sixrd_get_addr_net (const ipip_tunnel_t * t, u64 dal)
 int ipip_add_tunnel (ipip_transport_t transport, u32 instance,
 		     ip46_address_t * src, ip46_address_t * dst,
 		     u32 fib_index, tunnel_encap_decap_flags_t flags,
-		     ip_dscp_t dscp, tunnel_mode_t mode, u32 * sw_if_indexp);
+		     ip_dscp_t dscp, tunnel_mode_t mode, u32 * sw_if_indexp, u32 *instance_p);
 int ipip_del_tunnel (u32 sw_if_index);
 int sixrd_add_tunnel (ip6_address_t * ip6_prefix, u8 ip6_prefix_len,
 		      ip4_address_t * ip4_prefix, u8 ip4_prefix_len,

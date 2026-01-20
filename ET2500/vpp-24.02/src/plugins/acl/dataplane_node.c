@@ -333,9 +333,18 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
 {
     u16 priority = 0;
 
-    for (int i = 0; i < match_acl_info->acl_match_count; i++)
+    *action = match_acl_info->action[0];
+    *acl_index = match_acl_info->acl_index[0];
+    *rule_index = match_acl_info->rule_index[0];
+    action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[0];
+    action_expand->policer_index = match_acl_info->policer_index[0];
+    action_expand->set_tc_value = match_acl_info->set_tc_value[0];
+    action_expand->set_hqos_user_id = match_acl_info->set_hqos_user_id[0];
+    priority = match_acl_info->acl_priority[0];
+
+    for (int i = 1; i < match_acl_info->acl_match_count; i++)
     {
-        if (match_acl_info->acl_priority[i] >= priority)
+        if (match_acl_info->acl_priority[i] > priority)
         {
             *action = match_acl_info->action[i];
             *acl_index = match_acl_info->acl_index[i];
@@ -343,12 +352,16 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             action_expand->action_expand_bitmap = match_acl_info->action_expand_bitmap[i];
             action_expand->policer_index = match_acl_info->policer_index[i];
             action_expand->set_tc_value = match_acl_info->set_tc_value[i];
+            action_expand->set_hqos_user_id = match_acl_info->set_hqos_user_id[i];
             priority = match_acl_info->acl_priority[i];
         }
     }
 
     return;
 }
+
+
+
 
 always_inline u8
 acl_get_country_index_by_domain(vlib_buffer_t **b, u32 **cc_indices, u32 **dns_cc_indices, int is_ipv6)
@@ -417,8 +430,6 @@ always_inline u8
 acl_get_country_index_by_dip4(vlib_buffer_t **b, u32 **cc_indices, ip4_address_t ip4)
 {
   u8 result = 0;
-  u8 *ip_str = format(0, "%U", format_ip4_address, &ip4);
-  vec_free(ip_str);
   *cc_indices = ((__typeof__(geoip_get_country_code_by_ip4) *)geoip_get_country_code_by_ip4_ptr)(ip4);
   if (*cc_indices)
   {
@@ -432,8 +443,6 @@ always_inline u8
 acl_get_country_index_by_dip6(vlib_buffer_t **b, u32 **cc_indices, ip6_address_t ip6)
 {
   u8 result = 0;
-  u8 *ip_str = format(0, "%U", format_ip6_address, &ip6);
-  vec_free(ip_str);
   *cc_indices = ((__typeof__(geoip_get_country_code_by_ip6) *)geoip_get_country_code_by_ip6_ptr)(ip6);
   if (*cc_indices)
   {
@@ -467,6 +476,13 @@ acl_action_expand_proc(vlib_main_t *vm, vlib_buffer_t *b, u16 *next, const match
     if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_SET_TC))
     {
         vnet_buffer2(b)->tc_index = action_expand->set_tc_value;
+        b->flags |= VLIB_BUFFER_ACL_SET_TC_VALID;
+    }
+
+    if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_SET_HQOS_USER))
+    {
+         vnet_buffer2(b)->hqos_user_id = action_expand->set_hqos_user_id;
+        b->flags |= VLIB_BUFFER_ACL_SET_USER_VALID;
     }
     return;
 }
@@ -589,7 +605,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 						 node_trace_on,
 						 &trace_bitmap);
 
-                   fa_session_t *sess = get_session_ptr (am, thread_index, f_sess_id.session_index);
+                   fa_session_t *sess = get_session_ptr (am, f_sess_id.thread_index, f_sess_id.session_index);
                   saved_byte_count = vlib_buffer_length_in_chain (vm, b[0]);
 
                   if (!is_l2_path && is_input)
@@ -598,8 +614,12 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
                   }
 
                   /* prefetch the counter that we are going to increment */
-                  sess->hitcount_pkts += 1;
-                  sess->hitcount_bytes += saved_byte_count;
+                  clib_atomic_fetch_add (&sess->hitcount_pkts, 1);
+                  clib_atomic_fetch_add (&sess->hitcount_bytes, saved_byte_count);
+                  action_expand.action_expand_bitmap = sess->action_expand.action_expand_bitmap;
+                  action_expand.policer_index = sess->action_expand.policer_index;
+                  action_expand.set_tc_value = sess->action_expand.set_tc_value;
+                  action_expand.set_hqos_user_id = sess->action_expand.set_hqos_user_id;
 
 		  /* expose the session id to the tracer */
 		  if (node_trace_on)
@@ -663,7 +683,8 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 							     &trace_bitmap,
 							     &match_acl_info,get_cc_code,cc_indices,dns_cc_indices);
               //Only hit the default rule and enabled acl reflect
-              if (PREDICT_FALSE((1 == match_acl_info.acl_match_count) && 1 == pinout_reflect_by_sw_if_index[sw_if_index[0]]))
+              if (PREDICT_FALSE((1 == match_acl_info.acl_match_count) && 0 == match_acl_info.acl_index[0] && 
++                                 1 == pinout_reflect_by_sw_if_index[sw_if_index[0]]))
               {
                   //icmpv6 NA or RA
                   if (IP_PROTOCOL_ICMP6 == fa_5tuple->l4.proto &&  
@@ -720,8 +741,12 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 
 		}
 #endif
+
+          if (match_acl_info.acl_match_count > 0)
+          {
               acl_calc_action(&match_acl_info, &match_acl_in_index, &match_rule_index, &action, &action_expand);
-	      if (PREDICT_FALSE(match_acl_info.acl_match_count > 1 && am->interface_acl_counters_enabled))
+          }
+	      if (PREDICT_FALSE(match_acl_info.acl_match_count > 0 && match_acl_in_index != 0 && am->interface_acl_counters_enabled))
               {
                   u32 buf_len = vlib_buffer_length_in_chain (vm, b[0]);
                   saved_byte_count = buf_len;
@@ -759,7 +784,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 			acl_fa_add_session (am, is_input, is_ip6,
 					    sw_if_index[0],
 					    now, &fa_5tuple[0],
-					    current_policy_epoch);
+					    current_policy_epoch, &action_expand);
 
 		      /* perform the accounting for the newly added session */
 		      process_established_session (vm, am,

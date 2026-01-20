@@ -525,6 +525,7 @@ typedef enum vnet_hw_interface_flags_t_
   VNET_HW_INTERFACE_FLAG_HALF_DUPLEX = (1 << 1),
   VNET_HW_INTERFACE_FLAG_FULL_DUPLEX = (1 << 2),
   VNET_HW_INTERFACE_FLAG_USE_TC = (1 << 3),
+  VNET_HW_INTERFACE_FLAG_HQOS_OFFLOAD = (1 << 4),
 
   /* non-broadcast multiple access */
   VNET_HW_INTERFACE_FLAG_NBMA = (1 << 19),
@@ -756,8 +757,14 @@ typedef struct vnet_hw_interface_t
   uword* dscp_to_tc;
   /* Hash table for dot1p to tc mapping. */
   uword* dot1p_to_tc;
+  /* Hash table for mpls exp to tc mapping. */
+  uword* mpls_exp_to_tc;
   /* Hash table for tc to queue mapping. */
   uword* tc_to_queue;
+
+  /* Hash table for user_index to user group mapping. */
+  uword* user_to_ugroup;
+
 } vnet_hw_interface_t;
 
 STATIC_ASSERT_OFFSET_OF (vnet_hw_interface_t, cacheline1,

@@ -77,22 +77,24 @@ acl_fill_5tuple_l2_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
     if (is_ip6)
     {
         int ii;
-        for(ii = 0; ii < 1; ii++)
+        for(ii = 0; ii < 3; ii++)
         {
             p5tuple_pkt->l3_zero_pad_1[ii] = 0;
         }
 
+        p5tuple_pkt->dscp_v6 = 0;
         clib_memcpy(&p5tuple_pkt->mac6_addr[0], mac_addr->src_address, 6);
         clib_memcpy(&p5tuple_pkt->mac6_addr[1], mac_addr->dst_address, 6);
     }
     else
     {
         int ii;
-        for(ii = 0; ii < 7; ii++)
+        for(ii = 0; ii < 27; ii++)
         {
             p5tuple_pkt->l3_zero_pad[ii] = 0;
         }
 
+        p5tuple_pkt->dscp_v4 = 0;
         clib_memcpy(&p5tuple_pkt->mac4_addr[0], mac_addr->src_address, 6);
         clib_memcpy(&p5tuple_pkt->mac4_addr[1], mac_addr->dst_address, 6);
     }
@@ -105,14 +107,17 @@ acl_fill_5tuple_l3_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
   if (is_ip6)
     {
       ip6_header_t *ip6 = vlib_buffer_get_current (b0) + l3_offset;
+      u32 ip_version_traffic_class_and_flow_label = ntohl(ip6->ip_version_traffic_class_and_flow_label);
       p5tuple_pkt->ip6_addr[0] = ip6->src_address;
       p5tuple_pkt->ip6_addr[1] = ip6->dst_address;
+      p5tuple_pkt->dscp_v6 = (ip_version_traffic_class_and_flow_label & 0x0ff00000) >> 22;
     }
   else
     {
       ip4_header_t *ip4 = vlib_buffer_get_current (b0) + l3_offset;
       p5tuple_pkt->ip4_addr[0] = ip4->src_address;
       p5tuple_pkt->ip4_addr[1] = ip4->dst_address;
+      p5tuple_pkt->dscp_v4 = (ip4->tos >> 2) & 0x3f;
     }
 }
 
@@ -483,13 +488,6 @@ single_acl_match_5tuple (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5tupl
   return 0;
 }
 
-typedef struct match_rule_expand
-{
-    u64 action_expand_bitmap;
-    u32 policer_index;
-    u8  set_tc_value;
-} match_rule_expand_t;
-
 always_inline int
 single_acl_match_5tuple_sai (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5tuple,
 		  int is_ip6, u8 * r_action, u32 * r_acl_match_p,
@@ -570,6 +568,7 @@ single_acl_match_5tuple_sai (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5
             {
                 r_expand->policer_index = r->policer_index;
                 r_expand->set_tc_value = r->set_tc_value;
+                r_expand->set_hqos_user_id = r->set_hqos_user_id;
             }
             return 1;
           }
@@ -626,6 +625,7 @@ single_acl_match_5tuple_sai (acl_main_t * am, u32 acl_index, fa_5tuple_t * pkt_5
       {
         r_expand->policer_index = r->policer_index;
         r_expand->set_tc_value = r->set_tc_value;
+        r_expand->set_hqos_user_id = r->set_hqos_user_id;
       }
       return 1;
     }
@@ -685,6 +685,7 @@ typedef struct match_acl{
     u8  acl_match_count;
     u8  action[ACL_BIND_MAX_COUNTER];
     u64 action_expand_bitmap[ACL_BIND_MAX_COUNTER];
+    u32 set_hqos_user_id[ACL_BIND_MAX_COUNTER];
     u8  set_tc_value[ACL_BIND_MAX_COUNTER];
     u32 acl_index[ACL_BIND_MAX_COUNTER];
     u32 rule_index[ACL_BIND_MAX_COUNTER];
@@ -744,6 +745,7 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
             match_acl_info->action_expand_bitmap[j] = expand.action_expand_bitmap;
             match_acl_info->policer_index[j] = expand.policer_index;
             match_acl_info->set_tc_value[j] = expand.set_tc_value;
+            match_acl_info->set_hqos_user_id[j] = expand.set_hqos_user_id;
             match_acl_info->acl_priority[j] = kv_result.value;
             j++;
             match_acl_info->acl_match_count = j;
@@ -775,6 +777,7 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
               match_acl_info->action_expand_bitmap[j] = expand.action_expand_bitmap;
               match_acl_info->policer_index[j] = expand.policer_index;
               match_acl_info->set_tc_value[j] = expand.set_tc_value;
+              match_acl_info->set_hqos_user_id[j] = expand.set_hqos_user_id;
               match_acl_info->acl_priority[j] = kv_result.value;
               j++;
               match_acl_info->acl_match_count = j;
@@ -812,6 +815,7 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
             match_acl_info->action_expand_bitmap[j] = expand.action_expand_bitmap;
             match_acl_info->policer_index[j] = expand.policer_index;
             match_acl_info->set_tc_value[j] = expand.set_tc_value;
+            match_acl_info->set_hqos_user_id[j] = expand.set_hqos_user_id;
             match_acl_info->acl_priority[j] = kv_result.value;
             j++;
             match_acl_info->acl_match_count = j;
@@ -840,6 +844,7 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
         match_acl_info->action_expand_bitmap[j] = expand.action_expand_bitmap;
         match_acl_info->policer_index[j] = expand.policer_index;
         match_acl_info->set_tc_value[j] = expand.set_tc_value;
+        match_acl_info->set_hqos_user_id[j] = expand.set_hqos_user_id;
         match_acl_info->acl_priority[j] = kv_result.value;
         j++;
         match_acl_info->acl_match_count = j;
@@ -887,7 +892,7 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
     {
       return 0;
     }
-
+#if 0
   if (is_ip6)
     {
       if (!fa_acl_match_ip6_addr
@@ -933,6 +938,7 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
 	      r->tcp_flags_value))
 	return 0;
     }
+#endif
   /* everything matches! */
   return 1;
 }
@@ -1048,8 +1054,7 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
     u64 *pmask;
     u64 *pkey;
     int mask_type_index, order_index;
-    int j = 0;
-    int k = 0;
+    u32 curr_match_index = -1;
 
     u32 lc_index = match->pkt.lc_index;
     applied_hash_ace_entry_t **applied_hash_aces = vec_elt_at_index (am->hash_entry_vec_by_lc_index, lc_index);
@@ -1096,58 +1101,42 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
             applied_hash_ace_entry_t *pae = vec_elt_at_index ((*applied_hash_aces), curr_index);
             collision_match_rule_t *crs = pae->colliding_rules;
             int i;
-            u32 tmp_index = 0;
             applied_hash_ace_entry_t *tmp_pae = NULL;
 
             for (i = 0; i < vec_len (crs); i++)
             {
+                if (crs[i].applied_entry_index >= curr_match_index)
+                {
+                    continue;
+                }
                 if (single_rule_match_5tuple (&crs[i].rule, is_ip6, match))
                 {
-                    tmp_index = crs[i].applied_entry_index;
-                    tmp_pae = vec_elt_at_index ((*applied_hash_aces), tmp_index);
-
-                    for (j = 0; j < k; j++)
-                    {
-                        if (match_acl_info->acl_index[j] == tmp_pae->acl_index)
-                        {
-                            if (tmp_index < match_acl_info->curr_match_index[j])
-                            {
-                                match_acl_info->rule_index[j] = tmp_pae->ace_index;
-                                match_acl_info->action[j] = tmp_pae->action;
-                                match_acl_info->acl_pos[j] = tmp_pae->acl_position;
-                                match_acl_info->curr_match_index[j] = tmp_index;
-
-                                match_acl_info->action_expand_bitmap[j] = tmp_pae->action_expand_bitmap;
-                                match_acl_info->policer_index[j] = tmp_pae->policer_index;
-                                match_acl_info->set_tc_value[j] = tmp_pae->set_tc_value;
-                                match_acl_info->acl_priority[j] = tmp_pae->priority;
-                            }
-
-                            break;
-                        }
-                    }
-
-                    if (j == k)
-                    {
-                        match_acl_info->acl_index[k] = tmp_pae->acl_index;
-                        match_acl_info->rule_index[k] = tmp_pae->ace_index;
-                        match_acl_info->action[k] = tmp_pae->action;
-                        match_acl_info->acl_pos[k] = tmp_pae->acl_position;
-                        match_acl_info->curr_match_index[k] = tmp_index;
-
-                        match_acl_info->action_expand_bitmap[k] = tmp_pae->action_expand_bitmap;
-                        match_acl_info->policer_index[k] = tmp_pae->policer_index;
-                        match_acl_info->set_tc_value[k] = tmp_pae->set_tc_value;
-                        match_acl_info->acl_priority[k] = tmp_pae->priority;
-                        k++;
-                    }
+                    curr_match_index = crs[i].applied_entry_index;
                 }
+            }
+
+            if (-1 != curr_match_index)
+            {
+                tmp_pae = vec_elt_at_index ((*applied_hash_aces), curr_match_index);
+                match_acl_info->acl_index[0] = tmp_pae->acl_index;
+                match_acl_info->rule_index[0] = tmp_pae->ace_index;
+                match_acl_info->action[0] = tmp_pae->action;
+                match_acl_info->acl_pos[0] = tmp_pae->acl_position;
+                match_acl_info->curr_match_index[0] = curr_match_index;
+
+                match_acl_info->action_expand_bitmap[0] = tmp_pae->action_expand_bitmap;
+                match_acl_info->policer_index[0] = tmp_pae->policer_index;
+                match_acl_info->set_tc_value[0] = tmp_pae->set_tc_value;
+                match_acl_info->set_hqos_user_id[0] = tmp_pae->set_hqos_user_id;
+                match_acl_info->acl_priority[0] = tmp_pae->priority;
+                pae->hitcount++;
+                match_acl_info->acl_match_count = 1;
+                return 1;
             }
         }
     }
 
-    match_acl_info->acl_match_count = k;
-    return k;
+    return 0;
 }
 
 always_inline int
@@ -1258,6 +1247,7 @@ get_single_match_acl_info(match_acl_t *match_acl_info, match_acl_t **tmp_match_a
       (*tmp_match_acl_info)->action_expand_bitmap[j] = match_acl_info->action_expand_bitmap[j];
       (*tmp_match_acl_info)->policer_index[j] = match_acl_info->policer_index[j];
       (*tmp_match_acl_info)->set_tc_value[j] = match_acl_info->set_tc_value[j];
+      (*tmp_match_acl_info)->set_hqos_user_id[j] = match_acl_info->set_hqos_user_id[j];
       (*tmp_match_acl_info)->acl_priority[j] = match_acl_info->acl_priority[j];
       
     }
@@ -1285,6 +1275,7 @@ get_single_match_acl_info(match_acl_t *match_acl_info, match_acl_t **tmp_match_a
             (*tmp_match_acl_info)->action_expand_bitmap[k] = match_acl_info->action_expand_bitmap[j];
             (*tmp_match_acl_info)->policer_index[k] = match_acl_info->policer_index[j];
             (*tmp_match_acl_info)->set_tc_value[k] = match_acl_info->set_tc_value[j];
+            (*tmp_match_acl_info)->set_hqos_user_id[k] = match_acl_info->set_hqos_user_id[j];
             (*tmp_match_acl_info)->acl_priority[k] = match_acl_info->acl_priority[j];
           }
           break;
@@ -1302,6 +1293,7 @@ get_single_match_acl_info(match_acl_t *match_acl_info, match_acl_t **tmp_match_a
         (*tmp_match_acl_info)->action_expand_bitmap[tmp_index] = match_acl_info->action_expand_bitmap[j];
         (*tmp_match_acl_info)->policer_index[tmp_index] = match_acl_info->policer_index[j];
         (*tmp_match_acl_info)->set_tc_value[tmp_index] = match_acl_info->set_tc_value[j];
+        (*tmp_match_acl_info)->set_hqos_user_id[tmp_index] = match_acl_info->set_hqos_user_id[j];
         (*tmp_match_acl_info)->acl_priority[tmp_index] = match_acl_info->acl_priority[j];
         (*tmp_match_acl_info)->acl_match_count++;
       }
@@ -1339,6 +1331,7 @@ get_last_match_acl_info(match_acl_t *match_acl_info, match_acl_t *tmp_match_acl_
                     match_acl_info->action[match_count] = tmp_match_acl_info->action[i];
                     match_acl_info->action_expand_bitmap[match_count] = tmp_match_acl_info->action_expand_bitmap[i];
                     match_acl_info->set_tc_value[match_count] = tmp_match_acl_info->set_tc_value[i];
+                    match_acl_info->set_hqos_user_id[match_count] = tmp_match_acl_info->set_hqos_user_id[i];
                     match_acl_info->acl_index[match_count] = tmp_match_acl_info->acl_index[i];
                     match_acl_info->rule_index[match_count] = tmp_match_acl_info->rule_index[i];
                     match_acl_info->acl_pos[match_count] = tmp_match_acl_info->acl_pos[i];
@@ -1350,6 +1343,7 @@ get_last_match_acl_info(match_acl_t *match_acl_info, match_acl_t *tmp_match_acl_
                     match_acl_info->action[match_count] = tmp_dns_match_acl_info->action[j];
                     match_acl_info->action_expand_bitmap[match_count] = tmp_dns_match_acl_info->action_expand_bitmap[j];
                     match_acl_info->set_tc_value[match_count] = tmp_dns_match_acl_info->set_tc_value[j];
+                    match_acl_info->set_hqos_user_id[match_count] = tmp_dns_match_acl_info->set_hqos_user_id[j];
                     match_acl_info->acl_index[match_count] = tmp_dns_match_acl_info->acl_index[j];
                     match_acl_info->rule_index[match_count] = tmp_dns_match_acl_info->rule_index[j];
                     match_acl_info->acl_pos[match_count] = tmp_dns_match_acl_info->acl_pos[j];
@@ -1367,6 +1361,7 @@ get_last_match_acl_info(match_acl_t *match_acl_info, match_acl_t *tmp_match_acl_
             match_acl_info->action[match_count] = tmp_match_acl_info->action[i];
             match_acl_info->action_expand_bitmap[match_count] = tmp_match_acl_info->action_expand_bitmap[i];
             match_acl_info->set_tc_value[match_count] = tmp_match_acl_info->set_tc_value[i];
+            match_acl_info->set_hqos_user_id[match_count] = tmp_match_acl_info->set_hqos_user_id[i];
             match_acl_info->acl_index[match_count] = tmp_match_acl_info->acl_index[i];
             match_acl_info->rule_index[match_count] = tmp_match_acl_info->rule_index[i];
             match_acl_info->acl_pos[match_count] = tmp_match_acl_info->acl_pos[i];
@@ -1397,6 +1392,7 @@ get_last_match_acl_info(match_acl_t *match_acl_info, match_acl_t *tmp_match_acl_
             match_acl_info->action[match_count] = tmp_dns_match_acl_info->action[j];
             match_acl_info->action_expand_bitmap[match_count] = tmp_dns_match_acl_info->action_expand_bitmap[j];
             match_acl_info->set_tc_value[match_count] = tmp_dns_match_acl_info->set_tc_value[j];
+            match_acl_info->set_hqos_user_id[match_count] = tmp_dns_match_acl_info->set_hqos_user_id[j];
             match_acl_info->acl_index[match_count] = tmp_dns_match_acl_info->acl_index[j];
             match_acl_info->rule_index[match_count] = tmp_dns_match_acl_info->rule_index[j];
             match_acl_info->acl_pos[match_count] = tmp_dns_match_acl_info->acl_pos[j];
@@ -1448,6 +1444,7 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
                 match_acl_info->action_expand_bitmap[i] = tmp_match_acl_info->action_expand_bitmap[i];
                 match_acl_info->policer_index[i] = tmp_match_acl_info->policer_index[i];
                 match_acl_info->set_tc_value[i] = tmp_match_acl_info->set_tc_value[i];
+                match_acl_info->set_hqos_user_id[i] = tmp_match_acl_info->set_hqos_user_id[i];
                 match_acl_info->acl_priority[i] = tmp_match_acl_info->acl_priority[i];
                 
             }
@@ -1519,6 +1516,7 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
                   match_acl_info->action_expand_bitmap[i] = tmp_match_acl_info->action_expand_bitmap[i];
                   match_acl_info->policer_index[i] = tmp_match_acl_info->policer_index[i];
                   match_acl_info->set_tc_value[i] = tmp_match_acl_info->set_tc_value[i];
+                  match_acl_info->set_hqos_user_id[i] = tmp_match_acl_info->set_hqos_user_id[i];
                   match_acl_info->acl_priority[i] = tmp_match_acl_info->acl_priority[i];
               }
               clib_mem_free(tmp_match_acl_info);

@@ -2154,7 +2154,7 @@ ikev2_add_tunnel_from_main (ikev2_add_ipsec_tunnel_args_t * a)
       rv = ipip_add_tunnel (IPIP_TRANSPORT_IP4, ~0, &ip_addr_46 (&a->local_ip),
 			    &ip_addr_46 (&a->remote_ip), 0,
 			    TUNNEL_ENCAP_DECAP_FLAG_NONE, IP_DSCP_CS0,
-			    TUNNEL_MODE_P2P, &sw_if_index);
+			    TUNNEL_MODE_P2P, &sw_if_index, NULL);
 
       if (rv == VNET_API_ERROR_IF_ALREADY_EXISTS)
 	{
@@ -5415,6 +5415,15 @@ ikev2_mngr_process_ipsec_sa (ipsec_sa_t * ipsec_sa)
           fsa = sa;
           break;
         }
+      else
+      {
+          fchild = ikev2_sa_get_child(sa, ipsec_sa->spi, IKEV2_PROTOCOL_ESP, 0);
+          if (fchild)
+          {
+              fsa = sa;
+              break;
+          }
+      }
     }
   }
   vlib_get_combined_counter (&ipsec_sa_counters,
@@ -5423,6 +5432,18 @@ ikev2_mngr_process_ipsec_sa (ipsec_sa_t * ipsec_sa)
   if (fsa && fsa->profile_index != ~0 && fsa->is_initiator)
     p = pool_elt_at_index (km->profiles, fsa->profile_index);
 
+  if (fchild && p)
+  {
+      if (!fchild->is_expired && counts.packets > IKEV2_MAX_PKTS_ONE_SA)
+      {
+        vlib_zero_combined_counter (&ipsec_sa_counters, ipsec_sa->stat_index);
+        if (0 == p->handover)
+        {
+            p->handover = 10;
+        }
+        fchild->time_to_expiration = now;
+      }
+  }
   if (fchild && p && p->lifetime_maxdata)
     {
       if (!fchild->is_expired && counts.bytes > p->lifetime_maxdata)

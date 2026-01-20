@@ -1,0 +1,35 @@
+L2FWD_EVENT (ordered queue) output in packets per second
+cores, RESULT
+1, 9367017
+8, 68210627
+16, 88761668
+
+------------------------------------------------------------------------
+L3FWD_EVENT (ordered queue) output in packets per second
+cores, RESULT
+1, 8389920
+8, 64268011
+16, 88734720
+
+------------------------------------------------------------------------
+PERF_ATQ (parallel queue) output in packets per second
+cores, RESULT
+1, 8.289
+8, 57.647
+16, 87.201
+
+------------------------------------------------------------------------
+PIPELINE_ATQ_TX_FIRST (atomic queue) output in packets per second
+cores, RESULT
+1, 9.849
+8, 73.211
+16, 110.001
+
+------------------------------------------------------------------------
+CRYPTO_ADAPTER_FWD (parallel queue) output in packets per second
+cores, RESULT
+1, 3.941
+8, 16.427
+12, 22.550
+
+------------------------------------------------------------------------

@@ -1,0 +1,39 @@
+; SPDX-License-Identifier: BSD-3-Clause
+; Copyright(c) 2020 Intel Corporation
+
+# Example command line:
+#	./build/examples/dpdk-pipeline -l0-1 -- -s ./examples/pipeline/examples/vxlan_pcap.cli
+#
+# Once the application has started, the command to get the CLI prompt is:
+#	telnet 0.0.0.0 8086
+
+;
+; Pipeline code generation & shared object library build.
+;
+pipeline codegen ./examples/pipeline/examples/vxlan.spec /tmp/vxlan.c
+pipeline libbuild /tmp/vxlan.c /tmp/vxlan.so
+
+;
+; List of DPDK devices.
+;
+; Note: Customize the parameters below to match your setup.
+;
+mempool MEMPOOL0 meta 0 pkt 2176 pool 32K cache 256 numa 0
+
+;
+; List of pipelines.
+;
+pipeline PIPELINE0 build lib /tmp/vxlan.so io ./examples/pipeline/examples/pcap.io numa 0
+
+;
+; Initial set of table entries.
+;
+; The table entries can later be updated at run-time through the CLI commands.
+;
+pipeline PIPELINE0 table vxlan_table add ./examples/pipeline/examples/vxlan_table.txt
+pipeline PIPELINE0 commit
+
+;
+; Pipelines-to-threads mapping.
+;
+pipeline PIPELINE0 enable thread 1
