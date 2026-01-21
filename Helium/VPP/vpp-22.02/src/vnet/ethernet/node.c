@@ -1850,9 +1850,36 @@ VLIB_NODE_FN (ethernet_input_node) (vlib_main_t * vm,
 {
   vnet_main_t *vnm = vnet_get_main ();
   u32 *from = vlib_frame_vector_args (frame);
+  u32 *from_tmp = vlib_frame_vector_args (frame);
   u32 n_packets = frame->n_vectors;
 
+  u32 n_left_from = frame->n_vectors;
+
   ethernet_input_trace (vm, node, frame);
+
+  while (n_left_from > 0)
+  {
+      u32 bi0;
+      vlib_buffer_t *b0;
+      ethernet_header_t *e0;
+
+      bi0 = from_tmp[0];
+      from_tmp += 1;
+      n_left_from -= 1;
+
+      b0 = vlib_get_buffer (vm, bi0);
+      e0 = vlib_buffer_get_current (b0);
+      if (clib_net_to_host_u16(e0->type) == 0x8100 && vnet_buffer(b0)->sw_if_index[VLIB_RX] == 1)
+      {
+          u8 *pkt_start = vlib_buffer_get_current (b0);
+          for (int i = 11; i > 0; i--)
+          {
+              *(pkt_start + i + 4) = *(pkt_start + i);
+          }
+          vlib_buffer_advance(b0, 4);
+      }
+
+  }
 
   if (frame->flags & ETH_INPUT_FRAME_F_SINGLE_SW_IF_IDX)
     {
