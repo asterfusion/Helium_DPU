@@ -57,6 +57,7 @@ typedef struct
   u8 flags;			/* 0=normal, 1=bvi */
   u8 shg;			/* split horizon group number  */
   u16 spare;
+  u8 is_tunnel;    /* 1=tunnel,0=not tunnel */
 } l2_flood_member_t;
 
 /* Per-bridge domain configuration */

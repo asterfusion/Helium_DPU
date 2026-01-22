@@ -98,6 +98,15 @@ int mpls_label_cmp (void *a1, void *a2);
 void mpls_table_create (u32 table_id, u8 is_api, const u8 * name);
 void mpls_table_delete (u32 table_id, u8 is_api);
 
+extern u32 mpls_l2_decap_lookup( const mpls_unicast_header_t *hdr);
+extern u32 vnet_mpls_l2_decap_add_del(u32 label, u8 eos, u32 sw_if_index, u8 is_add);
+
+
+
+#define MPLS_L2_DECAP_TABLE_HASH_NUM_BUCKETS (1024)
+#define MPLS_L2_DECAP_TABLE_HASH_MEMORY_SIZE (1ULL<<20)
+
+
 #endif /* included_vnet_mpls_h */
 
 /*

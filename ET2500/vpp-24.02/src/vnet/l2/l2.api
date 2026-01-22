@@ -603,6 +603,7 @@ autoreply define sw_interface_set_l2_bridge
   vl_api_l2_port_type_t port_type;
   u8 shg;
   bool enable [default=true];
+  u8 is_tunnel;
 };
 
 /** \brief Set bridge domain ip to mac entry request

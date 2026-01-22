@@ -24,7 +24,8 @@
 #include <vnet/mfib/mfib_table.h>
 #include <vnet/mfib/ip4_mfib.h>
 #include <vnet/mfib/ip6_mfib.h>
-
+#include <vnet/mpls/mpls.h>
+#include <vnet/l2/l2_input.h>
 static const char *const lookup_input_names[] = LOOKUP_INPUTS;
 static const char *const lookup_cast_names[] = LOOKUP_CASTS;
 
@@ -1089,7 +1090,6 @@ lookup_dpo_mpls_inline (vlib_main_t * vm,
             vnet_buffer (b0)->mpls.ttl = ((char*)hdr0)[3];
             vnet_buffer (b0)->mpls.exp = (((char*)hdr0)[2] & 0xe) >> 1;
             vnet_buffer (b0)->mpls.first = 1;
-            vlib_buffer_advance(b0, sizeof(*hdr0));
 
             if (!(b0->flags & VNET_BUFFER_F_LOOP_COUNTER_VALID)) {
                 vnet_buffer2(b0)->loop_counter = 0;
@@ -1109,6 +1109,23 @@ lookup_dpo_mpls_inline (vlib_main_t * vm,
                 tr->lbi = lbi0;
                 tr->hdr = *hdr0;
             }
+
+
+            vlib_buffer_advance(b0, sizeof(*hdr0));
+
+          u32 mpls_tunnel_index;
+          if(mpls_l2_decap_lookup(hdr0))
+            {
+                mpls_tunnel_index =mpls_l2_decap_lookup(hdr0);
+                vnet_buffer (b0)->ip.adj_index[VLIB_TX] = 0;
+                vnet_buffer(b0)->sw_if_index[VLIB_RX] = mpls_tunnel_index;
+                    b0->flags |= VNET_BUFFER_F_L2_HDR_OFFSET_VALID;
+                    vnet_buffer(b0)->l2_hdr_offset = 0;
+                    vnet_update_l2_len (b0);
+                    next0 = mpls_lookup_to_l2_input_edge;
+                
+            }
+
 
            vlib_validate_buffer_enqueue_x1(vm, node, next_index, to_next,
                                             n_left_to_next, bi0, next0);

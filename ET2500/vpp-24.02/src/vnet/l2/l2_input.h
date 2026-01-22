@@ -293,7 +293,7 @@ u32 set_int_l2_mode (vlib_main_t * vm,
 		     u32 mode,
 		     u32 sw_if_index,
 		     u32 bd_index, l2_bd_port_type_t port_type,
-		     u32 shg, u32 xc_sw_if_index);
+		     u32 shg, u32 xc_sw_if_index,u8 is_tunnel);
 
 static inline u16
 vnet_update_l2_len (vlib_buffer_t *b)

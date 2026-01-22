@@ -295,6 +295,25 @@ static void
   REPLY_MACRO (VL_API_SW_INTERFACE_SET_MPLS_ENABLE_REPLY);
 }
 
+
+static void
+  vl_api_mpls_l2_decap_fib_t_handler
+  (vl_api_mpls_l2_decap_fib_t * mp)
+{
+  vl_api_mpls_l2_decap_fib_reply_t *rmp;
+  int rv = 0;
+
+  VALIDATE_SW_IF_INDEX (mp);
+
+  rv = vnet_mpls_l2_decap_add_del ( ntohl (mp->label),ntohl (mp->eos),ntohl (mp->sw_if_index),
+					 mp->add);
+
+  BAD_SW_IF_INDEX_LABEL;
+  REPLY_MACRO (VL_API_MPLS_L2_DECAP_FIB_REPLY);
+}
+
+
+
 typedef struct mpls_tunnel_send_walk_ctx_t_
 {
   vl_api_registration_t *reg;

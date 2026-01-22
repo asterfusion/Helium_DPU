@@ -26,7 +26,7 @@
  * The arc/edge from the MPLS lookup node to the MPLS replicate node
  */
 extern u32 mpls_lookup_to_replicate_edge;
-
+extern u32 mpls_lookup_to_l2_input_edge;
 /**
  * Enum of statically configred MPLS lookup next nodes
  */
