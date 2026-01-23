@@ -1578,13 +1578,17 @@ ip4_local_check_src (vlib_buffer_t *b, ip4_header_t *ip0,
        *  - allow packets destined to the broadcast address from unknown sources
        */
 
-      *error0 = ((*error0 == IP4_ERROR_UNKNOWN_PROTOCOL
-		  && dpo0->dpoi_type == DPO_RECEIVE) ?
-		 IP4_ERROR_SPOOFED_LOCAL_PACKETS : *error0);
-      *error0 = ((*error0 == IP4_ERROR_UNKNOWN_PROTOCOL
-		  && !fib_urpf_check_size (lb0->lb_urpf)
-		  && ip0->dst_address.as_u32 != 0xFFFFFFFF) ?
-		 IP4_ERROR_SRC_LOOKUP_MISS : *error0);
+      if(ip0->protocol != IP_PROTOCOL_IGMP)
+      {
+        *error0 = ((*error0 == IP4_ERROR_UNKNOWN_PROTOCOL
+                   && dpo0->dpoi_type == DPO_RECEIVE) ?
+        IP4_ERROR_SPOOFED_LOCAL_PACKETS : *error0);
+
+        *error0 = ((*error0 == IP4_ERROR_UNKNOWN_PROTOCOL
+                   && !fib_urpf_check_size (lb0->lb_urpf)
+                   && ip0->dst_address.as_u32 != 0xFFFFFFFF) ?
+                   IP4_ERROR_SRC_LOOKUP_MISS : *error0);
+      }
 
       last_check->src.as_u32 = ip0->src_address.as_u32;
       last_check->lbi = lbi0;
