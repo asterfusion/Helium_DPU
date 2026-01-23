@@ -191,12 +191,10 @@ acl_print_acl_x (acl_vector_print_func_t vpr, vlib_main_t * vm,
       out0 = format (out0, "  %9d: %s ", j, r->is_ipv6 ? "ipv6" : "ipv4");
       out0 = format_acl_action (out0, r->is_permit);
       out0 = format (out0, " src_sw_if_index %u ", r->src_sw_if_index);
-      //("r->geosite_cc_index =%d",r->geosite_cc_index);
-      if(r->geosite_cc_index!=0){
+      if(r->geosite_cc_index != 0xffff){
       out0 = format (out0, " geosite %s ", ((__typeof__ (geosite_get_country_code_by_index) *)geosite_country_index_get_code_ptr) (r->geosite_cc_index));
       }
-       //clib_warning("r->geoip_cc_index =%d",r->geoip_cc_index);
-      if(r->geoip_cc_index!=0){
+      if(r->geoip_cc_index != 0xffff){
       out0 = format (out0, " geoip %s ", ((__typeof__ (geoip_get_country_code_by_index) *)geoip_country_index_get_code_ptr) (r->geoip_cc_index));
       }
       out0 = format (out0, " smac %02x:%02x:%02x:%02x:%02x:%02x ",
@@ -606,15 +604,13 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       r->tcp_flags_mask = rules[i].tcp_flags_mask;
       r->rule_id = rules[i].rule_id;
       r->src_sw_if_index = ntohl(rules[i].src_sw_if_index);
-      //r->geosite_cc_index = 0;
+      r->geosite_cc_index = ~0;
+      r->geoip_cc_index = ~0;
       if(rules[i].geosite_country_code[0] != '\0'){
         r->geosite_cc_index = ((__typeof__ (geosite_get_index_by_country_code) *)geosite_get_index_by_country_code_ptr)((char*)rules[i].geosite_country_code);
-       // clib_warning("country_code %s geosite_cc_index %d,length =%d", (char*)rules[i].geosite_country_code, r->geosite_cc_index,strlen((char*)rules[i].geosite_country_code));
       }
-     // r->geoip_cc_index = 0;
       if(rules[i].geoip_country_code[0] != '\0'){  
         r->geoip_cc_index = ((__typeof__ (geoip_get_index_by_country_code) *)geoip_get_index_by_country_code_ptr)((char*)rules[i].geoip_country_code);
-       // clib_warning("country_code %s geoip_cc_index %d,length =%d", (char*)rules[i].geoip_country_code, r->geoip_cc_index,strlen((char*)rules[i].geoip_country_code));
       }
 
       r->action_expand_bitmap = rules[i].action_expand_bitmap;

@@ -298,7 +298,7 @@ fa_acl_match_mac_addr (mac_address_t *addr1, u8 *addr2, int prefixlen)
 	  return 0;
 	}
 
-    return 0;
+    return 1;
 }
 
 
@@ -722,7 +722,7 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
         vec_foreach(cc, cc_indices)
         {
           pkt_5tuple->geosite_cc_index = *cc;
-          pkt_5tuple->geoip_cc_index = 0;
+          pkt_5tuple->geoip_cc_index = ~0;
           if (single_acl_match_5tuple_sai(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap, &expand))
           {
             if (j > 64)
@@ -745,7 +745,7 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
 
         vec_foreach(dns_cc, dns_cc_indices)
         {
-          pkt_5tuple->geosite_cc_index = 0;
+          pkt_5tuple->geosite_cc_index = ~0;
           pkt_5tuple->geoip_cc_index = *dns_cc;
 
           if (single_acl_match_5tuple_sai(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap, &expand))
@@ -774,7 +774,7 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
         vec_foreach(cc, cc_indices)
         {
 
-          pkt_5tuple->geosite_cc_index = 0;
+          pkt_5tuple->geosite_cc_index = ~0;
           pkt_5tuple->geoip_cc_index = *cc;
           if (single_acl_match_5tuple_sai(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap, &expand))
           {
@@ -865,6 +865,16 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
 
   if (is_ip6)
     {
+      if (!fa_acl_match_mac_addr(&pkt_5tuple->mac6_addr[0], r->src_mac, r->src_mac_len))
+      {
+          return 0;
+      }
+
+      if (!fa_acl_match_mac_addr(&pkt_5tuple->mac6_addr[1], r->dst_mac, r->dst_mac_len))
+      {
+          return 0;
+      }
+
       if (!fa_acl_match_ip6_addr
 	  (&pkt_5tuple->ip6_addr[1], &r->dst.ip6, r->dst_prefixlen))
 	return 0;
@@ -874,6 +884,16 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
     }
   else
     {
+      if (!fa_acl_match_mac_addr(&pkt_5tuple->mac4_addr[0], r->src_mac, r->src_mac_len))
+      {
+          return 0;
+      }
+
+      if (!fa_acl_match_mac_addr(&pkt_5tuple->mac4_addr[1], r->dst_mac, r->dst_mac_len))
+      {
+          return 0;
+      }
+
       if (!fa_acl_match_ip4_addr
 	  (&pkt_5tuple->ip4_addr[1], &r->dst.ip4, r->dst_prefixlen))
 	return 0;
@@ -881,6 +901,16 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
 	  (&pkt_5tuple->ip4_addr[0], &r->src.ip4, r->src_prefixlen))
 	return 0;
     }
+
+  if (0xffff != r->geoip_cc_index && pkt_5tuple->geoip_cc_index != r->geoip_cc_index)
+  {
+      return 0;
+  }
+
+  if (0xffff != r->geosite_cc_index && pkt_5tuple->geosite_cc_index != r->geosite_cc_index)
+  {
+      return 0;
+  }
 
   if (r->proto)
     {
@@ -1137,7 +1167,7 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
       u32 tmp_match_index = ~0;
       vec_foreach(cc, cc_indices) {
         pkt_5tuple->geosite_cc_index = *cc;
-        pkt_5tuple->geoip_cc_index =0;
+        pkt_5tuple->geoip_cc_index = ~0;
          match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
         if(match_index < tmp_match_index){
             tmp_match_index = match_index;
@@ -1148,7 +1178,7 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
         match_index = tmp_match_index;
 
       vec_foreach(dns_cc, dns_cc_indices) {
-        pkt_5tuple->geosite_cc_index = 0;
+        pkt_5tuple->geosite_cc_index = ~0;
         pkt_5tuple->geoip_cc_index =*dns_cc;
 
         match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
@@ -1165,7 +1195,7 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
       u32 tmp_match_index = ~0;
       vec_foreach(cc, cc_indices) {
 
-        pkt_5tuple->geosite_cc_index =0;
+        pkt_5tuple->geosite_cc_index = ~0;
         pkt_5tuple->geoip_cc_index = *cc;
         match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
         if(match_index < tmp_match_index){
@@ -1179,8 +1209,8 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
     
     else
     {
-        pkt_5tuple->geosite_cc_index =0;
-        pkt_5tuple->geoip_cc_index = 0;
+        pkt_5tuple->geosite_cc_index = ~0;
+        pkt_5tuple->geoip_cc_index = ~0;
        match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
     }
 
@@ -1381,7 +1411,7 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
 
         vec_foreach(cc, cc_indices) {
             pkt_5tuple->geosite_cc_index = *cc;
-            pkt_5tuple->geoip_cc_index =0;
+            pkt_5tuple->geoip_cc_index = ~0;
 
 
             multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
@@ -1409,7 +1439,7 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
         //and then choose the best match between geosite and geoip
         
         vec_foreach(dns_cc, dns_cc_indices) {
-            pkt_5tuple->geosite_cc_index = 0;
+            pkt_5tuple->geosite_cc_index = ~0;
             pkt_5tuple->geoip_cc_index =*dns_cc;
 
             multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
@@ -1436,7 +1466,7 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
           match_acl_t *tmp_match_acl_info = NULL ;
           vec_foreach(cc, cc_indices) {
 
-              pkt_5tuple->geosite_cc_index =0;
+              pkt_5tuple->geosite_cc_index = ~0;
               pkt_5tuple->geoip_cc_index = *cc;
               multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
               if(match_acl_info->acl_match_count > 0 ){
@@ -1461,8 +1491,8 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
       }
       else
       {
-          pkt_5tuple->geosite_cc_index =0;
-          pkt_5tuple->geoip_cc_index = 0;
+          pkt_5tuple->geosite_cc_index = ~0;
+          pkt_5tuple->geoip_cc_index = ~0;
           multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
       }
 
