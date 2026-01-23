@@ -1572,6 +1572,8 @@ hqos_hw_interface_add_del (vnet_main_t * vnm, u32 hw_if_index, u32 is_add)
         hash_free(intf_hqos_map->user_id_to_hqos_pipe_id);
 
         /* Reset Register the tx node of hw into the post-processing node */
+        hw = vnet_get_hw_interface(vnm, hw_if_index);
+        vec_validate(hm->sw_if_tx_node_next_index, hw->sw_if_index);
         hm->sw_if_tx_node_next_index[hw->sw_if_index] = 0;
     }
 
