@@ -250,13 +250,19 @@ VLIB_NODE_FN (l2flood_node) (vlib_main_t * vm,
 		  to_next[0] = ci0;
 		  to_next += 1;
 		  n_left_to_next -= 1;
-
 		  if(b0->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL)
           {
-			vnet_buffer2(c0)->geosite_domain_ptr =clib_mem_alloc(256 * sizeof(char));
-			
-        	clib_memcpy_fast(vnet_buffer2(c0)->geosite_domain_ptr,vnet_buffer2(b0)->geosite_domain_ptr,256);
+			char *src = vnet_buffer2(b0)->geosite_domain_ptr;
+			char *dst;
 
+			dst = clib_mem_alloc(256);
+			clib_memset(dst, 0, 256);
+			clib_strncpy(dst, src, 255);
+
+			vnet_buffer2(c0)->geosite_domain_ptr = dst;
+		
+
+			
 			c0->flags |= VLIB_BUFFER_DOMAIN_VALID;
       
 
@@ -284,14 +290,6 @@ VLIB_NODE_FN (l2flood_node) (vlib_main_t * vm,
 						   ci0, next0);
 
 
-
-          if(b0->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL)
-          {
-            clib_mem_free(vnet_buffer2(b0)->geosite_domain_ptr);
-            b0->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
-            vnet_buffer2(b0)->geosite_domain_ptr = NULL;
-          }
-		  
 		  if (PREDICT_FALSE (0 == n_left_to_next))
 		    {
 		      vlib_put_next_frame (vm, node, next_index,
