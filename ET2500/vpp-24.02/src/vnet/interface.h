@@ -930,7 +930,9 @@ typedef struct
   vnet_flood_class_t flood_class;
 
   bool ipv4_multicast_mac_flag;
+  u32 ipv4_multicast_mac_count;
   bool ipv6_multicast_mac_flag;
+  u32 ipv6_multicast_mac_count;
 } vnet_sw_interface_t;
 
 typedef enum

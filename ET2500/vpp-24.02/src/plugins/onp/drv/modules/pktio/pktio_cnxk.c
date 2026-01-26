@@ -554,7 +554,7 @@ cnxk_pktio_mac_addr_add (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr)
       memset(eth_mask.dst_address, 0xff, 3); 
       eth_mask.dst_address[3] = 0x80;  
       memset(eth_mask.dst_address + 4, 0x00, 2);
-      onp_pktio_warn("IPv4 MAC: %02x:%02x:%02x:%02x:%02x:%02x, mask: ff:ff:ff:80:00:00",
+      cnxk_pktio_err("IPv4 MAC: %02x:%02x:%02x:%02x:%02x:%02x, mask: ff:ff:ff:80:00:00",
                   addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]); 
     } 
     else if (addr[0] == 0x33 && addr[1] == 0x33) 
@@ -562,7 +562,7 @@ cnxk_pktio_mac_addr_add (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr)
       memset(eth_mask.dst_address, 0xff, 2);
       memset(eth_mask.dst_address + 2, 0x00, 4);
         
-      onp_pktio_warn("IPv6 MAC: %02x:%02x:%02x:%02x:%02x:%02x, mask: ff:ff:00:00:00:00",
+      cnxk_pktio_err("IPv6 MAC: %02x:%02x:%02x:%02x:%02x:%02x, mask: ff:ff:00:00:00:00",
                         addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
     } 
     else 
@@ -570,7 +570,7 @@ cnxk_pktio_mac_addr_add (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr)
       memset(eth_mask.dst_address, 0xff, 3);
       memset(eth_mask.dst_address + 3, 0x00, 3);
         
-      onp_pktio_warn("other MAC: %02x:%02x:%02x:%02x:%02x:%02x, mask: ff:ff:ff:00:00:00",
+      cnxk_pktio_err("other MAC: %02x:%02x:%02x:%02x:%02x:%02x, mask: ff:ff:ff:00:00:00",
                         addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
     }
   }
