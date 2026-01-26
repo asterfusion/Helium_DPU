@@ -45,6 +45,7 @@
 #include <vnet/l3_types.h>
 #include <vppinfra/lock.h>
 #include <vnet/hash/hash.h>
+#include <stdbool.h>
 
 struct vnet_main_t;
 struct vnet_hw_interface_t;
@@ -927,6 +928,9 @@ typedef struct
   vnet_p2p_sub_interface_t p2p;
 
   vnet_flood_class_t flood_class;
+
+  bool ipv4_multicast_mac_flag;
+  bool ipv6_multicast_mac_flag;
 } vnet_sw_interface_t;
 
 typedef enum
