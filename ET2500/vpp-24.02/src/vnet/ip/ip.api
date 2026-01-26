@@ -1080,6 +1080,12 @@ counters ip4 {
     units "packets";
     description "ip4 IHL < 5";
   };
+  bad_l3_mac {
+    severity error;
+    type counter64;
+    units "packets";
+    description "ipv4 bad l3 mac address";
+  };
 
   /* Errors signalled by ip4-rewrite. */
   mtu_exceeded {
@@ -1332,6 +1338,13 @@ counters ip6 {
     type counter64;
     units "packets";
     description "ip6 punt";
+  };
+
+  bad_l3_mac {
+    severity error;
+    type counter64;
+    units "packets";
+    description "ipv6 bad l3 mac address";
   };
 
   /* errors signalled by ip6-local. */
