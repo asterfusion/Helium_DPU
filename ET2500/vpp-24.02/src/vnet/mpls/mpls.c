@@ -19,6 +19,11 @@
 #include <vnet/mpls/mpls.h>
 #include <vnet/fib/ip4_fib.h>
 #include <vnet/fib/mpls_fib.h>
+#include <vppinfra/bihash_8_8.h>
+#include <vnet/mpls/mpls_l2_decap.h>
+
+
+mpls_l2_decap_main_t mpls_l2_decap_main;
 
 const static char* mpls_eos_bit_names[] = MPLS_EOS_BITS;
 
@@ -373,6 +378,172 @@ VLIB_CLI_COMMAND (mpls_local_label_command, static) = {
   .short_help = "mpls local-label [add|del] <label-value> [eos|non-eos] via [next-hop-address] [next-hop-interface] [next-hop-table <value>] [weight <value>] [preference <value>] [udp-encap-id <value>] [ip4-lookup-in-table <value>] [ip6-lookup-in-table <value>] [mpls-lookup-in-table <value>] [resolve-via-host] [resolve-via-attached] [rx-ip4 <interface>] [out-labels <value value value>]",
 };
 
+ u32 vnet_mpls_l2_decap_add_del(u32 label, u8 eos, u32 sw_if_index, u8 is_add){
+    /* key */
+    clib_bihash_kv_8_8_t kv = {
+        .key = ((u64)label << 1) | eos,
+        .value = sw_if_index,
+    };
+
+    if (is_add)
+    {
+        clib_bihash_add_del_8_8(&mpls_l2_decap_main.table, &kv, 1);
+    }
+    else
+    {
+        clib_bihash_add_del_8_8(&mpls_l2_decap_main.table, &kv, 0);
+    }
+    return 0;
+}
+
+static clib_error_t *
+vnet_mpls_l2_decap (vlib_main_t * vm,
+                    unformat_input_t * input,
+                    vlib_cli_command_t * cmd)
+{
+    unformat_input_t _line_input, *line_input = &_line_input;
+    clib_error_t *error = NULL;
+
+    u32 label = MPLS_LABEL_INVALID;
+    u8 eos = 1;
+    u8 is_add = 1;
+    u32 sw_if_index = ~0;
+
+    if (!unformat_user(input, unformat_line_input, line_input))
+        return 0;
+
+    while (unformat_check_input(line_input) != UNFORMAT_END_OF_INPUT)
+    {
+        if (unformat(line_input, "add"))
+            is_add = 1;
+        else if (unformat(line_input, "del"))
+            is_add = 0;
+        else if (unformat(line_input, "label %u", &label))
+            ;
+        else if (unformat(line_input, "eos"))
+            eos = 1;
+        else if (unformat(line_input, "non-eos"))
+            eos = 0;
+        else if (unformat(line_input, "rx-if %U",
+                          unformat_vnet_sw_interface,
+                          vnet_get_main(),
+                          &sw_if_index))
+            ;
+        else
+        {
+            error = clib_error_return(0, "unknown input");
+            goto done;
+        }
+    }
+
+    if (label == MPLS_LABEL_INVALID)
+    {
+        error = clib_error_return(0, "label is required");
+        goto done;
+    }
+
+
+    // /* key */
+    // clib_bihash_kv_8_8_t kv = {
+    //     .key = ((u64)label << 1) | eos,
+    //     .value = sw_if_index,
+    // };
+
+    // if (is_add)
+    // {
+    //     clib_bihash_add_del_8_8(&mpls_l2_decap_main.table, &kv, 1);
+    // }
+    // else
+    // {
+    //     clib_bihash_add_del_8_8(&mpls_l2_decap_main.table, &kv, 0);
+    // }
+    vnet_mpls_l2_decap_add_del(label, eos, sw_if_index, is_add);
+done:
+    unformat_free(line_input);
+    return error;
+}
+
+
+
+VLIB_CLI_COMMAND (mpls_l2_decap_command, static) = {
+  .path = "mpls l2-decap",
+  .function = vnet_mpls_l2_decap,
+  .short_help = "mpls l2-decap [add|del] label <label> [eos|non-eos] rx-if <itfc>",
+};
+
+
+static int
+mpls_l2_decap_show_walk (clib_bihash_kv_8_8_t *kv,
+                         void *arg)
+{
+    vlib_main_t *vm = arg;
+
+    u32 label;
+    u8 eos;
+    u32 sw_if_index;
+
+    /* 解析 key */
+    label = kv->key >> 1;
+    eos   = kv->key & 0x1;
+
+    /* value */
+    sw_if_index = kv->value;
+
+    vlib_cli_output(vm,
+        "%-10u %-4u %-12u",
+        label, eos, sw_if_index);
+
+    return BIHASH_WALK_CONTINUE;
+}
+
+
+static clib_error_t *
+show_mpls_l2_decap (vlib_main_t *vm,
+                    unformat_input_t *input,
+                    vlib_cli_command_t *cmd)
+{
+    vlib_cli_output(vm,
+        "%-10s %-4s %-12s",
+        "Label", "EOS", "sw_if_index");
+
+    vlib_cli_output(vm,
+        "--------------------------------");
+
+    clib_bihash_foreach_key_value_pair_8_8(
+        &mpls_l2_decap_main.table,
+        mpls_l2_decap_show_walk,
+        vm);
+
+    return 0;
+}
+
+
+VLIB_CLI_COMMAND (show_mpls_l2_decap_command, static) = {
+  .path = "show mpls l2-decap",
+  .short_help = "show mpls l2-decap",
+  .function = show_mpls_l2_decap,
+};
+
+
+  u32 mpls_l2_decap_lookup( const mpls_unicast_header_t *hdr){
+    mpls_label_t label;
+
+  
+    clib_bihash_kv_8_8_t kv,value;
+     
+    label = clib_net_to_host_u32(hdr->label_exp_s_ttl);
+    kv.key = (vnet_mpls_uc_get_label(label) << 1) | vnet_mpls_uc_get_s(label);
+    clib_warning("MPLS L2 DECAP lookup label %d eos %d key %u",
+        vnet_mpls_uc_get_label(label),
+        vnet_mpls_uc_get_s(label),
+        kv.key);
+   if (clib_bihash_search_8_8(&mpls_l2_decap_main.table, &kv,&value) == 0){
+        return value.value;
+    }
+    return 0;
+}
+
+
 clib_error_t *
 vnet_mpls_table_cmd (vlib_main_t * vm,
                      unformat_input_t * main_input,
@@ -452,6 +623,10 @@ mpls_init (vlib_main_t * vm)
   if ((error = vlib_call_init_function (vm, ip_main_init)))
     return error;
 
+clib_bihash_init_8_8(&mpls_l2_decap_main.table,
+                     "mpls-l2-decap-table",
+                     MPLS_L2_DECAP_TABLE_HASH_NUM_BUCKETS,  // buckets
+                     MPLS_L2_DECAP_TABLE_HASH_MEMORY_SIZE);// memory
   return vlib_call_init_function (vm, mpls_input_init);
 }
 

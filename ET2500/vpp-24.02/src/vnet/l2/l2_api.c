@@ -825,12 +825,12 @@ static void
       VALIDATE_TX_SW_IF_INDEX (mp);
       rv = set_int_l2_mode (vm, vnm, MODE_L2_XC,
 			    rx_sw_if_index, 0,
-			    L2_BD_PORT_TYPE_NORMAL, 0, tx_sw_if_index);
+			    L2_BD_PORT_TYPE_NORMAL, 0, tx_sw_if_index,0);
     }
   else
     {
       rv = set_int_l2_mode (vm, vnm, MODE_L3, rx_sw_if_index, 0,
-			    L2_BD_PORT_TYPE_NORMAL, 0, 0);
+			    L2_BD_PORT_TYPE_NORMAL, 0, 0,0);
     }
 
   switch (rv)
@@ -894,11 +894,11 @@ static void
       u32 bd_index = bd_find_or_add_bd_index (bdm, bd_id);
 
       rv = set_int_l2_mode (vm, vnm, MODE_L2_BRIDGE,
-			    rx_sw_if_index, bd_index, pt, mp->shg, 0);
+			    rx_sw_if_index, bd_index, pt, mp->shg, 0,mp->is_tunnel);
     }
   else
     {
-      rv = set_int_l2_mode (vm, vnm, MODE_L3, rx_sw_if_index, 0, pt, 0, 0);
+      rv = set_int_l2_mode (vm, vnm, MODE_L3, rx_sw_if_index, 0, pt, 0, 0,0);
     }
 
   switch (rv)

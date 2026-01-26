@@ -67,6 +67,7 @@ add_vpp_plugin(linux_cp
   lcp_igmp.c
   lcp_pim.c
   lcp_rip.c
+    lcp_ldp.c
 
   API_FILES
   lcp.api

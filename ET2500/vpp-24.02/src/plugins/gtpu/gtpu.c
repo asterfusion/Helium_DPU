@@ -773,7 +773,7 @@ int vnet_gtpu_add_mod_del_tunnel
 
       /* make sure tunnel is removed from l2 bd or xconnect */
       set_int_l2_mode (gtm->vlib_main, vnm, MODE_L3, t->sw_if_index, 0,
-		       L2_BD_PORT_TYPE_NORMAL, 0, 0);
+		       L2_BD_PORT_TYPE_NORMAL, 0, 0,0);
       vec_add1 (gtm->free_gtpu_tunnel_hw_if_indices, t->hw_if_index);
 
       gtm->tunnel_index_by_sw_if_index[t->sw_if_index] = ~0;

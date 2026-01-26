@@ -232,6 +232,27 @@ autoreply define sw_interface_set_mpls_enable
   bool enable [default=true];
 };
 
+
+/** \brief Enable or Disable MPLS on and interface
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param sw_if_index - index of the rx tunnel interface
+    @param add - 1 =add ,0 =del
+    @param eos - 1 =eos ,0 =non-eos
+    @param label - label
+*/
+autoreply define mpls_l2_decap_fib
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool add [default=true];
+  u32 eos;
+  u32 label;
+};
+
+
+
 counters mpls {
   none {
     severity info;

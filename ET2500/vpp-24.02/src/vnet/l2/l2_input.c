@@ -289,7 +289,8 @@ set_int_l2_mode (vlib_main_t * vm, vnet_main_t * vnet_main,	/*           */
 		 u32 bd_index,	/* for bridged interface                     */
 		 l2_bd_port_type_t port_type,	/* port_type */
 		 u32 shg,	/* the bridged interface split horizon group */
-		 u32 xc_sw_if_index)	/* peer interface for xconnect       */
+		 u32 xc_sw_if_index	,/* peer interface for xconnect       */
+     u8 is_tunnel)/* interface is mpls tunnel       */
 {
   l2output_main_t *l2om = &l2output_main;
   vnet_main_t *vnm = vnet_get_main ();
@@ -467,6 +468,7 @@ set_int_l2_mode (vlib_main_t * vm, vnet_main_t * vnet_main,	/*           */
 		.sw_if_index = sw_if_index,
 		.flags = member_flags,
 		.shg = shg,
+    .is_tunnel = is_tunnel,
 	      };
 	      bd_add_member (bd_config, &member);
 	    }
@@ -582,10 +584,10 @@ l2_input_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_add)
 	  config = vec_elt_at_index (l2input_main.configs, sw_if_index);
 	  if (l2_input_is_xconnect (config))
 	    set_int_l2_mode (vm, vnm, MODE_L3, config->output_sw_if_index, 0,
-			     L2_BD_PORT_TYPE_NORMAL, 0, 0);
+			     L2_BD_PORT_TYPE_NORMAL, 0, 0,0);
 	  if (l2_input_is_xconnect (config) || l2_input_is_bridge (config))
 	    set_int_l2_mode (vm, vnm, MODE_L3, sw_if_index, 0,
-			     L2_BD_PORT_TYPE_NORMAL, 0, 0);
+			     L2_BD_PORT_TYPE_NORMAL, 0, 0,0);
 	}
     }
 
@@ -610,6 +612,7 @@ int_l2_bridge (vlib_main_t * vm,
   u32 sw_if_index;
   u32 rc;
   u32 shg;
+  u8 is_tunnel = 0;
 
   if (!unformat_user (input, unformat_vnet_sw_interface, vnm, &sw_if_index))
     {
@@ -639,7 +642,8 @@ int_l2_bridge (vlib_main_t * vm,
     port_type = L2_BD_PORT_TYPE_BVI;
   if (unformat (input, "uu-fwd"))
     port_type = L2_BD_PORT_TYPE_UU_FWD;
-
+  if (unformat (input, "tunnel"))
+      is_tunnel =  1;
   /* optional split horizon group */
   shg = 0;
   (void) unformat (input, "%d", &shg);
@@ -647,7 +651,7 @@ int_l2_bridge (vlib_main_t * vm,
   /* set the interface mode */
   if ((rc =
        set_int_l2_mode (vm, vnm, MODE_L2_BRIDGE, sw_if_index, bd_index,
-			port_type, shg, 0)))
+			port_type, shg, 0,is_tunnel)))
     {
       if (rc == MODE_ERROR_ETH)
 	{
@@ -701,7 +705,7 @@ done:
 /* *INDENT-OFF* */
 VLIB_CLI_COMMAND (int_l2_bridge_cli, static) = {
   .path = "set interface l2 bridge",
-  .short_help = "set interface l2 bridge <interface> <bridge-domain-id> [bvi|uu-fwd] [shg]",
+  .short_help = "set interface l2 bridge <interface> <bridge-domain-id> [bvi|uu-fwd] [shg] [tunnel]",
   .function = int_l2_bridge,
 };
 /* *INDENT-ON* */
@@ -738,7 +742,7 @@ int_l2_xc (vlib_main_t * vm,
   /* set the interface mode */
   if (set_int_l2_mode
       (vm, vnm, MODE_L2_XC, sw_if_index, 0, L2_BD_PORT_TYPE_NORMAL,
-       0, xc_sw_if_index))
+       0, xc_sw_if_index,0))
     {
       error = clib_error_return (0, "invalid configuration for interface",
 				 format_unformat_error, input);
@@ -793,7 +797,7 @@ int_l3 (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd)
 
   /* set the interface mode */
   if (set_int_l2_mode (vm, vnm, MODE_L3, sw_if_index, 0,
-		       L2_BD_PORT_TYPE_NORMAL, 0, 0))
+		       L2_BD_PORT_TYPE_NORMAL, 0, 0,0))
     {
       error = clib_error_return (0, "invalid configuration for interface",
 				 format_unformat_error, input);

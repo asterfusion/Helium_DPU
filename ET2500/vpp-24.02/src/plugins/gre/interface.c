@@ -540,7 +540,7 @@ vnet_gre_tunnel_delete (vnet_gre_tunnel_add_del_args_t *a, u32 outer_fib_index,
 
   /* make sure tunnel is removed from l2 bd or xconnect */
   set_int_l2_mode (gm->vlib_main, vnm, MODE_L3, sw_if_index, 0,
-		   L2_BD_PORT_TYPE_NORMAL, 0, 0);
+		   L2_BD_PORT_TYPE_NORMAL, 0, 0,0);
   gm->tunnel_index_by_sw_if_index[sw_if_index] = ~0;
 
   if (t->type == GRE_TUNNEL_TYPE_L3)
