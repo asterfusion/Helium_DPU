@@ -1174,9 +1174,11 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
         }
 
       }
-      if (tmp_match_index < vec_len((*applied_hash_aces)))
+      if (tmp_match_index < vec_len((*applied_hash_aces))){
         match_index = tmp_match_index;
-
+        return 0;
+      }
+      tmp_match_index = ~0;
       vec_foreach(dns_cc, dns_cc_indices) {
         pkt_5tuple->geosite_cc_index = ~0;
         pkt_5tuple->geoip_cc_index =*dns_cc;
@@ -1299,102 +1301,6 @@ get_single_match_acl_info(match_acl_t *match_acl_info, match_acl_t **tmp_match_a
 
 
 
-always_inline void
-get_last_match_acl_info(match_acl_t *match_acl_info, match_acl_t *tmp_match_acl_info,match_acl_t  *tmp_dns_match_acl_info)
-{
-    int i, j;
-    int match_count = 0;
-    memset(match_acl_info, 0, sizeof(match_acl_t));
-
-    for (i = 0; i < tmp_match_acl_info->acl_match_count ; i++) {
-        u32 acl_index1 = tmp_match_acl_info->acl_index[i];
-        
-        
-        int found_match = 0;
-        
-       
-        for (j = 0; j < tmp_dns_match_acl_info->acl_match_count; j++) {
-            u32 acl_index2 = tmp_dns_match_acl_info->acl_index[j];
-            
-            
-            if (acl_index1 == acl_index2) {
-                
-                found_match = 1;
-                
-                if (tmp_match_acl_info->rule_index[i] <= tmp_dns_match_acl_info->rule_index[j]) {
-                  
-                    match_acl_info->action[match_count] = tmp_match_acl_info->action[i];
-                    match_acl_info->action_expand_bitmap[match_count] = tmp_match_acl_info->action_expand_bitmap[i];
-                    match_acl_info->set_tc_value[match_count] = tmp_match_acl_info->set_tc_value[i];
-                    match_acl_info->acl_index[match_count] = tmp_match_acl_info->acl_index[i];
-                    match_acl_info->rule_index[match_count] = tmp_match_acl_info->rule_index[i];
-                    match_acl_info->acl_pos[match_count] = tmp_match_acl_info->acl_pos[i];
-                    match_acl_info->curr_match_index[match_count] = tmp_match_acl_info->curr_match_index[i];
-                    match_acl_info->policer_index[match_count] = tmp_match_acl_info->policer_index[i];
-                } else {
-                    
-                    match_acl_info->action[match_count] = tmp_dns_match_acl_info->action[j];
-                    match_acl_info->action_expand_bitmap[match_count] = tmp_dns_match_acl_info->action_expand_bitmap[j];
-                    match_acl_info->set_tc_value[match_count] = tmp_dns_match_acl_info->set_tc_value[j];
-                    match_acl_info->acl_index[match_count] = tmp_dns_match_acl_info->acl_index[j];
-                    match_acl_info->rule_index[match_count] = tmp_dns_match_acl_info->rule_index[j];
-                    match_acl_info->acl_pos[match_count] = tmp_dns_match_acl_info->acl_pos[j];
-                    match_acl_info->curr_match_index[match_count] = tmp_dns_match_acl_info->curr_match_index[j];
-                    match_acl_info->policer_index[match_count] = tmp_dns_match_acl_info->policer_index[j];
-                }
-                match_count++;
-                break;
-            }
-        }
-        
-
-        if (!found_match) {
-            match_acl_info->action[match_count] = tmp_match_acl_info->action[i];
-            match_acl_info->action_expand_bitmap[match_count] = tmp_match_acl_info->action_expand_bitmap[i];
-            match_acl_info->set_tc_value[match_count] = tmp_match_acl_info->set_tc_value[i];
-            match_acl_info->acl_index[match_count] = tmp_match_acl_info->acl_index[i];
-            match_acl_info->rule_index[match_count] = tmp_match_acl_info->rule_index[i];
-            match_acl_info->acl_pos[match_count] = tmp_match_acl_info->acl_pos[i];
-            match_acl_info->curr_match_index[match_count] = tmp_match_acl_info->curr_match_index[i];
-            match_acl_info->policer_index[match_count] = tmp_match_acl_info->policer_index[i];
-            match_count++;
-        }
-    }
-    
-   
-    for (j = 0; j < tmp_dns_match_acl_info->acl_match_count ; j++) {
-        u32 acl_index2 = tmp_dns_match_acl_info->acl_index[j];
-       
-        
-        int already_added = 0;
-        
-   
-        for (i = 0; i < match_count; i++) {
-            if (match_acl_info->acl_index[i] == acl_index2) {
-                already_added = 1;
-                break;
-            }
-        }
-        
-       
-        if (!already_added ) {
-            match_acl_info->action[match_count] = tmp_dns_match_acl_info->action[j];
-            match_acl_info->action_expand_bitmap[match_count] = tmp_dns_match_acl_info->action_expand_bitmap[j];
-            match_acl_info->set_tc_value[match_count] = tmp_dns_match_acl_info->set_tc_value[j];
-            match_acl_info->acl_index[match_count] = tmp_dns_match_acl_info->acl_index[j];
-            match_acl_info->rule_index[match_count] = tmp_dns_match_acl_info->rule_index[j];
-            match_acl_info->acl_pos[match_count] = tmp_dns_match_acl_info->acl_pos[j];
-            match_acl_info->curr_match_index[match_count] = tmp_dns_match_acl_info->curr_match_index[j];
-            match_acl_info->policer_index[match_count] = tmp_dns_match_acl_info->policer_index[j];
-            match_count++;
-        }
-    }
-    
-    
-    match_acl_info->acl_match_count = match_count;
-}
-
-
 
 
 always_inline int
@@ -1413,7 +1319,6 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
             pkt_5tuple->geosite_cc_index = *cc;
             pkt_5tuple->geoip_cc_index = ~0;
 
-
             multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
 
             if(match_acl_info->acl_match_count > 0 ){
@@ -1421,7 +1326,7 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
 
             }
         }
-        if(tmp_match_acl_info != NULL){
+        if(tmp_match_acl_info != NULL ){
             match_acl_info->acl_match_count = tmp_match_acl_info->acl_match_count;
             for (int i = 0; i < tmp_match_acl_info->acl_match_count; i++) {
                 match_acl_info->acl_index[i] = tmp_match_acl_info->acl_index[i];
@@ -1434,24 +1339,37 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
                 match_acl_info->set_tc_value[i] = tmp_match_acl_info->set_tc_value[i];
             }
         }
+        if( match_acl_info->acl_match_count > 1)
+        {
+            clib_mem_free(tmp_match_acl_info);
+            return 0;
+        }
       
-        //when domain can resove ip ,we also need to match geoip
-        //and then choose the best match between geosite and geoip
+        //when geosite cc cant match,try to resovle dns then match geoip
         
         vec_foreach(dns_cc, dns_cc_indices) {
             pkt_5tuple->geosite_cc_index = ~0;
             pkt_5tuple->geoip_cc_index =*dns_cc;
-
             multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
             if(match_acl_info->acl_match_count > 0 ){
                 get_single_match_acl_info(match_acl_info, &tmp_dns_match_acl_info);
 
             }
         }
-
-        if(tmp_match_acl_info != NULL && tmp_dns_match_acl_info != NULL)
-            get_last_match_acl_info(match_acl_info, tmp_match_acl_info,tmp_dns_match_acl_info);
-
+        if(tmp_dns_match_acl_info != NULL){
+            match_acl_info->acl_match_count = tmp_dns_match_acl_info->acl_match_count;
+            for (int i = 0; i < tmp_dns_match_acl_info->acl_match_count; i++) {
+                match_acl_info->acl_index[i] = tmp_dns_match_acl_info->acl_index[i];
+                match_acl_info->action[i] = tmp_dns_match_acl_info->action[i];
+                match_acl_info->rule_index[i] = tmp_dns_match_acl_info->rule_index[i];
+                match_acl_info->acl_pos[i] = tmp_dns_match_acl_info->acl_pos[i];
+                match_acl_info->curr_match_index[i] = tmp_dns_match_acl_info->curr_match_index[i];
+                match_acl_info->action_expand_bitmap[i] = tmp_dns_match_acl_info->action_expand_bitmap[i];
+                match_acl_info->policer_index[i] = tmp_dns_match_acl_info->policer_index[i];
+                match_acl_info->set_tc_value[i] = tmp_dns_match_acl_info->set_tc_value[i];
+            }
+        }
+   
 
         if(tmp_match_acl_info != NULL){
             clib_mem_free(tmp_match_acl_info);
