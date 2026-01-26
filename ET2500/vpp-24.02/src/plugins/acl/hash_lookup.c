@@ -1083,7 +1083,7 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
     hi->match.ip6_addr[0] = r->src.ip6;
     make_ip6_address_mask(&mask->ip6_addr[1], r->dst_prefixlen);
     hi->match.ip6_addr[1] = r->dst.ip6;
-    if (r->dscp != 0)
+    if (r->dscp != 0xff)
     {
         mask->dscp_v6 = ~0;
         hi->match.dscp_v6 = r->dscp;
@@ -1111,7 +1111,7 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
     hi->match.ip4_addr[0] = r->src.ip4;
     make_ip4_address_mask(&mask->ip4_addr[1], r->dst_prefixlen);
     hi->match.ip4_addr[1] = r->dst.ip4;
-    if (r->dscp != 0)
+    if (r->dscp != 0xff)
     {
         mask->dscp_v4 = ~0;
         hi->match.dscp_v4 = r->dscp;
@@ -1123,11 +1123,11 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
       hi->match.src_sw_if_index = r->src_sw_if_index;
   }
 
-  if (r->geosite_cc_index != 0) {
+  if (r->geosite_cc_index != 0xffff) {
       mask->geosite_cc_index = ~0;
       hi->match.geosite_cc_index = r->geosite_cc_index;
   }
-    if (r->geoip_cc_index != 0) {
+    if (r->geoip_cc_index != 0xffff) {
       mask->geoip_cc_index = ~0;
       hi->match.geoip_cc_index = r->geoip_cc_index;
   }
