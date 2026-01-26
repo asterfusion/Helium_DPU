@@ -1331,10 +1331,12 @@ vlib_buffer_clone_at_offset (vlib_main_t * vm, u32 src_buffer, u32 * buffers,
     {
       vlib_buffer_t *copy;
       copy = vlib_buffer_copy (vm, s);
+      if(copy){
       n_cloned += vlib_buffer_clone_256 (vm,
 					 vlib_get_buffer_index (vm, copy),
 					 (buffers + n_cloned),
 					 256, head_end_offset, offset);
+      }
       n_buffers -= 256;
     }
   n_cloned += vlib_buffer_clone_256 (vm, src_buffer,
