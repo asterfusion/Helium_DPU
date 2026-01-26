@@ -164,9 +164,45 @@ mfib_itf_mac_add_del (mfib_itf_t *itf,
     mfib_itf_prefix_to_mac(pfx, &mac);
 
     si = vnet_get_sw_interface(vnm, itf->mfi_sw_if_index);
-    vnet_hw_interface_add_del_mac_address (vnet_get_main(),
+    if(pfx->fp_proto == FIB_PROTOCOL_IP4 && si->ipv4_multicast_mac_flag == false && add)
+    {
+        vnet_hw_interface_add_del_mac_address (vnet_get_main(),
                                            si->hw_if_index,
                                            mac.bytes, add);
+        si->ipv4_multicast_mac_flag = true;
+        si->ipv4_multicast_mac_count++;
+    }
+    else if(pfx->fp_proto == FIB_PROTOCOL_IP6 && si->ipv6_multicast_mac_flag == false && add)
+    {
+        vnet_hw_interface_add_del_mac_address (vnet_get_main(),
+                                           si->hw_if_index,
+                                           mac.bytes, add);
+        si->ipv6_multicast_mac_flag = true;
+        si->ipv6_multicast_mac_count++;
+    }
+    else if(pfx->fp_proto == FIB_PROTOCOL_IP4 && !add)
+    {
+        si->ipv4_multicast_mac_count--;
+        if(si->ipv4_multicast_mac_count == 0)
+        {
+            si->ipv4_multicast_mac_flag = false;
+            vnet_hw_interface_add_del_mac_address (vnet_get_main(),
+                                           si->hw_if_index,
+                                           mac.bytes, add);
+        }
+    }
+    else if(pfx->fp_proto == FIB_PROTOCOL_IP6 && !add)
+    {
+        si->ipv6_multicast_mac_count--;
+        if(si->ipv6_multicast_mac_count == 0)
+        {
+            si->ipv6_multicast_mac_flag = false;
+            vnet_hw_interface_add_del_mac_address (vnet_get_main(),
+                                           si->hw_if_index,
+                                           mac.bytes, add);
+        }
+          
+    }
 }
 
 void
