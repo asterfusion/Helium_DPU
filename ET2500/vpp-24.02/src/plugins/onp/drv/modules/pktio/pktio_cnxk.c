@@ -540,11 +540,36 @@ cnxk_pktio_mac_addr_add (vlib_main_t *vm, cnxk_pktio_t *dev, char *addr)
   eth_spec.type = 0;
   eth_mask.type = 0;
 
+  int is_multicast = (addr[0] & 0x01) ? 1 : 0;
+
   memset(eth_spec.src_address, 0, CNXK_MAC_ADDRESS_LEN);
   memset(eth_mask.src_address, 0, CNXK_MAC_ADDRESS_LEN);
 
   memcpy(eth_spec.dst_address, addr, CNXK_MAC_ADDRESS_LEN);
-  memset(eth_mask.dst_address, 0xff, CNXK_MAC_ADDRESS_LEN);
+
+  if (is_multicast)
+  {
+    if (addr[0] == 0x01 && addr[1] == 0x00 && addr[2] == 0x5e) 
+    {
+      memset(eth_mask.dst_address, 0xff, 3); 
+      eth_mask.dst_address[3] = 0x80;  
+      memset(eth_mask.dst_address + 4, 0x00, 2);
+    } 
+    else if (addr[0] == 0x33 && addr[1] == 0x33) 
+    {
+      memset(eth_mask.dst_address, 0xff, 2);
+      memset(eth_mask.dst_address + 2, 0x00, 4);
+    } 
+    else 
+    {
+      memset(eth_mask.dst_address, 0xff, 3);
+      memset(eth_mask.dst_address + 3, 0x00, 3);
+    }
+  }
+  else
+  {
+    memset(eth_mask.dst_address, 0xff, CNXK_MAC_ADDRESS_LEN);
+  }
 
   item_info[layer].spec = (void *) &eth_spec;
   item_info[layer].mask = (void *) &eth_mask;
