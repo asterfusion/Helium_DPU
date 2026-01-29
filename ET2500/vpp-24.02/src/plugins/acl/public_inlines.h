@@ -69,7 +69,7 @@ offset_beyond_packet (vlib_buffer_t * b0, int offset)
 }
 
 always_inline void
-acl_fill_5tuple_l2_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6, 
+acl_fill_5tuple_l2_data (acl_main_t * am, vlib_buffer_t * b0, int is_ip6,
 		 int l2_offset, fa_5tuple_t * p5tuple_pkt)
 {
     ethernet_header_t *mac_addr = vlib_buffer_get_current (b0) + l2_offset;
@@ -303,7 +303,7 @@ fa_acl_match_mac_addr (mac_address_t *addr1, u8 *addr2, int prefixlen)
 	  return 0;
 	}
 
-    return 0;
+    return 1;
 }
 
 
@@ -724,13 +724,14 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
       key.key = ((u64)lc_index << 32) | acl_vector[i];
       clib_bihash_search_inline_2_8_8(&am->sw_acl_index_priority_hash, &key, &kv_result);
 
-      if (get_cc_code & GEOSITE_FIND_CC_CODE)
+      if (get_cc_code & (GEOSITE_FIND_CC_CODE | GEOSITE_DNS_FIND_CC_CODE))
       {
         u32 *cc = 0;
+        u32 *dns_cc = 0;
         vec_foreach(cc, cc_indices)
         {
           pkt_5tuple->geosite_cc_index = *cc;
-          pkt_5tuple->geoip_cc_index = 0;
+          pkt_5tuple->geoip_cc_index = ~0;
           if (single_acl_match_5tuple_sai(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap, &expand))
           {
             if (j > ACL_BIND_MAX_COUNTER)
@@ -752,18 +753,15 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
             j++;
           }
         }
-        if (cc_indices)
-          vec_free(cc_indices);
 
-        if (get_cc_code & GEOSITE_DNS_FIND_CC_CODE && j == 0)
+        vec_foreach(dns_cc, dns_cc_indices)
         {
-          u32 *dns_cc = 0;
-          vec_foreach(dns_cc, dns_cc_indices)
-          {
-            pkt_5tuple->geosite_cc_index = 0;
-            pkt_5tuple->geoip_cc_index = *dns_cc;
+          pkt_5tuple->geosite_cc_index = ~0;
+          pkt_5tuple->geoip_cc_index = *dns_cc;
 
-            if (single_acl_match_5tuple_sai(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap, &expand))
+          if (single_acl_match_5tuple_sai(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap, &expand))
+          {
+            if (j > 64)
             {
               if (j > 64)
               {
@@ -783,14 +781,18 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
               match_acl_info->acl_match_count = j;
               j++;
             }
+            match_acl_info->acl_index[j] = acl_match;
+            match_acl_info->action[j] = action;
+            match_acl_info->rule_index[j] = rule_match;
+            match_acl_info->acl_pos[j] = i;
+
+            match_acl_info->action_expand_bitmap[j] = expand.action_expand_bitmap;
+            match_acl_info->policer_index[j] = expand.policer_index;
+            match_acl_info->set_tc_value[j] = expand.set_tc_value;
+            j++;
+            match_acl_info->acl_match_count = j;
+            j++;
           }
-          if (dns_cc_indices)
-            vec_free(dns_cc_indices);
-        }
-        else
-        {
-          if (dns_cc_indices)
-            vec_free(dns_cc_indices);
         }
       }
       else if (get_cc_code & GEOIP_FIND_CC_CODE)
@@ -799,7 +801,7 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
         vec_foreach(cc, cc_indices)
         {
 
-          pkt_5tuple->geosite_cc_index = 0;
+          pkt_5tuple->geosite_cc_index = ~0;
           pkt_5tuple->geoip_cc_index = *cc;
           if (single_acl_match_5tuple_sai(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap, &expand))
           {
@@ -823,11 +825,7 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
           }
         }
 
-        if (cc_indices)
-          vec_free(cc_indices);
       }
-    
-
     else
     {
       if (single_acl_match_5tuple_sai(am, acl_vector[i], pkt_5tuple, is_ip6, &action, &acl_match, &rule_match, trace_bitmap, &expand))
@@ -851,6 +849,9 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
         j++;
       }
     }
+
+    vec_free(dns_cc_indices);
+    vec_free(cc_indices);
 }
 
 return 0;
@@ -895,6 +896,16 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
 #if 0
   if (is_ip6)
     {
+      if (!fa_acl_match_mac_addr(&pkt_5tuple->mac6_addr[0], r->src_mac, r->src_mac_len))
+      {
+          return 0;
+      }
+
+      if (!fa_acl_match_mac_addr(&pkt_5tuple->mac6_addr[1], r->dst_mac, r->dst_mac_len))
+      {
+          return 0;
+      }
+
       if (!fa_acl_match_ip6_addr
 	  (&pkt_5tuple->ip6_addr[1], &r->dst.ip6, r->dst_prefixlen))
 	return 0;
@@ -904,6 +915,16 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
     }
   else
     {
+      if (!fa_acl_match_mac_addr(&pkt_5tuple->mac4_addr[0], r->src_mac, r->src_mac_len))
+      {
+          return 0;
+      }
+
+      if (!fa_acl_match_mac_addr(&pkt_5tuple->mac4_addr[1], r->dst_mac, r->dst_mac_len))
+      {
+          return 0;
+      }
+
       if (!fa_acl_match_ip4_addr
 	  (&pkt_5tuple->ip4_addr[1], &r->dst.ip4, r->dst_prefixlen))
 	return 0;
@@ -911,6 +932,16 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
 	  (&pkt_5tuple->ip4_addr[0], &r->src.ip4, r->src_prefixlen))
 	return 0;
     }
+
+  if (0xffff != r->geoip_cc_index && pkt_5tuple->geoip_cc_index != r->geoip_cc_index)
+  {
+      return 0;
+  }
+
+  if (0xffff != r->geosite_cc_index && pkt_5tuple->geosite_cc_index != r->geosite_cc_index)
+  {
+      return 0;
+  }
 
   if (r->proto)
     {
@@ -1043,7 +1074,7 @@ multi_acl_match_get_applied_ace_index (acl_main_t * am, int is_ip6, fa_5tuple_t 
 }
 
 always_inline u32
-multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6, 
+multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
                                                                 fa_5tuple_t * match, match_acl_t *match_acl_info)
 {
     clib_bihash_kv_72_8_t kv;
@@ -1147,75 +1178,64 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
   acl_main_t *am = p_acl_main;
   applied_hash_ace_entry_t **applied_hash_aces = vec_elt_at_index(am->hash_entry_vec_by_lc_index, lc_index);
   u32 match_index = 0;
-    if(get_cc_code & GEOSITE_FIND_CC_CODE){
+    if(get_cc_code & (GEOSITE_FIND_CC_CODE | GEOSITE_DNS_FIND_CC_CODE)){
       u32 *cc = 0;
+      u32 *dns_cc = 0;
       u32 tmp_match_index = ~0;
       vec_foreach(cc, cc_indices) {
         pkt_5tuple->geosite_cc_index = *cc;
-        pkt_5tuple->geoip_cc_index =0;
+        pkt_5tuple->geoip_cc_index = ~0;
          match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
         if(match_index < tmp_match_index){
             tmp_match_index = match_index;
         }
 
       }
-      if (tmp_match_index < vec_len((*applied_hash_aces)))
+      if (tmp_match_index < vec_len((*applied_hash_aces))){
         match_index = tmp_match_index;
-      if(vec_len(cc_indices) != 0){
-        vec_free(cc_indices);
+        return 0;
       }
-        
+      tmp_match_index = ~0;
+      vec_foreach(dns_cc, dns_cc_indices) {
+        pkt_5tuple->geosite_cc_index = ~0;
+        pkt_5tuple->geoip_cc_index =*dns_cc;
 
-        if(get_cc_code & GEOSITE_DNS_FIND_CC_CODE ){
-        u32 *dns_cc = 0;
-        vec_foreach(dns_cc, dns_cc_indices) {
-          pkt_5tuple->geosite_cc_index = 0;
-          pkt_5tuple->geoip_cc_index =*dns_cc;
-        
-          match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
-          if(match_index < tmp_match_index){
-              tmp_match_index = match_index;
-          }
-
-        }
-        if (tmp_match_index < vec_len((*applied_hash_aces)))
-          match_index = tmp_match_index;
-        if(vec_len(dns_cc_indices) != 0)
-          vec_free(dns_cc_indices);
-      }else{
-        if(vec_len(cc_indices) != 0)
-          vec_free(cc_indices);        
-        if(vec_len(dns_cc_indices) != 0)
-          vec_free(dns_cc_indices);
-      }
-      }
-      else if(get_cc_code & GEOIP_FIND_CC_CODE){
-        u32 *cc = 0;
-        u32 tmp_match_index = ~0;
-        vec_foreach(cc, cc_indices) {
-          
-          pkt_5tuple->geosite_cc_index =0;
-          pkt_5tuple->geoip_cc_index = *cc;
-          match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
-          if(match_index < tmp_match_index){
+        match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
+        if(match_index < tmp_match_index){
             tmp_match_index = match_index;
         }
- 
-        }
-        if (tmp_match_index < vec_len((*applied_hash_aces)))
+
+      }
+      if (tmp_match_index < vec_len((*applied_hash_aces)))
           match_index = tmp_match_index;
-        if(vec_len(cc_indices) != 0)
-          vec_free(cc_indices);
+    }
+    else if(get_cc_code & GEOIP_FIND_CC_CODE){
+      u32 *cc = 0;
+      u32 tmp_match_index = ~0;
+      vec_foreach(cc, cc_indices) {
+
+        pkt_5tuple->geosite_cc_index = ~0;
+        pkt_5tuple->geoip_cc_index = *cc;
+        match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
+        if(match_index < tmp_match_index){
+          tmp_match_index = match_index;
       }
+ 
+      }
+      if (tmp_match_index < vec_len((*applied_hash_aces)))
+        match_index = tmp_match_index;
+    }
     
-      else
-      {
-          pkt_5tuple->geosite_cc_index =0;
-          pkt_5tuple->geoip_cc_index = 0;
-         match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
-      }
+    else
+    {
+        pkt_5tuple->geosite_cc_index = ~0;
+        pkt_5tuple->geoip_cc_index = ~0;
+       match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
+    }
 
 
+  vec_free(cc_indices);
+  vec_free(dns_cc_indices);
   
   if (match_index < vec_len((*applied_hash_aces))) {
     applied_hash_ace_entry_t *pae = vec_elt_at_index((*applied_hash_aces), match_index);
@@ -1416,25 +1436,25 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
 {
     acl_main_t *am = p_acl_main;
 
-   
-    if(get_cc_code & GEOSITE_FIND_CC_CODE){
-      u32 *cc = 0;
-      match_acl_t *tmp_match_acl_info = NULL;
-      match_acl_t *tmp_dns_match_acl_info = NULL;
-      vec_foreach(cc, cc_indices) {
-        pkt_5tuple->geosite_cc_index = *cc;
-        pkt_5tuple->geoip_cc_index =0;
-       
-        
-        multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
-    
-        if(match_acl_info->acl_match_count > 0 ){
-          get_single_match_acl_info(match_acl_info, &tmp_match_acl_info);
-  
+    if(get_cc_code & (GEOSITE_FIND_CC_CODE | GEOSITE_DNS_FIND_CC_CODE)) {
+        u32 *cc = 0;
+        u32 *dns_cc = 0;
+        match_acl_t *tmp_match_acl_info = NULL;
+        match_acl_t *tmp_dns_match_acl_info = NULL;
+
+        vec_foreach(cc, cc_indices) {
+            pkt_5tuple->geosite_cc_index = *cc;
+            pkt_5tuple->geoip_cc_index = ~0;
+
+            multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
+
+            if(match_acl_info->acl_match_count > 0 ){
+                get_single_match_acl_info(match_acl_info, &tmp_match_acl_info);
+
+            }
         }
-      }
-      if(tmp_match_acl_info != NULL){
-        match_acl_info->acl_match_count = tmp_match_acl_info->acl_match_count;
+        if(tmp_match_acl_info != NULL ){
+            match_acl_info->acl_match_count = tmp_match_acl_info->acl_match_count;
             for (int i = 0; i < tmp_match_acl_info->acl_match_count; i++) {
                 match_acl_info->acl_index[i] = tmp_match_acl_info->acl_index[i];
                 match_acl_info->action[i] = tmp_match_acl_info->action[i];
@@ -1448,64 +1468,61 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
                 match_acl_info->acl_priority[i] = tmp_match_acl_info->acl_priority[i];
                 
             }
-    
-           }
+        }
+        if( match_acl_info->acl_match_count > 1)
+        {
+            clib_mem_free(tmp_match_acl_info);
+            return 0;
+        }
       
-      if(vec_len(cc_indices) != 0)
-      vec_free(cc_indices);
-
-      //when domain can resove ip ,we also need to match geoip
-      //and then choose the best match between geosite and geoip
-      if(get_cc_code & GEOSITE_DNS_FIND_CC_CODE){
-        u32 *dns_cc = 0;
+        //when geosite cc cant match,try to resovle dns then match geoip
         
         vec_foreach(dns_cc, dns_cc_indices) {
-          pkt_5tuple->geosite_cc_index = 0;
-          pkt_5tuple->geoip_cc_index =*dns_cc;
-        
-          multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
-          if(match_acl_info->acl_match_count > 0 ){
-            get_single_match_acl_info(match_acl_info, &tmp_dns_match_acl_info);
-     
-          }
+            pkt_5tuple->geosite_cc_index = ~0;
+            pkt_5tuple->geoip_cc_index =*dns_cc;
+            multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
+            if(match_acl_info->acl_match_count > 0 ){
+                get_single_match_acl_info(match_acl_info, &tmp_dns_match_acl_info);
+
+            }
         }
-
-
-              
-              
-        if(vec_len(dns_cc_indices) != 0)
-          vec_free(dns_cc_indices);
-      
-      }
-
-      if(tmp_match_acl_info != NULL && tmp_dns_match_acl_info != NULL)
-        get_last_match_acl_info(match_acl_info, tmp_match_acl_info,tmp_dns_match_acl_info);
-
-
-
-      if(tmp_match_acl_info != NULL){
-          clib_mem_free(tmp_match_acl_info);
-          tmp_match_acl_info = NULL;}
-
-      if(tmp_dns_match_acl_info != NULL){
-          clib_mem_free(tmp_dns_match_acl_info);
-          tmp_dns_match_acl_info = NULL;}          
-
-      }
-      else if(get_cc_code & GEOIP_FIND_CC_CODE){
-        u32 *cc = 0;
-         match_acl_t *tmp_match_acl_info = NULL ;
-        vec_foreach(cc, cc_indices) {
-          
-          pkt_5tuple->geosite_cc_index =0;
-          pkt_5tuple->geoip_cc_index = *cc;
-          multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
-          if(match_acl_info->acl_match_count > 0 ){
-            get_single_match_acl_info(match_acl_info, &tmp_match_acl_info);   
-
-            }       
+        if(tmp_dns_match_acl_info != NULL){
+            match_acl_info->acl_match_count = tmp_dns_match_acl_info->acl_match_count;
+            for (int i = 0; i < tmp_dns_match_acl_info->acl_match_count; i++) {
+                match_acl_info->acl_index[i] = tmp_dns_match_acl_info->acl_index[i];
+                match_acl_info->action[i] = tmp_dns_match_acl_info->action[i];
+                match_acl_info->rule_index[i] = tmp_dns_match_acl_info->rule_index[i];
+                match_acl_info->acl_pos[i] = tmp_dns_match_acl_info->acl_pos[i];
+                match_acl_info->curr_match_index[i] = tmp_dns_match_acl_info->curr_match_index[i];
+                match_acl_info->action_expand_bitmap[i] = tmp_dns_match_acl_info->action_expand_bitmap[i];
+                match_acl_info->policer_index[i] = tmp_dns_match_acl_info->policer_index[i];
+                match_acl_info->set_tc_value[i] = tmp_dns_match_acl_info->set_tc_value[i];
+            }
         }
+   
+
         if(tmp_match_acl_info != NULL){
+            clib_mem_free(tmp_match_acl_info);
+            tmp_match_acl_info = NULL;}
+
+        if(tmp_dns_match_acl_info != NULL){
+            clib_mem_free(tmp_dns_match_acl_info);
+            tmp_dns_match_acl_info = NULL;}
+      }
+      else if(get_cc_code & GEOIP_FIND_CC_CODE) {
+          u32 *cc = 0;
+          match_acl_t *tmp_match_acl_info = NULL ;
+          vec_foreach(cc, cc_indices) {
+
+              pkt_5tuple->geosite_cc_index = ~0;
+              pkt_5tuple->geoip_cc_index = *cc;
+              multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
+              if(match_acl_info->acl_match_count > 0 ){
+                  get_single_match_acl_info(match_acl_info, &tmp_match_acl_info);
+
+              }
+          }
+          if(tmp_match_acl_info != NULL){
               match_acl_info->acl_match_count = tmp_match_acl_info->acl_match_count;
               for (int i = 0; i < tmp_match_acl_info->acl_match_count; i++) {
                   match_acl_info->acl_index[i] = tmp_match_acl_info->acl_index[i];
@@ -1520,21 +1537,17 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
                   match_acl_info->acl_priority[i] = tmp_match_acl_info->acl_priority[i];
               }
               clib_mem_free(tmp_match_acl_info);
-              tmp_match_acl_info = NULL;}   
-        
-        if(vec_len(cc_indices) != 0){
-           vec_free(cc_indices);
-        }
+              tmp_match_acl_info = NULL;}
       }
-    
       else
       {
-           pkt_5tuple->geosite_cc_index =0;
-          pkt_5tuple->geoip_cc_index = 0;
-        multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
-  
-    }
-    
+          pkt_5tuple->geosite_cc_index = ~0;
+          pkt_5tuple->geoip_cc_index = ~0;
+          multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
+      }
+
+      vec_free(cc_indices);
+      vec_free(dns_cc_indices);
 
     return 0;
 }

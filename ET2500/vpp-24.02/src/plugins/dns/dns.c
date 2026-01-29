@@ -67,7 +67,11 @@ dns_cache_clear (dns_main_t * dm)
   pool_foreach (ep, dm->entries)
    {
     vec_free (ep->name);
-    vec_free (ep->pending_requests);
+    vec_free (ep->dns_request);
+    vec_free (ep->dns_request6);
+    vec_free (ep->dns_response);
+    vec_free (ep->dns_response6);
+    clib_fifo_free (ep->pending_requests);
   }
   /* *INDENT-ON* */
 
@@ -791,7 +795,11 @@ vnet_dns_delete_entry_by_index_nolock (dns_main_t * dm, u32 index)
 found:
   hash_unset_mem (dm->cache_entry_by_name, ep->name);
   vec_free (ep->name);
-  vec_free (ep->pending_requests);
+  vec_free (ep->dns_request);
+  vec_free (ep->dns_request6);
+  vec_free (ep->dns_response);
+  vec_free (ep->dns_response6);
+  clib_fifo_free (ep->pending_requests);
   pool_put (dm->entries, ep);
 
   return 0;
@@ -999,12 +1007,27 @@ search_again:
 	}
       else
 	{
+      if (t->request_type == DNS_INTERNAL_PENDING_NAME_TO_IP ||
+          t->request_type == DNS_INTERNAL_PENDING_IP_TO_NAME)
+      {
+	    dns_cache_unlock (dm);
+	    return (0);
+      }
 	  /*
 	   * Resolution pending. Add request to the pending vector
 	   * by copying the template request
 	   */
-	  vec_add2 (ep->pending_requests, pr, 1);
+	  clib_fifo_add2 (ep->pending_requests, pr);
 	  memcpy (pr, t, sizeof (*pr));
+      /*
+       * Check current entry pending_requests len
+       * If the limit is exceeded, remove the oldest request
+       */
+	  if(clib_fifo_elts (ep->pending_requests) > DNS_PER_ENTRY_PENDING_REQUESTS_MAX)
+      {
+          //remove oldest
+          clib_fifo_sub2(ep->pending_requests, pr);
+      }
 	  dns_cache_unlock (dm);
 	  return (0);
 	}
@@ -1031,8 +1054,17 @@ re_resolve:
 
   hash_set_mem (dm->cache_entry_by_name, ep->name, ep - dm->entries);
 
+  /* Internal pending type Skip add pending_requests */
+  if (t->request_type == DNS_INTERNAL_PENDING_NAME_TO_IP ||
+      t->request_type == DNS_INTERNAL_PENDING_IP_TO_NAME)
+    {
+        vnet_send_dns_request (vm, dm, ep);
+        dns_cache_unlock (dm);
+        return 0;
+    }
+
   vec_add1 (dm->unresolved_entries, ep - dm->entries);
-  vec_add2 (ep->pending_requests, pr, 1);
+  clib_fifo_add2 (ep->pending_requests, pr);
 
   pr->request_type = t->request_type;
 
@@ -2433,7 +2465,7 @@ format_dns_cache (u8 * s, va_list * args)
 
                 if (verbose > 2)
                   s = format (s, "    %d client notifications pending\n",
-                              vec_len(ep->pending_requests));
+                              clib_fifo_elts(ep->pending_requests));
               }
           }
         else
@@ -2441,6 +2473,9 @@ format_dns_cache (u8 * s, va_list * args)
             ASSERT (ep->dns_request);
             s = format (s, "[P] %U", format_dns_reply, ep->dns_request,
                         verbose);
+            if (verbose > 2)
+                s = format (s, "    %d client notifications pending\n",
+                              clib_fifo_elts(ep->pending_requests));
           }
         vec_add1 (s, '\n');
       }
@@ -3321,7 +3356,6 @@ dns_query_domain_name (u8  * domain,dns_resolve_name_t **rn)
   dns_pending_request_t _t0 = { 0 }, *t0 = &_t0;
   int rv;
  dns_resolve_name_t *rn2 = NULL;
-  dns_resolve_name_t *_rn;
 
 
  
@@ -3329,18 +3363,11 @@ dns_query_domain_name (u8  * domain,dns_resolve_name_t **rn)
   {
     return 0;
   }
-  t0->request_type = DNS_API_PENDING_NAME_TO_IP;
+  t0->request_type = DNS_INTERNAL_PENDING_NAME_TO_IP;
   t0->client_index = 0;
   t0->client_context = 0;
   t0->qp_type = DNS_TYPE_A;
   rv = dns_resolve_name_ex (domain, &ep, t0, &rn2);
-           for(int i=0; i< vec_len(rn2); i++)
-           {
-              _rn = &rn2[i];
-              u8 *ip_str = format(0, "%U", format_ip4_address, &_rn->address.ip.ip4);
-              vec_free(ip_str); 
-            
-           }
            
   /* Error, e.g. not enabled? Tell the user */
   if (rv < 0)

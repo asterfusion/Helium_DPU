@@ -53,7 +53,7 @@ bool geoip_load_default = false;
 int geosite_enable_disable (geosite_main_t * gmp, u32 sw_if_index,
                                    int enable_disable)
 {
-  vnet_sw_interface_t * sw;
+
   int rv = 0;
 
   /* Utterly wrong? */
@@ -61,10 +61,6 @@ int geosite_enable_disable (geosite_main_t * gmp, u32 sw_if_index,
                           sw_if_index))
     return VNET_API_ERROR_INVALID_SW_IF_INDEX;
 
-  /* Not a physical port? */
-  sw = vnet_get_sw_interface (gmp->vnet_main, sw_if_index);
-  if (sw->type != VNET_SW_INTERFACE_TYPE_HARDWARE)
-    return VNET_API_ERROR_INVALID_SW_IF_INDEX;
 
   geosite_create_periodic_process (gmp);
 
@@ -117,11 +113,6 @@ geosite_enable_disable_command_fn (vlib_main_t * vm,
   switch(rv)
     {
   case 0:
-    break;
-
-  case VNET_API_ERROR_INVALID_SW_IF_INDEX:
-    return clib_error_return
-      (0, "Invalid interface, only works on physical ports");
     break;
 
   case VNET_API_ERROR_UNIMPLEMENTED:
@@ -395,6 +386,8 @@ show_geosite_stats_command_fn(vlib_main_t *vm,
         {
             show_details = true;
         }
+        else
+            break;
     }
 
     u32 cc_total = pool_elts(gmp->domain_trie->country_codes);
@@ -572,6 +565,8 @@ show_geoip_stats_command_fn(vlib_main_t *vm,
         {
             show_details = true;
         }
+        else
+            break;
     }
 
     u32 cc_total = pool_elts(gmp->geoip_trie->country_codes);
@@ -826,9 +821,6 @@ u32 *geoip_get_country_code_by_ip4(ip4_address_t ip4)
         return NULL;
     }
   
-     u8 *ip_str = format(0, "%U", format_ip4_address, &ip4);
-    vec_free(ip_str);
-        
         cc_indices = geoip_lookup_v4 (db, &ip4);
         if (vec_len(cc_indices) != 0) {
          
