@@ -174,7 +174,7 @@ extern fib_node_index_t fib_path_create_special(fib_node_index_t pl_index,
 
 extern int fib_path_cmp(fib_node_index_t path_index1,
 			fib_node_index_t path_index2);
-extern int fib_path_cmp_for_sort(void * a1, void * a2);
+// extern int fib_path_cmp_for_sort(void * a1, void * a2);
 extern int fib_path_cmp_w_route_path(fib_node_index_t path_index,
 				     const fib_route_path_t *rpath);
 extern fib_node_index_t fib_path_copy(fib_node_index_t path_index,
