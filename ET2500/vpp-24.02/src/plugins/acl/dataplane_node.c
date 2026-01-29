@@ -394,8 +394,6 @@ acl_get_country_index_by_domain(vlib_buffer_t **b, u32 **cc_indices, u32 **dns_c
     for (int i = 0; i < vec_len(rn); i++)
     {
       dns_resolve_name_t *_rn = &rn[i];
-      u8 *ip_str = format(0, "%U", format_ip4_address, &_rn->address.ip.ip4);
-      vec_free(ip_str);
       u32 *cc_indices_tmp;
       if (is_ipv6)
       {

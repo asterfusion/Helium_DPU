@@ -1123,11 +1123,11 @@ make_mask_and_match_from_rule(fa_5tuple_t *mask, acl_rule_t *r, hash_ace_info_t 
       hi->match.src_sw_if_index = r->src_sw_if_index;
   }
 
-  if (r->geosite_cc_index != 0) {
+  if (r->geosite_cc_index != 0xffff) {
       mask->geosite_cc_index = ~0;
       hi->match.geosite_cc_index = r->geosite_cc_index;
   }
-    if (r->geoip_cc_index != 0) {
+    if (r->geoip_cc_index != 0xffff) {
       mask->geoip_cc_index = ~0;
       hi->match.geoip_cc_index = r->geoip_cc_index;
   }

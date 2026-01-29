@@ -69,16 +69,14 @@ void domain_trie_add(domain_trie_t *trie, const char *domain, const char *countr
             domain_trie_node_t *new_node = NULL;
             pool_get(trie->nodes, new_node);
             clib_memset(new_node, 0, sizeof(*new_node));
-            new_node->children = hash_create_mem(0, sizeof(u8 *), sizeof(uword));  // must create mem-based hash
+            new_node->children = hash_create_string(0, sizeof(uword));  // must create mem-based hash
 
             u32 new_index = new_node - trie->nodes;
-            hash_set_mem_alloc(&(trie->nodes[node_index].children), label, new_index);
+            hash_set_mem(trie->nodes[node_index].children, label, new_index);
             node_index = new_index;
         } else {
             node_index = *childp;
         }
-
-        vec_free(label);
         p = dot - 1;
     }
 
@@ -214,7 +212,7 @@ void domain_trie_free(domain_trie_t *trie) {
 
         /* iterate all entries and free keys */
         hash_foreach_mem(key, value, node->children, ({
-                    clib_mem_free(key);   // free key string
+                    vec_free(key);   // free key string
                     }));
 
         hash_free(node->children);

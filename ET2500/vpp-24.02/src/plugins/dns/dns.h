@@ -50,6 +50,8 @@ typedef enum
   DNS_API_PENDING_IP_TO_NAME,
   DNS_PEER_PENDING_NAME_TO_IP,
   DNS_PEER_PENDING_IP_TO_NAME,
+  DNS_INTERNAL_PENDING_NAME_TO_IP,
+  DNS_INTERNAL_PENDING_IP_TO_NAME,
 } dns_pending_request_type_t;
 
 typedef struct
@@ -96,6 +98,8 @@ typedef struct
 
 #define DNS_RESOLVER_EVENT_RESOLVED	1
 #define DNS_RESOLVER_EVENT_PENDING	2
+
+#define DNS_PER_ENTRY_PENDING_REQUESTS_MAX (1024)
 
 u8  dns_query_domain_name(u8  * domain,dns_resolve_name_t** rn);
 

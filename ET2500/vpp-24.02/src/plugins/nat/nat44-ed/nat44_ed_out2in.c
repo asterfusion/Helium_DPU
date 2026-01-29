@@ -598,9 +598,32 @@ create_bypass_for_fwd (snat_main_t *sm, vlib_buffer_t *b, snat_session_t *s,
   if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv, &value))
     {
       ASSERT (thread_index == ed_value_get_thread_index (&value));
+      /*
+       * Attack and error checking
+       * This is a fault-tolerant mechanism, which may conceal some issues.
+       * But we have to do this, otherwise if we receive errors pkts, the system will crash.
+       * In the debugging:
+       *    By asserting whether the thread is correct and
+       *    whether the session flag contains "bypass_fwd",
+       *    issues can be identified in advance.
+       * In the release:
+       *    Direct return and output warning message
+       */
+      if (thread_index != ed_value_get_thread_index (&value))
+      {
+          clib_warning("NAT bypass fwd thread error: Maybe received illegal or abnormal Packet!!");
+          return;
+      }
       s =
 	pool_elt_at_index (tsm->sessions,
 			   ed_value_get_session_index (&value));
+
+      ASSERT(na44_ed_is_fwd_bypass_session(s));
+      if (!na44_ed_is_fwd_bypass_session(s))
+      {
+          clib_warning("NAT bypass fwd session flag error: Maybe received illegal or abnormal Packet!!");
+          return;
+      }
     }
   else if (ip->protocol == IP_PROTOCOL_ICMP &&
 	   icmp_type_is_error_message

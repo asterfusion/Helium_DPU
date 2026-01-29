@@ -400,6 +400,7 @@ ip6_sv_reass_update (vlib_main_t *vm, vlib_node_runtime_t *node,
       fvnb->ip.reass.ip6_frag_hdr_offset == 0 ||
       fvnb->ip.reass.ip6_frag_hdr_offset >= fb->current_length)
     {
+      vec_add1 (reass->cached_buffers, bi0);
       return IP6_SV_REASS_RC_INTERNAL_ERROR;
     }
 
@@ -410,6 +411,7 @@ ip6_sv_reass_update (vlib_main_t *vm, vlib_node_runtime_t *node,
     (fvnb->ip.reass.ip6_frag_hdr_offset + sizeof (*frag_hdr));
   if (0 == fragment_length)
     {
+      vec_add1 (reass->cached_buffers, bi0);
       return IP6_SV_REASS_RC_INVALID_FRAG_LEN;
     }
   u32 fragment_last = fvnb->ip.reass.fragment_last =
@@ -419,12 +421,11 @@ ip6_sv_reass_update (vlib_main_t *vm, vlib_node_runtime_t *node,
   fvnb->ip.reass.next_range_bi = ~0;
   if (0 == fragment_first)
     {
-      if (!ip6_get_port
+      ip6_get_port
 	  (vm, fb, fip, fb->current_length, &reass->ip_proto,
 	   &reass->l4_src_port, &reass->l4_dst_port,
 	   &reass->icmp_type_or_tcp_flags, &reass->tcp_ack_number,
-	   &reass->tcp_seq_number))
-	return IP6_SV_REASS_RC_UNSUPP_IP_PROTO;
+	   &reass->tcp_seq_number);
 
       reass->is_complete = true;
       vlib_buffer_t *b0 = vlib_get_buffer (vm, bi0);
