@@ -57,6 +57,7 @@ typedef struct
   u8 flags;			/* 0=normal, 1=bvi */
   u8 shg;			/* split horizon group number  */
   u16 spare;
+  u8 is_tunnel;    /* 1=tunnel,0=not tunnel */
 } l2_flood_member_t;
 
 /* Per-bridge domain configuration */
@@ -117,6 +118,8 @@ typedef struct
   /* Current number of learned entries */
   u32 learn_count;
 
+  bool drop_unknown_multicast;
+
 } l2_bridge_domain_t;
 
 /* Limit Bridge Domain ID to 24 bits to match 24-bit VNI range */
@@ -132,6 +135,7 @@ typedef struct
   u8 arp_term;
   u8 arp_ufwd;
   u8 mac_age;
+  u8 multicast;
   u8 *bd_tag;
   u8 is_add;
 } l2_bridge_domain_add_del_args_t;
@@ -160,12 +164,14 @@ typedef enum bd_flags_t_
   L2_UU_FLOOD = (1 << 3),
   L2_ARP_TERM = (1 << 4),
   L2_ARP_UFWD = (1 << 5),
+  L2_MULTICAST = (1 << 6),
 } bd_flags_t;
 
 u32 bd_set_flags (vlib_main_t * vm, u32 bd_index, bd_flags_t flags,
 		  u32 enable);
 void bd_set_mac_age (vlib_main_t * vm, u32 bd_index, u8 age);
 void bd_set_learn_limit (vlib_main_t *vm, u32 bd_index, u32 learn_limit);
+void bd_set_unknown_multicast_packet_action (vlib_main_t *vm, u32 bd_index, bool drop);
 int bd_add_del (l2_bridge_domain_add_del_args_t * args);
 u32 bd_get_unused_id (void);
 /**

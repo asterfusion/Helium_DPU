@@ -576,5 +576,4 @@ extern u8 * format_mfib_table_memory(u8 * s, va_list * args);
 extern u32 mfib_table_get_n_routes(fib_node_index_t index,
                                    fib_protocol_t proto);
 
-
 #endif

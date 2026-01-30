@@ -574,7 +574,7 @@ int vnet_geneve_add_del_tunnel
 
       /* make sure tunnel is removed from l2 bd or xconnect */
       set_int_l2_mode (vxm->vlib_main, vnm, MODE_L3, t->sw_if_index, 0,
-		       L2_BD_PORT_TYPE_NORMAL, 0, 0);
+		       L2_BD_PORT_TYPE_NORMAL, 0, 0,0);
 
       if (t->l3_mode)
 	ethernet_delete_interface (vnm, t->hw_if_index);

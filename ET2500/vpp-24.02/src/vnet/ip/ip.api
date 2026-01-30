@@ -497,6 +497,20 @@ define ip_mroute_add_del_reply
   u32 stats_index;
 };
 
+/** \brief unknown packet action
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param table_id - fib table /vrf
+    @param punt - true to punt, false to drop
+*/
+autoreply define set_unknown_unicast_packet_action
+{
+  u32 client_index;
+  u32 context;
+  u32 table_id;
+  bool punt;
+};
+
 /** \brief Dump IP multicast fib table
     @param table - The table from which to dump routes (ony ID an AF are needed)
 */

@@ -3183,6 +3183,8 @@ nat44_ed_get_out2in_worker_index (vlib_buffer_t *b, ip4_header_t *ip,
 	  if (PREDICT_TRUE (
 		!clib_bihash_search_16_8 (&sm->flow_hash, &kv16, &value16)))
 	    {
+		  vnet_buffer2 (b)->nat.cached_session_index =
+		    ed_value_get_session_index (&value16);
 	      next_worker_index = ed_value_get_thread_index (&value16);
 	      nat_elog_debug_handoff (
 		sm, "HANDOFF OUT2IN (session)", next_worker_index,

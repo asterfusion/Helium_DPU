@@ -37,6 +37,7 @@ vl_api_lcp_pppoe_add_del_session_t_handler (
   u32 sw_if_index;
   u8 sw_if_name[16];
 
+  sw_if_name[0] = '\0';
   if (!vnet_sw_if_index_is_api_valid(encap_sw_if_index)) {
       rv = VNET_API_ERROR_INVALID_SW_IF_INDEX;     
       goto bad_sw_if_index;                       

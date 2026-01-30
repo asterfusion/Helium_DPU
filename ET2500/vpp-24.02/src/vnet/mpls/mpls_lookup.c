@@ -21,12 +21,16 @@
 #include <vnet/dpo/load_balance_map.h>
 #include <vnet/dpo/replicate_dpo.h>
 #include <vnet/mpls/mpls.api_enum.h>
-
+#include <vppinfra/bihash_8_8.h>
+#include <vnet/mpls/mpls_l2_decap.h>
+#include <vnet/mpls/mpls.h>
+#include <vnet/l2/l2_input.h>
 /**
  * The arc/edge from the MPLS lookup node to the MPLS replicate node
  */
 #ifndef CLIB_MARCH_VARIANT
 u32 mpls_lookup_to_replicate_edge;
+u32 mpls_lookup_to_l2_input_edge;
 #endif /* CLIB_MARCH_VARIANT */
 
 typedef struct {
@@ -302,16 +306,7 @@ VLIB_NODE_FN (mpls_lookup_node) (vlib_main_t * vm,
           vnet_buffer (b3)->mpls.ttl = ((char*)h3)[3];
           vnet_buffer (b3)->mpls.exp = (((char*)h3)[2] & 0xe) >> 1;
           vnet_buffer (b3)->mpls.first = 1;
-
-          /*
-           * pop the label that was just used in the lookup
-           */
-          vlib_buffer_advance(b0, sizeof(*h0));
-          vlib_buffer_advance(b1, sizeof(*h1));
-          vlib_buffer_advance(b2, sizeof(*h2));
-          vlib_buffer_advance(b3, sizeof(*h3));
-
-          if (PREDICT_FALSE(b0->flags & VLIB_BUFFER_IS_TRACED))
+if (PREDICT_FALSE(b0->flags & VLIB_BUFFER_IS_TRACED))
           {
               mpls_lookup_trace_t *tr = vlib_add_trace (vm, node,
                                                         b0, sizeof (*tr));
@@ -354,6 +349,75 @@ VLIB_NODE_FN (mpls_lookup_node) (vlib_main_t * vm,
               tr->hash = hash_c3;
               tr->label_net_byte_order = h3->label_exp_s_ttl;
           }
+      
+
+
+
+          /*
+           * pop the label that was just used in the lookup
+           */
+          vlib_buffer_advance(b0, sizeof(*h0));
+          vlib_buffer_advance(b1, sizeof(*h1));
+          vlib_buffer_advance(b2, sizeof(*h2));
+          vlib_buffer_advance(b3, sizeof(*h3));
+          
+            u32 mpls_tunnel_index0;
+            u32 mpls_tunnel_index1;
+            u32 mpls_tunnel_index2;
+            u32 mpls_tunnel_index3;
+
+
+            if(mpls_l2_decap_lookup(h0))
+            {
+                
+                mpls_tunnel_index0 =mpls_l2_decap_lookup(h0);
+                vnet_buffer (b0)->ip.adj_index[VLIB_TX] = 0;
+                vnet_buffer(b0)->sw_if_index[VLIB_RX] = mpls_tunnel_index0;
+                    b0->flags |= VNET_BUFFER_F_L2_HDR_OFFSET_VALID;
+                    vnet_buffer(b0)->l2_hdr_offset = 0;
+                    vnet_update_l2_len (b0);
+                    next0 = mpls_lookup_to_l2_input_edge;
+                
+            }
+          
+            if(mpls_l2_decap_lookup(h1))
+            {
+                
+                mpls_tunnel_index1 =mpls_l2_decap_lookup(h1);
+                vnet_buffer (b1)->ip.adj_index[VLIB_TX] = 0;
+                vnet_buffer(b1)->sw_if_index[VLIB_RX] = mpls_tunnel_index1;
+                    b1->flags |= VNET_BUFFER_F_L2_HDR_OFFSET_VALID;
+                    vnet_buffer(b1)->l2_hdr_offset = 0;
+                    vnet_update_l2_len (b1);
+                    next1 = mpls_lookup_to_l2_input_edge;
+                
+            }
+            if(mpls_l2_decap_lookup(h2))
+            {
+                
+                mpls_tunnel_index2 =mpls_l2_decap_lookup(h2);
+                vnet_buffer (b2)->ip.adj_index[VLIB_TX] = 0;
+                vnet_buffer(b2)->sw_if_index[VLIB_RX] = mpls_tunnel_index2;
+                    b2->flags |= VNET_BUFFER_F_L2_HDR_OFFSET_VALID;
+                    vnet_buffer(b2)->l2_hdr_offset = 0;
+                    vnet_update_l2_len (b2);
+                    next2 = mpls_lookup_to_l2_input_edge;
+                
+            }
+            if(mpls_l2_decap_lookup(h3))
+            {
+                
+                mpls_tunnel_index3 =mpls_l2_decap_lookup(h3);
+                vnet_buffer (b3)->ip.adj_index[VLIB_TX] = 0;
+                vnet_buffer(b3)->sw_if_index[VLIB_RX] = mpls_tunnel_index3;
+                    b3->flags |= VNET_BUFFER_F_L2_HDR_OFFSET_VALID;
+                    vnet_buffer(b3)->l2_hdr_offset = 0;
+                    vnet_update_l2_len (b3);
+                    next3 = mpls_lookup_to_l2_input_edge;
+                
+            }
+
+          
 
           vlib_validate_buffer_enqueue_x4 (vm, node, next_index,
                                            to_next, n_left_to_next,
@@ -426,12 +490,6 @@ VLIB_NODE_FN (mpls_lookup_node) (vlib_main_t * vm,
           vnet_buffer (b0)->mpls.ttl = ((char*)h0)[3];
           vnet_buffer (b0)->mpls.exp = (((char*)h0)[2] & 0xe) >> 1;
           vnet_buffer (b0)->mpls.first = 1;
-
-          /*
-           * pop the label that was just used in the lookup
-           */
-          vlib_buffer_advance(b0, sizeof(*h0));
-
           if (PREDICT_FALSE(b0->flags & VLIB_BUFFER_IS_TRACED))
           {
               mpls_lookup_trace_t *tr = vlib_add_trace (vm, node,
@@ -442,6 +500,26 @@ VLIB_NODE_FN (mpls_lookup_node) (vlib_main_t * vm,
               tr->hash = hash_c0;
               tr->label_net_byte_order = h0->label_exp_s_ttl;
           }
+
+
+          /*
+           * pop the label that was just used in the lookup
+           */
+          vlib_buffer_advance(b0, sizeof(*h0));
+          u32 mpls_tunnel_index;
+          if(mpls_l2_decap_lookup(h0))
+            {
+                
+                mpls_tunnel_index =mpls_l2_decap_lookup(h0);
+                vnet_buffer (b0)->ip.adj_index[VLIB_TX] = 0;
+                vnet_buffer(b0)->sw_if_index[VLIB_RX] = mpls_tunnel_index;
+                    b0->flags |= VNET_BUFFER_F_L2_HDR_OFFSET_VALID;
+                    vnet_buffer(b0)->l2_hdr_offset = 0;
+                    vnet_update_l2_len (b0);
+                    next0 = mpls_lookup_to_l2_input_edge;
+                
+            }
+
 
           vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
                                            to_next, n_left_to_next,
@@ -721,7 +799,10 @@ mpls_lookup_init (vlib_main_t * vm)
       vlib_node_add_named_next(vm,
                                mm->mpls_lookup_node_index,
                                "mpls-replicate");
-
+  mpls_lookup_to_l2_input_edge =
+      vlib_node_add_named_next(vm,
+                               mm->mpls_lookup_node_index,
+                               "l2-input");
   return (NULL);
 }
 

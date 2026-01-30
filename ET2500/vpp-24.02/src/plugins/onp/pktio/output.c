@@ -11,6 +11,7 @@
 
 #include <onp/onp.h>
 #include <onp/drv/inc/dpu.h>
+#include <vppinfra/linux/sysfs.h>
 
 #define foreach_onp_tx_func_error                                             \
   _ (BAD_PARAM, "Invalid parameters")                                         \
@@ -84,62 +85,248 @@ onp_pktio_tx_pkts_trace (vlib_main_t *vm, vlib_node_runtime_t *node,
 }
 
 #ifdef VPP_PLATFORM_ET2500
+typedef enum
+{
+  ONP_PORT_TYPE_UNKNOWN = 0,
+  ONP_PORT_TYPE_RJ45,
+  ONP_PORT_TYPE_SFP,
+  ONP_PORT_TYPE_QSFP,
+} onp_port_type_t;
+
+typedef struct
+{
+  onp_port_type_t type;
+  int a_param; /* scratch params or path id override; -1 unused */
+  int b_param; /* scratch register params; -1 when unused */
+} onp_port_map_entry_t;
+
+typedef struct
+{
+  const onp_port_map_entry_t *map;
+  u32 port_count;
+  const char *sfp_path_fmt;  /* printf format with single %u */
+  const char *qsfp_path_fmt; /* printf format with single %u */
+  const char *sfp_up;
+  const char *sfp_down;
+  const char *qsfp_up;
+  const char *qsfp_down;
+  bool gpio_on_down;
+  int gpio_offset_adjust; /* gpio_offset = hw_if_index + adjust */
+  i8 *state_cache;	      /* optional dedup cache, 1-based indexed */
+} onp_platform_desc_t;
+
+/* ---------------------- ET2500 ---------------------- */
+
 #define ETH_CMD_LINK_BRING_UP 0x0000000000000015
 #define ETH_CMD_LINK_BRING_DOWN 0x0000000000000019
 #define ET2500_PORT_NUM 16
-#define SFP_SYSFS_BASE_PATH "/sys/bus/i2c/devices/3-0040/ET2500_SFP"
-#define SFP_TX_CTRL_PREFIX  "SFP_tx_ctrl_"
-#define GPIO_OFFSET(hw_if_index) ((hw_if_index) - 9)
-typedef struct {
-  int a_param;
-  int b_param;
-} port_mapping_t;
+#define ET2500_SFP_SYSFS_BASE "/sys/bus/i2c/devices/3-0040/ET2500_SFP"
+#define ET2500_SFP_TX_CTRL_PREFIX "SFP_tx_ctrl_"
+
+static const onp_port_map_entry_t onp_et2500_port_map[ET2500_PORT_NUM + 1] = {
+  { ONP_PORT_TYPE_UNKNOWN, -1, -1 },
+  { ONP_PORT_TYPE_RJ45, 0, 3 },  { ONP_PORT_TYPE_RJ45, 0, 0 },
+  { ONP_PORT_TYPE_RJ45, 0, 2 },  { ONP_PORT_TYPE_RJ45, 0, 1 },
+  { ONP_PORT_TYPE_RJ45, 0, 7 },  { ONP_PORT_TYPE_RJ45, 0, 4 },
+  { ONP_PORT_TYPE_RJ45, 0, 6 },  { ONP_PORT_TYPE_RJ45, 0, 5 },
+  { ONP_PORT_TYPE_RJ45, 1, 3 },  { ONP_PORT_TYPE_RJ45, 1, 0 },
+  { ONP_PORT_TYPE_RJ45, 1, 2 },  { ONP_PORT_TYPE_RJ45, 1, 1 },
+  { ONP_PORT_TYPE_SFP, -1, -1 }, { ONP_PORT_TYPE_SFP, -1, -1 },
+  { ONP_PORT_TYPE_SFP, -1, -1 }, { ONP_PORT_TYPE_SFP, -1, -1 },
+};
+
+/* ---------------------- ET3600 ---------------------- */
+
+#define ET3600_SYSFS_BASE "/sys/bus/i2c/devices/4-0040"
+#define ET3600_PORT_NUM 4
+
+static const onp_port_map_entry_t onp_et3600_port_map[ET3600_PORT_NUM + 1] = {
+  { ONP_PORT_TYPE_UNKNOWN, -1, -1 },
+  { ONP_PORT_TYPE_SFP, 1, -1 },  { ONP_PORT_TYPE_SFP, 2, -1 },
+  { ONP_PORT_TYPE_QSFP, 1, -1 }, { ONP_PORT_TYPE_QSFP, 2, -1 },
+};
+
+static i8 onp_et3600_last_state[ET3600_PORT_NUM + 1] = { -1, -1, -1, -1,
+							 -1 };
+/* ---------------------- END ---------------------- */
+
+static const onp_platform_desc_t *
+onp_get_platform_desc (onp_main_t *om)
+{
+  switch (om->platform_type)
+    {
+    case ONP_PLATFORM_ET2500:
+      {
+	static const onp_platform_desc_t desc = {
+	  .map = onp_et2500_port_map,
+	  .port_count = ET2500_PORT_NUM,
+	  .sfp_path_fmt = ET2500_SFP_SYSFS_BASE "/" ET2500_SFP_TX_CTRL_PREFIX
+			  "%u",
+	  .sfp_up = "0",
+	  .sfp_down = "1",
+	  .gpio_on_down = true,
+	  .gpio_offset_adjust = -9,
+	};
+	return &desc;
+      }
+    case ONP_PLATFORM_ET3600:
+      {
+	static const onp_platform_desc_t desc = {
+	  .map = onp_et3600_port_map,
+	  .port_count = ET3600_PORT_NUM,
+	  .sfp_path_fmt = ET3600_SYSFS_BASE "/ET3600_SFP/sfp%u_tx_disable",
+	  .qsfp_path_fmt = ET3600_SYSFS_BASE "/ET3600_QSFP/qsfp%u_reset",
+	  .sfp_up = "0",
+	  .sfp_down = "1",
+	  .qsfp_up = "1",
+	  .qsfp_down = "0",
+	  .state_cache = onp_et3600_last_state,
+	};
+	return &desc;
+      }
+    default:
+      return NULL;
+    }
+}
+
+static void
+onp_platform_state_cache_reset (const onp_platform_desc_t *pd)
+{
+  if (!pd || !pd->state_cache)
+    return;
+
+  for (u32 i = 0; i <= pd->port_count; i++)
+    pd->state_cache[i] = -1;
+}
+
+static void
+onp_platform_link_up_down (onp_main_t *om, u32 hw_if_index, bool is_up)
+{
+  const onp_platform_desc_t *pd = onp_get_platform_desc (om);
+  const char *platform_name = onp_platform_to_string (om->platform_type);
+
+  if (!pd)
+    return;
+
+  if (hw_if_index == 0 || hw_if_index > pd->port_count)
+    {
+      onp_pktio_warn ("platform %s: hw_if_index %u out of range", platform_name,
+		      hw_if_index);
+      return;
+    }
+
+  const onp_port_map_entry_t *map = &pd->map[hw_if_index];
+  u32 port_id = hw_if_index; /* 1-based */
+
+  if (map->type == ONP_PORT_TYPE_UNKNOWN)
+    {
+      onp_pktio_warn ("platform %s: hw_if_index %u unmapped", platform_name,
+		      hw_if_index);
+      return;
+    }
+
+  if (pd->state_cache && pd->state_cache[hw_if_index] == (i8) is_up)
+    return;
+
+  if (map->type == ONP_PORT_TYPE_RJ45)
+    {
+      if (map->a_param < 0 || map->b_param < 0)
+	{
+	  onp_pktio_warn ("platform %s: hw_if_index %u rpm params missing",
+			  platform_name, hw_if_index);
+	  return;
+	}
+
+      u64 cmd_value = is_up ? ETH_CMD_LINK_BRING_UP : ETH_CMD_LINK_BRING_DOWN;
+      char cmd[128];
+      int rc = snprintf (cmd, sizeof (cmd),
+			 "txcsr RPMX_CMRX_SCRATCHX -a %d -b %d -c 1 0x%016lx",
+			 map->a_param, map->b_param, cmd_value);
+      if (rc < 0 || rc >= (int) sizeof (cmd))
+	{
+	  onp_pktio_warn ("platform %s: format txcsr failed for port %u",
+			  platform_name, port_id);
+	  return;
+	}
+
+      if(system (cmd) == -1)
+      {
+          onp_pktio_warn("platform %s, port_id %d, cmd error", platform_name, port_id);
+          return;
+      }
+    }
+  else
+    {
+      const char *path_fmt = map->type == ONP_PORT_TYPE_SFP ? pd->sfp_path_fmt :
+							      pd->qsfp_path_fmt;
+      const char *val_up = map->type == ONP_PORT_TYPE_SFP ? pd->sfp_up :
+							    pd->qsfp_up;
+      const char *val_down = map->type == ONP_PORT_TYPE_SFP ? pd->sfp_down :
+							      pd->qsfp_down;
+      int path_id = map->a_param >= 0 ? map->a_param : (int) port_id;
+
+      if (!path_fmt || !val_up || !val_down)
+	{
+	  onp_pktio_warn ("platform %s: missing sysfs config for port %u",
+			  platform_name, port_id);
+	  return;
+	}
+
+      char path[256];
+      int rc = snprintf (path, sizeof (path), path_fmt, path_id);
+      if (rc < 0 || rc >= (int) sizeof (path))
+	{
+	  onp_pktio_warn ("platform %s: format sysfs path failed for port %u",
+			  platform_name, port_id);
+	  return;
+	}
+
+      clib_sysfs_write ((char *) path, "%s", is_up ? val_up : val_down);
+      if (!is_up && pd->gpio_on_down)
+	{
+	  int gpio_offset = hw_if_index + pd->gpio_offset_adjust;
+	  if (gpio_offset >= 0)
+	    {
+	      char cmd[128];
+	      rc = snprintf (cmd, sizeof (cmd), "gpioset gpiochip0 %d=0",
+			     gpio_offset);
+	      if (rc >= 0 && rc < (int) sizeof (cmd))
+          {
+		    if(system (cmd) == -1)
+            {
+                onp_pktio_warn("platform %s, port_id %d, cmd error", platform_name, port_id);
+                return;
+            }
+          }
+	    }
+	}
+    }
+
+  if (pd->state_cache)
+    {
+      pd->state_cache[hw_if_index] = is_up;
+      onp_pktio_notice ("platform %s: port %u set %s", platform_name, port_id,
+			is_up ? "up" : "down");
+    }
+  else
+    onp_pktio_notice ("platform %s: port %u set %s", platform_name, port_id,
+		      is_up ? "up" : "down");
+}
 
 void
-onp_pktio_intf_link_up_down(u32 hw_if_index, uword up) {
-  static const port_mapping_t port_mappings[] = {
-    {-1,-1},
-    {0, 3}, //index 1
-    {0, 0}, //index 2
-    {0, 2}, //index 3
-    {0, 1}, //index 4
-    {0, 7}, //index 5
-    {0, 4}, //index 6
-    {0, 6}, //index 7
-    {0, 5}, //index 8
-    {1, 3}, //index 9
-    {1, 0}, //index 10
-    {1, 2}, //index 11
-    {1, 1}  //index 12
-  };
-  if (hw_if_index < sizeof(port_mappings) / sizeof(port_mappings[0])) {
-    u8 a_param = port_mappings[hw_if_index].a_param;
-    u8 b_param = port_mappings[hw_if_index].b_param;
+onp_platform_ports_force_down (void)
+{
+  onp_main_t *om = onp_get_main ();
+  const onp_platform_desc_t *pd = onp_get_platform_desc (om);
 
-    u64 cmd_value = up ? ETH_CMD_LINK_BRING_UP : ETH_CMD_LINK_BRING_DOWN;
+  if (!pd)
+    return;
 
-    char cmd[256];
-    snprintf(cmd, sizeof(cmd), "txcsr RPMX_CMRX_SCRATCHX -a %d -b %d -c 1 0x%016lx",
-      a_param, b_param, cmd_value);
-    int __attribute__((unused)) ret = system(cmd);
-  }
-  else if (hw_if_index <= ET2500_PORT_NUM) {
-    char path[256];
-    snprintf(path, sizeof(path), SFP_SYSFS_BASE_PATH "/" SFP_TX_CTRL_PREFIX "%d",
-      hw_if_index);
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "echo %d > %s", up ? 0 : 1, path);
-    printf("%s\n", cmd);
-    int __attribute__((unused)) ret = system(cmd);
-    if (!up) {
-      char cmd[256];
-      snprintf(cmd, sizeof(cmd), "gpioset gpiochip0 %d=0", GPIO_OFFSET(hw_if_index));
-      int __attribute__((unused)) ret = system(cmd);
-    }
-  }
+  onp_platform_state_cache_reset (pd);
+  for (u32 i = 1; i <= pd->port_count; i++)
+    onp_platform_link_up_down (om, i, false);
 }
-#endif
-
+#endif /* VPP_PLATFORM_ET2500 */
 
 static clib_error_t *
 onp_pktio_intf_admin_up_down (vnet_main_t *vnm, u32 hw_if_index, u32 flags)
@@ -170,7 +357,7 @@ onp_pktio_intf_admin_up_down (vnet_main_t *vnm, u32 hw_if_index, u32 flags)
     }
 
 #ifdef VPP_PLATFORM_ET2500
-      onp_pktio_intf_link_up_down(hw_if_index, is_up);
+  onp_platform_link_up_down (om, hw_if_index, is_up);
 #endif
   return 0;
 }

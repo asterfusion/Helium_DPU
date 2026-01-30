@@ -404,8 +404,7 @@ ip4_sv_reass_update (vlib_main_t *vm, vlib_node_runtime_t *node,
       reass->ip_proto = ip0->protocol;
       reass->l4_src_port = ip4_get_port (ip0, 1);
       reass->l4_dst_port = ip4_get_port (ip0, 0);
-      if (!reass->l4_src_port || !reass->l4_dst_port)
-	return IP4_SV_REASS_RC_UNSUPP_IP_PROTO;
+
       if (IP_PROTOCOL_TCP == reass->ip_proto)
 	{
 	  reass->icmp_type_or_tcp_flags = ((tcp_header_t *) (ip0 + 1))->flags;

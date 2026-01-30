@@ -359,7 +359,7 @@ vnet_configure_l2_xcrw (vlib_main_t * vm, vnet_main_t * vnm,
 	vnet_rewrite_set_data (a[0], rewrite, vec_len (rewrite));
 
       set_int_l2_mode (vm, vnm, MODE_L2_XC, t->l2_sw_if_index, 0,
-		       L2_BD_PORT_TYPE_NORMAL, 0, t->tunnel_sw_if_index);
+		       L2_BD_PORT_TYPE_NORMAL, 0, t->tunnel_sw_if_index,0);
       hash_set (xcm->tunnel_index_by_l2_sw_if_index,
 		t->l2_sw_if_index, t - xcm->tunnels);
       return 0;
@@ -377,7 +377,7 @@ vnet_configure_l2_xcrw (vlib_main_t * vm, vnet_main_t * vnm,
       clib_memset (a, 0, sizeof (*a));
 
       set_int_l2_mode (vm, vnm, MODE_L3, t->l2_sw_if_index, 0,
-		       L2_BD_PORT_TYPE_NORMAL, 0, 0);
+		       L2_BD_PORT_TYPE_NORMAL, 0, 0,0);
 
       vnet_sw_interface_set_flags (vnm, t->tunnel_sw_if_index, 0 /* down */ );
 
