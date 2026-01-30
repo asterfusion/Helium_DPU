@@ -193,11 +193,11 @@ reply:
   }
 
   /* Most likely, send 1 message */
-  for (i = 0; i < vec_len (ep->pending_requests); i++)
+  while(clib_fifo_elts(ep->pending_requests) > 0)
     {
       vl_api_registration_t *regp;
 
-      pr = vec_elt_at_index (ep->pending_requests, i);
+      clib_fifo_sub2 (ep->pending_requests, pr);
 
       switch (pr->request_type)
 	{
@@ -260,12 +260,15 @@ reply:
 	  else
 	    vnet_send_dns4_reply (vm, dm, pr, ep, 0 /* allocate a buffer */ );
 	  break;
+	case DNS_INTERNAL_PENDING_IP_TO_NAME:
+	case DNS_INTERNAL_PENDING_NAME_TO_IP:
+      break;
 	default:
 	  clib_warning ("request type %d unknown", pr->request_type);
 	  break;
 	}
     }
-  vec_free (ep->pending_requests);
+  clib_fifo_free (ep->pending_requests);
 
   remove_count = 0;
   for (i = 0; i < vec_len (dm->unresolved_entries); i++)
