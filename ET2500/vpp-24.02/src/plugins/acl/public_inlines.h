@@ -1176,7 +1176,7 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
       }
       if (tmp_match_index < vec_len((*applied_hash_aces))){
         match_index = tmp_match_index;
-        return 0;
+        goto end;
       }
       tmp_match_index = ~0;
       vec_foreach(dns_cc, dns_cc_indices) {
@@ -1216,7 +1216,7 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
        match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
     }
 
-
+end:
   vec_free(cc_indices);
   vec_free(dns_cc_indices);
   
