@@ -756,6 +756,7 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
 
         vec_foreach(dns_cc, dns_cc_indices)
         {
+
           pkt_5tuple->geosite_cc_index = ~0;
           pkt_5tuple->geoip_cc_index = *dns_cc;
 
@@ -893,7 +894,7 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
     {
       return 0;
     }
-#if 0
+
   if (is_ip6)
     {
       if (!fa_acl_match_mac_addr(&pkt_5tuple->mac6_addr[0], r->src_mac, r->src_mac_len))
@@ -912,6 +913,10 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
       if (!fa_acl_match_ip6_addr
 	  (&pkt_5tuple->ip6_addr[0], &r->src.ip6, r->src_prefixlen))
 	return 0;
+      if (0xff != r->dscp && pkt_5tuple->dscp_v6 != r->dscp)
+      {
+          return 0;
+      }
     }
   else
     {
@@ -931,6 +936,10 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
       if (!fa_acl_match_ip4_addr
 	  (&pkt_5tuple->ip4_addr[0], &r->src.ip4, r->src_prefixlen))
 	return 0;
+      if (0xff != r->dscp && pkt_5tuple->dscp_v4 != r->dscp)
+      {
+          return 0;
+      }
     }
 
   if (0xffff != r->geoip_cc_index && pkt_5tuple->geoip_cc_index != r->geoip_cc_index)
@@ -969,7 +978,7 @@ single_rule_match_5tuple (acl_rule_t * r, int is_ip6, fa_5tuple_t * pkt_5tuple)
 	      r->tcp_flags_value))
 	return 0;
     }
-#endif
+
   /* everything matches! */
   return 1;
 }
@@ -1195,6 +1204,7 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
         match_index = tmp_match_index;
         goto end;
       }
+
       tmp_match_index = ~0;
       vec_foreach(dns_cc, dns_cc_indices) {
         pkt_5tuple->geosite_cc_index = ~0;
@@ -1219,8 +1229,7 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
         match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
         if(match_index < tmp_match_index){
           tmp_match_index = match_index;
-      }
- 
+        }
       }
       if (tmp_match_index < vec_len((*applied_hash_aces)))
         match_index = tmp_match_index;
@@ -1519,7 +1528,6 @@ hash_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t * p
               multi_acl_match_get_applied_ace_index_sai(am, is_ip6, pkt_5tuple, match_acl_info);
               if(match_acl_info->acl_match_count > 0 ){
                   get_single_match_acl_info(match_acl_info, &tmp_match_acl_info);
-
               }
           }
           if(tmp_match_acl_info != NULL){
