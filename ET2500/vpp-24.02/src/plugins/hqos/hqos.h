@@ -24,6 +24,8 @@
 #include <vppinfra/sparse_vec.h>
 #include <vppinfra/hash.h>
 
+#include <vnet/ip/ip_types.h>
+
 #include <hqos/hqos.api_enum.h>
 #include "hqos/sched/sched.h"
 
@@ -96,12 +98,16 @@ typedef struct _hqos_user
     /* Hash table for mpls exp to color mapping. */
     uword* mpls_exp_to_color;
 
+    CLIB_CACHE_LINE_ALIGN_MARK(cacheline0);
+
     u8 tc_queue_weight[HQOS_SCHED_BE_QUEUES_PER_PIPE];
-    u8 tag[32];
+
+    CLIB_CACHE_LINE_ALIGN_MARK(cacheline1);
+    u8 tag[64];
 } hqos_user_t;
 
-STATIC_ASSERT ((sizeof (hqos_user_t) <= CLIB_CACHE_LINE_BYTES * 2),
-	       "hqos user fits in one cacheline");
+STATIC_ASSERT ((sizeof (hqos_user_t) <= CLIB_CACHE_LINE_BYTES * 3),
+	       "hqos user fits in three cacheline");
 
 typedef struct _hqos_user_group
 {
@@ -122,11 +128,19 @@ typedef struct _hqos_user_group
     /* Hash table for mpls exp to color mapping. */
     uword* mpls_exp_to_color;
 
-    u8 tag[32];
+    CLIB_CACHE_LINE_ALIGN_MARK(cacheline0);
+
+    u8 range_valid;
+    ip_address_family_t ip_range_version;
+    ip46_address_t ip_range_start;
+    ip46_address_t ip_range_end;
+
+    CLIB_CACHE_LINE_ALIGN_MARK(cacheline1);
+    u8 tag[64];
 } hqos_user_group_t;
 
-STATIC_ASSERT ((sizeof (hqos_user_group_t) <= CLIB_CACHE_LINE_BYTES * 2),
-	       "hqos user group fits in one cacheline");
+STATIC_ASSERT ((sizeof (hqos_user_group_t) <= CLIB_CACHE_LINE_BYTES * 3),
+	       "hqos user group fits in three cacheline");
 
 typedef struct _hqos_interface_hqos_mapping
 {
@@ -135,6 +149,7 @@ typedef struct _hqos_interface_hqos_mapping
     /* hash by user mapping*/
     uword *user_group_id_to_hqos_subport_id;
     uword *user_id_to_hqos_pipe_id;
+    uword *hqos_pipe_id_to_user_id;
 
 } hqos_interface_hqos_mapping_t;
 
@@ -252,6 +267,8 @@ int hqos_user_add (u8 * tag, u32 * user_id);
 int hqos_user_del (u32 user_id);
 int hqos_user_group_add (u8 * tag, u32 *user_group_id);
 int hqos_user_group_del (u32 user_group_id);
+int hqos_user_group_range_check_add_del(u32 user_group_id, bool is_add,
+                                        ip_address_family_t af, ip46_address_t *start, ip46_address_t *end);
 int hqos_interface_update_user_group_user(u32 sw_if_index, u32 user_id, u32 user_group_id);
 
 //hqos scheduler node Control
@@ -362,6 +379,9 @@ hqos_get_queue_id(hqos_sched_port *hqos_port, u32 hqos_subport_id, u32 hqos_pipe
            hqos_queue_id;
 }
 
+/* export func */
+u8 hqos_user_group_check_ip4_range(u32 hqos_user_group_id, ip4_address_t *ip, u32 *user_offset);
+u8 hqos_user_group_check_ip6_range(u32 hqos_user_group_id, ip6_address_t *ip, u32 *user_offset);
 
 /* node */
 extern vlib_node_registration_t hqos_sched_node;

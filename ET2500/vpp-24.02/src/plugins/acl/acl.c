@@ -82,6 +82,8 @@ void *geoip_country_index_get_code_ptr;
  void *get_domain_by_index_ptr;
  void *geoip_get_country_code_by_ip4_ptr;
  void *geoip_get_country_code_by_ip6_ptr;
+ void *hqos_user_group_check_ip4_range_ptr;
+ void *hqos_user_group_check_ip6_range_ptr;
 //  void *cc_get_ptr;
 
 /* Format vec16. */
@@ -621,6 +623,7 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       r->policer_index = ntohl(rules[i].policer_index);
       r->set_tc_value = rules[i].set_tc_value;
       r->set_hqos_user_id = ntohl(rules[i].set_hqos_user_id);
+      r->set_hqos_guser_id = ntohl(rules[i].set_hqos_guser_id);
       r->dscp = rules[i].dscp;
     }
 
@@ -3382,6 +3385,8 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
   u32 tcpflags, tcpmask;
   u8  set_tc_value;
   u32 set_hqos_user_id;
+  u32 set_hqos_dip_guser_id;
+  u32 set_hqos_sip_guser_id;
   ip_prefix_t src, dst;
   u32 src_sw_if_index = 0;
   
@@ -3498,6 +3503,18 @@ acl_set_aclplugin_acl_fn (vlib_main_t * vm,
 	  vec_validate_acl_rules (rules, rule_idx);
 	  rules[rule_idx].action_expand_bitmap |= (1 << ACL_ACTION_EXPAND_SET_HQOS_USER);
 	  rules[rule_idx].set_hqos_user_id = htonl(set_hqos_user_id);
+    }
+    else if (unformat (line_input, "hqos_dip_guser %u", &set_hqos_dip_guser_id))
+    {
+	  vec_validate_acl_rules (rules, rule_idx);
+	  rules[rule_idx].action_expand_bitmap |= (1 << ACL_ACTION_EXPAND_SET_HQOS_GUSER_DIP_RANGE);
+	  rules[rule_idx].set_hqos_guser_id = htonl(set_hqos_dip_guser_id);
+    }
+    else if (unformat (line_input, "hqos_sip_guser %u", &set_hqos_sip_guser_id))
+    {
+	  vec_validate_acl_rules (rules, rule_idx);
+	  rules[rule_idx].action_expand_bitmap |= (1 << ACL_ACTION_EXPAND_SET_HQOS_GUSER_SIP_RANGE);
+	  rules[rule_idx].set_hqos_guser_id = htonl(set_hqos_sip_guser_id);
     }
     else if (unformat (line_input, "src_sw_if_index %d", &src_sw_if_index))
     {
@@ -4559,6 +4576,17 @@ acl_init (vlib_main_t * vm)
       return clib_error_return (0, "geosite_plugin6.so is not loaded");
   }
 
+  hqos_user_group_check_ip4_range_ptr =
+   vlib_get_plugin_symbol ("hqos_plugin.so", "hqos_user_group_check_ip4_range");
+
+  hqos_user_group_check_ip6_range_ptr =
+   vlib_get_plugin_symbol ("hqos_plugin.so", "hqos_user_group_check_ip6_range");
+
+  if(hqos_user_group_check_ip4_range_ptr == NULL || 
+     hqos_user_group_check_ip6_range_ptr == NULL)
+  {
+      return clib_error_return (0, "hqos_plugin.so is not loaded");
+  }
 
   clib_bihash_init_8_8 (&am->acl_index_bd_id_hash,
 			     "ACL plugin acl_index and bd_id bihash",

@@ -78,6 +78,8 @@ enum acl_action_expand_e {
   ACL_ACTION_EXPAND_POLICER,
   ACL_ACTION_EXPAND_SET_TC,
   ACL_ACTION_EXPAND_SET_HQOS_USER,
+  ACL_ACTION_EXPAND_SET_HQOS_GUSER_DIP_RANGE,
+  ACL_ACTION_EXPAND_SET_HQOS_GUSER_SIP_RANGE,
   ACL_N_ACTIONS_EXPAND = 64,
 };
 
@@ -424,5 +426,7 @@ extern void *dns_query_domain_ptr;
 extern void *get_domain_by_index_ptr;
 extern void *geoip_get_country_code_by_ip4_ptr;
 extern void *geoip_get_country_code_by_ip6_ptr;
+extern void *hqos_user_group_check_ip4_range_ptr;
+extern void *hqos_user_group_check_ip6_range_ptr;
 #endif
 

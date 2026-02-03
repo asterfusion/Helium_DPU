@@ -21,6 +21,7 @@
 
 option version = "1.0.0";
 
+import "vnet/ip/ip_types.api";
 import "vnet/interface_types.api";
 
 /** \brief Add HQOS user 
@@ -110,6 +111,23 @@ autoreply define hqos_user_group_del
     u32 client_index;
     u32 context;
     u32 user_group_id;
+};
+
+/** \brief Add/Del hqos user group range check
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_add - If 1 add, if 0 clear
+    @param ip_start - IP range start
+    @param ip_end - IP range end
+*/
+autoreply define hqos_user_group_range_check_add_del
+{
+  u32 client_index;
+  u32 context;
+  bool is_add;
+  u32 user_group_id;
+  vl_api_address_t ip_start;
+  vl_api_address_t ip_end;
 };
 
 /** \brief Update the user group to which the user belongs (based on the interface)

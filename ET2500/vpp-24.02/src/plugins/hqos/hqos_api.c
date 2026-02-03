@@ -16,6 +16,7 @@
  * limitations under the License.
  *------------------------------------------------------------------
  */
+#include <vnet/ip/ip_types_api.h>
 
 #include <hqos/hqos.h>
 #include <hqos/hqos.api_enum.h>
@@ -105,6 +106,37 @@ vl_api_hqos_user_group_del_t_handler (vl_api_hqos_user_group_del_t * mp)
 
     REPLY_MACRO (VL_API_HQOS_USER_GROUP_DEL_REPLY);
 }
+
+static void
+vl_api_hqos_user_group_range_check_add_del_t_handler (vl_api_hqos_user_group_range_check_add_del_t * mp)
+{
+    hqos_main_t *hm = &hqos_main;
+    vl_api_hqos_user_group_range_check_add_del_reply_t *rmp;
+
+    int rv = 0;
+
+    if (mp->ip_start.af == mp->ip_end.af)
+    {
+        ip46_address_t start;
+        ip46_address_t end;
+
+        ip_address_decode (&mp->ip_start, &start);
+        ip_address_decode (&mp->ip_end, &end);
+
+        rv = hqos_user_group_range_check_add_del(ntohl(mp->user_group_id),
+                                                       mp->is_add,
+                                                       (ip_address_family_t)mp->ip_start.af,
+                                                       (ip46_address_t *)&start,
+                                                       (ip46_address_t *)&end);
+    }
+    else
+    {
+        rv = VNET_API_ERROR_INVALID_ADDRESS_FAMILY;
+    }
+
+    REPLY_MACRO (VL_API_HQOS_USER_GROUP_RANGE_CHECK_ADD_DEL_REPLY);
+}
+
 
 static void
 vl_api_hqos_interface_update_user_group_user_t_handler (vl_api_hqos_interface_update_user_group_user_t * mp)
