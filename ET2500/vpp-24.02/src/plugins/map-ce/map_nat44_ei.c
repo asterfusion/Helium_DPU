@@ -303,7 +303,7 @@ map_ce_nat44_domain_create(u32 map_domain_index, map_nat44_ei_config_t *config)
         }
 
         max_translations = max_user * max_session_per_user;
-        hash_buckets = max_user * max_session_per_user;
+        hash_buckets = max_user * max_session_per_user / 4;
     }
 
     /* Init Hash */
