@@ -98,7 +98,7 @@ format_hqos_port(u8 *s, va_list *args)
     hqos_sched_port *hqos_port = va_arg (*args, hqos_sched_port *);
     s = format(s, "Hqos Port %u:\n", hqos_port_id);
     s = format(s, "\tBasic:\n");
-    s = format(s, "\t\tRate = %u bytes/second\n", hqos_port->rate);
+    s = format(s, "\t\tRate = %llu bytes/second\n", hqos_port->rate);
     s = format(s, "\t\tMTU = %u bytes\n", hqos_port->mtu);
     s = format(s, "\t\tFrame overhead = %u bytes\n", hqos_port->frame_overhead);
     s = format(s, "\t\tNumber of subports = %u\n", hqos_port->n_subports_per_port);
@@ -130,7 +130,7 @@ format_hqos_port_detail(u8 *s, va_list *args)
 
     s = format(s, "Hqos Port %u:\n", hqos_port_id);
     s = format(s, "\tBasic:\n");
-    s = format(s, "\t\tRate = %u bytes/second\n", hqos_port->rate);
+    s = format(s, "\t\tRate = %llu bytes/second\n", hqos_port->rate);
     s = format(s, "\t\tMTU = %u bytes\n", hqos_port->mtu);
     s = format(s, "\t\tFrame overhead = %u bytes\n", hqos_port->frame_overhead);
     s = format(s, "\t\tNumber of subports = %u\n", hqos_port->n_subports_per_port);
@@ -147,7 +147,7 @@ format_hqos_port_detail(u8 *s, va_list *args)
         {
             subport_profile =  hqos_port->subport_profiles + hqos_subport->profile;
             s = format(s, "\t\tSubport %u:\n", subport_id);
-            s = format(s, "\t\t\tRate = %u bytes/second\n", hqos_port->subport_profiles[hqos_subport->profile].orig_tb_rate);
+            s = format(s, "\t\t\tRate = %llu bytes/second\n", hqos_port->subport_profiles[hqos_subport->profile].orig_tb_rate);
             s = format(s, "\t\t\tNumber of enable pipes per subport = %u\n", hqos_subport->n_pipes_per_subport_enabled);
             s = format(s, "\t\t\tNumber of max pipe profiles = %u\n", hqos_subport->n_max_pipe_profiles);
             s = format(s, "\t\t\tNumber of current pipe profiles = %u\n", hqos_subport->n_pipe_profiles);
@@ -196,7 +196,7 @@ format_hqos_port_detail(u8 *s, va_list *args)
                     pipe_profile = hqos_subport->pipe_profiles + hqos_pipe->profile;
                     s = format(s, "\t\tPipe %u:\n", pipe_id);
                     s = format(s, "\t\t\t\tPipe profile %u:\n", hqos_pipe->profile);
-                    s = format(s, "\t\t\t\tRate = %u bytes/second\n", pipe_profile->orig_tb_rate);
+                    s = format(s, "\t\t\t\tRate = %llu bytes/second\n", pipe_profile->orig_tb_rate);
                     s = format(s, "\t\t\t\tToken bucket size = %u bytes\n", pipe_profile->tb_size);
                     s = format(s, "\t\t\t\tTraffic class rate:\n");
                     s = format(s, "\t\t\t\t\tTC0 = %llu, TC1 = %llu, TC2 = %llu, TC3 = %llu bytes/second\n",

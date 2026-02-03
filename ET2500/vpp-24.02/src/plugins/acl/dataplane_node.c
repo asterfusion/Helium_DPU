@@ -37,6 +37,7 @@
 #include <vppinfra/bihash_template.h>
 #include <plugins/geosite/geosite.h>
 #include <plugins/dns/dns.h>
+#include <plugins/hqos/hqos.h>
 //#include <vppinfra/bihash_template.c>
 
 typedef struct
@@ -340,6 +341,7 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
     action_expand->policer_index = match_acl_info->policer_index[0];
     action_expand->set_tc_value = match_acl_info->set_tc_value[0];
     action_expand->set_hqos_user_id = match_acl_info->set_hqos_user_id[0];
+    action_expand->set_hqos_guser_id = match_acl_info->set_hqos_guser_id[0];
     priority = match_acl_info->acl_priority[0];
 
     for (int i = 1; i < match_acl_info->acl_match_count; i++)
@@ -353,6 +355,7 @@ always_inline void acl_calc_action(match_acl_t *match_acl_info, u32 *acl_index, 
             action_expand->policer_index = match_acl_info->policer_index[i];
             action_expand->set_tc_value = match_acl_info->set_tc_value[i];
             action_expand->set_hqos_user_id = match_acl_info->set_hqos_user_id[i];
+            action_expand->set_hqos_guser_id = match_acl_info->set_hqos_guser_id[i];
             priority = match_acl_info->acl_priority[i];
         }
     }
@@ -452,7 +455,7 @@ acl_get_country_index_by_dip6(vlib_buffer_t **b, u32 **cc_indices, ip6_address_t
 
 
 always_inline void 
-acl_action_expand_proc(vlib_main_t *vm, vlib_buffer_t *b, u16 *next, const match_rule_expand_t *action_expand)
+acl_action_expand_proc(vlib_main_t *vm, vlib_buffer_t *b, u16 *next, int is_ip6, fa_5tuple_t *fa_5tuple, const match_rule_expand_t *action_expand)
 {
     if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_NO_NAT))
     {
@@ -479,8 +482,56 @@ acl_action_expand_proc(vlib_main_t *vm, vlib_buffer_t *b, u16 *next, const match
 
     if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_SET_HQOS_USER))
     {
-         vnet_buffer2(b)->hqos_user_id = action_expand->set_hqos_user_id;
+        vnet_buffer2(b)->hqos_user_id = action_expand->set_hqos_user_id;
         b->flags |= VLIB_BUFFER_ACL_SET_USER_VALID;
+    }
+    else if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_SET_HQOS_GUSER_SIP_RANGE))
+    {
+        u32 user_offset = ~0;
+        if (is_ip6)
+        {
+            if( ((__typeof__(hqos_user_group_check_ip6_range) *)hqos_user_group_check_ip6_range_ptr)
+                    (action_expand->set_hqos_guser_id, &fa_5tuple->ip6_addr[0], &user_offset))
+            {
+                vnet_buffer2(b)->hqos_user_id = user_offset;
+                vnet_buffer2(b)->hqos_guser_id = action_expand->set_hqos_guser_id;
+                b->flags |= VLIB_BUFFER_ACL_SET_GUSER_IP_RANGE_VALID;
+            }
+        }
+        else
+        {
+            if( ((__typeof__(hqos_user_group_check_ip4_range) *)hqos_user_group_check_ip4_range_ptr)
+                    (action_expand->set_hqos_guser_id, &fa_5tuple->ip4_addr[0], &user_offset))
+            {
+                vnet_buffer2(b)->hqos_user_id = user_offset;
+                vnet_buffer2(b)->hqos_guser_id = action_expand->set_hqos_guser_id;
+                b->flags |= VLIB_BUFFER_ACL_SET_GUSER_IP_RANGE_VALID;
+            }
+        }
+    }
+    else if (action_expand->action_expand_bitmap & (1 << ACL_ACTION_EXPAND_SET_HQOS_GUSER_DIP_RANGE))
+    {
+        u32 user_offset = ~0;
+        if (is_ip6)
+        {
+            if( ((__typeof__(hqos_user_group_check_ip6_range) *)hqos_user_group_check_ip6_range_ptr)
+                    (action_expand->set_hqos_guser_id, &fa_5tuple->ip6_addr[1], &user_offset))
+            {
+                vnet_buffer2(b)->hqos_user_id = user_offset;
+                vnet_buffer2(b)->hqos_guser_id = action_expand->set_hqos_guser_id;
+                b->flags |= VLIB_BUFFER_ACL_SET_GUSER_IP_RANGE_VALID;
+            }
+        }
+        else
+        {
+            if( ((__typeof__(hqos_user_group_check_ip4_range) *)hqos_user_group_check_ip4_range_ptr)
+                    (action_expand->set_hqos_guser_id, &fa_5tuple->ip4_addr[1], &user_offset))
+            {
+                vnet_buffer2(b)->hqos_user_id = user_offset;
+                vnet_buffer2(b)->hqos_guser_id = action_expand->set_hqos_guser_id;
+                b->flags |= VLIB_BUFFER_ACL_SET_GUSER_IP_RANGE_VALID;
+            }
+        }
     }
     return;
 }
@@ -618,6 +669,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
                   action_expand.policer_index = sess->action_expand.policer_index;
                   action_expand.set_tc_value = sess->action_expand.set_tc_value;
                   action_expand.set_hqos_user_id = sess->action_expand.set_hqos_user_id;
+                  action_expand.set_hqos_guser_id = sess->action_expand.set_hqos_guser_id;
 
 		  /* expose the session id to the tracer */
 		  if (node_trace_on)
@@ -827,7 +879,7 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
         }
 
         /* Proc action expand */
-        acl_action_expand_proc(vm, b[0], &next[0], &action_expand);
+        acl_action_expand_proc(vm, b[0], &next[0], is_ip6, &fa_5tuple[0], &action_expand);
 
         b[0]->acl_index = match_acl_in_index;
         b[0]->flags |= VLIB_BUFFER_ACL_INDEX_VALID;

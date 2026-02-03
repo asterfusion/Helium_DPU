@@ -301,6 +301,45 @@ int hqos_user_group_del (u32 user_group_id)
     return 0;
 }
 
+int hqos_user_group_range_check_add_del(u32 user_group_id,
+                                        bool is_add,
+                                        ip_address_family_t af,
+                                        ip46_address_t *start,
+                                        ip46_address_t *end)
+{
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    if (pool_is_free_index(hm->user_group_pool, user_group_id))
+    {
+        clib_warning ("%s :current user group not create", __FUNCTION__);
+        return VNET_API_ERROR_INVALID_VALUE;
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    if (is_add)
+    {
+        user_group->range_valid = 1;
+        user_group->ip_range_version = af;
+        user_group->ip_range_start.as_u64[0] = start->as_u64[0];
+        user_group->ip_range_start.as_u64[1] = start->as_u64[1];
+        user_group->ip_range_end.as_u64[0] = end->as_u64[0];
+        user_group->ip_range_end.as_u64[1] = end->as_u64[1];
+    }
+    else
+    {
+        user_group->range_valid = 0;
+        user_group->ip_range_version = AF_IP4;
+        user_group->ip_range_start.as_u64[0] = 0;
+        user_group->ip_range_start.as_u64[1] = 0;
+        user_group->ip_range_end.as_u64[0] = 0;
+        user_group->ip_range_end.as_u64[1] = 0;
+    }
+
+    return 0;
+}
+
 int hqos_interface_update_user_group_user(u32 sw_if_index, u32 user_id, u32 user_group_id)
 {
     hqos_main_t *hm = &hqos_main;
@@ -453,7 +492,10 @@ int hqos_interface_mapping_user_to_hqos_pipe(u32 sw_if_index, u32 user_id, u32 h
     {
         result = hash_get(interface_hqos_mapping->user_id_to_hqos_pipe_id, user_id);
         if (result)
+        {
             hash_unset(interface_hqos_mapping->user_id_to_hqos_pipe_id, user_id);
+            hash_unset(interface_hqos_mapping->hqos_pipe_id_to_user_id, result);
+        }
 
         return 0;
     }
@@ -465,6 +507,7 @@ int hqos_interface_mapping_user_to_hqos_pipe(u32 sw_if_index, u32 user_id, u32 h
     }
 
     hash_set(interface_hqos_mapping->user_id_to_hqos_pipe_id,  user_id, hqos_pipe_id);
+    hash_set(interface_hqos_mapping->hqos_pipe_id_to_user_id,  hqos_pipe_id, user_id);
 
     return 0;
 }
@@ -1702,6 +1745,86 @@ hqos_init (vlib_main_t * vm)
 }
 
 VLIB_INIT_FUNCTION (hqos_init);
+
+__clib_export u8
+hqos_user_group_check_ip4_range(u32 hqos_user_group_id, ip4_address_t *ip, u32 *user_offset)
+{
+    /*
+     * The scope of our support is limited
+     * If it exceeds the range, it also returns failure
+     * For IPv6, the upper 16 bits must be consistent
+     */
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    u16 compare = 0, start = 0, end = 0;
+
+    if (pool_is_free_index(hm->user_group_pool, hqos_user_group_id)) return 0;
+
+    user_group = pool_elt_at_index(hm->user_group_pool, hqos_user_group_id);
+
+    if (!user_group->range_valid) return 0;
+    if (user_group->ip_range_version != AF_IP4) return 0;
+
+
+    if (ip->as_u16[0] != user_group->ip_range_start.ip4.as_u16[0])
+        return 0;
+
+    compare = ip->as_u8[2] << 8 | ip->as_u8[3];
+    start = user_group->ip_range_start.ip4.as_u8[2] << 8 | user_group->ip_range_start.ip4.as_u8[3];
+    end = user_group->ip_range_end.ip4.as_u8[2] << 8 | user_group->ip_range_end.ip4.as_u8[3];
+
+    if (compare < start || compare > end)
+        return 0;
+
+    *user_offset = compare - start;
+
+    if (*user_offset > hm->hqos_max_user_per_user_group)
+        return 0;
+
+    return 1;
+}
+
+__clib_export u8
+hqos_user_group_check_ip6_range(u32 hqos_user_group_id, ip6_address_t *ip, u32 *user_offset)
+{
+    /*
+     * The scope of our support is limited
+     * If it exceeds the range, it also returns failure
+     * For IPv6, the upper 112 bits must be consistent
+     */
+    hqos_main_t *hm = &hqos_main;
+    hqos_user_group_t *user_group = NULL;
+
+    u16 compare = 0, start = 0, end = 0;
+
+    if (pool_is_free_index(hm->user_group_pool, hqos_user_group_id)) return 0;
+
+    user_group = pool_elt_at_index(hm->user_group_pool, hqos_user_group_id);
+
+    if (!user_group->range_valid) return 0;
+    if (user_group->ip_range_version != AF_IP6) return 0;
+
+    if (ip->as_u32[0] != user_group->ip_range_start.ip6.as_u32[0] ||
+        ip->as_u32[1] != user_group->ip_range_start.ip6.as_u32[1] ||
+        ip->as_u32[2] != user_group->ip_range_start.ip6.as_u32[2] ||
+        ip->as_u16[6] != user_group->ip_range_start.ip6.as_u16[6])
+        return 0;
+
+    compare = ip->as_u8[14] << 8 | ip->as_u8[15];
+    start = user_group->ip_range_start.ip6.as_u8[14] << 8 | user_group->ip_range_start.ip6.as_u8[15];
+    end = user_group->ip_range_end.ip6.as_u8[14] << 8 | user_group->ip_range_end.ip6.as_u8[15];
+
+    if (compare < start || compare > end)
+        return 0;
+
+    *user_offset = compare - start;
+
+    if (*user_offset > hm->hqos_max_user_per_user_group)
+        return 0;
+
+    return 1;
+}
 
 VLIB_PLUGIN_REGISTER() = {
   .version = VPP_BUILD_VER,

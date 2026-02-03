@@ -35,6 +35,8 @@ enum acl_action_expand : u8
   ACL_ACTION_API_EXPAND_POLICER = 1,
   ACL_ACTION_API_EXPAND_SET_TC = 2,
   ACL_ACTION_API_EXPAND_SET_HQOS_USER = 3,
+  ACL_ACTION_API_EXPAND_SET_HQOS_GUSER_DIP_RANGE = 4,
+  ACL_ACTION_API_EXPAND_SET_HQOS_GUSER_SIP_RANGE = 5,
 };
 
 /** \brief Access List Rule entry
@@ -73,6 +75,7 @@ typedef acl_rule
   u64 action_expand_bitmap;
   u32 policer_index;
   u32 set_hqos_user_id;
+  u32 set_hqos_guser_id;
   u8 set_tc_value;
 
 /*

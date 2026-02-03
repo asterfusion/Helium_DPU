@@ -351,6 +351,112 @@ VLIB_CLI_COMMAND (hqos_user_group_del_command, static) = {
 };
 
 static clib_error_t *
+hqos_user_group_range_check_command_fn (vlib_main_t *vm, unformat_input_t *input, vlib_cli_command_t *cmd)
+{
+    unformat_input_t _line_input, *line_input = &_line_input;
+    clib_error_t *error = 0;
+    hqos_main_t *hm = &hqos_main;
+
+    int rv = 0;
+    u8 *tag = NULL;
+    u32 user_group_id = (~0);
+
+    bool is_add = true;
+
+    ip_address_t ip_start = IP_ADDRESS_V6_ALL_0S;
+    ip_address_t ip_end = IP_ADDRESS_V6_ALL_0S;
+
+    hqos_user_group_t *user_group = NULL;
+
+    if (!unformat_user (input, unformat_line_input, line_input))
+        return clib_error_return (0, HQOS_EXPECTED_ARGUMENT);
+
+    while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+        if (unformat (line_input, "index %u", &user_group_id));
+        else if (unformat (line_input, "name %s", &tag));
+        else if (unformat (line_input, "ip-start %U", unformat_ip_address, &ip_start));
+        else if (unformat (line_input, "ip-end %U", unformat_ip_address, &ip_end));
+        else if (unformat (line_input, "del")) is_add = false;
+        else
+        {
+            error = clib_error_return (0, "unknown input '%U'", format_unformat_error, line_input);
+            goto done;
+        }
+    }
+
+    if (user_group_id != (~0))
+    {
+        if (pool_is_free_index(hm->user_group_pool, user_group_id))
+        {
+            error = clib_error_return (0, "Not found user_group by index %u", user_group_id);
+            goto done;
+        }
+    }
+    else if (tag)
+    {
+        pool_foreach(user_group, hm->user_group_pool)
+        {
+            if (clib_memcmp(user_group->tag, tag, vec_len(tag) < 32 ? vec_len(tag) : 32) == 0)
+            {
+                user_group_id = user_group->user_group_id;
+                break;
+            }
+        }
+        if (user_group_id == (~0))
+        {
+            error = clib_error_return (0, "Not found user_group by name %s", tag);
+            goto done;
+        }
+    }
+    else
+    {
+        error = clib_error_return (0, "Missing index or name");
+        goto done;
+    }
+
+    if (is_add)
+    {
+        if (ip_address_is_zero (&ip_start))
+        {
+            error = clib_error_return (0, "Missing ip-start");
+            goto done;
+        }
+
+        if (ip_address_is_zero (&ip_end))
+        {
+            error = clib_error_return (0, "Missing ip-end");
+            goto done;
+        }
+
+        if (ip_addr_version(&ip_start) != ip_addr_version(&ip_end))
+        {
+            error = clib_error_return (0, "Ip Version Error");
+            goto done;
+        }
+    }
+
+    user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+    rv = hqos_user_group_range_check_add_del(user_group_id, is_add, ip_start.version, &ip_start.ip, &ip_end.ip);
+    if(rv)
+    {
+        error = clib_error_return (0, "hqos user_group range-check failed (rv = %d).", rv);
+        goto done;
+    }
+done:
+  unformat_free (line_input);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND (hqos_user_group_range_check_command, static) = {
+  .path = "hqos user_group range-check",
+  .short_help = "hqos user_group range-check [index <user_id> | name <name>] ip-start <ip_start> ip-end <ip_end> [del]",
+  .function = hqos_user_group_range_check_command_fn,
+};
+
+static clib_error_t *
 show_hqos_user_group_command_fn (vlib_main_t * vm, unformat_input_t *input, vlib_cli_command_t * cmd)
 {
     hqos_main_t *hm = &hqos_main;
@@ -360,6 +466,12 @@ show_hqos_user_group_command_fn (vlib_main_t * vm, unformat_input_t *input, vlib
     pool_foreach(user_group, hm->user_group_pool)
     {
         vlib_cli_output (vm, "User Group Id : %u  Tag:(%s)", user_group->user_group_id, user_group->tag);
+        if (user_group->range_valid)
+        {
+            vlib_cli_output (vm, "\trange family %U", format_ip_address_family, user_group->ip_range_version);
+            vlib_cli_output (vm, "\trange start %U", format_ip46_address, &user_group->ip_range_start, IP46_TYPE_ANY);
+            vlib_cli_output (vm, "\trange end %U", format_ip46_address, &user_group->ip_range_end, IP46_TYPE_ANY);
+        }
     }
 
     return 0;
@@ -1469,6 +1581,98 @@ VLIB_CLI_COMMAND (hqos_interface_mapping_user_pipe_command, static) = {
   .short_help = "hqos interface user-mapping-pipe <interface-name> user <userp_id> [pipe <hqos_pipe_id>]",
   .function = hqos_interface_mapping_user_pipe_command_fn,
 };
+
+static clib_error_t *
+show_hqos_interface_hqos_mapping_command_fn (vlib_main_t * vm, unformat_input_t *input, vlib_cli_command_t * cmd)
+{
+    unformat_input_t _line_input, *line_input = &_line_input;
+    clib_error_t *error = 0;
+    vnet_main_t *vnm = vnet_get_main ();
+    hqos_main_t *hm = &hqos_main;
+
+    hqos_interface_hqos_mapping_t *hqos_mapping = NULL;
+    hqos_user_t *user = NULL;
+    hqos_user_group_t *user_group = NULL;
+
+    u32 sw_if_index = (~0);
+    u32 user_id = (~0);
+    u32 user_group_id = (~0);
+    u32 subport_id = (~0);
+    u32 pipe_id = (~0);
+    hash_pair_t *p;
+
+    if (!unformat_user (input, unformat_line_input, line_input))
+        return clib_error_return (0, HQOS_EXPECTED_ARGUMENT);
+
+    while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+        if (unformat(line_input, "%U", unformat_vnet_sw_interface, vnm, &sw_if_index));
+        else
+        {
+            error = clib_error_return (0, "unknown input '%U'", format_unformat_error, line_input);
+            goto done;
+        }
+    }
+
+    if (sw_if_index == (~0))
+    {
+        error = clib_error_return (0, "unknown interface");
+        goto done;
+    }
+
+    hqos_mapping = vec_elt_at_index(hm->interface_mapping_vec, sw_if_index);
+
+    if (hqos_mapping->hqos_port_id != (~0))
+        vlib_cli_output (vm, "Bind Hqos Port index : %u", hqos_mapping->hqos_port_id);
+    else
+        vlib_cli_output (vm, "Not bind Hqos Port");
+
+    vlib_cli_output (vm, "------ Group bind Subport Info ------");
+    hash_foreach_pair (p, hqos_mapping->user_group_id_to_hqos_subport_id,
+   ({
+        user_group_id = p->key;
+        subport_id = p->value[0];
+
+        user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
+
+        vlib_cli_output (vm, "User Group %u[%s] ---> Subport Id %u ", user_group_id, user_group->tag, subport_id);
+    }));
+    vlib_cli_output (vm, "Other User Group ---> Subport 0[default_Subport] ");
+
+    vlib_cli_output (vm, "------ User bind Pipe Info ------");
+    hash_foreach_pair (p, hqos_mapping->user_id_to_hqos_pipe_id,
+   ({
+        user_id = p->key;
+        pipe_id = p->value[0];
+
+        user = pool_elt_at_index(hm->user_pool, user_id);
+
+        vlib_cli_output (vm, "User %u[%s] ---> Pipe Id %u ", user_id, user->tag, pipe_id);
+    }));
+    vlib_cli_output (vm, "Other User  ---> Pipe 0[default_pipe] ");
+
+    vlib_cli_output (vm, "------ Pipe bind User Info ------");
+    hash_foreach_pair (p, hqos_mapping->hqos_pipe_id_to_user_id,
+   ({
+        pipe_id = p->key;
+        user_id = p->value[0];
+
+        user = pool_elt_at_index(hm->user_pool, user_id);
+
+        vlib_cli_output (vm, "Pipe Id %u ---> User Id %u [%s]", pipe_id, user_id, user->tag);
+    }));
+
+done:
+    unformat_free (line_input);
+    return error;
+}
+
+VLIB_CLI_COMMAND (show_hqos_interface_hqos_mapping_command, static) = {
+    .path = "show hqos interface hqos-mapping",
+    .short_help = "show hqos interface hqos-mapping <interface-name>",
+    .function = show_hqos_interface_hqos_mapping_command_fn,
+};
+
 
 static clib_error_t *
 hqos_interface_enable_disable_command_fn (vlib_main_t *vm, unformat_input_t *input, vlib_cli_command_t *cmd)

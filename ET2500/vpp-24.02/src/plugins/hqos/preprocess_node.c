@@ -56,6 +56,9 @@ hqos_classification_proc(vlib_main_t *vm,
     hqos_user_group_t *user_group = NULL;
     u32 user_group_id = ~0;
 
+    u32 user_offset = ~0;
+    uword *user_id_ptr = NULL;
+
     hqos_user_t *user = NULL;
     u32 user_id = ~0;
 
@@ -108,30 +111,57 @@ hqos_classification_proc(vlib_main_t *vm,
         goto trace;
     }
 
-    user_id = vlib_buffer_hqos_user_get(p);
-    if (pool_is_free_index(hm->user_pool, user_id))
+    if (!(p->flags & VLIB_BUFFER_ACL_SET_USER_VALID) &&
+          p->flags & VLIB_BUFFER_ACL_SET_GUSER_IP_RANGE_VALID)
     {
-        //user to default user
-        user_id = 0;
+        user_group_id = vnet_buffer2(p)->hqos_guser_id;
+
+        hqos_subport_id_ptr = hash_get(hqos_mapping->user_group_id_to_hqos_subport_id, user_group_id);
+        if (hqos_subport_id_ptr)
+            hqos_subport_id = (*hqos_subport_id_ptr) & (hm->hqos_node_max_subport_per_port - 1);
+        else
+            hqos_subport_id = 0;
+
+        user_offset = vnet_buffer2(p)->hqos_user_id;
+        user_id_ptr = hash_get(hqos_mapping->hqos_pipe_id_to_user_id, user_offset);
+        if (user_id_ptr)
+            user_id = (*user_id_ptr) & (hm->hqos_max_user - 1);
+        else
+            user_id = 0;
+
+        hqos_pipe_id_ptr = hash_get(hqos_mapping->user_id_to_hqos_pipe_id, user_id);
+        if (hqos_pipe_id_ptr)
+            hqos_pipe_id = (*hqos_pipe_id_ptr) & (hm->hqos_node_max_pipe_per_subport - 1);
+        else
+            hqos_pipe_id = 0;
     }
-
-    user_group_id_ptr = hash_get(hi->user_to_ugroup, user_id);
-    if (user_group_id_ptr)
-        user_group_id = (*user_group_id_ptr) & (HQOS_MAX_USER_GROUP - 1);
     else
-        user_group_id = 0;
+    {
+        user_id = vlib_buffer_hqos_user_get(p);
+        if (pool_is_free_index(hm->user_pool, user_id))
+        {
+            //user to default user
+            user_id = 0;
+        }
 
-    hqos_subport_id_ptr = hash_get(hqos_mapping->user_group_id_to_hqos_subport_id, user_group_id);
-    if (hqos_subport_id_ptr)
-        hqos_subport_id = (*hqos_subport_id_ptr) & (HQOS_NODE_MAX_SUBPORT_PER_PORT - 1);
-    else
-        hqos_subport_id = 0;
+        user_group_id_ptr = hash_get(hi->user_to_ugroup, user_id);
+        if (user_group_id_ptr)
+            user_group_id = (*user_group_id_ptr) & (hm->hqos_max_user_group - 1);
+        else
+            user_group_id = 0;
 
-    hqos_pipe_id_ptr = hash_get(hqos_mapping->user_id_to_hqos_pipe_id, user_id);
-    if (hqos_pipe_id_ptr)
-        hqos_pipe_id = (*hqos_pipe_id_ptr) & (HQOS_NODE_MAX_PIPE_PER_SUBPORT - 1);
-    else
-        hqos_pipe_id = 0;
+        hqos_subport_id_ptr = hash_get(hqos_mapping->user_group_id_to_hqos_subport_id, user_group_id);
+        if (hqos_subport_id_ptr)
+            hqos_subport_id = (*hqos_subport_id_ptr) & (hm->hqos_node_max_subport_per_port - 1);
+        else
+            hqos_subport_id = 0;
+
+        hqos_pipe_id_ptr = hash_get(hqos_mapping->user_id_to_hqos_pipe_id, user_id);
+        if (hqos_pipe_id_ptr)
+            hqos_pipe_id = (*hqos_pipe_id_ptr) & (hm->hqos_node_max_pipe_per_subport - 1);
+        else
+            hqos_pipe_id = 0;
+    }
 
     user_group = pool_elt_at_index(hm->user_group_pool, user_group_id);
     user = pool_elt_at_index(hm->user_pool, user_id);

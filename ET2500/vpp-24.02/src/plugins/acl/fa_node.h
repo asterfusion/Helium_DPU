@@ -125,6 +125,7 @@ typedef struct match_rule_expand
     u64 action_expand_bitmap;
     u32 policer_index;
     u32 set_hqos_user_id;
+    u32 set_hqos_guser_id;
     u8  set_tc_value;
 } match_rule_expand_t;
 
