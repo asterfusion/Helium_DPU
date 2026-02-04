@@ -892,7 +892,7 @@ hqos_sched_subport_pipe_profile_add(hqos_sched_port *port,
     }
 
     pp = &s->pipe_profiles[s->n_pipe_profiles];
-    hqos_sched_pipe_profile_convert(s, params, pp, sp->orig_tb_rate);
+    hqos_sched_pipe_profile_convert(s, params, pp, port->rate);
 
     /* Pipe profile commit */
     *pipe_profile_id = s->n_pipe_profiles;
@@ -953,7 +953,7 @@ hqos_sched_subport_pipe_profile_update(hqos_sched_port *port,
     }
 
     pp = &s->pipe_profiles[pipe_profile_id];
-    hqos_sched_pipe_profile_convert(s, params, pp, sp->orig_tb_rate);
+    hqos_sched_pipe_profile_convert(s, params, pp, port->rate);
 
     if (s->pipe_tc_be_rate_max < params->tc_rate[HQOS_SCHED_TRAFFIC_CLASS_BE])
     {
