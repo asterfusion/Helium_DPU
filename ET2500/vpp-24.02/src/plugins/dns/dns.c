@@ -1053,6 +1053,8 @@ re_resolve:
 
   hash_set_mem (dm->cache_entry_by_name, ep->name, ep - dm->entries);
 
+  vec_add1 (dm->unresolved_entries, ep - dm->entries);
+
   /* Internal pending type Skip add pending_requests */
   if (t->request_type == DNS_INTERNAL_PENDING_NAME_TO_IP ||
       t->request_type == DNS_INTERNAL_PENDING_IP_TO_NAME)
@@ -1062,7 +1064,6 @@ re_resolve:
         return 0;
     }
 
-  vec_add1 (dm->unresolved_entries, ep - dm->entries);
   clib_fifo_add2 (ep->pending_requests, pr);
 
   pr->request_type = t->request_type;
