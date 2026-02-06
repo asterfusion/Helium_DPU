@@ -272,6 +272,11 @@ vnet_interface_output_node_inline (vlib_main_t *vm, u32 sw_if_index,
 	  vnet_interface_output_handle_offload (vm, b[3]);
 	}
 
+      vnet_buffer2(b[0])->actual_tx_sw_if_index = sw_if_index;
+      vnet_buffer2(b[1])->actual_tx_sw_if_index = sw_if_index;
+      vnet_buffer2(b[2])->actual_tx_sw_if_index = sw_if_index;
+      vnet_buffer2(b[3])->actual_tx_sw_if_index = sw_if_index;
+
       n_left -= 4;
       b += 4;
     }
@@ -309,6 +314,8 @@ vnet_interface_output_node_inline (vlib_main_t *vm, u32 sw_if_index,
 
       if (processing_level >= 1)
 	vnet_interface_output_handle_offload (vm, b[0]);
+
+      vnet_buffer2(b[0])->actual_tx_sw_if_index = sw_if_index;
 
       n_left -= 1;
       b += 1;

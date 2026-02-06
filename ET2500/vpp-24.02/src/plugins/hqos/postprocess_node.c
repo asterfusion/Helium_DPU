@@ -314,10 +314,10 @@ hqos_enqueue_to_tx_node(vlib_main_t * vm, vlib_node_runtime_t * node,
         vlib_prefetch_buffer_header (buffers[6], LOAD);
         vlib_prefetch_buffer_header (buffers[7], LOAD);
 
-        sw_if_index[0] = vnet_buffer (buffers[0])->sw_if_index[VLIB_TX];
-        sw_if_index[1] = vnet_buffer (buffers[1])->sw_if_index[VLIB_TX];
-        sw_if_index[2] = vnet_buffer (buffers[2])->sw_if_index[VLIB_TX];
-        sw_if_index[3] = vnet_buffer (buffers[3])->sw_if_index[VLIB_TX];
+        sw_if_index[0] = vnet_buffer2(buffers[0])->actual_tx_sw_if_index;
+        sw_if_index[1] = vnet_buffer2(buffers[1])->actual_tx_sw_if_index;
+        sw_if_index[2] = vnet_buffer2(buffers[2])->actual_tx_sw_if_index;
+        sw_if_index[3] = vnet_buffer2(buffers[3])->actual_tx_sw_if_index;
 
         hi0 = vnet_get_sup_hw_interface (vnm, sw_if_index[0]);
         hi1 = vnet_get_sup_hw_interface (vnm, sw_if_index[1]);
@@ -336,28 +336,32 @@ hqos_enqueue_to_tx_node(vlib_main_t * vm, vlib_node_runtime_t * node,
         if (PREDICT_FALSE (buffers[0]->flags & VLIB_BUFFER_IS_TRACED))
         {
             t0 = vlib_add_trace (vm, node, buffers[0], sizeof (hqos_postprocess_trace_t));
-            t0->sw_if_index = sw_if_index[0];
+            t0->tx_sw_if_index = vnet_buffer (buffers[0])->sw_if_index[VLIB_TX];
+            t0->actual_tx_sw_if_index = sw_if_index[0];
             t0->use_tc = hi0->flags & VNET_HW_INTERFACE_FLAG_USE_TC;
             t0->tc = vnet_buffer2(buffers[0])->tc_index;
         }
         if (PREDICT_FALSE (buffers[1]->flags & VLIB_BUFFER_IS_TRACED))
         {
             t1 = vlib_add_trace (vm, node, buffers[1], sizeof (hqos_postprocess_trace_t));
-            t1->sw_if_index = sw_if_index[1];
+            t1->tx_sw_if_index = vnet_buffer (buffers[1])->sw_if_index[VLIB_TX];
+            t1->actual_tx_sw_if_index = sw_if_index[1];
             t1->use_tc = hi1->flags & VNET_HW_INTERFACE_FLAG_USE_TC;
             t1->tc = vnet_buffer2(buffers[1])->tc_index;
         }
         if (PREDICT_FALSE (buffers[2]->flags & VLIB_BUFFER_IS_TRACED))
         {
             t2 = vlib_add_trace (vm, node, buffers[2], sizeof (hqos_postprocess_trace_t));
-            t2->sw_if_index = sw_if_index[2];
+            t2->tx_sw_if_index = vnet_buffer (buffers[2])->sw_if_index[VLIB_TX];
+            t2->actual_tx_sw_if_index = sw_if_index[2];
             t2->use_tc = hi0->flags & VNET_HW_INTERFACE_FLAG_USE_TC;
             t2->tc = vnet_buffer2(buffers[2])->tc_index;
         }
         if (PREDICT_FALSE (buffers[3]->flags & VLIB_BUFFER_IS_TRACED))
         {
             t3 = vlib_add_trace (vm, node, buffers[3], sizeof (hqos_postprocess_trace_t));
-            t3->sw_if_index = sw_if_index[3];
+            t3->tx_sw_if_index = vnet_buffer (buffers[3])->sw_if_index[VLIB_TX];
+            t3->actual_tx_sw_if_index = sw_if_index[3];
             t3->use_tc = hi0->flags & VNET_HW_INTERFACE_FLAG_USE_TC;
             t3->tc = vnet_buffer2(buffers[3])->tc_index;
         }
@@ -376,8 +380,8 @@ hqos_enqueue_to_tx_node(vlib_main_t * vm, vlib_node_runtime_t * node,
         vlib_prefetch_buffer_header (buffers[2], LOAD);
         vlib_prefetch_buffer_header (buffers[3], LOAD);
 
-        sw_if_index[0] = vnet_buffer (buffers[0])->sw_if_index[VLIB_TX];
-        sw_if_index[1] = vnet_buffer (buffers[1])->sw_if_index[VLIB_TX];
+        sw_if_index[0] = vnet_buffer2(buffers[0])->actual_tx_sw_if_index;
+        sw_if_index[1] = vnet_buffer2(buffers[1])->actual_tx_sw_if_index;
 
         hi0 = vnet_get_sup_hw_interface (vnm, sw_if_index[0]);
         hi1 = vnet_get_sup_hw_interface (vnm, sw_if_index[1]);
@@ -390,14 +394,16 @@ hqos_enqueue_to_tx_node(vlib_main_t * vm, vlib_node_runtime_t * node,
         if (PREDICT_FALSE (buffers[0]->flags & VLIB_BUFFER_IS_TRACED))
         {
             t0 = vlib_add_trace (vm, node, buffers[0], sizeof (hqos_postprocess_trace_t));
-            t0->sw_if_index = sw_if_index[0];
+            t0->tx_sw_if_index = vnet_buffer (buffers[0])->sw_if_index[VLIB_TX];
+            t0->actual_tx_sw_if_index = sw_if_index[0];
             t0->use_tc = hi0->flags & VNET_HW_INTERFACE_FLAG_USE_TC;
             t0->tc = vnet_buffer2(buffers[0])->tc_index;
         }
         if (PREDICT_FALSE (buffers[1]->flags & VLIB_BUFFER_IS_TRACED))
         {
             t1 = vlib_add_trace (vm, node, buffers[1], sizeof (hqos_postprocess_trace_t));
-            t1->sw_if_index = sw_if_index[1];
+            t1->tx_sw_if_index = vnet_buffer (buffers[1])->sw_if_index[VLIB_TX];
+            t1->actual_tx_sw_if_index = sw_if_index[1];
             t1->use_tc = hi1->flags & VNET_HW_INTERFACE_FLAG_USE_TC;
             t1->tc = vnet_buffer2(buffers[1])->tc_index;
         }
@@ -413,7 +419,7 @@ hqos_enqueue_to_tx_node(vlib_main_t * vm, vlib_node_runtime_t * node,
         vnet_hw_interface_t *hi0;
         hqos_postprocess_trace_t *t0;
 
-        sw_if_index[0] = vnet_buffer (buffers[0])->sw_if_index[VLIB_TX];
+        sw_if_index[0] = vnet_buffer2(buffers[0])->actual_tx_sw_if_index;
 
         hi0 = vnet_get_sup_hw_interface (vnm, sw_if_index[0]);
 
@@ -423,7 +429,8 @@ hqos_enqueue_to_tx_node(vlib_main_t * vm, vlib_node_runtime_t * node,
         if (PREDICT_FALSE (buffers[0]->flags & VLIB_BUFFER_IS_TRACED))
         {
             t0 = vlib_add_trace (vm, node, buffers[0], sizeof (hqos_postprocess_trace_t));
-            t0->sw_if_index = sw_if_index[0];
+            t0->tx_sw_if_index = vnet_buffer (buffers[0])->sw_if_index[VLIB_TX];
+            t0->actual_tx_sw_if_index = sw_if_index[0];
             t0->use_tc = hi0->flags & VNET_HW_INTERFACE_FLAG_USE_TC;
             t0->tc = vnet_buffer2(buffers[0])->tc_index;
         }
