@@ -508,15 +508,12 @@ typedef struct
 
   union {
   struct{
-      union
-      {
   u32 l2_rx_sw_if_index; /* store the orignal if index when bvi */
-  u32 actual_tx_sw_if_index;
-      };
   u32 tc_index; /* store the traffic class index*/
   char *geosite_domain_ptr; /* store the domain pointer for geosite */  
   u32 hqos_user_id;  /* store the hqos user id */
   u32 hqos_guser_id; /* store the hqos user group id */
+  u32 actual_tx_sw_if_index;
   u8 tc_index_dpo; /* store the traffic class dpo */
 
   };
