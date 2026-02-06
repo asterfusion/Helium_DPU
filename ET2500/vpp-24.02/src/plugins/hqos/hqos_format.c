@@ -22,6 +22,8 @@ format_hqos_preprocess_trace(u8 *s, va_list *args)
     CLIB_UNUSED (vlib_node_t * node) = va_arg (*args, vlib_node_t *);
     hqos_preprocess_trace_t *t = va_arg (*args, hqos_preprocess_trace_t *);
 
+    s = format (s, "\tCurrent Pkt tx_sw_if_index %u actual_tx_sw_if_index %u\n", 
+                t->tx_sw_if_index, t->actual_tx_sw_if_index);
     s = format (s, "\tCurrent Pkt [%s]: tc %u, color %u, len %u\n", hqos_error_counters[t->state].name, 
                 t->tc, t->color, t->pkt_len);
     if (t->user_id == ~0)
@@ -65,8 +67,10 @@ format_hqos_postprocess_trace(u8 *s, va_list *args)
     hqos_postprocess_trace_t *t = va_arg (*args, hqos_postprocess_trace_t *);
     vnet_main_t *vnm = vnet_get_main ();
 
+    s = format (s, "\tCurrent Pkt tx_sw_if_index %u actual_tx_sw_if_index %u\n", 
+                t->tx_sw_if_index, t->actual_tx_sw_if_index);
     s = format (s, "\tCurrent Pkt :  output-tx %U, use_tc %u, tc %u\n", 
-            format_vnet_sw_if_index_name, vnm, t->sw_if_index, t->use_tc, t->tc);
+            format_vnet_sw_if_index_name, vnm, t->actual_tx_sw_if_index, t->use_tc, t->tc);
     return s;
 }
 

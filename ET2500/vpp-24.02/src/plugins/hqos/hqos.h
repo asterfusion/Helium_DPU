@@ -228,6 +228,8 @@ typedef vl_counter_hqos_enum_t hqos_error_t;
 typedef struct _hqos_preprocess_trace
 {
     u32 state;
+    u32 tx_sw_if_index;
+    u32 actual_tx_sw_if_index;
 
     u32 pkt_len;
     u32 user_id;
@@ -242,7 +244,8 @@ typedef struct _hqos_preprocess_trace
 
 typedef struct _hqos_postprocess_trace
 {
-    u32 sw_if_index;
+    u32 tx_sw_if_index;
+    u32 actual_tx_sw_if_index;
     u32 tc;
     u8  use_tc;
 } hqos_postprocess_trace_t;

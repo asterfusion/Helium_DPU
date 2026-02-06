@@ -82,7 +82,7 @@ hqos_classification_proc(vlib_main_t *vm,
 
     hqos_preprocess_trace_t *t = NULL;
 
-    sw_if_index = vnet_buffer (p)->sw_if_index[VLIB_TX];
+    sw_if_index = vnet_buffer2(p)->actual_tx_sw_if_index;
     hi = vnet_get_sup_hw_interface (vnm, sw_if_index);
 
     if (!hi)
@@ -261,6 +261,9 @@ trace:
     {
         t = vlib_add_trace (vm, node, p, sizeof (hqos_preprocess_trace_t));
         t->state = state;
+        t->tx_sw_if_index = vnet_buffer (p)->sw_if_index[VLIB_TX];
+        t->actual_tx_sw_if_index = sw_if_index;
+
         t->pkt_len = vlib_buffer_length_in_chain(vm, p);
         t->tc = tc;
         t->user_id = user_id;
