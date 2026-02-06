@@ -92,7 +92,11 @@ u32 *domain_trie_match(domain_trie_t *trie, const char *domain) {
     if(!trie) {
         return NULL;
     }
-    const char *p = domain + strlen(domain);
+    size_t len_pre = strlen(domain);
+    if (len_pre > 0 && domain[len_pre - 1] == '.') {
+        len_pre--;
+    }
+    const char *p = domain + len_pre;
     u32 node_index = 0;
     u32 *results = 0;
     u32 *results_all = 0;
