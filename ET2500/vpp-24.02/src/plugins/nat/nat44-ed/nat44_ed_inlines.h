@@ -323,9 +323,9 @@ nat_ed_session_delete (snat_main_t *sm, snat_session_t *ses, u32 thread_index,
     }
   pool_put_index (tsm->lru_pool, ses->lru_index);
   if (nat_ed_ses_i2o_flow_hash_add_del (sm, thread_index, ses, 0))
-    nat_elog_warn (sm, "flow hash del failed");
+    nat_elog_debug (sm, "delete flow hash del failed");
   if (nat_ed_ses_o2i_flow_hash_add_del (sm, thread_index, ses, 0))
-    nat_elog_warn (sm, "flow hash del failed");
+    nat_elog_debug (sm, "delete flow hash del failed");
   pool_put (tsm->sessions, ses);
   vlib_set_simple_counter (&sm->total_sessions, thread_index, 0,
 			   pool_elts (tsm->sessions));

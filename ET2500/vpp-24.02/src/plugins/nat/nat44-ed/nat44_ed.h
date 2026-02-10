@@ -39,7 +39,7 @@
 /* number of attempts to get a port for ED overloading algorithm, if rolling
  * a dice this many times doesn't produce a free port, it's treated
  * as if there were no free ports available to conserve resources */
-#define ED_PORT_ALLOC_ATTEMPTS (10)
+#define ED_PORT_ALLOC_ATTEMPTS (20)
 
 /* system ports range is 0-1023, first user port is 1024 per
  * https://www.rfc-editor.org/rfc/rfc6335#section-6

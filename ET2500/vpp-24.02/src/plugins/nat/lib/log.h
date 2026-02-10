@@ -143,6 +143,51 @@
     }                                                                         \
   while (0);
 
+#define nat_elog_info_trans(_pm, _str, _tid, _trycount, _src, _sport, _src1, _sport1, _proto)             \
+  do                                                                          \
+    {                                                                         \
+      if (PREDICT_FALSE (_pm->log_level >= NAT_LOG_INFO))                    \
+	{                                                                     \
+	  ELOG_TYPE_DECLARE (e) = {                                           \
+	    .format = "nat-msg " _str " thread: %d try %d, ip src: %d.%d.%d.%d,%d" \
+                " trans: %d.%d.%d.%d,%d, proto %d", \
+	    .format_args = "i4i4i1i1i1i1i2i1i1i1i1i2i2",                          \
+	  };                                                                  \
+	  CLIB_PACKED (struct {                                               \
+        u32 tid; \
+        u32 trycount; \
+	    u8 src_oct1;                                                      \
+	    u8 src_oct2;                                                      \
+	    u8 src_oct3;                                                      \
+	    u8 src_oct4;                                                      \
+        u16 src_port; \
+	    u8 dst_oct1;                                                      \
+	    u8 dst_oct2;                                                      \
+	    u8 dst_oct3;                                                      \
+	    u8 dst_oct4;                                                      \
+        u16 dst_port;\
+        u16 proto;\
+	  }) *                                                                \
+	    ed;                                                               \
+	  ed = ELOG_DATA (&vlib_global_main.elog_main, e);                    \
+	  ed->tid = _tid;\
+      ed->trycount = _trycount;\
+	  ed->src_oct1 = _src >> 24;                                          \
+	  ed->src_oct2 = _src >> 16;                                          \
+	  ed->src_oct3 = _src >> 8;                                           \
+	  ed->src_oct4 = _src;                                                \
+      ed->src_port = _sport;\
+	  ed->dst_oct1 = _src1 >> 24;                                          \
+	  ed->dst_oct2 = _src1 >> 16;                                          \
+	  ed->dst_oct3 = _src1 >> 8;                                           \
+	  ed->dst_oct4 = _src1;                                                \
+      ed->dst_port = _sport1;\
+      ed->proto = _proto;\
+	}                                                                     \
+    }                                                                         \
+  while (0);
+
+
 #define nat_elog_X1(_pm, _level, _fmt, _arg, _val1)                           \
   do                                                                          \
     {                                                                         \

@@ -128,6 +128,13 @@ nat_ed_alloc_addr_and_port_with_snat_address (
 	  s->o2i.match.sport = clib_host_to_net_u16 (port);
 	}
       s->o2i.match.dport = clib_host_to_net_u16 (port);
+
+  nat_elog_info_trans (sm, "TRY ",
+               thread_index, attempts,
+			   s->in2out.addr.as_u32, s->in2out.port,
+               a->addr.as_u32, port,
+               s->proto);
+
       if (0 == nat_ed_ses_o2i_flow_hash_add_del (sm, thread_index, s, 2))
 	{
 	  *outside_addr = a->addr;
@@ -695,7 +702,12 @@ slow_path_ed (vlib_main_t *vm, snat_main_t *sm, vlib_buffer_t *b,
 	    sm, rx_fib_index, tx_sw_if_index, proto, thread_index, l_addr,
 	    r_addr, tsm->snat_thread_index, s, &outside_addr, &outside_port, b))
 	{
-	  nat_elog_notice (sm, "addresses exhausted");
+  nat_elog_info_trans (sm, "EXHAUSTED ",
+               thread_index, 0,
+			   s->in2out.addr.as_u32, s->in2out.port,
+               outside_addr.as_u32, outside_port,
+               s->proto);
+	  //nat_elog_notice (sm, "addresses exhausted");
 	  b->error = node->errors[NAT_IN2OUT_ED_ERROR_OUT_OF_PORTS];
 	  nat_ed_session_delete (sm, s, thread_index, 1);
 	  return NAT_NEXT_DROP;
@@ -777,6 +789,12 @@ slow_path_ed (vlib_main_t *vm, snat_main_t *sm, vlib_buffer_t *b,
 			 s->in2out.port, &s->ext_host_nat_addr,
 			 s->ext_host_nat_port, &s->out2in.addr, s->out2in.port,
 			 &s->ext_host_addr, s->ext_host_port, s->proto, 0);
+
+  nat_elog_info_trans (sm, "CREATE",
+               thread_index, 0,
+			   s->in2out.addr.as_u32, s->in2out.port,
+               s->out2in.addr.as_u32, s->out2in.port,
+               s->proto);
 
   per_vrf_sessions_register_session (s, thread_index);
 

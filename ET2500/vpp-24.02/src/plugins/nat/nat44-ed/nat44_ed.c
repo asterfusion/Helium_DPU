@@ -211,10 +211,10 @@ nat44_ed_free_session_data (snat_main_t *sm, snat_session_t *s,
   per_vrf_sessions_unregister_session (s, thread_index);
 
   if (nat_ed_ses_i2o_flow_hash_add_del (sm, thread_index, s, 0))
-    nat_elog_warn (sm, "flow hash del failed");
+    nat_elog_debug (sm, "free flow hash del failed");
 
   if (nat_ed_ses_o2i_flow_hash_add_del (sm, thread_index, s, 0))
-    nat_elog_warn (sm, "flow hash del failed");
+    nat_elog_debug (sm, "free flow hash del failed");
 
   if (na44_ed_is_fwd_bypass_session (s))
     {
@@ -3128,7 +3128,7 @@ nat44_ed_get_in2out_worker_index (vlib_buffer_t *b, ip4_header_t *ip,
   hash = ip->src_address.as_u32 + (ip->src_address.as_u32 >> 8) +
 	 (ip->src_address.as_u32 >> 16) + (ip->src_address.as_u32 >> 24) +
 	 rx_fib_index + (rx_fib_index >> 8) + (rx_fib_index >> 16) +
-	 (rx_fib_index >> 24);
+	 (rx_fib_index >> 24) + vnet_buffer (b)->ip.reass.l4_src_port;
 
   if (PREDICT_TRUE (is_pow2 (_vec_len (sm->workers))))
     next_worker_index += sm->workers[hash & (_vec_len (sm->workers) - 1)];
