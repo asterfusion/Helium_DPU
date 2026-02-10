@@ -1,97 +1,19 @@
-## 1 **Kernel modification**
+## 1 Check that the driver is loaded correctly
 
-- *[KERNEL]/drivers/usb/serial/option.c*
-    
-    ```
-      @@ -641,6 +641,7 @@ static void option_instat_callback(struct urb *urb);
-    
-       static const struct usb_device_id option_ids[] = {
-      +       { USB_DEVICE(0x2C7C, 0x0801) },		//当前5G模块型号RM520N对应的vid和pid
-      		{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_COLT) },
-      		{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_RICOLA) },
-      		{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_RICOLA_LIGHT) },
-    
-      @@ -2399,6 +2400,7 @@ static struct usb_serial_driver option_1port_device = {
-       #ifdef CONFIG_PM
-      		.suspend           = usb_wwan_suspend,
-      		.resume            = usb_wwan_resume,
-      +       .reset_resume      = usb_wwan_resume,
-       #endif
-       };
-    
-      @@ -2441,7 +2443,27 @@ static int option_probe(struct usb_serial *serial,
-      		 */
-      		if (device_flags & NUMEP2 && iface_desc->bNumEndpoints != 2)
-      				return -ENODEV;
-      -
-      +//Added by Quectel
-      +
-      +       if (serial->dev->descriptor.idVendor == cpu_to_le16(0x2C7C)) {
-      +               __u16 idProduct =
-      +                       le16_to_cpu(serial->dev->descriptor.idProduct);
-      +               struct usb_interface_descriptor *intf =
-      +                       &serial->interface->cur_altsetting->desc;
-      +               if (intf->bInterfaceClass != 0xFF ||
-      +                   intf->bInterfaceSubClass == 0x42) {
-      +                       //ECM, RNDIS, NCM, MBIM, ACM, UAC, ADB
-      +                       return -ENODEV;
-      +               }
-      +               if ((idProduct & 0xF000) == 0x0000) {
-      +                       //MDM interface 4 is QMI
-      +                       if (intf->bInterfaceNumber == 4 &&
-      +                           intf->bNumEndpoints == 3 &&
-      +                           intf->bInterfaceSubClass == 0xFF &&
-      +                           intf->bInterfaceProtocol == 0xFF)
-      +                               return -ENODEV;
-      +               }
-      +       }
-      		/* Store the device flags so we can use them during attach. */
-      		usb_set_serial_data(serial, (void *)device_flags);
-    
-    ```
-    
-- *[KERNEL]/drivers/usb/serial/usb_wwan.c*
-@@ -435,7 +435,11 @@ static struct urb *usb_wwan_setup_urb(struct usb_serial_port *port,
-    
-    ```
-      		if (intfdata->use_zlp && dir == USB_DIR_OUT)
-      				urb->transfer_flags |= URB_ZERO_PACKET;
-      -
-      +       if (dir == USB_DIR_OUT) {
-      +               struct usb_device_descriptor *desc = &serial->dev->descriptor;
-      +               if (desc->idVendor == cpu_to_le16(0x2C7C))
-      +               urb->transfer_flags |= URB_ZERO_PACKET;
-      +       }
-      		return urb;
-       }
-    
-    ```
-    
-- *[KERNEL]/drivers/net/usb/Makefile*
-@@ -38,6 +38,7 @@ obj-$(CONFIG_USB_NET_CX82310_ETH) += cx82310_eth.o
-obj-$(CONFIG_USB_NET_CDC_NCM) += cdc_ncm.o
-obj-$(CONFIG_USB_NET_HUAWEI_CDC_NCM) += huawei_cdc_ncm.o
-obj-$(CONFIG_USB_VL600) += lg-vl600.o
-+obj-${CONFIG_USB_NET_QMI_WWAN} += qmi_wwan_q.o
-obj-$(CONFIG_USB_NET_QMI_WWAN) += qmi_wwan.o
-obj-$(CONFIG_USB_NET_CDC_MBIM) += cdc_mbim.o
-obj-$(CONFIG_USB_NET_CH9200) += ch9200.o
-- add file : *drivers/net/usb/qmi_wwan_q.c*
-- kernel config:
-CONFIG_USB_SERIAL [y]
-CONFIG_USB_SERIAL_WWAN [y]
-CONFIG_USB_SERIAL_OPTION [y]
-    
-    ```
-      CONFIG_USB_NET_DRIVERS [y]
-      CONFIG_USB_USBNET [y]
-      CONFIG_USB_NET_QMI_WWAN [m]
-      CONFIG_USB_WDM [y]
-    
-      CONFIG_USB_NET_CDC_MBIM [m]
-    
-    ```
-    
+- cd /sys/bus/usb/drivers
+check *option、qmi_wwan_q、cdc_mbim* exist
+
+The RM520N should support both `qmi_wwan_q` and `cdc_mbim` driver modes. Currently, `qmi_wwan_q` is being used.
+
+- check driver insmod
+
+```bash
+lsmod | grep qmi_wwan_q 
+```
+
+- if driver not exists，get lastest kernel source code from github
+
+https://github.com/asterfusion/DPU_linux_kernel.git
 
 ## 2 Check Hardware
 
@@ -128,7 +50,8 @@ sudo cp example/udhcp/simple.script /usr/share/udhcpc/default.script
 ## 3 Compile Quectel_QConnectManager
 
 ```
-	cd Quectel_QConnectManager_Linux_V1.6.8
+	git clone https://github.com/asterfusion/Helium_DPU.git
+	cd Helium_DPU/ET2500/Quectel_QConnectManager
 	make
 
 ```
@@ -194,14 +117,7 @@ sudo cp example/udhcp/simple.script /usr/share/udhcpc/default.script
 
 ```
 
-## 5 Check that the driver is loaded correctly
-
-cd /sys/bus/usb/drivers
-*option、qmi_wwan_q、cdc_mbim* exist
-
-- The RM520N should support both `qmi_wwan_q` and `cdc_mbim` driver modes. Currently, `qmi_wwan_q` is being used.
-
-## 6 AT command
+## 5 AT command
 
 USB2 is an AT serial port device. Use a serial terminal tool to connect to the serial port.
 minicom /dev/tty/USB2
