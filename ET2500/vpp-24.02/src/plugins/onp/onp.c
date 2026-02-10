@@ -422,6 +422,7 @@ onp_config (vlib_main_t *vm, unformat_input_t *input)
 			 &sub_input))
 	{
 	  conf->is_crypto_config_enabled = 1;
+          crypto_main.crypto_async_flag = 1;
 	  /* Use first crypto queue for IPsec */
 	  conf->onp_ipsecconf.crypto_hw_queue_id = ONP_IPSEC_QUEUE;
 
@@ -433,6 +434,7 @@ onp_config (vlib_main_t *vm, unformat_input_t *input)
 			 &crypto_pci_addr))
 	{
 	  conf->is_crypto_config_enabled = 1;
+          crypto_main.crypto_async_flag = 1;
 	  /* Use first crypto queue for IPsec */
 	  conf->onp_ipsecconf.crypto_hw_queue_id = ONP_IPSEC_QUEUE;
 

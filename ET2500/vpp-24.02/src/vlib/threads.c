@@ -586,6 +586,7 @@ start_workers (vlib_main_t * vm)
 
       worker_thread_index = 1;
       clib_spinlock_init (&vm->worker_thread_main_loop_callback_lock);
+      clib_spinlock_init (&vm->phymem_lock);
 
       for (i = 0; i < vec_len (tm->registrations); i++)
 	{

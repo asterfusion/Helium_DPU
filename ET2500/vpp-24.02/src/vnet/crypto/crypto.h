@@ -478,6 +478,7 @@ typedef struct
   vnet_crypto_async_alg_data_t *async_algs;
   vnet_crypto_async_next_node_t *next_nodes;
   u32 crypto_node_index;
+  u8 crypto_async_flag;
 } vnet_crypto_main_t;
 
 extern vnet_crypto_main_t crypto_main;
