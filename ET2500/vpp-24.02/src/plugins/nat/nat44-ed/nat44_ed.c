@@ -3030,7 +3030,7 @@ nat44_ed_get_in2out_worker_index (vlib_buffer_t *b, ip4_header_t *ip,
 {
   snat_main_t *sm = &snat_main;
   u32 next_worker_index = sm->first_worker_index;
-  u32 hash;
+  u32 hash = 0;
 
   clib_bihash_kv_16_8_t kv16, value16;
 
@@ -3123,12 +3123,18 @@ nat44_ed_get_in2out_worker_index (vlib_buffer_t *b, ip4_header_t *ip,
 	    ed_value_get_session_index (&value16);
 	  goto out;
 	}
-    }
 
   hash = ip->src_address.as_u32 + (ip->src_address.as_u32 >> 8) +
 	 (ip->src_address.as_u32 >> 16) + (ip->src_address.as_u32 >> 24) +
 	 rx_fib_index + (rx_fib_index >> 8) + (rx_fib_index >> 16) +
 	 (rx_fib_index >> 24) + vnet_buffer (b)->ip.reass.l4_src_port;
+    }
+    else{
+    hash = ip->src_address.as_u32 + (ip->src_address.as_u32 >> 8) +
+    (ip->src_address.as_u32 >> 16) + (ip->src_address.as_u32 >> 24) +
+    rx_fib_index + (rx_fib_index >> 8) + (rx_fib_index >> 16) +
+    (rx_fib_index >> 24);
+    }
 
   if (PREDICT_TRUE (is_pow2 (_vec_len (sm->workers))))
     next_worker_index += sm->workers[hash & (_vec_len (sm->workers) - 1)];
