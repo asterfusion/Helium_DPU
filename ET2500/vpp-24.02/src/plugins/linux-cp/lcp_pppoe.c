@@ -368,6 +368,15 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
               sw_if_index, 1, NULL, 0);
       vnet_feature_enable_disable("ip6-multicast", "linux-cp-bfdv6-phy",
               sw_if_index, 1, NULL, 0);
+      /* enable pim and igmp punt for interface */
+      vnet_feature_enable_disable("ip4-multicast", "linux-cp-pim",
+              sw_if_index, 1, NULL, 0);
+      vnet_feature_enable_disable("ip6-multicast", "linux-cp-pim6",
+              sw_if_index, 1, NULL, 0);
+      vnet_feature_enable_disable("ip4-multicast", "linux-cp-igmp",
+              sw_if_index, 1, NULL, 0);
+      vnet_feature_enable_disable("ip6-multicast", "linux-cp-igmp6",
+              sw_if_index, 1, NULL, 0);
       /* disable ip-not-enable */
       vnet_feature_enable_disable("ip4-unicast", "ip4-not-enabled",
               sw_if_index, 0, NULL, 0);
