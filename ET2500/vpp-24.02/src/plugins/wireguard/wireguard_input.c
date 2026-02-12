@@ -328,6 +328,7 @@ wg_handshake_process (vlib_main_t *vm, wg_main_t *wmp, vlib_buffer_t *b,
       return WG_INPUT_ERROR_HANDSHAKE_RECEIVE;
     }
 
+  peer->last_handshark = vlib_time_now (vm);
   wg_timers_any_authenticated_packet_received (peer);
   wg_timers_any_authenticated_packet_traversal (peer);
   return WG_INPUT_ERROR_NONE;
@@ -561,6 +562,7 @@ wg_input_add_to_frame (vlib_main_t *vm, vnet_crypto_async_frame_t *f,
   fe->iv = iv;
   fe->tag = tag;
   fe->flags = flags;
+  fe->aad = NULL;
   f->buffer_indices[index] = buffer_index;
   f->next_node_index[index] = next_node;
 }
@@ -598,6 +600,7 @@ wg_input_process (vlib_main_t *vm, wg_per_thread_data_t *ptd,
   clib_memset (iv, 0, 4);
   clib_memcpy (iv + 4, &nonce, sizeof (nonce));
 
+  //  VNET_CRYPTO_OP_CHACHA20_POLY1305_TAG16_AAD0_DEC, VNET_CRYPTO_OP_CHACHA20_POLY1305_DEC);
   if (is_async)
     {
       u8 flags = VNET_CRYPTO_OP_FLAG_HMAC_CHECK;
@@ -903,6 +906,7 @@ wg_input_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	    wg_handshake_process (vm, wmp, b[0], node->node_index, is_ip4);
 	  if (ret != WG_INPUT_ERROR_NONE)
 	    {
+              peer->last_handshark = 0;
 	      other_next[n_other] = WG_INPUT_NEXT_ERROR;
 	      b[0]->error = node->errors[ret];
 	      other_bi[n_other] = from[b - bufs];
