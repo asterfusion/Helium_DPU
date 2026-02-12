@@ -413,7 +413,7 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       vnet_sw_interface_set_flags (vnm, sw_if_index,
 				   VNET_SW_INTERFACE_FLAG_ADMIN_UP);
       vnet_set_interface_l3_output_node (vnm->vlib_main, sw_if_index,
-					 (u8 *) "tunnel-output");
+					 (u8 *) "tunnel-output-no-count");
 
   }
   else
@@ -1581,9 +1581,12 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
   u32 n_left_from, *from, *to_next;
   u32 next_index = node->cached_next_index;
   pppoe_main_t *pem = &pppoe_main;
+  vnet_main_t *vnm = pem->vnet_main;
+  u32 thread_index = vm->thread_index;
   u32 pkts_decapsulated = 0;
   pppoe_entry_key_t cached_key;
   pppoe_entry_result_t cached_result;
+  u32 stats_sw_if_index, stats_n_packets, stats_n_bytes;
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
@@ -1592,6 +1595,8 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
   cached_key.raw[0] = ~0;
   cached_key.raw[1] = ~0;
   cached_result.raw = ~0;	/* warning be gone */
+  stats_sw_if_index = ~0;
+  stats_n_packets = stats_n_bytes = 0;
 
   while (n_left_from > 0)
   {
@@ -1612,9 +1617,11 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
           u16 type0;
           pppoe_session_t * t0;
           u32 sw_if_index = 0;
-	  pppoe_entry_key_t key0;
-	  pppoe_entry_result_t result0;
-	  u32 bucket0;
+          pppoe_entry_key_t key0;
+          pppoe_entry_result_t result0;
+          u32 bucket0;
+          u32 len0;
+          u32 new_sw_if_index0;
 
           bi0 = from[0];
           to_next[0] = bi0;
@@ -1679,12 +1686,43 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               : PPPOE_INPUT_NEXT_IP6_INPUT;
           pkts_decapsulated ++;
           if (PREDICT_FALSE (result0.fields.session_index != ~0))
-	  {
-	     t0 = pool_elt_at_index (pem->sessions,
-				  result0.fields.session_index);
-	     vnet_buffer2(b0)->l2_rx_sw_if_index = vnet_buffer(b0)->sw_if_index[VLIB_RX];
-	     vnet_buffer(b0)->sw_if_index[VLIB_RX] = t0->sw_if_index;
-	  }
+          {
+              t0 = pool_elt_at_index (pem->sessions,
+                      result0.fields.session_index);
+              vnet_buffer2(b0)->l2_rx_sw_if_index = vnet_buffer(b0)->sw_if_index[VLIB_RX];
+              vnet_buffer(b0)->sw_if_index[VLIB_RX] = t0->sw_if_index;
+
+              //current same with interface_output, include ethernet+pppoe
+              len0 = vlib_buffer_length_in_chain (vm, b0) + b0->current_data
+                  - vnet_buffer (b0)->l2_hdr_offset;
+
+              stats_n_packets += 1;
+              stats_n_bytes += len0;
+              new_sw_if_index0 = t0->sw_if_index;
+              // Batch stat increments from the same subinterface so counters
+              // don't need to be incremented for every packet.
+              if (PREDICT_FALSE (new_sw_if_index0 != stats_sw_if_index))
+              {
+                  stats_n_packets -= 1;
+                  stats_n_bytes -= len0;
+
+                  if (new_sw_if_index0 != ~0)
+                      vlib_increment_combined_counter
+                          (vnm->interface_main.combined_sw_if_counters
+                           + VNET_INTERFACE_COUNTER_RX,
+                           thread_index, new_sw_if_index0, 1, len0);
+                  if (stats_n_packets > 0)
+                  {
+                      vlib_increment_combined_counter
+                          (vnm->interface_main.combined_sw_if_counters
+                           + VNET_INTERFACE_COUNTER_RX,
+                           thread_index,
+                           stats_sw_if_index, stats_n_packets, stats_n_bytes);
+                      stats_n_packets = stats_n_bytes = 0;
+                  }
+                  stats_sw_if_index = new_sw_if_index0;
+              }
+          }
 
 trace00:
           b0->error = error0 ? node->errors[error0] : 0;
@@ -1715,6 +1753,16 @@ trace00:
   vlib_node_increment_counter (vm, pppoe_input_node.index,
                                PPPOE_ERROR_DECAPSULATED,
                                pkts_decapsulated);
+
+  // Increment any remaining batched stats
+  if (stats_n_packets > 0 && stats_sw_if_index != ~0)
+  {
+      vlib_increment_combined_counter
+          (vnm->interface_main.combined_sw_if_counters
+           + VNET_INTERFACE_COUNTER_RX,
+           thread_index, stats_sw_if_index, stats_n_packets, stats_n_bytes);
+  }
+
   return frame->n_vectors;
 
 }
