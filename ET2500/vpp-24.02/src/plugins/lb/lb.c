@@ -31,9 +31,6 @@ static fib_source_t lb_fib_src;
 
 lb_main_t lb_main;
 
-#define lb_get_writer_lock() clib_spinlock_lock (&lb_main.writer_lock)
-#define lb_put_writer_lock() clib_spinlock_unlock (&lb_main.writer_lock)
-
 static void lb_as_stack (lb_as_t *as);
 
 
@@ -129,6 +126,13 @@ static char *lb_vip_type_strings[] = {
     [LB_VIP_TYPE_IP4_L3DSR] = "ip4-l3dsr",
     [LB_VIP_TYPE_IP4_NAT4] = "ip4-nat4",
     [LB_VIP_TYPE_IP6_NAT6] = "ip6-nat6",
+    [LB_VIP_TYPE_IP6_NAT4] = "ip6-nat4",
+};
+
+static char *lb_nat_proto_strings[] = {
+#define _(N, i, n, s) [LB_NAT_PROTOCOL_##N] = s,
+  foreach_lb_nat_protocol
+#undef _
 };
 
 u8 *format_lb_vip_type (u8 * s, va_list * args)
@@ -139,6 +143,13 @@ u8 *format_lb_vip_type (u8 * s, va_list * args)
     if (vipt == i)
       return format(s, lb_vip_type_strings[i]);
   return format(s, "_WRONG_TYPE_");
+}
+
+u8 *format_lb_nat_proto (u8 *s, va_list * args)
+{
+    lb_nat_protocol_t lb_proto = va_arg (*args, lb_nat_protocol_t);
+
+    return format(s, lb_nat_proto_strings[lb_proto]);
 }
 
 uword unformat_lb_vip_type (unformat_input_t * input, va_list * args)
@@ -156,6 +167,7 @@ uword unformat_lb_vip_type (unformat_input_t * input, va_list * args)
 u8 *format_lb_vip (u8 * s, va_list * args)
 {
   lb_vip_t *vip = va_arg (*args, lb_vip_t *);
+  s = format(s, "Vrf (ip table: %u fib index: %u)", vip->vrf_id, vip->fib_index);
   s = format(s, "%U %U new_size:%u #as:%u%s",
              format_lb_vip_type, vip->type,
              format_ip46_prefix, &vip->prefix, vip->plen, IP46_TYPE_ANY,
@@ -179,6 +191,11 @@ u8 *format_lb_vip (u8 * s, va_list * args)
          (vip->encap_args.srv_type == LB_SRV_TYPE_CLUSTERIP)?"clusterip":
              "nodeport",
          ntohs(vip->port), ntohs(vip->encap_args.target_port));
+
+      if (lb_vip_is_double_nat44(vip))
+      {
+          s = format (s, " enable snat-vip : snat-vip-pool %u", vip->vip_snat_pool_index);
+      }
     }
 
   return s;
@@ -187,8 +204,9 @@ u8 *format_lb_vip (u8 * s, va_list * args)
 u8 *format_lb_as (u8 * s, va_list * args)
 {
   lb_as_t *as = va_arg (*args, lb_as_t *);
-  return format(s, "%U %s", format_ip46_address,
-                &as->address, IP46_TYPE_ANY,
+  return format(s, "Vrf (ip table: %u fib index: %u) %U %s", 
+                as->vrf_id, as->fib_index,
+                format_ip46_address, &as->address, IP46_TYPE_ANY,
                 (as->flags & LB_AS_FLAGS_USED)?"used":"removed");
 }
 
@@ -209,6 +227,9 @@ u8 *format_lb_vip_detailed (u8 * s, va_list * args)
                   (vip->flags & LB_VIP_FLAGS_USED)?"":" removed",
                   format_white_space, indent,
                   vip->new_flow_table_mask + 1);
+  s = format(s, "%U  Vrf (ip table: %u fib inde): %u)", 
+                  format_white_space, indent, 
+                  vip->vrf_id, vip->fib_index);
   /* clang-format on */
 
   if (vip->port != 0)
@@ -227,11 +248,32 @@ u8 *format_lb_vip_detailed (u8 * s, va_list * args)
   else if ((vip->type == LB_VIP_TYPE_IP4_NAT4)
           || (vip->type == LB_VIP_TYPE_IP6_NAT6))
     {
-      s = format (s, "%U  type:%s port:%u target_port:%u",
+      s = format (s, "%U  type:%s port:%u target_port:%u\n",
          format_white_space, indent,
          (vip->encap_args.srv_type == LB_SRV_TYPE_CLUSTERIP)?"clusterip":
              "nodeport",
          ntohs(vip->port), ntohs(vip->encap_args.target_port));
+
+      if (lb_vip_is_double_nat44(vip))
+      {
+          s = format (s, "%U  #snat-vip-pool : %u\n", format_white_space, indent, vip->vip_snat_pool_index);
+          lb_vip_snat_addresses_pool_t *addresses;
+          lb_vip_snat_address_t *address;
+          int i;
+
+          addresses = pool_elt_at_index(lbm->vip_snat_pool, vip->vip_snat_pool_index);
+          vec_foreach(address, addresses->addresses)
+          {
+              s = format(s, "%U    %U : \n", 
+                        format_white_space, indent, format_ip4_address, &address->addr);
+              for (i = 0; i < LB_NAT_N_PROTOCOLS; ++i)
+              {
+                  s = format(s, "\t\t Proto %U: port-used %u port-available %u\n", 
+                             format_lb_nat_proto, i, 
+                             address->busy_ports[i], 0xfbff - address->busy_ports[i]);
+              }
+          }
+      }
     }
 
   //Print counters
@@ -273,6 +315,29 @@ u8 *format_lb_vip_detailed (u8 * s, va_list * args)
   return s;
 }
 
+u8 *format_lb_snat_pool (u8 * s, va_list * args)
+{
+  lb_vip_snat_addresses_pool_t *snat_addresses = va_arg (*args, lb_vip_snat_addresses_pool_t *);
+
+  lb_vip_snat_address_t *address;
+
+  int i;
+
+  s = format(s, "Index %u refcnt %u address %u\n", snat_addresses->id, snat_addresses->refcnt, vec_len(snat_addresses->addresses));
+
+  vec_foreach(address, snat_addresses->addresses)
+  {
+      s = format(s, "\t%U : \n", format_ip4_address, &address->addr);
+      for (i = 0; i < LB_NAT_N_PROTOCOLS; ++i)
+      {
+          s = format(s, "\t\t Proto %U: port-used %u port-available %u\n", 
+                    format_lb_nat_proto, i, 
+                    address->busy_ports[i], 0xfbff - address->busy_ports[i]);
+      }
+  }
+  return s;
+}
+
 typedef struct {
   u32 as_index;
   u32 last;
@@ -292,7 +357,7 @@ static void lb_vip_garbage_collection(lb_vip_t *vip)
 {
   lb_main_t *lbm = &lb_main;
   lb_snat4_key_t m_key4;
-  clib_bihash_kv_8_8_t kv4, value4;
+  clib_bihash_kv_16_8_t kv4, value4;
   lb_snat6_key_t m_key6;
   clib_bihash_kv_24_8_t kv6, value6;
   lb_snat_mapping_t *m = 0;
@@ -313,25 +378,28 @@ static void lb_vip_garbage_collection(lb_vip_t *vip)
         { //Not referenced
 
           if (lb_vip_is_nat4_port(vip)) {
+              clib_memset(&m_key4, 0, sizeof(m_key4));
               m_key4.addr = as->address.ip4;
               m_key4.port = vip->encap_args.target_port;
-              m_key4.protocol = 0;
-              m_key4.fib_index = 0;
+              m_key4.protocol = vip->protocol;
+              m_key4.fib_index = as->fib_index;
 
-              kv4.key = m_key4.as_u64;
-              if(!clib_bihash_search_8_8(&lbm->mapping_by_as4, &kv4, &value4))
+              kv4.key[0] = m_key4.as_u64[0];
+              kv4.key[1] = m_key4.as_u64[1];
+              if(!clib_bihash_search_16_8(&lbm->mapping_by_as4, &kv4, &value4))
                 m = pool_elt_at_index (lbm->snat_mappings, value4.value);
               ASSERT (m);
 
               kv4.value = m - lbm->snat_mappings;
-              clib_bihash_add_del_8_8(&lbm->mapping_by_as4, &kv4, 0);
+              clib_bihash_add_del_16_8(&lbm->mapping_by_as4, &kv4, 0);
               pool_put (lbm->snat_mappings, m);
           } else if (lb_vip_is_nat6_port(vip)) {
+              clib_memset(&m_key6, 0, sizeof(m_key6));
               m_key6.addr.as_u64[0] = as->address.ip6.as_u64[0];
               m_key6.addr.as_u64[1] = as->address.ip6.as_u64[1];
               m_key6.port = vip->encap_args.target_port;
-              m_key6.protocol = 0;
-              m_key6.fib_index = 0;
+              m_key6.protocol = vip->protocol;
+              m_key6.fib_index = as->fib_index;
 
               kv6.key[0] = m_key6.as_u64[0];
               kv6.key[1] = m_key6.as_u64[1];
@@ -496,7 +564,7 @@ int lb_conf(ip4_address_t *ip4_address, ip6_address_t *ip6_address,
 
 
 static
-int lb_vip_port_find_index(ip46_address_t *prefix, u8 plen,
+int lb_vip_port_find_index(u32 vrf_id, ip46_address_t *prefix, u8 plen,
                            u8 protocol, u16 port,
                            lb_lkp_type_t lkp_type,
                            u32 *vip_index)
@@ -508,6 +576,7 @@ int lb_vip_port_find_index(ip46_address_t *prefix, u8 plen,
   ip46_prefix_normalize(prefix, plen);
   pool_foreach (vip, lbm->vips) {
       if ((vip->flags & LB_AS_FLAGS_USED) &&
+          vip->vrf_id == vrf_id &&
           vip->plen == plen &&
           vip->prefix.as_u64[0] == prefix->as_u64[0] &&
           vip->prefix.as_u64[1] == prefix->as_u64[1])
@@ -530,36 +599,36 @@ int lb_vip_port_find_index(ip46_address_t *prefix, u8 plen,
 }
 
 static
-int lb_vip_port_find_index_with_lock(ip46_address_t *prefix, u8 plen,
+int lb_vip_port_find_index_with_lock(u32 vrf_id, ip46_address_t *prefix, u8 plen,
                                      u8 protocol, u16 port, u32 *vip_index)
 {
-  return lb_vip_port_find_index(prefix, plen, protocol, port,
+  return lb_vip_port_find_index(vrf_id, prefix, plen, protocol, port,
                                 LB_LKP_SAME_IP_PORT, vip_index);
 }
 
 static
-int lb_vip_port_find_all_port_vip(ip46_address_t *prefix, u8 plen,
+int lb_vip_port_find_all_port_vip(u32 vrf_id, ip46_address_t *prefix, u8 plen,
                                   u32 *vip_index)
 {
-  return lb_vip_port_find_index(prefix, plen, ~0, 0,
+  return lb_vip_port_find_index(vrf_id, prefix, plen, ~0, 0,
                                 LB_LKP_ALL_PORT_IP, vip_index);
 }
 
 /* Find out per-port-vip entry with different protocol and port */
 static
-int lb_vip_port_find_diff_port(ip46_address_t *prefix, u8 plen,
+int lb_vip_port_find_diff_port(u32 vrf_id, ip46_address_t *prefix, u8 plen,
                                u8 protocol, u16 port, u32 *vip_index)
 {
-  return lb_vip_port_find_index(prefix, plen, protocol, port,
+  return lb_vip_port_find_index(vrf_id, prefix, plen, protocol, port,
                                 LB_LKP_DIFF_IP_PORT, vip_index);
 }
 
-int lb_vip_find_index(ip46_address_t *prefix, u8 plen, u8 protocol,
+int lb_vip_find_index(u32 vrf_id, ip46_address_t *prefix, u8 plen, u8 protocol,
                       u16 port, u32 *vip_index)
 {
   int ret;
   lb_get_writer_lock();
-  ret = lb_vip_port_find_index_with_lock(prefix, plen,
+  ret = lb_vip_port_find_index_with_lock(vrf_id, prefix, plen,
                                          protocol, port, vip_index);
   lb_put_writer_lock();
   return ret;
@@ -585,17 +654,29 @@ static int lb_as_find_index_vip(lb_vip_t *vip, ip46_address_t *address, u32 *as_
   return -1;
 }
 
-int lb_vip_add_ass(u32 vip_index, ip46_address_t *addresses, u32 n)
+int lb_vip_add_ass(u32 vip_index, ip46_address_t *addresses, u32 n, u32 as_vrf_id)
 {
   lb_main_t *lbm = &lb_main;
   lb_get_writer_lock();
   lb_vip_t *vip;
-  if (!(vip = lb_vip_get_by_index(vip_index))) {
+  u32 fib_index;
+
+  if (!(vip = lb_vip_get_by_index(vip_index))) 
+  {
     lb_put_writer_lock();
     return VNET_API_ERROR_NO_SUCH_ENTRY;
   }
 
   ip46_type_t type = lb_encap_is_ip4(vip)?IP46_TYPE_IP4:IP46_TYPE_IP6;
+
+  fib_index = fib_table_find (lb_encap_is_ip4(vip) ? FIB_PROTOCOL_IP4 : FIB_PROTOCOL_IP6, as_vrf_id);
+  
+  if (~0 == fib_index)
+  {
+    lb_put_writer_lock();
+    return (VNET_API_ERROR_NO_SUCH_FIB);
+  }
+
   u32 *to_be_added = 0;
   u32 *to_be_updated = 0;
   u32 i;
@@ -669,8 +750,11 @@ next:
         nh.fp_proto = FIB_PROTOCOL_IP6;
     }
 
+    as->vrf_id = as_vrf_id;
+    as->fib_index = fib_index;
+
     as->next_hop_fib_entry_index =
-        fib_table_entry_special_add(0,
+        fib_table_entry_special_add(fib_index,
                                     &nh,
                                     FIB_SOURCE_RR,
                                     FIB_ENTRY_FLAG_NONE);
@@ -688,11 +772,11 @@ next:
         clib_memset (m, 0, sizeof (*m));
         if (lb_vip_is_nat4_port(vip)) {
             lb_snat4_key_t m_key4;
-            clib_bihash_kv_8_8_t kv4;
+            clib_bihash_kv_16_8_t kv4;
             m_key4.addr = as->address.ip4;
             m_key4.port = vip->encap_args.target_port;
-            m_key4.protocol = 0;
-            m_key4.fib_index = 0;
+            m_key4.protocol = vip->protocol;
+            m_key4.fib_index = as->fib_index;
 
             if (vip->encap_args.srv_type == LB_SRV_TYPE_CLUSTERIP)
               {
@@ -707,20 +791,21 @@ next:
             m->as_ip_is_ipv6 = 0;
             m->src_port = vip->port;
             m->target_port = vip->encap_args.target_port;
-            m->vrf_id = 0;
-            m->fib_index = 0;
+            m->fib_index = vip->fib_index;
 
-            kv4.key = m_key4.as_u64;
+            kv4.key[0] = m_key4.as_u64[0];
+            kv4.key[1] = m_key4.as_u64[1];
             kv4.value = m - lbm->snat_mappings;
-            clib_bihash_add_del_8_8(&lbm->mapping_by_as4, &kv4, 1);
+            clib_bihash_add_del_16_8(&lbm->mapping_by_as4, &kv4, 1);
         } else {
             lb_snat6_key_t m_key6;
             clib_bihash_kv_24_8_t kv6;
+            clib_memset(&m_key6, 0, sizeof(m_key6));
             m_key6.addr.as_u64[0] = as->address.ip6.as_u64[0];
             m_key6.addr.as_u64[1] = as->address.ip6.as_u64[1];
             m_key6.port = vip->encap_args.target_port;
-            m_key6.protocol = 0;
-            m_key6.fib_index = 0;
+            m_key6.protocol = vip->protocol;
+            m_key6.fib_index = as->fib_index;
 
             if (vip->encap_args.srv_type == LB_SRV_TYPE_CLUSTERIP)
               {
@@ -738,8 +823,7 @@ next:
             m->as_ip_is_ipv6 = 1;
             m->src_port = vip->port;
             m->target_port = vip->encap_args.target_port;
-            m->vrf_id = 0;
-            m->fib_index = 0;
+            m->fib_index = vip->fib_index;
 
             kv6.key[0] = m_key6.as_u64[0];
             kv6.key[1] = m_key6.as_u64[1];
@@ -874,12 +958,16 @@ lb_vip_prefix_index_alloc (lb_main_t *lbm)
 
   lbm->vip_prefix_indexes = clib_bitmap_set(lbm->vip_prefix_indexes, bit, 1);
 
+  bit |= LB_VIP_PREFIX_PER_PORT_FLAG;
+
   return bit;
 }
 
 static int
 lb_vip_prefix_index_free (lb_main_t *lbm, u32 instance)
 {
+
+  instance &= ~(LB_VIP_PREFIX_PER_PORT_FLAG);
 
   if (clib_bitmap_get (lbm->vip_prefix_indexes, instance) == 0)
     {
@@ -906,7 +994,7 @@ static void lb_vip_add_adjacency(lb_main_t *lbm, lb_vip_t *vip,
     {
       /* for per-port vip, if VIP adjacency has been added,
        * no need to add adjacency. */
-      if (!lb_vip_port_find_diff_port(&(vip->prefix), vip->plen,
+      if (!lb_vip_port_find_diff_port(vip->vrf_id, &(vip->prefix), vip->plen,
                                       vip->protocol, vip->port, &vip_idx))
         {
           lb_vip_t *exists_vip = lb_vip_get_by_index(vip_idx);
@@ -954,7 +1042,7 @@ static void lb_vip_add_adjacency(lb_main_t *lbm, lb_vip_t *vip,
     dpo_type = lbm->dpo_nat6_port_type;
 
   dpo_set(&dpo, dpo_type, proto, *vip_prefix_index);
-  fib_table_entry_special_dpo_add(0,
+  fib_table_entry_special_dpo_add(vip->fib_index,
                                   &pfx,
                                   lb_fib_src,
                                   FIB_ENTRY_FLAG_EXCLUSIVE,
@@ -969,16 +1057,18 @@ static int lb_vip_add_port_filter(lb_main_t *lbm, lb_vip_t *vip,
                                   u32 vip_prefix_index, u32 vip_idx)
 {
   vip_port_key_t key;
-  clib_bihash_kv_8_8_t kv;
+  clib_bihash_kv_16_8_t kv;
 
+  clib_memset(&key, 0, sizeof(key));
   key.vip_prefix_index = vip_prefix_index;
   key.protocol = vip->protocol;
   key.port = clib_host_to_net_u16(vip->port);
-  key.rsv = 0;
+  key.fib_index = vip->fib_index;
 
-  kv.key = key.as_u64;
+  kv.key[0] = key.as_u64[0];
+  kv.key[1] = key.as_u64[1];
   kv.value = vip_idx;
-  clib_bihash_add_del_8_8(&lbm->vip_index_per_port, &kv, 1);
+  clib_bihash_add_del_16_8(&lbm->vip_index_per_port, &kv, 1);
 
   return 0;
 }
@@ -989,16 +1079,18 @@ static int lb_vip_add_port_filter(lb_main_t *lbm, lb_vip_t *vip,
 static int lb_vip_del_port_filter(lb_main_t *lbm, lb_vip_t *vip)
 {
   vip_port_key_t key;
-  clib_bihash_kv_8_8_t kv, value;
+  clib_bihash_kv_16_8_t kv, value;
   lb_vip_t *m = 0;
 
+  clib_memset(&key, 0, sizeof(key));
   key.vip_prefix_index = vip->vip_prefix_index;
   key.protocol = vip->protocol;
   key.port = clib_host_to_net_u16(vip->port);
-  key.rsv = 0;
+  key.fib_index = vip->fib_index;
 
-  kv.key = key.as_u64;
-  if(clib_bihash_search_8_8(&lbm->vip_index_per_port, &kv, &value) != 0)
+  kv.key[0] = key.as_u64[0];
+  kv.key[1] = key.as_u64[1];
+  if(clib_bihash_search_16_8(&lbm->vip_index_per_port, &kv, &value) != 0)
     {
       clib_warning("looking up vip_index_per_port failed.");
       return VNET_API_ERROR_NO_SUCH_ENTRY;
@@ -1007,7 +1099,7 @@ static int lb_vip_del_port_filter(lb_main_t *lbm, lb_vip_t *vip)
   ASSERT (m);
 
   kv.value = m - lbm->vips;
-  clib_bihash_add_del_8_8(&lbm->vip_index_per_port, &kv, 0);
+  clib_bihash_add_del_16_8(&lbm->vip_index_per_port, &kv, 0);
 
   return 0;
 }
@@ -1024,7 +1116,7 @@ static void lb_vip_del_adjacency(lb_main_t *lbm, lb_vip_t *vip)
     {
       /* If this vip adjacency is used by other per-port vip,
        * no need to del this adjacency. */
-      if (!lb_vip_port_find_diff_port(&(vip->prefix), vip->plen,
+      if (!lb_vip_port_find_diff_port(vip->vrf_id, &(vip->prefix), vip->plen,
                                       vip->protocol, vip->port, &vip_idx))
         {
           lb_put_writer_lock();
@@ -1055,11 +1147,12 @@ int lb_vip_add(lb_vip_add_args_t args, u32 *vip_index)
   lb_vip_t *vip;
   lb_vip_type_t type = args.type;
   u32 vip_prefix_index = 0;
+  u32 fib_index;
 
   lb_get_writer_lock();
   ip46_prefix_normalize(&(args.prefix), args.plen);
 
-  if (!lb_vip_port_find_index_with_lock(&(args.prefix), args.plen,
+  if (!lb_vip_port_find_index_with_lock(args.vrf_id, &(args.prefix), args.plen,
                                          args.protocol, args.port,
                                          vip_index))
     {
@@ -1070,7 +1163,7 @@ int lb_vip_add(lb_vip_add_args_t args, u32 *vip_index)
   /* Make sure we can't add a per-port VIP entry
    * when there already is an all-port VIP for the same prefix. */
   if ((args.port != 0) &&
-      !lb_vip_port_find_all_port_vip(&(args.prefix), args.plen, vip_index))
+      !lb_vip_port_find_all_port_vip(args.vrf_id, &(args.prefix), args.plen, vip_index))
     {
       lb_put_writer_lock();
       return VNET_API_ERROR_VALUE_EXIST;
@@ -1079,7 +1172,7 @@ int lb_vip_add(lb_vip_add_args_t args, u32 *vip_index)
   /* Make sure we can't add a all-port VIP entry
    * when there already is an per-port VIP for the same prefix. */
   if ((args.port == 0) &&
-      !lb_vip_port_find_diff_port(&(args.prefix), args.plen,
+      !lb_vip_port_find_diff_port(args.vrf_id, &(args.prefix), args.plen,
                                   args.protocol, args.port, vip_index))
     {
       lb_put_writer_lock();
@@ -1088,7 +1181,7 @@ int lb_vip_add(lb_vip_add_args_t args, u32 *vip_index)
 
   /* Make sure all VIP for a given prefix (using different ports) have the same type. */
   if ((args.port != 0) &&
-      !lb_vip_port_find_diff_port(&(args.prefix), args.plen,
+      !lb_vip_port_find_diff_port(args.vrf_id, &(args.prefix), args.plen,
                                   args.protocol, args.port, vip_index)
       && (args.type != lbm->vips[*vip_index].type))
     {
@@ -1120,6 +1213,14 @@ int lb_vip_add(lb_vip_add_args_t args, u32 *vip_index)
       return VNET_API_ERROR_VALUE_EXIST;
     }
 
+  fib_index = fib_table_find (lb_vip_is_ip4(type) ? FIB_PROTOCOL_IP4 : FIB_PROTOCOL_IP6, args.vrf_id);
+
+  if (~0 == fib_index)
+  {
+    lb_put_writer_lock();
+    return (VNET_API_ERROR_NO_SUCH_FIB);
+  }
+
   //Allocate
   pool_get(lbm->vips, vip);
 
@@ -1138,6 +1239,9 @@ int lb_vip_add(lb_vip_add_args_t args, u32 *vip_index)
     }
   vip->last_garbage_collection = (u32) vlib_time_now(vlib_get_main());
   vip->type = args.type;
+  vip->vrf_id = args.vrf_id;
+  vip->fib_index = fib_index;
+  vip->vip_snat_pool_index = (~0);
 
   if (args.type == LB_VIP_TYPE_IP4_L3DSR) {
       vip->encap_args.dscp = args.encap_args.dscp;
@@ -1256,6 +1360,239 @@ int lb_vip_del(u32 vip_index)
   return rv;
 }
 
+int lb_add_snat_pool(u32 *pool_idx)
+{
+  lb_main_t *lbm = &lb_main;
+
+  lb_vip_snat_addresses_pool_t *snat_addresses = NULL;
+
+  lb_get_writer_lock();
+
+  pool_get_zero (lbm->vip_snat_pool, snat_addresses);
+
+  snat_addresses->id = snat_addresses - lbm->vip_snat_pool;
+
+  *pool_idx = snat_addresses->id;
+
+  lb_put_writer_lock();
+  return 0;
+}
+
+int lb_del_snat_pool(u32 pool_idx)
+{
+  lb_main_t *lbm = &lb_main;
+
+  lb_vip_snat_addresses_pool_t *snat_addresses = NULL;
+  lb_vip_snat_address_t *address = NULL;
+
+  lb_get_writer_lock();
+
+  if (pool_is_free_index(lbm->vip_snat_pool, pool_idx))
+  {
+      clib_warning ("%s :current vip snat pool id is free", __FUNCTION__);
+      lb_put_writer_lock();
+      return 0;
+  }
+
+  snat_addresses = pool_elt_at_index(lbm->vip_snat_pool, pool_idx);
+
+  if (snat_addresses->refcnt > 0)
+  {
+      lb_put_writer_lock();
+      return VNET_API_ERROR_INSTANCE_IN_USE;
+  }
+
+  vec_foreach(address, snat_addresses->addresses)
+  {
+      //free resource
+      for (int i = 0 ; i < LB_NAT_N_PROTOCOLS; ++i)
+      {
+          clib_bitmap_free(address->busy_port_bitmap[i]);
+          vec_free(address->flow_index[i]);
+      }
+      clib_spinlock_free(&address->lock_self);
+
+      //free snat session table ? 
+      //TODO
+  }
+
+  vec_free(snat_addresses->addresses);
+
+  pool_put_index (lbm->vip_snat_pool, pool_idx);
+
+  lb_put_writer_lock();
+  return 0;
+}
+
+int lb_add_snat_pool_address(u32 pool_idx, ip4_address_t *snat_ip_address)
+{
+  lb_main_t *lbm = &lb_main;
+
+  lb_vip_snat_addresses_pool_t *snat_addresses = NULL;
+  lb_vip_snat_address_t *address = NULL;
+  u32 addresses_len = 0;
+
+  lb_get_writer_lock();
+
+  if (pool_is_free_index(lbm->vip_snat_pool, pool_idx))
+  {
+      clib_warning ("%s :current vip snat pool id is free", __FUNCTION__);
+      lb_put_writer_lock();
+      return 0;
+  }
+
+  snat_addresses = pool_elt_at_index(lbm->vip_snat_pool, pool_idx);
+
+  vec_foreach(address, snat_addresses->addresses)
+  {
+      if (address->addr.as_u32 == snat_ip_address->as_u32)
+      {
+          lb_put_writer_lock();
+          return 0;
+      }
+  }
+
+  addresses_len = vec_len(snat_addresses->addresses);
+  vec_validate(snat_addresses->addresses, addresses_len);
+
+  address = vec_elt_at_index(snat_addresses->addresses, addresses_len);
+  clib_memset(address, 0, sizeof(lb_vip_snat_address_t));
+
+  address->addr.as_u32 = snat_ip_address->as_u32;
+
+  for (int i = 0 ; i < LB_NAT_N_PROTOCOLS; ++i)
+  {
+      clib_bitmap_alloc(address->busy_port_bitmap[i], 0xffff);
+      vec_validate(address->flow_index[i], 0xffff);
+  }
+  clib_spinlock_init (&address->lock_self);
+
+  lb_put_writer_lock();
+  return 0;
+}
+
+int lb_del_snat_pool_address(u32 pool_idx, ip4_address_t *snat_ip_address)
+{
+  lb_main_t *lbm = &lb_main;
+
+  u32 del_index = ~0;
+  lb_vip_snat_addresses_pool_t *snat_addresses = NULL;
+  lb_vip_snat_address_t *address = NULL;
+  lb_vip_snat_address_t del_address;
+
+  lb_get_writer_lock();
+
+  if (pool_is_free_index(lbm->vip_snat_pool, pool_idx))
+  {
+      clib_warning ("%s :current vip snat pool id is free", __FUNCTION__);
+      lb_put_writer_lock();
+      return 0;
+  }
+
+  snat_addresses = pool_elt_at_index(lbm->vip_snat_pool, pool_idx);
+
+  vec_foreach(address, snat_addresses->addresses)
+  {
+      if (address->addr.as_u32 == snat_ip_address->as_u32)
+      {   
+          del_index = address - snat_addresses->addresses;
+      }
+  }
+
+  address = vec_elt_at_index(snat_addresses->addresses, del_index);
+  clib_memcpy(&del_address, address, sizeof(lb_vip_snat_address_t));
+  vec_del1(snat_addresses->addresses, del_index);
+
+  //free resource
+  for (int i = 0 ; i < LB_NAT_N_PROTOCOLS; ++i)
+  {
+      clib_bitmap_free(del_address.busy_port_bitmap[i]);
+      vec_free(del_address.flow_index[i]);
+  }
+  clib_spinlock_free (&del_address.lock_self);
+
+  //free snat session table ? 
+  //TODO
+  
+  lb_put_writer_lock();
+  return 0;
+}
+
+int lb_vip_set_src_ip_sticky(u32 vip_index, bool src_ip_sticky)
+{
+  lb_vip_t *vip;
+
+  lb_get_writer_lock();
+
+  if (!(vip = lb_vip_get_by_index(vip_index))) 
+  {
+    lb_put_writer_lock();
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+  }
+
+  if (src_ip_sticky)
+      vip->flags |= LB_VIP_FLAGS_SRC_IP_STICKY;
+  else
+      vip->flags &= ~(LB_VIP_FLAGS_SRC_IP_STICKY);
+
+  lb_put_writer_lock();
+  return 0;
+}
+
+int lb_vip_set_snat_address_pool(u32 vip_index, u32 snat_pool_index)
+{
+  lb_main_t *lbm = &lb_main;
+
+  lb_vip_t *vip = NULL;
+  lb_vip_snat_addresses_pool_t *snat_addresses = NULL;
+  lb_vip_snat_addresses_pool_t *old_snat_addresses = NULL;
+
+  lb_get_writer_lock();
+
+  if (!(vip = lb_vip_get_by_index(vip_index))) 
+  {
+    lb_put_writer_lock();
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+  }
+
+  if (snat_pool_index != (~0))
+  {
+    if (pool_is_free_index(lbm->vip_snat_pool, snat_pool_index))
+    {
+      clib_warning ("%s :current vip snat pool id is free", __FUNCTION__);
+      lb_put_writer_lock();
+      return VNET_API_ERROR_NO_SUCH_ENTRY;
+    }
+
+    snat_addresses = pool_elt_at_index(lbm->vip_snat_pool, snat_pool_index);
+
+    if (vip->vip_snat_pool_index != snat_pool_index && 
+        vip->vip_snat_pool_index != (~0))
+    {
+        old_snat_addresses = pool_elt_at_index(lbm->vip_snat_pool, vip->vip_snat_pool_index);
+        old_snat_addresses->refcnt--;
+    }
+
+    snat_addresses->refcnt++;
+    vip->vip_snat_pool_index = snat_pool_index;
+    vip->flags |= LB_VIP_FLAGS_IPV4_SNAT;
+  }
+  else
+  {
+    if(vip->vip_snat_pool_index != (~0))
+    {
+        old_snat_addresses = pool_elt_at_index(lbm->vip_snat_pool, vip->vip_snat_pool_index);
+        old_snat_addresses->refcnt--;
+    }
+
+    vip->flags &= ~(LB_VIP_FLAGS_IPV4_SNAT);
+    vip->vip_snat_pool_index = (~0);
+  }
+
+  lb_put_writer_lock();
+  return 0;
+}
+
 /* *INDENT-OFF* */
 VLIB_PLUGIN_REGISTER () = {
     .version = VPP_BUILD_VER,
@@ -1268,8 +1605,29 @@ u8 *format_lb_dpo (u8 * s, va_list * va)
   index_t index = va_arg (*va, index_t);
   CLIB_UNUSED(u32 indent) = va_arg (*va, u32);
   lb_main_t *lbm = &lb_main;
-  lb_vip_t *vip = pool_elt_at_index (lbm->vips, index);
-  return format (s, "%U", format_lb_vip, vip);
+
+  lb_vip_t *vip = NULL;
+
+  if (lb_vip_prefix_is_per_port(index))
+  {
+      uint32_t cnt = 0;
+      pool_foreach(vip, lbm->vips)
+      {
+          if(vip->port == 0)
+              continue;
+          if(vip->vip_prefix_index == index)
+          {
+              s = format (s, "\n\t\t<%u> %U", cnt, format_lb_vip, vip);
+              cnt++;
+          }
+      }
+  }
+  else
+  {
+      lb_vip_t *vip = pool_elt_at_index (lbm->vips, index);
+      s = format (s, "%U", format_lb_vip, vip);
+  }
+  return s;
 }
 
 static void lb_dpo_lock (dpo_id_t *dpo) {}
@@ -1366,6 +1724,87 @@ int lb_nat6_interface_add_del (u32 sw_if_index, int is_del)
   return 0;
 }
 
+u8 *format_lb_vip_index_per_port_kvp (u8 *s, va_list *args)
+{
+    clib_bihash_kv_16_8_t *v = va_arg (*args, clib_bihash_kv_16_8_t *);
+
+    vip_port_key_t key;
+
+    key.as_u64[0] = v->key[0];
+    key.as_u64[1] = v->key[1];
+
+    s = format (s, "Key: vip_prefix_index %u protocol %u port %u fib_index %u vip-index %llu", 
+                key.vip_prefix_index, key.protocol, key.port, key.fib_index,
+                v->value);
+
+    return s;
+}
+
+u8 *format_lb_mapping_by_as4_kvp (u8 *s, va_list *args)
+{
+    clib_bihash_kv_16_8_t *v = va_arg (*args, clib_bihash_kv_16_8_t *);
+
+    lb_snat4_key_t key;
+
+    key.as_u64[0] = v->key[0];
+    key.as_u64[1] = v->key[1];
+
+    s = format (s, "Key: addr %U protocol %u port %u fib_index %u snat-mapping-index %llu", 
+                format_ip4_address, &key.addr, key.protocol, key.port, key.fib_index,
+                v->value);
+
+    return s;
+}
+
+u8 *format_lb_mapping_by_as6_kvp (u8 *s, va_list *args)
+{
+    clib_bihash_kv_24_8_t *v = va_arg (*args, clib_bihash_kv_24_8_t *);
+
+    lb_snat6_key_t key;
+
+    key.as_u64[0] = v->key[0];
+    key.as_u64[1] = v->key[1];
+    key.as_u64[2] = v->key[2];
+
+    s = format (s, "Key: addr %U protocol %u port %u fib_index %u snat-mapping-index %llu", 
+                format_ip6_address, &key.addr, key.protocol, key.port, key.fib_index,
+                v->value);
+
+    return s;
+}
+
+u8 *format_lb_mapping_by_uplink_dnat4_kvp (u8 *s, va_list *args)
+{
+    clib_bihash_kv_16_8_t *v = va_arg (*args, clib_bihash_kv_16_8_t *);
+
+    lb_snat_vip_key_t key;
+
+    key.as_u64[0] = v->key[0];
+    key.as_u64[1] = v->key[1];
+
+    s = format (s, "Key: addr %U protocol %u port %u fib_index %u vip-snat-mapping-index %llu", 
+                format_ip4_address, &key.addr, key.protocol, key.port, key.fib_index,
+                v->value);
+
+    return s;
+}
+
+u8 *format_lb_mapping_by_downlink_snat4_kvp (u8 *s, va_list *args)
+{
+    clib_bihash_kv_16_8_t *v = va_arg (*args, clib_bihash_kv_16_8_t *);
+
+    lb_snat_vip_key_t key;
+
+    key.as_u64[0] = v->key[0];
+    key.as_u64[1] = v->key[1];
+
+    s = format (s, "Key: addr %U protocol %u port %u fib_index %u vip-snat-mapping-index %llu", 
+                format_ip4_address, &key.addr, key.protocol, key.port, key.fib_index,
+                v->value);
+
+    return s;
+}
+
 clib_error_t *
 lb_init (vlib_main_t * vm)
 {
@@ -1442,17 +1881,31 @@ lb_init (vlib_main_t * vm)
   lbm->vip_index_by_nodeport
     = hash_create_mem (0, sizeof(u16), sizeof (uword));
 
-  clib_bihash_init_8_8 (&lbm->vip_index_per_port,
+  clib_bihash_init_16_8 (&lbm->vip_index_per_port,
                         "vip_index_per_port", LB_VIP_PER_PORT_BUCKETS,
                         LB_VIP_PER_PORT_MEMORY_SIZE);
 
-  clib_bihash_init_8_8 (&lbm->mapping_by_as4,
+  clib_bihash_init_16_8 (&lbm->mapping_by_as4,
                         "mapping_by_as4", LB_MAPPING_BUCKETS,
                         LB_MAPPING_MEMORY_SIZE);
 
   clib_bihash_init_24_8 (&lbm->mapping_by_as6,
                         "mapping_by_as6", LB_MAPPING_BUCKETS,
                         LB_MAPPING_MEMORY_SIZE);
+
+  clib_bihash_init_16_8 (&lbm->mapping_by_uplink_dnat4,
+                        "mapping_by_uplink_dnat4", LB_DYNAMIC_MAPPING_BUCKETS,
+                        LB_DYNAMIC_MAPPING_MEMORY_SIZE);
+  clib_bihash_init_16_8 (&lbm->mapping_by_downlink_snat4,
+                        "mapping_by_downlink_snat4", LB_DYNAMIC_MAPPING_BUCKETS,
+                        LB_DYNAMIC_MAPPING_MEMORY_SIZE);
+
+
+  clib_bihash_set_kvp_format_fn_16_8 (&lbm->vip_index_per_port, format_lb_vip_index_per_port_kvp);
+  clib_bihash_set_kvp_format_fn_16_8 (&lbm->mapping_by_as4, format_lb_mapping_by_as4_kvp);
+  clib_bihash_set_kvp_format_fn_24_8 (&lbm->mapping_by_as6, format_lb_mapping_by_as6_kvp);
+  clib_bihash_set_kvp_format_fn_16_8 (&lbm->mapping_by_uplink_dnat4, format_lb_mapping_by_uplink_dnat4_kvp);
+  clib_bihash_set_kvp_format_fn_16_8 (&lbm->mapping_by_downlink_snat4, format_lb_mapping_by_downlink_snat4_kvp);
 
 #define _(a,b,c) lbm->vip_counters[c].name = b;
   lb_foreach_vip_counter

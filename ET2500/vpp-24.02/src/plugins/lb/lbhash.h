@@ -154,8 +154,8 @@ void lb_hash_get(lb_hash_t *ht, u32 hash, u32 vip, u32 time_now,
   for (i = 0; i < LBHASH_ENTRY_PER_BUCKET; i++) {
       u8 cmp = (bucket->hash[i] == hash && bucket->vip[i] == vip);
       u8 timeouted = clib_u32_loop_gt(time_now, bucket->timeout[i]);
-      *found_value = (cmp || timeouted)?*found_value:bucket->value[i];
-      bucket->timeout[i] = (cmp || timeouted)?time_now + ht->timeout:bucket->timeout[i];
+      *found_value = (cmp && !timeouted)?bucket->value[i] : *found_value:;
+      bucket->timeout[i] = (cmp && !timeouted)?time_now + ht->timeout:bucket->timeout[i];
       *available_index = (timeouted && (*available_index == ~0))?i:*available_index;
 
       if (!cmp)

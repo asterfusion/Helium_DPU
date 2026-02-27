@@ -38,18 +38,21 @@
 #include <vnet/dpo/dpo.h>
 #include <vnet/fib/fib_table.h>
 #include <vppinfra/hash.h>
-#include <vppinfra/bihash_8_8.h>
+#include <vppinfra/bihash_16_8.h>
 #include <vppinfra/bihash_24_8.h>
 #include <lb/lbhash.h>
 #include <vppinfra/lock.h>
 
-#define LB_DEFAULT_PER_CPU_STICKY_BUCKETS 1 << 10
+#define LB_DEFAULT_PER_CPU_STICKY_BUCKETS (1 << 20)
 #define LB_DEFAULT_FLOW_TIMEOUT 40
-#define LB_MAPPING_BUCKETS  1024
-#define LB_MAPPING_MEMORY_SIZE  64<<20
+#define LB_MAPPING_BUCKETS                (1024 * 16)
+#define LB_MAPPING_MEMORY_SIZE            (0)
 
-#define LB_VIP_PER_PORT_BUCKETS  1024
-#define LB_VIP_PER_PORT_MEMORY_SIZE  64<<20
+#define LB_DYNAMIC_MAPPING_BUCKETS        (1024 * 512)
+#define LB_DYNAMIC_MAPPING_MEMORY_SIZE    (0)
+
+#define LB_VIP_PER_PORT_BUCKETS           (1024)
+#define LB_VIP_PER_PORT_MEMORY_SIZE       (0)
 
 typedef enum {
   LB_NEXT_DROP,
@@ -79,6 +82,19 @@ typedef enum {
 #undef _
   LB_NAT_IN2OUT_N_ERROR,
 } lb_nat_in2out_error_t;
+
+
+#define foreach_lb_nat_protocol \
+  _(UDP, 0, udp, "udp")       \
+  _(TCP, 1, tcp, "tcp")
+
+typedef enum {
+#define _(N, i, n, s) LB_NAT_PROTOCOL_##N = i,
+  foreach_lb_nat_protocol
+#undef _
+
+  LB_NAT_N_PROTOCOLS
+} lb_nat_protocol_t;
 
 /**
  * lb for kube-proxy supports three types of service
@@ -160,6 +176,12 @@ typedef struct {
    */
   dpo_id_t dpo;
 
+  /**
+   * Vrf Support
+   */
+  u32 vrf_id;
+  u32 fib_index;
+
 } lb_as_t;
 
 format_function_t format_lb_as;
@@ -213,12 +235,14 @@ typedef enum {
   LB_VIP_TYPE_IP4_L3DSR,
   LB_VIP_TYPE_IP4_NAT4,
   LB_VIP_TYPE_IP6_NAT6,
+  LB_VIP_TYPE_IP6_NAT4,
   LB_VIP_N_TYPES,
 } lb_vip_type_t;
 
 format_function_t format_lb_vip_type;
 unformat_function_t unformat_lb_vip_type;
 
+format_function_t format_lb_nat_proto;
 
 /* args for different vip encap types */
 typedef struct {
@@ -245,11 +269,30 @@ typedef struct {
       u32 vip_prefix_index;
       u16 port;
       u8  protocol;
-      u8 rsv;
+      u32 fib_index;
     };
-    u64 as_u64;
+    u64 as_u64[2];
   };
 } vip_port_key_t;
+
+typedef struct
+{
+    clib_spinlock_t lock_self;
+
+    ip4_address_t addr;
+    u32 busy_ports[LB_NAT_N_PROTOCOLS];
+    uword *busy_port_bitmap[LB_NAT_N_PROTOCOLS];
+
+    //record the flow index by per port 
+    u32 *flow_index[LB_NAT_N_PROTOCOLS];
+} lb_vip_snat_address_t;
+
+typedef struct
+{
+    u32 id;
+    u32 refcnt;
+    lb_vip_snat_address_t *addresses;
+} lb_vip_snat_addresses_pool_t;
 
 /**
  * Load balancing service is provided per VIP+protocol+port.
@@ -281,6 +324,12 @@ typedef struct {
   u32 last_garbage_collection;
 
   //Not runtime
+  
+  /**
+   * Vrf Support
+   */
+  u32 vrf_id;
+  u32 fib_index;
 
   /**
    * A Virtual IP represents a given service delivered
@@ -300,7 +349,7 @@ typedef struct {
   /* tcp or udp. If not per-port vip, set to ~0 */
   u8 protocol;
 
-  /* tcp port or udp port. If not per-port vip, set to ~0 */
+  /* tcp port or udp port. If not per-port vip, set to 0 */
   u16 port;
 
   /* Valid for per-port vip */
@@ -315,6 +364,12 @@ typedef struct {
   /* args for different vip encap types */
   lb_vip_encap_args_t encap_args;
 
+  /* 
+   * dynamic snat44 snat64 pool index
+   *
+   */
+  u32 vip_snat_pool_index;
+
   /**
    * Flags related to this VIP.
    * LB_VIP_FLAGS_USED means the VIP is active.
@@ -325,6 +380,7 @@ typedef struct {
   u8 flags;
 #define LB_VIP_FLAGS_USED 0x1
 #define LB_VIP_FLAGS_SRC_IP_STICKY 0x2
+#define LB_VIP_FLAGS_IPV4_SNAT 0x4
 
   /**
    * Pool of AS indexes used for this VIP.
@@ -340,15 +396,20 @@ typedef struct {
 
 #define lb_vip_is_ip6(type) (type == LB_VIP_TYPE_IP6_GRE6 \
                             || type == LB_VIP_TYPE_IP6_GRE4 \
-                            || type == LB_VIP_TYPE_IP6_NAT6 )
+                            || type == LB_VIP_TYPE_IP6_NAT6 \
+                            || type == LB_VIP_TYPE_IP6_NAT4 )
 
 #define lb_encap_is_ip4(vip) ((vip)->type == LB_VIP_TYPE_IP6_GRE4 \
                              || (vip)->type == LB_VIP_TYPE_IP4_GRE4 \
                              || (vip)->type == LB_VIP_TYPE_IP4_L3DSR \
-                             || (vip)->type == LB_VIP_TYPE_IP4_NAT4 )
+                             || (vip)->type == LB_VIP_TYPE_IP4_NAT4 \
+                             || (vip)->type == LB_VIP_TYPE_IP6_NAT4 )
 
 #define lb_vip_is_src_ip_sticky(vip)                                          \
   (((vip)->flags & LB_VIP_FLAGS_SRC_IP_STICKY) != 0)
+
+#define lb_vip_is_double_nat44(vip)                                          \
+  (((vip)->flags & LB_VIP_FLAGS_IPV4_SNAT) != 0)
 
 /* clang-format off */
 #define lb_vip_is_gre4(vip) (((vip)->type == LB_VIP_TYPE_IP6_GRE4 \
@@ -393,15 +454,7 @@ lb_vip_is_nat6_port(const lb_vip_t *vip)
 format_function_t format_lb_vip;
 format_function_t format_lb_vip_detailed;
 
-#define foreach_lb_nat_protocol \
-  _(UDP, 0, udp, "udp")       \
-  _(TCP, 1, tcp, "tcp")
-
-typedef enum {
-#define _(N, i, n, s) LB_NAT_PROTOCOL_##N = i,
-  foreach_lb_nat_protocol
-#undef _
-} lb_nat_protocol_t;
+format_function_t format_lb_snat_pool;
 
 always_inline u32
 lb_ip_proto_to_nat_proto (u8 ip_proto)
@@ -422,10 +475,10 @@ typedef struct {
     {
       ip4_address_t addr;
       u16 port;
-      u16 protocol:3,
-          fib_index:13;
+      u8 protocol;
+      u32 fib_index;
     };
-    u64 as_u64;
+    u64 as_u64[2];
   };
 } lb_snat4_key_t;
 
@@ -437,12 +490,27 @@ typedef struct
     {
       ip6_address_t addr;
       u16 port;
-      u16 protocol;
+      u8 protocol;
       u32 fib_index;
     };
     u64 as_u64[3];
   };
 } lb_snat6_key_t;
+
+/* Key for Pod's egress DNAT */
+typedef struct {
+  union
+  {
+    struct
+    {
+      ip4_address_t addr;
+      u16 port;
+      u8 protocol;
+      u32 fib_index;
+    };
+    u64 as_u64[2];
+  };
+} lb_snat_vip_key_t;
 
 typedef struct {
   /**
@@ -460,9 +528,40 @@ typedef struct {
    */
   u16 src_port;
   u16 target_port; /* Network byte order */
-  u32 vrf_id;
+
   u32 fib_index;
+
+  /**
+   * vip record
+   */
+  u32 vip_index;
 } lb_snat_mapping_t;
+
+typedef struct {
+  /**
+   * for snat-vip + port case, ip = snat-vip;
+   */
+  ip46_address_t ip;
+  ip46_address_t outside_ip;
+  u8 ip_is_ipv6;
+  u8 outside_ip_is_ipv6;
+
+  /**
+   * Network byte order
+   * for snat-vip + port case, port = snat-port;
+   */
+  u16 port;
+  u16 outside_port; /* Network byte order */
+
+  u32 fib_index;
+  u32 outside_fib_index;
+
+  /**
+   * record
+   */
+  u32 vip_index;
+  u32 timeout;
+} lb_vip_snat_mapping_t;
 
 typedef struct {
   /**
@@ -480,8 +579,12 @@ typedef struct {
 
   /**
    * bitmap for vip prefix to support per-port vip
+   * Due to the fact that there are two types of VIP: 
+   *    For non per port, use VIP's index.
+   *    For per port, use the index obtained from this request and move the highest position to 1.
    */
   uword *vip_prefix_indexes;
+#define LB_VIP_PREFIX_PER_PORT_FLAG (1 << 31)
 
   /**
    * Pool of ASs.
@@ -532,6 +635,11 @@ typedef struct {
   u32 flow_timeout;
 
   /**
+   * dynamic random seed
+   */
+  u32 random_seed;
+
+  /**
    * Per VIP counter
    */
   vlib_simple_counter_main_t vip_counters[LB_N_VIP_COUNTERS];
@@ -553,14 +661,26 @@ typedef struct {
   fib_node_type_t fib_node_type;
 
   /* lookup per_port vip by key */
-  clib_bihash_8_8_t vip_index_per_port;
+  clib_bihash_16_8_t vip_index_per_port;
 
   /* Find a static mapping by AS IP : target_port */
-  clib_bihash_8_8_t mapping_by_as4;
+  clib_bihash_16_8_t mapping_by_as4;
   clib_bihash_24_8_t mapping_by_as6;
 
-  /* Static mapping pool */
+  /* Static mapping pool : AS uplink */
   lb_snat_mapping_t * snat_mappings;
+
+  /* Find a dynamic mapping by AS uplink DstIP : uplink port */
+  clib_bihash_16_8_t mapping_by_uplink_dnat4;
+
+  /* Find a dynamic mapping by VIP downlink SrcIP : downlink port */
+  clib_bihash_16_8_t mapping_by_downlink_snat4;
+
+  /* dynamic mapping pool : AS uplink */
+  lb_vip_snat_mapping_t * vip_snat_mappings;
+
+  /* Vip snat address pool */
+  lb_vip_snat_addresses_pool_t *vip_snat_pool;
 
   /**
    * API dynamically registered base ID.
@@ -574,8 +694,18 @@ typedef struct {
   vnet_main_t *vnet_main;
 } lb_main_t;
 
+
+u8 *format_lb_vip_index_per_port_kvp (u8 *s, va_list *args);
+u8 *format_lb_mapping_by_as4_kvp (u8 *s, va_list *args);
+u8 *format_lb_mapping_by_as6_kvp (u8 *s, va_list *args);
+u8 *format_lb_mapping_by_uplink_dnat4_kvp (u8 *s, va_list *args);
+u8 *format_lb_mapping_by_downlink_snat4_kvp (u8 *s, va_list *args);
+
+#define lb_vip_prefix_is_per_port(index) (index & LB_VIP_PREFIX_PER_PORT_FLAG)
+
 /* args for different vip encap types */
 typedef struct {
+  u32 vrf_id;
   ip46_address_t prefix;
   u8 plen;
   u8 protocol;
@@ -609,12 +739,24 @@ int lb_vip_add(lb_vip_add_args_t args, u32 *vip_index);
 
 int lb_vip_del(u32 vip_index);
 
-int lb_vip_find_index(ip46_address_t *prefix, u8 plen, u8 protocol,
+int lb_add_snat_pool(u32 *pool_idx);
+
+int lb_del_snat_pool(u32 pool_idx);
+
+int lb_add_snat_pool_address(u32 pool_idx, ip4_address_t *snat_ip_address);
+
+int lb_del_snat_pool_address(u32 pool_idx, ip4_address_t *snat_ip_address);
+
+int lb_vip_set_snat_address_pool(u32 vip_index, u32 snat_pool_index);
+
+int lb_vip_set_src_ip_sticky(u32 vip_index, bool src_ip_sticky);
+
+int lb_vip_find_index(u32 vrf_id, ip46_address_t *prefix, u8 plen, u8 protocol,
                       u16 port, u32 *vip_index);
 
 #define lb_vip_get_by_index(index) (pool_is_free_index(lb_main.vips, index)?NULL:pool_elt_at_index(lb_main.vips, index))
 
-int lb_vip_add_ass(u32 vip_index, ip46_address_t *addresses, u32 n);
+int lb_vip_add_ass(u32 vip_index, ip46_address_t *addresses, u32 n, u32 as_vrf_id);
 int lb_vip_del_ass(u32 vip_index, ip46_address_t *addresses, u32 n, u8 flush);
 int lb_flush_vip_as (u32 vip_index, u32 as_index);
 
@@ -626,5 +768,12 @@ int lb_nat4_interface_add_del (u32 sw_if_index, int is_del);
 int lb_nat6_interface_add_del (u32 sw_if_index, int is_del);
 
 format_function_t format_lb_main;
+
+
+#define lb_get_writer_lock() clib_spinlock_lock (&lb_main.writer_lock)
+#define lb_put_writer_lock() clib_spinlock_unlock (&lb_main.writer_lock)
+
+#define lb_get_vip_nat_address_lock(a) clib_spinlock_lock (&a->lock_self); 
+#define lb_put_vip_nat_address_lock(a) clib_spinlock_unlock (&a->lock_self); 
 
 #endif /* LB_PLUGIN_LB_LB_H_ */

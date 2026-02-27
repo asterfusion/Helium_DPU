@@ -68,7 +68,7 @@ vl_api_lb_add_del_vip_t_handler
 (vl_api_lb_add_del_vip_t * mp)
 {
   lb_main_t *lbm = &lb_main;
-  vl_api_lb_conf_reply_t * rmp;
+  vl_api_lb_add_del_vip_reply_t * rmp;
   int rv = 0;
   lb_vip_add_args_t args = {};
 
@@ -82,7 +82,7 @@ vl_api_lb_add_del_vip_t_handler
 
   if (mp->is_del) {
     u32 vip_index;
-    if (!(rv = lb_vip_find_index(&(args.prefix), mp->pfx.len,
+    if (!(rv = lb_vip_find_index(ntohl(mp->vrf_id), &(args.prefix), mp->pfx.len,
                                  mp->protocol, ntohs(mp->port), &vip_index)))
       rv = lb_vip_del(vip_index);
   } else {
@@ -107,6 +107,7 @@ vl_api_lb_add_del_vip_t_handler
             type = LB_VIP_TYPE_IP6_NAT6;
     }
 
+    args.vrf_id = ntohl(mp->vrf_id);
     args.plen = mp->pfx.len;
     args.protocol = mp->protocol;
     args.port = ntohs(mp->port);
@@ -131,7 +132,7 @@ static void
 vl_api_lb_add_del_vip_v2_t_handler (vl_api_lb_add_del_vip_v2_t *mp)
 {
   lb_main_t *lbm = &lb_main;
-  vl_api_lb_conf_reply_t *rmp;
+  vl_api_lb_add_del_vip_v2_reply_t *rmp;
   int rv = 0;
   lb_vip_add_args_t args = {};
 
@@ -146,7 +147,7 @@ vl_api_lb_add_del_vip_v2_t_handler (vl_api_lb_add_del_vip_v2_t *mp)
   if (mp->is_del)
     {
       u32 vip_index;
-      if (!(rv = lb_vip_find_index (&(args.prefix), mp->pfx.len, mp->protocol,
+      if (!(rv = lb_vip_find_index (ntohl(mp->vrf_id), &(args.prefix), mp->pfx.len, mp->protocol,
 				    ntohs (mp->port), &vip_index)))
 	rv = lb_vip_del (vip_index);
     }
@@ -176,6 +177,7 @@ vl_api_lb_add_del_vip_v2_t_handler (vl_api_lb_add_del_vip_v2_t *mp)
 	    type = LB_VIP_TYPE_IP6_NAT6;
 	}
 
+      args.vrf_id = ntohl(mp->vrf_id);
       args.plen = mp->pfx.len;
       args.protocol = mp->protocol;
       args.port = ntohs (mp->port);
@@ -202,11 +204,119 @@ vl_api_lb_add_del_vip_v2_t_handler (vl_api_lb_add_del_vip_v2_t *mp)
 }
 
 static void
+vl_api_lb_add_snat_pool_t_handler
+(vl_api_lb_add_snat_pool_t *mp)
+{
+  lb_main_t *lbm = &lb_main;
+  vl_api_lb_add_snat_pool_reply_t * rmp;
+  int rv = 0;
+
+  u32 pool_idx;
+
+  rv = lb_add_snat_pool(&pool_idx);
+
+  /* *INDENT-OFF* */
+  REPLY_MACRO2(VL_API_LB_ADD_SNAT_POOL,
+          ({
+           rmp->pool_idx = htonl(pool_idx);
+           }));
+
+  /* *INDENT-ON* */
+}
+
+static void
+vl_api_lb_del_snat_pool_t_handler 
+(vl_api_lb_del_snat_pool_t * mp)
+{
+  lb_main_t *lbm = &lb_main;
+  vl_api_lb_del_snat_pool_reply_t *rmp;
+
+  int rv = 0;
+
+  rv = lb_del_snat_pool(ntohl(mp->pool_idx));
+
+  REPLY_MACRO (VL_API_LB_DEL_SNAT_POOL_REPLY);
+}
+
+static void
+vl_api_lb_add_del_snat_pool_address_t_handler
+(vl_api_lb_add_del_snat_pool_address_t *mp)
+{
+  lb_main_t *lbm = &lb_main;
+  vl_api_lb_add_del_snat_pool_address_reply_t * rmp;
+  int rv = 0;
+
+  ip4_address_t snat_ip_address;
+  ip4_address_decode (mp->ip_address, &snat_ip_address);
+
+  if (mp->is_del)
+    rv = lb_del_snat_pool_address(ntohl(mp->pool_idx), &snat_ip_address);
+  else
+    rv = lb_add_snat_pool_address(ntohl(mp->pool_idx), &snat_ip_address);
+
+  REPLY_MACRO (VL_API_LB_ADD_DEL_SNAT_POOL_ADDRESS_REPLY);
+}
+
+static void
+vl_api_lb_set_vip_src_ip_sticky_t_handler
+(vl_api_lb_set_vip_src_ip_sticky_t *mp)
+{
+  lb_main_t *lbm = &lb_main;
+  vl_api_lb_set_vip_src_ip_sticky_reply_t * rmp;
+  int rv = 0;
+  u32 vip_index;
+  ip46_address_t vip_ip_prefix;
+
+  if (mp->port == 0)
+    {
+      mp->protocol = ~0;
+    }
+
+  ip_address_decode (&mp->pfx.address, &vip_ip_prefix);
+
+  if ((rv = lb_vip_find_index(ntohl(mp->vrf_id), &vip_ip_prefix, mp->pfx.len,
+                              mp->protocol, ntohs(mp->port), &vip_index)))
+    goto done;
+
+  rv = lb_vip_set_src_ip_sticky(vip_index, mp->src_ip_sticky);
+
+done:
+  REPLY_MACRO (VL_API_LB_SET_VIP_SRC_IP_STICKY_REPLY);
+}
+
+static void
+vl_api_lb_set_vip_snat_address_pool_t_handler
+(vl_api_lb_set_vip_snat_address_pool_t *mp)
+{
+  lb_main_t *lbm = &lb_main;
+  vl_api_lb_set_vip_snat_address_pool_reply_t * rmp;
+  int rv = 0;
+  u32 vip_index;
+  ip46_address_t vip_ip_prefix;
+
+  if (mp->port == 0)
+    {
+      mp->protocol = ~0;
+    }
+
+  ip_address_decode (&mp->pfx.address, &vip_ip_prefix);
+
+  if ((rv = lb_vip_find_index(ntohl(mp->vrf_id), &vip_ip_prefix, mp->pfx.len,
+                              mp->protocol, ntohs(mp->port), &vip_index)))
+    goto done;
+
+  rv = lb_vip_set_snat_address_pool(vip_index, ntohl(mp->snat_pool_index));
+
+done:
+  REPLY_MACRO (VL_API_LB_SET_VIP_SNAT_ADDRESS_POOL_REPLY);
+}
+
+static void
 vl_api_lb_add_del_as_t_handler
 (vl_api_lb_add_del_as_t * mp)
 {
   lb_main_t *lbm = &lb_main;
-  vl_api_lb_conf_reply_t * rmp;
+  vl_api_lb_add_del_as_reply_t * rmp;
   int rv = 0;
   u32 vip_index;
   ip46_address_t vip_ip_prefix;
@@ -220,14 +330,14 @@ vl_api_lb_add_del_as_t_handler
   ip_address_decode (&mp->pfx.address, &vip_ip_prefix);
   ip_address_decode (&mp->as_address, &as_address);
 
-  if ((rv = lb_vip_find_index(&vip_ip_prefix, mp->pfx.len,
+  if ((rv = lb_vip_find_index(ntohl(mp->vrf_id), &vip_ip_prefix, mp->pfx.len,
                               mp->protocol, ntohs(mp->port), &vip_index)))
     goto done;
 
   if (mp->is_del)
     rv = lb_vip_del_ass(vip_index, &as_address, 1, mp->is_flush);
   else
-    rv = lb_vip_add_ass(vip_index, &as_address, 1);
+    rv = lb_vip_add_ass(vip_index, &as_address, ntohl(mp->as_vrf_id), 1);
 
 done:
  REPLY_MACRO (VL_API_LB_ADD_DEL_AS_REPLY);
@@ -263,6 +373,7 @@ vl_api_lb_vip_dump_t_handler
         rmp->vip.pfx.len = vip->plen;
         rmp->vip.protocol = htonl (vip->protocol);
         rmp->vip.port = htons(vip->port);
+        rmp->vip.vrf_id = htonl(vip->vrf_id);
         rmp->encap = htonl(vip->type);
         rmp->dscp = vip->encap_args.dscp;
         rmp->srv_type = vip->encap_args.srv_type;
@@ -301,7 +412,9 @@ static void send_lb_as_details
         rmp->vip.pfx.len = vip->plen;
         rmp->vip.protocol = htonl (vip->protocol);
         rmp->vip.port = htons(vip->port);
+        rmp->vip.vrf_id = htonl(vip->vrf_id);
         ip_address_encode(&as->address, IP46_TYPE_ANY, &rmp->app_srv);
+        rmp->as_vrf_id = htonl(as->fib_index);
         rmp->flags = as->flags;
         rmp->in_use_since = htonl(as->last_used);
 
@@ -337,7 +450,8 @@ vl_api_lb_as_dump_t_handler
         || ((prefix.as_u64[0] == vip->prefix.as_u64[0])
         && (prefix.as_u64[1] == vip->prefix.as_u64[1])
         && (mp->protocol == vip->protocol)
-        && (mp->port == vip->port)) )
+        && (ntohs(mp->port) == vip->port) 
+        && (ntohl(mp->vrf_id) == vip->vrf_id)))
       {
         send_lb_as_details(reg, mp->context, vip);
       }
@@ -365,7 +479,7 @@ vl_api_lb_flush_vip_t_handler
 
   vip_plen = mp->pfx.len;
 
-  rv = lb_vip_find_index(&vip_prefix, vip_plen, mp->protocol,
+  rv = lb_vip_find_index(ntohl(mp->vrf_id), &vip_prefix, vip_plen, mp->protocol,
                          ntohs(mp->port), &vip_index);
 
   rv = lb_flush_vip_as(vip_index, ~0);
