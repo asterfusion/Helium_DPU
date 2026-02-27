@@ -90,8 +90,10 @@ cn10k_ipsec_lookaside_setup (vlib_main_t *vm, cnxk_ipsec_config_t *ic)
 			CLIB_CACHE_LINE_BYTES);
 
   for (i = 0; i < vec_len (im->lookaside_ipsec_sessions); i++)
-    im->lookaside_ipsec_sessions[i] = cnxk_drv_physmem_alloc (
+  {
+      im->lookaside_ipsec_sessions[i] = cnxk_drv_physmem_alloc (
       vm, sizeof (cn10k_ipsec_session_t), CLIB_CACHE_LINE_BYTES);
+  }
 
   return 0;
 }

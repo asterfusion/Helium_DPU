@@ -46,6 +46,13 @@ onp_crypto_enqueue_aead_aad_12_enc (vlib_main_t *vm,
 }
 
 static_always_inline int
+onp_crypto_enqueue_aead_aad_0_enc (vlib_main_t *vm,
+				    vnet_crypto_async_frame_t *frame)
+{
+  return cnxk_drv_crypto_enqueue_aead_aad_enc (vm, frame, 0);
+}
+
+static_always_inline int
 onp_crypto_enqueue_aead_aad_8_dec (vlib_main_t *vm,
 				   vnet_crypto_async_frame_t *frame)
 {
@@ -57,6 +64,13 @@ onp_crypto_enqueue_aead_aad_12_dec (vlib_main_t *vm,
 				    vnet_crypto_async_frame_t *frame)
 {
   return cnxk_drv_crypto_enqueue_aead_aad_dec (vm, frame, 12);
+}
+
+static_always_inline int
+onp_crypto_enqueue_aead_aad_0_dec (vlib_main_t *vm,
+				    vnet_crypto_async_frame_t *frame)
+{
+  return cnxk_drv_crypto_enqueue_aead_aad_dec (vm, frame, 0);
 }
 
 clib_error_t *

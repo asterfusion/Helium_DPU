@@ -682,6 +682,8 @@ format_wg_peer (u8 * s, va_list * va)
   adj_index_t *adj_index;
   u8 key[NOISE_KEY_LEN_BASE64];
   wg_peer_t *peer;
+  vlib_main_t * vm = vlib_get_main();
+  f64 time_now = vlib_time_now (vm);
 
   peer = wg_peer_get (peeri);
   key_to_base64 (peer->remote.r_public, NOISE_PUBLIC_KEY_LEN, key);
@@ -704,6 +706,15 @@ format_wg_peer (u8 * s, va_list * va)
   vec_foreach (allowed_ip, peer->allowed_ips)
   {
     s = format (s, " %U", format_fib_prefix, allowed_ip);
+  }
+
+  if (peer->last_handshark && time_now > peer->last_handshark)
+  {
+      s = format(s, "\n  last handshark: %f (s)", time_now - peer->last_handshark);
+  }
+  else
+  {
+      s = format(s, "\n  last handshark: 0 (s)");
   }
 
   return s;

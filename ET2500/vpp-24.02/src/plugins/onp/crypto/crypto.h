@@ -22,7 +22,10 @@
   _ (AES_192_GCM, 24, 16, 8)                                                  \
   _ (AES_192_GCM, 24, 16, 12)                                                 \
   _ (AES_256_GCM, 32, 16, 8)                                                  \
-  _ (AES_256_GCM, 32, 16, 12)
+  _ (AES_256_GCM, 32, 16, 12)                                                 \
+  _ (CHACHA20_POLY1305, 32, 16, 8)                                            \
+  _ (CHACHA20_POLY1305, 32, 16, 12)                                           \
+  _ (CHACHA20_POLY1305, 32, 16, 0)
 
 /* CRYPTO_ID, INTEG_ID, KEY_LENGTH_IN_BYTES, DIGEST_LEN */
 #define foreach_onp_crypto_link_async_alg                                     \
