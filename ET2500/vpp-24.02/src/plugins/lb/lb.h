@@ -44,7 +44,7 @@
 #include <vppinfra/lock.h>
 
 #define LB_DEFAULT_PER_CPU_STICKY_BUCKETS (1 << 20)
-#define LB_DEFAULT_FLOW_TIMEOUT 40
+#define LB_DEFAULT_FLOW_TIMEOUT           (40)
 #define LB_MAPPING_BUCKETS                (1024 * 16)
 #define LB_MAPPING_MEMORY_SIZE            (0)
 
@@ -556,6 +556,7 @@ typedef struct {
   u32 fib_index;
   u32 outside_fib_index;
 
+  u8 protocol;
   /**
    * record
    */
@@ -681,6 +682,10 @@ typedef struct {
 
   /* Vip snat address pool */
   lb_vip_snat_addresses_pool_t *vip_snat_pool;
+
+  /* lb nat interface */
+  u32 *lb_enabled_nat4_by_sw_if;
+  u32 *lb_enabled_nat6_by_sw_if;
 
   /**
    * API dynamically registered base ID.

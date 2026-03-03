@@ -175,10 +175,10 @@ autoreply define lb_add_del_snat_pool_address {
     @param pfx - ip prefix and length
     @param protocol - tcp or udp.
     @param port - destination port.
-    @param as_address - The application server address (IPv4 in lower order 32 bits).
     @param as_vrf_id - The application server address Vrf.
-    @param is_del - The AS should be removed.
+    @param is_del - The number of application server address.
     @param is_flush - The sessions related to this AS should be flushed.
+    @param as_addresses - The application server address (IPv4 in lower order 32 bits).
 */
 autoreply  define lb_add_del_as {
   u32 client_index;
@@ -187,10 +187,38 @@ autoreply  define lb_add_del_as {
   vl_api_address_with_prefix_t pfx;
   u8 protocol [default=255];
   u16 port;
-  vl_api_address_t as_address;
   u32 as_vrf_id [default=0];
+  vl_api_address_t as_address;
   bool is_del;
   bool is_flush;
+  option vat_help = "<vip-prefix> [protocol (tcp|udp) port <n>] [<address>] [vrf <id>] [as_vrf <id>] [del] [flush]";
+};
+
+/** \brief Add an application server for a given VIP
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param vrf_id - Vrf.
+    @param pfx - ip prefix and length
+    @param protocol - tcp or udp.
+    @param port - destination port.
+    @param as_vrf_id - The application server address Vrf.
+    @param n_address - The server address number.
+    @param is_del - The number of application server address.
+    @param is_flush - The sessions related to this AS should be flushed.
+    @param as_addresses - The application server address (IPv4 in lower order 32 bits).
+*/
+autoreply  define lb_add_del_as_v2 {
+  u32 client_index;
+  u32 context;
+  u32 vrf_id [default=0];
+  vl_api_address_with_prefix_t pfx;
+  u8 protocol [default=255];
+  u16 port;
+  u32 as_vrf_id [default=0];
+  u32 n_address;
+  bool is_del;
+  bool is_flush;
+  vl_api_address_t as_addresses[n_address];
   option vat_help = "<vip-prefix> [protocol (tcp|udp) port <n>] [<address>] [vrf <id>] [as_vrf <id>] [del] [flush]";
 };
 

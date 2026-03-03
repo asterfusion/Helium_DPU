@@ -766,6 +766,8 @@ static_always_inline u8 lb_node_encap_nat_vip_snat(vlib_main_t * vm,
             flow->outside_port = old_src_port;
             flow->fib_index = lbm->ass[asindex].fib_index;
             flow->outside_fib_index = vip->fib_index;
+            flow->protocol = ip4->protocol;
+            flow->vip_index = vip - lbm->vips;
             flow->timeout = lb_time_now + lbm->flow_timeout;
 
             kv.value = flow_index;

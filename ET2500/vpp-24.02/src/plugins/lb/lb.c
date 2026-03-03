@@ -450,6 +450,52 @@ void lb_garbage_collection()
   lb_put_writer_lock();
 }
 
+static void lb_free_vip_snat_mappings_by_flow_index(u32 flow_index)
+{
+    lb_main_t *lbm = &lb_main;
+    lb_vip_snat_mapping_t *flow;
+
+    clib_bihash_kv_16_8_t kv;
+    lb_snat_vip_key_t key;
+
+    //check flow_index
+    if (pool_is_free_index(lbm->vip_snat_mappings, flow_index))
+        return;
+
+    flow = pool_elt_at_index (lbm->vip_snat_mappings, flow_index);
+
+    clib_memset(&key, 0, sizeof(key));
+
+    //remove entry by table
+    key.addr.as_u32 = flow->ip.ip4.as_u32;
+    key.port = flow->port;
+    key.protocol = flow->protocol;
+    key.fib_index = flow->fib_index;
+
+    kv.key[0] = key.as_u64[0];
+    kv.key[1] = key.as_u64[1];
+
+    if (clib_bihash_add_del_16_8 (&lbm->mapping_by_uplink_dnat4, &kv, 0))
+    {
+        clib_warning ("Lb vip-snat as-mapping dnat4 table del failed");
+    }
+
+    key.addr.as_u32 = flow->outside_ip.ip4.as_u32;
+    key.port = flow->outside_port;
+    key.protocol = flow->protocol;
+    key.fib_index = flow->outside_fib_index;
+
+    kv.key[0] = key.as_u64[0];
+    kv.key[1] = key.as_u64[1];
+
+    if (clib_bihash_add_del_16_8 (&lbm->mapping_by_downlink_snat4, &kv, 0))
+    {
+        clib_warning ("Lb vip-snat vip-mapping snat4 table del failed");
+    }
+
+    return;
+}
+
 static void lb_vip_update_new_flow_table(lb_vip_t *vip)
 {
   lb_main_t *lbm = &lb_main;
@@ -792,6 +838,7 @@ next:
             m->src_port = vip->port;
             m->target_port = vip->encap_args.target_port;
             m->fib_index = vip->fib_index;
+            m->vip_index = vip_index;
 
             kv4.key[0] = m_key4.as_u64[0];
             kv4.key[1] = m_key4.as_u64[1];
@@ -824,6 +871,7 @@ next:
             m->src_port = vip->port;
             m->target_port = vip->encap_args.target_port;
             m->fib_index = vip->fib_index;
+            m->vip_index = vip_index;
 
             kv6.key[0] = m_key6.as_u64[0];
             kv6.key[1] = m_key6.as_u64[1];
@@ -1404,16 +1452,24 @@ int lb_del_snat_pool(u32 pool_idx)
 
   vec_foreach(address, snat_addresses->addresses)
   {
+      lb_get_vip_nat_address_lock(address);
+      
       //free resource
       for (int i = 0 ; i < LB_NAT_N_PROTOCOLS; ++i)
       {
+          //free snat session table
+          int j;
+          clib_bitmap_foreach (j, address->busy_port_bitmap[i])
+          {
+              lb_free_vip_snat_mappings_by_flow_index(address->flow_index[i][j]);
+          }
           clib_bitmap_free(address->busy_port_bitmap[i]);
           vec_free(address->flow_index[i]);
       }
+
+      lb_put_vip_nat_address_lock(address);
       clib_spinlock_free(&address->lock_self);
 
-      //free snat session table ? 
-      //TODO
   }
 
   vec_free(snat_addresses->addresses);
@@ -1506,14 +1562,17 @@ int lb_del_snat_pool_address(u32 pool_idx, ip4_address_t *snat_ip_address)
   //free resource
   for (int i = 0 ; i < LB_NAT_N_PROTOCOLS; ++i)
   {
+      //free snat session table
+      int j;
+      clib_bitmap_foreach (j, del_address.busy_port_bitmap[i])
+      {
+          lb_free_vip_snat_mappings_by_flow_index(del_address.flow_index[i][j]);
+      }
       clib_bitmap_free(del_address.busy_port_bitmap[i]);
       vec_free(del_address.flow_index[i]);
   }
   clib_spinlock_free (&del_address.lock_self);
 
-  //free snat session table ? 
-  //TODO
-  
   lb_put_writer_lock();
   return 0;
 }
@@ -1694,15 +1753,28 @@ lb_fib_node_back_walk_notify (fib_node_t *node,
 
 int lb_nat4_interface_add_del (u32 sw_if_index, int is_del)
 {
+  lb_main_t *lbm = &lb_main;
+
+  vec_validate (lbm->lb_enabled_nat4_by_sw_if, sw_if_index);
+  vec_validate (lbm->lb_enabled_nat6_by_sw_if, sw_if_index);
   if (is_del)
     {
-      vnet_feature_enable_disable ("ip4-unicast", "lb-nat4-in2out",
+      if (lbm->lb_enabled_nat4_by_sw_if[sw_if_index])
+          --lbm->lb_enabled_nat4_by_sw_if[sw_if_index];
+
+      if (!lbm->lb_enabled_nat4_by_sw_if[sw_if_index])
+          vnet_feature_enable_disable ("ip4-unicast", "lb-nat4-in2out",
                                    sw_if_index, 0, 0, 0);
     }
   else
     {
-      vnet_feature_enable_disable ("ip4-unicast", "lb-nat4-in2out",
+      if (!lbm->lb_enabled_nat4_by_sw_if[sw_if_index])
+      {
+          ++lbm->lb_enabled_nat4_by_sw_if[sw_if_index];
+          vnet_feature_enable_disable ("ip4-unicast", "lb-nat4-in2out",
                                    sw_if_index, 1, 0, 0);
+      }
+      ++lbm->lb_enabled_nat4_by_sw_if[sw_if_index];
     }
 
   return 0;
@@ -1710,15 +1782,25 @@ int lb_nat4_interface_add_del (u32 sw_if_index, int is_del)
 
 int lb_nat6_interface_add_del (u32 sw_if_index, int is_del)
 {
+  lb_main_t *lbm = &lb_main;
   if (is_del)
     {
-      vnet_feature_enable_disable ("ip6-unicast", "lb-nat6-in2out",
+      if (lbm->lb_enabled_nat6_by_sw_if[sw_if_index])
+          --lbm->lb_enabled_nat6_by_sw_if[sw_if_index];
+
+      if (!lbm->lb_enabled_nat6_by_sw_if[sw_if_index])
+          vnet_feature_enable_disable ("ip6-unicast", "lb-nat6-in2out",
                                    sw_if_index, 0, 0, 0);
     }
   else
     {
-      vnet_feature_enable_disable ("ip6-unicast", "lb-nat6-in2out",
+      if (!lbm->lb_enabled_nat6_by_sw_if[sw_if_index])
+      {
+          ++lbm->lb_enabled_nat6_by_sw_if[sw_if_index];
+          vnet_feature_enable_disable ("ip6-unicast", "lb-nat6-in2out",
                                    sw_if_index, 1, 0, 0);
+      }
+      ++lbm->lb_enabled_nat6_by_sw_if[sw_if_index];
     }
 
   return 0;

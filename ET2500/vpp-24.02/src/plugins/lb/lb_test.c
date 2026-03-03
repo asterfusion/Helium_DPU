@@ -578,6 +578,12 @@ static int api_lb_add_del_as (vat_main_t * vam)
     return -99;
   }
 
+  if (vec_len(as_array) > 1)
+  {
+    errmsg ("Multiple AS addresses, please use V2\n");
+    return -99;
+  }
+
   M(LB_ADD_DEL_AS, mp);
   ip_address_encode(&vip_prefix, IP46_TYPE_ANY, &mp->pfx.address);
   mp->vrf_id = htonl(vrf_id);
@@ -588,6 +594,92 @@ static int api_lb_add_del_as (vat_main_t * vam)
   mp->as_vrf_id = htonl(as_vrf_id);
   mp->is_del = is_del;
   mp->is_flush = is_flush;
+
+  S(mp);
+  W (ret);
+  return ret;
+}
+
+static int api_lb_add_del_as_v2 (vat_main_t * vam)
+{
+
+  unformat_input_t *line_input = vam->input;
+  vl_api_lb_add_del_as_v2_t *mp;
+  int ret, ii;
+  ip46_address_t vip_prefix, as_addr;
+  u8 vip_plen;
+  ip46_address_t *as_array = 0;
+  u32 as_len = 0;
+  u32 port = 0;
+  u8 protocol = 0;
+  u32 vrf_id = 0;
+  u32 as_vrf_id = 0;
+  u8 is_del = 0;
+  u8 is_flush = 0;
+
+  if (!unformat(line_input, "%U", unformat_ip46_prefix,
+                &vip_prefix, &vip_plen, IP46_TYPE_ANY))
+  {
+      errmsg ("lb_add_del_as: invalid vip prefix\n");
+      return -99;
+  }
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "%U", unformat_ip46_address,
+                 &as_addr, IP46_TYPE_ANY))
+      {
+        vec_add1(as_array, as_addr);
+      }
+    else if (unformat(line_input, "del"))
+      {
+        is_del = 1;
+      }
+    else if (unformat(line_input, "flush"))
+      {
+        is_flush = 1;
+      }
+    else if (unformat(line_input, "protocol tcp"))
+      {
+          protocol = IP_PROTOCOL_TCP;
+      }
+    else if (unformat(line_input, "protocol udp"))
+      {
+          protocol = IP_PROTOCOL_UDP;
+      }
+    else if (unformat(line_input, "port %d", &port))
+      ;
+    else if (unformat(line_input, "vrf %d", &vrf_id))
+      ;
+    else if (unformat(line_input, "as_vrf %d", &as_vrf_id))
+      ;
+    else {
+        errmsg ("invalid arguments\n");
+        return -99;
+    }
+  }
+
+  as_len = vec_len(as_array);
+  if (!as_len) {
+    errmsg ("No AS address provided \n");
+    return -99;
+  }
+
+  M2(LB_ADD_DEL_AS_V2, mp, sizeof (vl_api_address_t) * vec_len(as_array));
+  ip_address_encode(&vip_prefix, IP46_TYPE_ANY, &mp->pfx.address);
+  mp->vrf_id = htonl(vrf_id);
+  mp->pfx.len = vip_plen;
+  mp->protocol = (u8)protocol;
+  mp->port = htons((u16)port);
+  mp->as_vrf_id = htonl(as_vrf_id);
+  mp->n_address = htonl(as_len);
+  mp->is_del = is_del;
+  mp->is_flush = is_flush;
+
+  for(ii = 0; ii < as_len; ii++)
+  {
+      ip_address_encode(&as_array[ii], IP46_TYPE_ANY, &mp->as_addresses[ii]);
+  }
 
   S(mp);
   W (ret);

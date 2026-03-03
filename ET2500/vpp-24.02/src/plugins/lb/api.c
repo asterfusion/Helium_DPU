@@ -344,6 +344,48 @@ done:
 }
 
 static void
+vl_api_lb_add_del_as_v2_t_handler
+(vl_api_lb_add_del_as_v2_t * mp)
+{
+  lb_main_t *lbm = &lb_main;
+  vl_api_lb_add_del_as_v2_reply_t * rmp;
+  int rv = 0, ii = 0;
+  u32 vip_index;
+  ip46_address_t vip_ip_prefix;
+  ip46_address_t *as_addresses;
+  u32 n_address = 0;
+
+  /* if port == 0, it means all-port VIP */
+  if (mp->port == 0)
+    {
+      mp->protocol = ~0;
+    }
+  ip_address_decode (&mp->pfx.address, &vip_ip_prefix);
+
+  if ((rv = lb_vip_find_index(ntohl(mp->vrf_id), &vip_ip_prefix, mp->pfx.len,
+                              mp->protocol, ntohs(mp->port), &vip_index)))
+    goto done;
+
+  n_address = ntohl(mp->n_address);
+  if (n_address > 0)
+      vec_validate (as_addresses, n_address - 1);
+
+  for (ii = 0; ii < n_address; ii++)
+  {
+      ip_address_decode (&mp->as_addresses[ii], &as_addresses[ii]);
+  }
+
+  if (mp->is_del)
+    rv = lb_vip_del_ass(vip_index, as_addresses, n_address, mp->is_flush);
+  else
+    rv = lb_vip_add_ass(vip_index, as_addresses, ntohl(mp->as_vrf_id), n_address);
+
+done:
+ vec_free (as_addresses);
+ REPLY_MACRO (VL_API_LB_ADD_DEL_AS_REPLY);
+}
+
+static void
 vl_api_lb_vip_dump_t_handler
 (vl_api_lb_vip_dump_t * mp)
 {
