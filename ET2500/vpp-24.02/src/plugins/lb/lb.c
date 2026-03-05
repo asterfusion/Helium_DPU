@@ -227,7 +227,7 @@ u8 *format_lb_vip_detailed (u8 * s, va_list * args)
                   (vip->flags & LB_VIP_FLAGS_USED)?"":" removed",
                   format_white_space, indent,
                   vip->new_flow_table_mask + 1);
-  s = format(s, "%U  Vrf (ip table: %u fib inde): %u)", 
+  s = format(s, "%U  Vrf (ip table: %u fib index: %u)",
                   format_white_space, indent, 
                   vip->vrf_id, vip->fib_index);
   /* clang-format on */
@@ -302,12 +302,12 @@ u8 *format_lb_vip_detailed (u8 * s, va_list * args)
   u32 *as_index;
   pool_foreach (as_index, vip->as_indexes) {
       as = &lbm->ass[*as_index];
-      s = format(s, "%U    %U %u buckets   %Lu flows  dpo:%u %s\n",
+      s = format(s, "%U    %U %u buckets   %Lu flows ip-table:%u fib-index:%u dpo:%u %s\n",
                    format_white_space, indent,
                    format_ip46_address, &as->address, IP46_TYPE_ANY,
                    count[as - lbm->ass],
                    vlib_refcount_get(&lbm->as_refcount, as - lbm->ass),
-                   as->dpo.dpoi_index,
+                   as->dpo.dpoi_index, as->vrf_id, as->fib_index,
                    (as->flags & LB_AS_FLAGS_USED)?"used":" removed");
   }
 
@@ -766,7 +766,97 @@ next:
 
   //Update reused ASs
   vec_foreach(ip, to_be_updated) {
-    lbm->ass[*ip].flags = LB_AS_FLAGS_USED;
+    lb_as_t *as;
+    as = &lbm->ass[*ip];
+    as->flags = LB_AS_FLAGS_USED;
+
+    if (as->fib_index != fib_index ||
+        as->vrf_id != as_vrf_id)
+    {
+        lb_snat_mapping_t *m = 0;
+        if (lb_vip_is_nat4_port(vip)) {
+            lb_snat4_key_t m_key4;
+            clib_bihash_kv_16_8_t kv4, value4;
+
+            clib_memset(&m_key4, 0, sizeof(m_key4));
+            m_key4.addr = as->address.ip4;
+            m_key4.port = vip->encap_args.target_port;
+            m_key4.protocol = vip->protocol;
+            m_key4.fib_index = as->fib_index;
+
+            kv4.key[0] = m_key4.as_u64[0];
+            kv4.key[1] = m_key4.as_u64[1];
+            if(!clib_bihash_search_16_8(&lbm->mapping_by_as4, &kv4, &value4))
+                m = pool_elt_at_index (lbm->snat_mappings, value4.value);
+            ASSERT (m);
+
+            clib_bihash_add_del_16_8(&lbm->mapping_by_as4, &kv4, 0);
+
+            m->fib_index = fib_index;
+            m_key4.fib_index = fib_index;
+
+            kv4.key[0] = m_key4.as_u64[0];
+            kv4.key[1] = m_key4.as_u64[1];
+            kv4.value = m - lbm->snat_mappings;
+            clib_bihash_add_del_16_8(&lbm->mapping_by_as4, &kv4, 1);
+        } else if (lb_vip_is_nat6_port(vip)) {
+            lb_snat6_key_t m_key6;
+            clib_bihash_kv_24_8_t kv6, value6;
+
+            clib_memset(&m_key6, 0, sizeof(m_key6));
+            m_key6.addr.as_u64[0] = as->address.ip6.as_u64[0];
+            m_key6.addr.as_u64[1] = as->address.ip6.as_u64[1];
+            m_key6.port = vip->encap_args.target_port;
+            m_key6.protocol = vip->protocol;
+            m_key6.fib_index = as->fib_index;
+
+            kv6.key[0] = m_key6.as_u64[0];
+            kv6.key[1] = m_key6.as_u64[1];
+            kv6.key[2] = m_key6.as_u64[2];
+
+            if (!clib_bihash_search_24_8 (&lbm->mapping_by_as6, &kv6, &value6))
+                m = pool_elt_at_index (lbm->snat_mappings, value6.value);
+            ASSERT (m);
+
+            clib_bihash_add_del_24_8(&lbm->mapping_by_as6, &kv6, 0);
+
+            m->fib_index = fib_index;
+            m_key6.fib_index = fib_index;
+
+            kv6.key[0] = m_key6.as_u64[0];
+            kv6.key[1] = m_key6.as_u64[1];
+            kv6.key[2] = m_key6.as_u64[2];
+            kv6.value = m - lbm->snat_mappings;
+            clib_bihash_add_del_24_8(&lbm->mapping_by_as6, &kv6, 1);
+        }
+        fib_entry_child_remove(as->next_hop_fib_entry_index, as->next_hop_child_index);
+        fib_table_entry_delete_index(as->next_hop_fib_entry_index, FIB_SOURCE_RR);
+
+        as->fib_index = fib_index;
+        as->vrf_id = as_vrf_id;
+
+        fib_prefix_t nh = {};
+        if (lb_encap_is_ip4(vip)) {
+            nh.fp_addr.ip4 = as->address.ip4;
+            nh.fp_len = 32;
+            nh.fp_proto = FIB_PROTOCOL_IP4;
+        } else {
+            nh.fp_addr.ip6 = as->address.ip6;
+            nh.fp_len = 128;
+            nh.fp_proto = FIB_PROTOCOL_IP6;
+        }
+        as->next_hop_fib_entry_index =
+            fib_table_entry_special_add(fib_index,
+                                        &nh,
+                                        FIB_SOURCE_RR,
+                                        FIB_ENTRY_FLAG_NONE);
+        as->next_hop_child_index =
+            fib_entry_child_add(as->next_hop_fib_entry_index,
+                                lbm->fib_node_type,
+                                as - lbm->ass);
+        lb_as_stack(as);
+
+    }
   }
   vec_free(to_be_updated);
 
@@ -819,6 +909,8 @@ next:
         if (lb_vip_is_nat4_port(vip)) {
             lb_snat4_key_t m_key4;
             clib_bihash_kv_16_8_t kv4;
+
+            clib_memset(&m_key4, 0, sizeof(m_key4));
             m_key4.addr = as->address.ip4;
             m_key4.port = vip->encap_args.target_port;
             m_key4.protocol = vip->protocol;
@@ -847,6 +939,7 @@ next:
         } else {
             lb_snat6_key_t m_key6;
             clib_bihash_kv_24_8_t kv6;
+
             clib_memset(&m_key6, 0, sizeof(m_key6));
             m_key6.addr.as_u64[0] = as->address.ip6.as_u64[0];
             m_key6.addr.as_u64[1] = as->address.ip6.as_u64[1];
@@ -1614,6 +1707,12 @@ int lb_vip_set_snat_address_pool(u32 vip_index, u32 snat_pool_index)
     return VNET_API_ERROR_NO_SUCH_ENTRY;
   }
 
+  if (vip->vip_snat_pool_index == snat_pool_index)
+  {
+    lb_put_writer_lock();
+    return 0;
+  }
+
   if (snat_pool_index != (~0))
   {
     if (pool_is_free_index(lbm->vip_snat_pool, snat_pool_index))
@@ -1756,7 +1855,6 @@ int lb_nat4_interface_add_del (u32 sw_if_index, int is_del)
   lb_main_t *lbm = &lb_main;
 
   vec_validate (lbm->lb_enabled_nat4_by_sw_if, sw_if_index);
-  vec_validate (lbm->lb_enabled_nat6_by_sw_if, sw_if_index);
   if (is_del)
     {
       if (lbm->lb_enabled_nat4_by_sw_if[sw_if_index])
@@ -1774,7 +1872,10 @@ int lb_nat4_interface_add_del (u32 sw_if_index, int is_del)
           vnet_feature_enable_disable ("ip4-unicast", "lb-nat4-in2out",
                                    sw_if_index, 1, 0, 0);
       }
-      ++lbm->lb_enabled_nat4_by_sw_if[sw_if_index];
+      else
+      {
+          ++lbm->lb_enabled_nat4_by_sw_if[sw_if_index];
+      }
     }
 
   return 0;
@@ -1783,6 +1884,8 @@ int lb_nat4_interface_add_del (u32 sw_if_index, int is_del)
 int lb_nat6_interface_add_del (u32 sw_if_index, int is_del)
 {
   lb_main_t *lbm = &lb_main;
+
+  vec_validate (lbm->lb_enabled_nat6_by_sw_if, sw_if_index);
   if (is_del)
     {
       if (lbm->lb_enabled_nat6_by_sw_if[sw_if_index])
@@ -1800,7 +1903,10 @@ int lb_nat6_interface_add_del (u32 sw_if_index, int is_del)
           vnet_feature_enable_disable ("ip6-unicast", "lb-nat6-in2out",
                                    sw_if_index, 1, 0, 0);
       }
-      ++lbm->lb_enabled_nat6_by_sw_if[sw_if_index];
+      else
+      {
+          ++lbm->lb_enabled_nat6_by_sw_if[sw_if_index];
+      }
     }
 
   return 0;

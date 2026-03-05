@@ -216,7 +216,7 @@ vl_api_lb_add_snat_pool_t_handler
   rv = lb_add_snat_pool(&pool_idx);
 
   /* *INDENT-OFF* */
-  REPLY_MACRO2(VL_API_LB_ADD_SNAT_POOL,
+  REPLY_MACRO2(VL_API_LB_ADD_SNAT_POOL_REPLY,
           ({
            rmp->pool_idx = htonl(pool_idx);
            }));
@@ -352,7 +352,7 @@ vl_api_lb_add_del_as_v2_t_handler
   int rv = 0, ii = 0;
   u32 vip_index;
   ip46_address_t vip_ip_prefix;
-  ip46_address_t *as_addresses;
+  ip46_address_t *as_addresses = 0;
   u32 n_address = 0;
 
   /* if port == 0, it means all-port VIP */
@@ -378,7 +378,7 @@ vl_api_lb_add_del_as_v2_t_handler
   if (mp->is_del)
     rv = lb_vip_del_ass(vip_index, as_addresses, n_address, mp->is_flush);
   else
-    rv = lb_vip_add_ass(vip_index, as_addresses, ntohl(mp->as_vrf_id), n_address);
+    rv = lb_vip_add_ass(vip_index, as_addresses, n_address, ntohl(mp->as_vrf_id));
 
 done:
  vec_free (as_addresses);

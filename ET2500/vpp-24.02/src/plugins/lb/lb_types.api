@@ -57,8 +57,8 @@ enum lb_vip_type:u8
 
 enum lb_nat_protocol
 {
-  LB_API_NAT_PROTOCOL_UDP = 0x06,
-  LB_API_NAT_PROTOCOL_TCP = 0x17,
+  LB_API_NAT_PROTOCOL_TCP = 0x06,
+  LB_API_NAT_PROTOCOL_UDP = 0x11,
   LB_API_NAT_PROTOCOL_ANY = 0xffffffff,
 };
 
