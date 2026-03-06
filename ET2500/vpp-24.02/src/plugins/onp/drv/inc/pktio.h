@@ -259,6 +259,13 @@ typedef struct
   u64 lmac_type_id;
 } cnxk_pktio_link_info_t;
 
+typedef enum
+{
+  CNXK_PKTIO_PLATFORM_UNKNOWN = 0,
+  CNXK_PKTIO_PLATFORM_ET2500,
+  CNXK_PKTIO_PLATFORM_ET3600,
+} cnxk_pktio_platform_type_t;
+
 i32 cnxk_drv_pktio_pkts_recv (vlib_main_t *vm, vlib_node_runtime_t *node,
 			      u32 rxq, u16 req_pkts,
 			      cnxk_per_thread_data_t *rxptd, const u64 mode,
@@ -347,7 +354,9 @@ i32 cnxk_drv_pktio_xstats_names_get (vlib_main_t *vm, u16 pktio_idx,
 				     u8 *xstats_names[], u32 count);
 
 i32 cnxk_drv_pktio_link_advertise_set (vlib_main_t *vm, u16 pktio_idx,
-				  cnxk_pktio_link_info_t *link_info);
+				       cnxk_pktio_link_info_t *link_info,
+				       cnxk_pktio_platform_type_t
+					 platform_type);
 
 i32 cnxk_drv_pktio_link_info_set (vlib_main_t *vm, u16 pktio_idx,
 				  cnxk_pktio_link_info_t *link_info);

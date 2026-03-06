@@ -246,6 +246,20 @@ onp_platform_to_string (onp_platform_t platform)
     }
 }
 
+static_always_inline cnxk_pktio_platform_type_t
+onp_platform_to_drv_pktio_platform (onp_platform_t platform)
+{
+  switch (platform)
+    {
+    case ONP_PLATFORM_ET2500:
+      return CNXK_PKTIO_PLATFORM_ET2500;
+    case ONP_PLATFORM_ET3600:
+      return CNXK_PKTIO_PLATFORM_ET3600;
+    default:
+      return CNXK_PKTIO_PLATFORM_UNKNOWN;
+    }
+}
+
 typedef struct
 {
   /* Fast path per thread data */

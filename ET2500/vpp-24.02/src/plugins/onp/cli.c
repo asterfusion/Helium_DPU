@@ -388,7 +388,9 @@ set_onp_interface_link_info(vlib_main_t* vm, unformat_input_t* input, vlib_cli_c
     return clib_error_return(0, "Please specify a valid interface.");
   }
 
-  cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
+  cnxk_drv_pktio_link_advertise_set (
+    vm, pktio->cnxk_pktio_index, &link_info,
+    onp_platform_to_drv_pktio_platform (om->platform_type));
 
   return error;
 }
