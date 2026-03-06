@@ -1485,6 +1485,19 @@ int lb_vip_del(u32 vip_index)
     vec_free(ass);
   }
 
+  //unbind snat-pool
+  if (lb_vip_is_double_nat44(vip))
+  {
+      if(vip->vip_snat_pool_index != (~0))
+      {
+          lb_vip_snat_addresses_pool_t * snat_addresses = pool_elt_at_index(lbm->vip_snat_pool, vip->vip_snat_pool_index);
+          snat_addresses->refcnt--;
+
+          vip->vip_snat_pool_index = (~0);
+          vip->flags &= ~LB_VIP_FLAGS_IPV4_SNAT;
+      }
+  }
+
   //Delete adjacency
   lb_vip_del_adjacency(lbm, vip);
 
