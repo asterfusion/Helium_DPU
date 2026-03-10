@@ -456,7 +456,7 @@ wg_peer_fill (vlib_main_t *vm, wg_peer_t *peer, u32 table_id,
   peer->last_sent_handshake = vlib_time_now (vm) - (REKEY_TIMEOUT + 1);
   wg_peer_update_flags (perri, WG_PEER_STATUS_DEAD, false);
 
-  const wg_if_t *wgi = wg_if_get (wg_if_find_by_sw_if_index (wg_sw_if_index));
+  wg_if_t *wgi = wg_if_get (wg_if_find_by_sw_if_index (wg_sw_if_index));
 
   if (NULL == wgi)
     return (VNET_API_ERROR_INVALID_INTERFACE);
@@ -468,6 +468,18 @@ wg_peer_fill (vlib_main_t *vm, wg_peer_t *peer, u32 table_id,
   peer->src.port = wgi->port;
 
   u8 is_ip4 = ip46_address_is_ip4 (&peer->dst.addr);
+
+  if (is_ip4)
+  {
+      wgi->src_ip.ip.ip4.data_u32 = peer->src.addr.ip4.data_u32;
+  }
+
+  else
+  {
+     wgi->src_ip.ip.ip6.as_u64[0] = peer->src.addr.ip6.as_u64[0];
+     wgi->src_ip.ip.ip6.as_u64[1] = peer->src.addr.ip6.as_u64[1];
+  }
+
   peer->rewrite = wg_build_rewrite (&peer->src.addr, peer->src.port,
 				    &peer->dst.addr, peer->dst.port, is_ip4);
 

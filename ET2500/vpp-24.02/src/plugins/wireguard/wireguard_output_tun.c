@@ -604,8 +604,8 @@ wg_output_tun_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	}
       else
 	{
-	  hdr6_out = vlib_buffer_get_current (b[0]);
-          if (hdr6_out->ip6.src_address.as_u64[0] != peer->src.addr.ip6.as_u64[0] ||
+          hdr6_out = vlib_buffer_get_current (b[0]);
+	  if (hdr6_out->ip6.src_address.as_u64[0] != peer->src.addr.ip6.as_u64[0] ||
               hdr6_out->ip6.src_address.as_u64[1] != peer->src.addr.ip6.as_u64[1])
           {
               hdr6_out->ip6.src_address.as_u64[0] = peer->src.addr.ip6.as_u64[0];
