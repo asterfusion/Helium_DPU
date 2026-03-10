@@ -328,10 +328,7 @@ wg_handshake_process (vlib_main_t *vm, wg_main_t *wmp, vlib_buffer_t *b,
       return WG_INPUT_ERROR_HANDSHAKE_RECEIVE;
     }
 
-  if (peer)
-  {
-      peer->last_handshark = vlib_time_now (vm);
-  }
+  peer->last_handshark = vlib_time_now (vm);
   wg_timers_any_authenticated_packet_received (peer);
   wg_timers_any_authenticated_packet_traversal (peer);
   return WG_INPUT_ERROR_NONE;
