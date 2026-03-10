@@ -815,7 +815,7 @@ static_always_inline u8 lb_node_encap_nat_vip_snat(vlib_main_t * vm,
         else if (ip4->protocol == IP_PROTOCOL_TCP)
         {
             th = (tcp_header_t *) (uh);
-            th->src_port = vip->encap_args.target_port;
+            th->src_port = flow->port;
             csum = th->checksum;
             csum = ip_csum_sub_even (csum, old_src);
             csum = ip_csum_add_even (csum, flow->ip.ip4.as_u32);
@@ -1337,7 +1337,7 @@ lb_nat4_in2out_node_inline (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_f
               csum = ip_csum_add_even (csum, new_port0);
               tcp0->checksum = ip_csum_fold (csum);
             }
-          else if (PREDICT_TRUE(ip40->protocol == LB_NAT_PROTOCOL_UDP))
+          else if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_UDP))
             {
               old_port0 = udp0->src_port;
               udp0->src_port = new_port0;
@@ -1378,6 +1378,12 @@ lb_nat4_in2out_node_inline (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_f
 
               old_addr0 = ip40->dst_address.as_u32;
               ip40->dst_address.as_u32 = flow->outside_ip.ip4.as_u32;
+
+              csum = ip40->checksum;
+              csum = ip_csum_sub_even (csum, old_addr0);
+              csum = ip_csum_add_even (csum, flow->outside_ip.ip4.as_u32);
+              ip40->checksum = ip_csum_fold (csum);
+
               if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_TCP))
               {
                   old_port0 = tcp0->dst_port;
@@ -1390,7 +1396,7 @@ lb_nat4_in2out_node_inline (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_f
                   csum = ip_csum_add_even (csum, flow->outside_port);
                   tcp0->checksum = ip_csum_fold (csum);
               }
-              else if (PREDICT_TRUE(ip40->protocol == LB_NAT_PROTOCOL_UDP))
+              else if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_UDP))
               {
                   old_port0 = udp0->dst_port;
                   udp0->dst_port = flow->outside_port;

@@ -493,6 +493,8 @@ static void lb_free_vip_snat_mappings_by_flow_index(u32 flow_index)
         clib_warning ("Lb vip-snat vip-mapping snat4 table del failed");
     }
 
+    pool_put(lbm->vip_snat_mappings, flow);
+
     return;
 }
 
@@ -927,7 +929,7 @@ next:
             m->src_ip_is_ipv6 = 0;
             m->as_ip.ip4 = as->address.ip4;
             m->as_ip_is_ipv6 = 0;
-            m->src_port = vip->port;
+            m->src_port = clib_host_to_net_u16(vip->port);
             m->target_port = vip->encap_args.target_port;
             m->fib_index = vip->fib_index;
             m->vip_index = vip_index;
@@ -961,7 +963,7 @@ next:
             m->as_ip.ip6.as_u64[0] = as->address.ip6.as_u64[0];
             m->as_ip.ip6.as_u64[1] = as->address.ip6.as_u64[1];
             m->as_ip_is_ipv6 = 1;
-            m->src_port = vip->port;
+            m->src_port = clib_host_to_net_u16(vip->port);
             m->target_port = vip->encap_args.target_port;
             m->fib_index = vip->fib_index;
             m->vip_index = vip_index;
