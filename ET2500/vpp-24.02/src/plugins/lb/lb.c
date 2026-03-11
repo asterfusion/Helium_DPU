@@ -307,7 +307,7 @@ u8 *format_lb_vip_detailed (u8 * s, va_list * args)
                    format_ip46_address, &as->address, IP46_TYPE_ANY,
                    count[as - lbm->ass],
                    vlib_refcount_get(&lbm->as_refcount, as - lbm->ass),
-                   as->dpo.dpoi_index, as->vrf_id, as->fib_index,
+                   as->vrf_id, as->fib_index, as->dpo.dpoi_index,
                    (as->flags & LB_AS_FLAGS_USED)?"used":" removed");
   }
 
@@ -794,7 +794,7 @@ next:
 
             clib_bihash_add_del_16_8(&lbm->mapping_by_as4, &kv4, 0);
 
-            m->fib_index = fib_index;
+            m->fib_index = vip->fib_index;
             m_key4.fib_index = fib_index;
 
             kv4.key[0] = m_key4.as_u64[0];
@@ -822,7 +822,7 @@ next:
 
             clib_bihash_add_del_24_8(&lbm->mapping_by_as6, &kv6, 0);
 
-            m->fib_index = fib_index;
+            m->fib_index = vip->fib_index;
             m_key6.fib_index = fib_index;
 
             kv6.key[0] = m_key6.as_u64[0];
