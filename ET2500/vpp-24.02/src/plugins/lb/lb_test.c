@@ -81,7 +81,7 @@ static int api_lb_conf (vat_main_t * vam)
   vl_api_lb_conf_t *mp;
   u32 ip4_src_address = 0xffffffff;
   ip46_address_t ip6_src_address;
-  u32 sticky_buckets_per_core = LB_DEFAULT_PER_CPU_STICKY_BUCKETS;
+  u32 sticky_buckets = LB_DEFAULT_STICKY_BUCKETS;
   u32 flow_timeout = LB_DEFAULT_FLOW_TIMEOUT;
   int ret;
 
@@ -94,7 +94,7 @@ static int api_lb_conf (vat_main_t * vam)
       ;
     else if (unformat(line_input, "ip6-src-address %U", unformat_ip6_address, &ip6_src_address))
       ;
-    else if (unformat(line_input, "buckets %d", &sticky_buckets_per_core))
+    else if (unformat(line_input, "buckets %d", &sticky_buckets))
       ;
     else if (unformat(line_input, "timeout %d", &flow_timeout))
       ;
@@ -107,7 +107,7 @@ static int api_lb_conf (vat_main_t * vam)
   M(LB_CONF, mp);
   clib_memcpy (&(mp->ip4_src_address), &ip4_src_address, sizeof (ip4_src_address));
   clib_memcpy (&(mp->ip6_src_address), &ip6_src_address, sizeof (ip6_src_address));
-  mp->sticky_buckets_per_core = htonl (sticky_buckets_per_core);
+  mp->sticky_buckets = htonl (sticky_buckets);
   mp->flow_timeout = htonl (flow_timeout);
 
   S(mp);

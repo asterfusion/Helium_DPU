@@ -31,22 +31,27 @@
 #define LB_PLUGIN_LB_LB_H_
 
 #include <lb/util.h>
-#include <vnet/util/refcount.h>
 
 #include <vnet/vnet.h>
 #include <vnet/ip/ip.h>
 #include <vnet/dpo/dpo.h>
 #include <vnet/fib/fib_table.h>
 #include <vppinfra/hash.h>
+#include <vppinfra/bihash_8_8.h>
 #include <vppinfra/bihash_16_8.h>
 #include <vppinfra/bihash_24_8.h>
 #include <lb/lbhash.h>
 #include <vppinfra/lock.h>
 
-#define LB_DEFAULT_PER_CPU_STICKY_BUCKETS (1 << 20)
-#define LB_DEFAULT_FLOW_TIMEOUT           (40)
+#define LB_DEFAULT_STICKY_BUCKETS         (1 << 20)
+#define LB_DEFAULT_STICKY_MEMORY_SIZE     (0)
+
 #define LB_MAPPING_BUCKETS                (1024 * 16)
 #define LB_MAPPING_MEMORY_SIZE            (0)
+
+#define LB_DEFAULT_FLOW_TIMEOUT           (40)
+#define LB_DEFAULT_FLOW_TCP_TRANSITORY    (40)
+#define LB_DEFAULT_FLOW_TCP_CLOSING       (10)
 
 #define LB_DYNAMIC_MAPPING_BUCKETS        (1024 * 512)
 #define LB_DYNAMIC_MAPPING_MEMORY_SIZE    (0)
@@ -467,6 +472,45 @@ lb_ip_proto_to_nat_proto (u8 ip_proto)
   return nat_proto;
 }
 
+typedef union {
+    u64 key;
+    struct {
+        u32 hash;
+        u32 vip_index;
+    };
+} lb_sticky_key_t;
+
+typedef union {
+    u64 value;
+    struct {
+        u32 timeout;
+        u32 asindex;
+    };
+} lb_sticky_value_t;
+
+typedef union {
+    struct {
+        u64 key;
+        u64 value;
+    };
+    struct {
+        lb_sticky_key_t lb_key;
+        lb_sticky_value_t lb_value;
+    };
+} lb_sticky_kv_t;
+
+typedef struct
+{
+    u32 lb_time_now;
+    u32 thread_index;
+} lb_sticky_is_idle_ctx_t;
+
+typedef struct
+{
+    u32 vip_index;
+    u32 as_index;
+} lb_sticky_is_foreach_ctx_t;
+
 /* Key for Pod's egress SNAT */
 typedef struct {
   union
@@ -566,14 +610,6 @@ typedef struct {
 
 typedef struct {
   /**
-   * Each CPU has its own sticky flow hash table.
-   * One single table is used for all VIPs.
-   */
-  lb_hash_t *sticky_ht;
-} lb_per_cpu_t;
-
-typedef struct {
-  /**
    * Pool of all Virtual IPs
    */
   lb_vip_t *vips;
@@ -600,15 +636,10 @@ typedef struct {
    * As ass[0] has a special meaning, its associated counter
    * starts at 0 and is decremented instead. i.e. do not use it.
    */
-  vlib_refcount_t as_refcount;
+  u64 *as_refcount;
 
   /* hash lookup vip_index by key: {u16: nodeport} */
   uword * vip_index_by_nodeport;
-
-  /**
-   * Some global data is per-cpu
-   */
-  lb_per_cpu_t *per_cpu;
 
   /**
    * Node next index for IP adjacencies, for each of the traffic types.
@@ -628,12 +659,17 @@ typedef struct {
   /**
    * Number of buckets in the per-cpu sticky hash table.
    */
-  u32 per_cpu_sticky_buckets;
+  u32 sticky_buckets;
+
+  /* sticky hash */
+  clib_bihash_8_8_t sticky_ht;
 
   /**
    * Flow timeout in seconds.
    */
   u32 flow_timeout;
+  u32 flow_tcp_transitory_timeout;
+  u32 flow_tcp_closing_timeout;
 
   /**
    * dynamic random seed
@@ -700,6 +736,7 @@ typedef struct {
 } lb_main_t;
 
 
+u8 *format_lb_sticky_ht_kvp (u8 *s, va_list *args);
 u8 *format_lb_vip_index_per_port_kvp (u8 *s, va_list *args);
 u8 *format_lb_mapping_by_as4_kvp (u8 *s, va_list *args);
 u8 *format_lb_mapping_by_as6_kvp (u8 *s, va_list *args);
@@ -738,7 +775,9 @@ extern vlib_node_registration_t lb_nat6_in2out_node;
  * @return 0 on success. VNET_LB_ERR_XXX on error
  */
 int lb_conf(ip4_address_t *ip4_address, ip6_address_t *ip6_address,
-            u32 sticky_buckets, u32 flow_timeout);
+            u32 sticky_buckets, u32 flow_timeout,
+            u32 flow_tcp_transitory_timeout,
+            u32 flow_tcp_closing_timeout);
 
 int lb_vip_add(lb_vip_add_args_t args, u32 *vip_index);
 

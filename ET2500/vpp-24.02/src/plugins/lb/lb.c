@@ -97,23 +97,16 @@ u32 lb_hash_time_now(vlib_main_t * vm)
 
 u8 *format_lb_main (u8 * s, va_list * args)
 {
-  vlib_thread_main_t *tm = vlib_get_thread_main();
   lb_main_t *lbm = &lb_main;
   s = format(s, "lb_main");
   s = format(s, " ip4-src-address: %U \n", format_ip4_address, &lbm->ip4_src_address);
   s = format(s, " ip6-src-address: %U \n", format_ip6_address, &lbm->ip6_src_address);
   s = format(s, " #vips: %u\n", pool_elts(lbm->vips));
   s = format(s, " #ass: %u\n", pool_elts(lbm->ass) - 1);
-
-  u32 thread_index;
-  for(thread_index = 0; thread_index < tm->n_vlib_mains; thread_index++ ) {
-    lb_hash_t *h = lbm->per_cpu[thread_index].sticky_ht;
-    if (h) {
-      s = format(s, "core %d\n", thread_index);
-      s = format(s, "  timeout: %ds\n", h->timeout);
-      s = format(s, "  usage: %d / %d\n", lb_hash_elts(h, lb_hash_time_now(vlib_get_main())),  lb_hash_size(h));
-    }
-  }
+  s = format(s, " #sticky buckets: %u\n", lbm->sticky_buckets);
+  s = format(s, " #flow timeout: %u\n", lbm->flow_timeout);
+  s = format(s, " #flow tcp transitory timeout: %u\n", lbm->flow_tcp_transitory_timeout);
+  s = format(s, " #flow tcp closing timeout: %u\n", lbm->flow_tcp_closing_timeout);
 
   return s;
 }
@@ -306,7 +299,7 @@ u8 *format_lb_vip_detailed (u8 * s, va_list * args)
                    format_white_space, indent,
                    format_ip46_address, &as->address, IP46_TYPE_ANY,
                    count[as - lbm->ass],
-                   vlib_refcount_get(&lbm->as_refcount, as - lbm->ass),
+                   lbm->as_refcount[as - lbm->ass],
                    as->vrf_id, as->fib_index, as->dpo.dpoi_index,
                    (as->flags & LB_AS_FLAGS_USED)?"used":" removed");
   }
@@ -344,6 +337,28 @@ typedef struct {
   u32 skip;
 } lb_pseudorand_t;
 
+static int
+lb_sticky_foreach_free_cb (clib_bihash_kv_8_8_t * kv, void *arg)
+{
+    lb_main_t *lbm = &lb_main;
+
+    lb_sticky_is_foreach_ctx_t *ctx = arg;
+
+    lb_sticky_kv_t *lb_kv = (lb_sticky_kv_t *)kv;
+
+    if (ctx->vip_index == ~0 ||
+        (lb_kv->lb_key.vip_index == ctx->vip_index && (ctx->as_index == ~0)) ||
+        (lb_kv->lb_key.vip_index == ctx->vip_index && (lb_kv->lb_value.asindex  == ctx->as_index)))
+    {
+        clib_atomic_fetch_sub(&lbm->as_refcount[lb_kv->lb_value.asindex], 1);
+
+        if (clib_bihash_add_del_8_8(&lbm->sticky_ht, kv, 0))
+            clib_warning("foreach stick table : remove entry failed!");
+    }
+
+    return 1;
+}
+
 static int lb_pseudorand_compare(void *a, void *b)
 {
   lb_as_t *asa, *asb;
@@ -374,7 +389,7 @@ static void lb_vip_garbage_collection(lb_vip_t *vip)
       as = &lbm->ass[*as_index];
       if (!(as->flags & LB_AS_FLAGS_USED) && //Not used
           clib_u32_loop_gt(now, as->last_used + LB_CONCURRENCY_TIMEOUT) &&
-          (vlib_refcount_get(&lbm->as_refcount, as - lbm->ass) == 0))
+          (clib_atomic_bool_cmp_and_swap(&lbm->as_refcount[as - lbm->ass], 0, 0)))
         { //Not referenced
 
           if (lb_vip_is_nat4_port(vip)) {
@@ -593,22 +608,44 @@ finished:
 }
 
 int lb_conf(ip4_address_t *ip4_address, ip6_address_t *ip6_address,
-           u32 per_cpu_sticky_buckets, u32 flow_timeout)
+           u32 sticky_buckets, u32 flow_timeout,
+           u32 flow_tcp_transitory_timeout,
+           u32 flow_tcp_closing_timeout)
 {
   lb_main_t *lbm = &lb_main;
 
-  if (!is_pow2(per_cpu_sticky_buckets))
+  if (!is_pow2(sticky_buckets))
     return VNET_API_ERROR_INVALID_MEMORY_SIZE;
 
   lb_get_writer_lock(); //Not exactly necessary but just a reminder that it exists for my future self
   lbm->ip4_src_address = *ip4_address;
   lbm->ip6_src_address = *ip6_address;
-  lbm->per_cpu_sticky_buckets = per_cpu_sticky_buckets;
   lbm->flow_timeout = flow_timeout;
+  lbm->flow_tcp_transitory_timeout = flow_tcp_transitory_timeout;
+  lbm->flow_tcp_closing_timeout = flow_tcp_closing_timeout;
+
+  if (lbm->sticky_buckets != sticky_buckets)
+  {
+      lbm->sticky_buckets = sticky_buckets;
+
+      if (clib_bihash_is_initialised_8_8(&lbm->sticky_ht))
+      {
+          lb_sticky_is_foreach_ctx_t ctx;
+          ctx.vip_index = ~0;
+          ctx.as_index = ~0;
+          clib_bihash_foreach_key_value_pair_8_8(&lbm->sticky_ht, lb_sticky_foreach_free_cb, &ctx);
+      }
+
+      clib_bihash_free_8_8(&lbm->sticky_ht);
+
+      //reinit
+      clib_bihash_init_8_8 (&lbm->sticky_ht, "lb_stick_ht", lbm->sticky_buckets, LB_DEFAULT_STICKY_MEMORY_SIZE);
+      clib_bihash_set_kvp_format_fn_8_8 (&lbm->sticky_ht, format_lb_sticky_ht_kvp);
+  }
+
   lb_put_writer_lock();
   return 0;
 }
-
 
 
 static
@@ -873,6 +910,8 @@ next:
     pool_get(vip->as_indexes, as_index);
     *as_index = as - lbm->ass;
 
+    vec_validate(lbm->as_refcount, *as_index);
+
     /*
      * become a child of the FIB entry
      * so we are informed when its forwarding changes
@@ -991,34 +1030,14 @@ next:
 int
 lb_flush_vip_as (u32 vip_index, u32 as_index)
 {
-  u32 thread_index;
-  vlib_thread_main_t *tm = vlib_get_thread_main();
   lb_main_t *lbm = &lb_main;
 
-  for(thread_index = 0; thread_index < tm->n_vlib_mains; thread_index++ ) {
-    lb_hash_t *h = lbm->per_cpu[thread_index].sticky_ht;
-    if (h != NULL) {
-        u32 i;
-        lb_hash_bucket_t *b;
+  lb_sticky_is_foreach_ctx_t ctx;
 
-        lb_hash_foreach_entry(h, b, i) {
-          if ((vip_index == ~0)
-              || ((b->vip[i] == vip_index) && (as_index == ~0))
-              || ((b->vip[i] == vip_index) && (b->value[i] == as_index)))
-            {
-              vlib_refcount_add(&lbm->as_refcount, thread_index, b->value[i], -1);
-              vlib_refcount_add(&lbm->as_refcount, thread_index, 0, 1);
-              b->vip[i] = ~0;
-              b->value[i] = 0;
-            }
-        }
-        if (vip_index == ~0)
-          {
-            lb_hash_free(h);
-            lbm->per_cpu[thread_index].sticky_ht = 0;
-          }
-      }
-    }
+  ctx.vip_index = vip_index;
+  ctx.as_index = as_index;
+
+  clib_bihash_foreach_key_value_pair_8_8(&lbm->sticky_ht, lb_sticky_foreach_free_cb, &ctx);
 
   return 0;
 }
@@ -1927,6 +1946,21 @@ int lb_nat6_interface_add_del (u32 sw_if_index, int is_del)
   return 0;
 }
 
+u8 *format_lb_sticky_ht_kvp (u8 *s, va_list *args)
+{
+    vlib_main_t *vm = vlib_get_main();
+    u32 lb_time = lb_hash_time_now (vm);
+    clib_bihash_kv_8_8_t *v = va_arg (*args, clib_bihash_kv_8_8_t *);
+
+    lb_sticky_kv_t *lb_kv = (lb_sticky_kv_t *)v;
+
+    s = format (s, "Key: hash %u vip %u Value : now_time %u (timeout %u) index %u ",
+                lb_kv->lb_key.hash, lb_kv->lb_key.vip_index,
+                lb_time,
+                lb_kv->lb_value.timeout, lb_kv->lb_value.asindex);
+    return s;
+}
+
 u8 *format_lb_vip_index_per_port_kvp (u8 *s, va_list *args)
 {
     clib_bihash_kv_16_8_t *v = va_arg (*args, clib_bihash_kv_16_8_t *);
@@ -2011,7 +2045,6 @@ u8 *format_lb_mapping_by_downlink_snat4_kvp (u8 *s, va_list *args)
 clib_error_t *
 lb_init (vlib_main_t * vm)
 {
-  vlib_thread_main_t *tm = vlib_get_thread_main ();
   lb_main_t *lbm = &lb_main;
   lbm->vnet_main = vnet_get_main ();
   lbm->vlib_main = vm;
@@ -2039,11 +2072,11 @@ lb_init (vlib_main_t * vm)
   default_vip->port = 0;
   default_vip->flags = LB_VIP_FLAGS_USED;
 
-  lbm->per_cpu = 0;
-  vec_validate(lbm->per_cpu, tm->n_vlib_mains - 1);
   clib_spinlock_init (&lbm->writer_lock);
-  lbm->per_cpu_sticky_buckets = LB_DEFAULT_PER_CPU_STICKY_BUCKETS;
+  lbm->sticky_buckets = LB_DEFAULT_STICKY_BUCKETS;
   lbm->flow_timeout = LB_DEFAULT_FLOW_TIMEOUT;
+  lbm->flow_tcp_transitory_timeout = LB_DEFAULT_FLOW_TCP_TRANSITORY;
+  lbm->flow_tcp_closing_timeout = LB_DEFAULT_FLOW_TCP_CLOSING;
   lbm->ip4_src_address.as_u32 = 0xffffffff;
   lbm->ip6_src_address.as_u64[0] = 0xffffffffffffffffL;
   lbm->ip6_src_address.as_u64[1] = 0xffffffffffffffffL;
@@ -2064,7 +2097,7 @@ lb_init (vlib_main_t * vm)
   lbm->fib_node_type = fib_node_register_new_type ("lb", &lb_fib_node_vft);
 
   //Init AS reference counters
-  vlib_refcount_init(&lbm->as_refcount);
+  vec_validate(lbm->as_refcount, 1024); //default length
 
   //Allocate and init default AS.
   lbm->ass = 0;
@@ -2083,6 +2116,10 @@ lb_init (vlib_main_t * vm)
 
   lbm->vip_index_by_nodeport
     = hash_create_mem (0, sizeof(u16), sizeof (uword));
+
+
+  clib_bihash_init_8_8 (&lbm->sticky_ht, "lb_stick_ht", lbm->sticky_buckets,
+                        LB_DEFAULT_STICKY_MEMORY_SIZE);
 
   clib_bihash_init_16_8 (&lbm->vip_index_per_port,
                         "vip_index_per_port", LB_VIP_PER_PORT_BUCKETS,
@@ -2104,6 +2141,7 @@ lb_init (vlib_main_t * vm)
                         LB_DYNAMIC_MAPPING_MEMORY_SIZE);
 
 
+  clib_bihash_set_kvp_format_fn_8_8 (&lbm->sticky_ht, format_lb_sticky_ht_kvp);
   clib_bihash_set_kvp_format_fn_16_8 (&lbm->vip_index_per_port, format_lb_vip_index_per_port_kvp);
   clib_bihash_set_kvp_format_fn_16_8 (&lbm->mapping_by_as4, format_lb_mapping_by_as4_kvp);
   clib_bihash_set_kvp_format_fn_24_8 (&lbm->mapping_by_as6, format_lb_mapping_by_as6_kvp);

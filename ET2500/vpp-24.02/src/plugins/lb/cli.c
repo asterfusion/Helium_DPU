@@ -660,9 +660,11 @@ lb_conf_command_fn (vlib_main_t * vm,
   unformat_input_t _line_input, *line_input = &_line_input;
   ip4_address_t ip4 = lbm->ip4_src_address;
   ip6_address_t ip6 = lbm->ip6_src_address;
-  u32 per_cpu_sticky_buckets = lbm->per_cpu_sticky_buckets;
-  u32 per_cpu_sticky_buckets_log2 = 0;
+  u32 sticky_buckets = lbm->sticky_buckets;
+  u32 sticky_buckets_log2 = 0;
   u32 flow_timeout = lbm->flow_timeout;
+  u32 flow_tcp_transitory_timeout = lbm->flow_tcp_transitory_timeout;
+  u32 flow_tcp_closing_timeout = lbm->flow_tcp_closing_timeout;
   int ret;
   clib_error_t *error = 0;
 
@@ -675,13 +677,17 @@ lb_conf_command_fn (vlib_main_t * vm,
       ;
     else if (unformat(line_input, "ip6-src-address %U", unformat_ip6_address, &ip6))
       ;
-    else if (unformat(line_input, "buckets %d", &per_cpu_sticky_buckets))
+    else if (unformat(line_input, "buckets %d", &sticky_buckets))
       ;
-    else if (unformat(line_input, "buckets-log2 %d", &per_cpu_sticky_buckets_log2)) {
-      if (per_cpu_sticky_buckets_log2 >= 32)
+    else if (unformat(line_input, "buckets-log2 %d", &sticky_buckets_log2)) {
+      if (sticky_buckets_log2 >= 32)
         return clib_error_return (0, "buckets-log2 value is too high");
-      per_cpu_sticky_buckets = 1 << per_cpu_sticky_buckets_log2;
+      sticky_buckets = 1 << sticky_buckets_log2;
     } else if (unformat(line_input, "timeout %d", &flow_timeout))
+      ;
+    else if (unformat(line_input, "tcp_transitory_timeout %d", &flow_tcp_transitory_timeout))
+      ;
+    else if (unformat(line_input, "tcp_closing_timeout %d", &flow_tcp_closing_timeout))
       ;
     else {
       error = clib_error_return (0, "parse error: '%U'",
@@ -692,7 +698,8 @@ lb_conf_command_fn (vlib_main_t * vm,
 
   lb_garbage_collection();
 
-  if ((ret = lb_conf(&ip4, &ip6, per_cpu_sticky_buckets, flow_timeout))) {
+  if ((ret = lb_conf(&ip4, &ip6, sticky_buckets,
+                     flow_timeout, flow_tcp_transitory_timeout, flow_tcp_closing_timeout))) {
     error = clib_error_return (0, "lb_conf error %d", ret);
     goto done;
   }

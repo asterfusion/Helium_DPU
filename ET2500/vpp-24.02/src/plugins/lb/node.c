@@ -15,6 +15,7 @@
 
 #include <lb/lb.h>
 #include <vnet/fib/ip4_fib.h>
+#include <vnet/ip/ip6_to_ip4.h>
 
 #include <vnet/gre/packet.h>
 #include <lb/lbhash.h>
@@ -23,6 +24,7 @@
  _(NONE, "no error") \
  _(PROTO_NOT_SUPPORTED, "protocol not supported") \
  _(NAT46_NOT_SUPPORTED, "nat46 not supported") \
+ _(IP6_FRAG_NOT_SUPPORTED, "ip6 frag not supported") \
  _(VIP_SNAT_NO_ADDRESS, "vip snat no address") \
  _(VIP_SNAT_OUT_OF_PORTS, "vip snat out of ports") \
  _(VIP_TYPE, "error vip type") 
@@ -123,42 +125,83 @@ format_lb_nat_trace (u8 * s, va_list * args)
   return s;
 }
 
-lb_hash_t *
-lb_get_sticky_table (u32 thread_index)
+static int
+lb_sticky_is_idle_cb (clib_bihash_kv_8_8_t * kv, void *arg)
 {
-  lb_main_t *lbm = &lb_main;
-  lb_hash_t *sticky_ht = lbm->per_cpu[thread_index].sticky_ht;
-  //Check if size changed
-  if (PREDICT_FALSE(
-      sticky_ht && (lbm->per_cpu_sticky_buckets != lb_hash_nbuckets(sticky_ht))))
-    {
-      //Dereference everything in there
-      lb_hash_bucket_t *b;
-      u32 i;
-      lb_hash_foreach_entry(sticky_ht, b, i)
-        {
-          vlib_refcount_add (&lbm->as_refcount, thread_index, b->value[i], -1);
-          vlib_refcount_add (&lbm->as_refcount, thread_index, 0, 1);
-        }
+    lb_main_t *lbm = &lb_main;
 
-      lb_hash_free (sticky_ht);
-      sticky_ht = NULL;
+    lb_sticky_is_idle_ctx_t *ctx = arg;
+
+    lb_sticky_kv_t *lb_kv = (lb_sticky_kv_t *)kv;
+
+    if (clib_u32_loop_gt(ctx->lb_time_now, lb_kv->lb_value.timeout))
+    {
+        clib_atomic_fetch_sub (&lbm->as_refcount[lb_kv->lb_value.asindex], 1);
+        return 1;
+    }
+    return 0;
+}
+
+static_always_inline u32
+lb_get_ip4_protocol_timeout(vlib_main_t *vm, vlib_buffer_t *b, ip4_header_t *ip4)
+{
+    lb_main_t *lbm = &lb_main;
+
+    if (ip4->protocol != IP_PROTOCOL_TCP)
+    {
+        return lbm->flow_timeout;
     }
 
-  //Create if necessary
-  if (PREDICT_FALSE(sticky_ht == NULL))
+    tcp_header_t *th = (tcp_header_t *) (ip4 + 1);
+
+    if (tcp_rst(th))
     {
-      lbm->per_cpu[thread_index].sticky_ht = lb_hash_alloc (
-          lbm->per_cpu_sticky_buckets, lbm->flow_timeout);
-      sticky_ht = lbm->per_cpu[thread_index].sticky_ht;
-      clib_warning("Regenerated sticky table %p", sticky_ht);
+        return 1;
+    }
+    else if (tcp_fin(th))
+    {
+        return lbm->flow_tcp_closing_timeout;
     }
 
-  ASSERT(sticky_ht);
+    return lbm->flow_tcp_transitory_timeout;
+}
 
-  //Update timeout
-  sticky_ht->timeout = lbm->flow_timeout;
-  return sticky_ht;
+static_always_inline u32
+lb_get_ip6_protocol_timeout(vlib_main_t *vm, vlib_buffer_t *b, ip6_header_t *ip6)
+{
+    lb_main_t *lbm = &lb_main;
+
+    u8 l4_protocol;
+    u16 l4_offset, frag_hdr_offset;
+
+    if (PREDICT_FALSE (ip6_parse (vm, b, ip6, b->current_length,
+                       &l4_protocol, &l4_offset, &frag_hdr_offset)))
+    {
+        return lbm->flow_timeout;
+    }
+
+    if (PREDICT_FALSE(frag_hdr_offset))
+    {
+        return lbm->flow_timeout;
+    }
+
+    if (l4_protocol != IP_PROTOCOL_TCP)
+    {
+        return lbm->flow_timeout;
+    }
+
+    tcp_header_t *th = (tcp_header_t *) u8_ptr_add (ip6, l4_offset);
+
+    if (tcp_rst(th))
+    {
+        return 0;
+    }
+    else if (tcp_fin(th))
+    {
+        return lbm->flow_tcp_closing_timeout;
+    }
+
+    return lbm->flow_tcp_transitory_timeout;
 }
 
 u64
@@ -612,17 +655,31 @@ static_always_inline u8 lb_node_encap_nat(vlib_main_t * vm,
         ip6_header_t *ip6;
         ip6_address_t old_dst;
         u16 old_dst_port;
+        u8 l4_protocol;
+        u16 l4_offset, frag_hdr_offset;
 
         ip6 = vlib_buffer_get_current (p);
-        uh = (udp_header_t *) (ip6 + 1);
-        th = (tcp_header_t *) (ip6 + 1);
+
+        if (PREDICT_FALSE (ip6_parse (vm, p, ip6, p->current_length,
+                           &l4_protocol, &l4_offset, &frag_hdr_offset)))
+        {
+            return LB_ERROR_PROTO_NOT_SUPPORTED;
+        }
+
+        if (PREDICT_FALSE(frag_hdr_offset))
+        {
+            return LB_ERROR_IP6_FRAG_NOT_SUPPORTED;
+        }
+
+        uh = (udp_header_t *) u8_ptr_add (ip6, l4_offset);
+        th = (tcp_header_t *) u8_ptr_add (ip6, l4_offset);
 
         old_dst.as_u64[0] = ip6->dst_address.as_u64[0];
         old_dst.as_u64[1] = ip6->dst_address.as_u64[1];
         ip6->dst_address.as_u64[0] = lbm->ass[asindex].address.ip6.as_u64[0];
         ip6->dst_address.as_u64[1] = lbm->ass[asindex].address.ip6.as_u64[1];
 
-        if (PREDICT_TRUE(ip6->protocol == IP_PROTOCOL_UDP))
+        if (PREDICT_TRUE(l4_protocol == IP_PROTOCOL_UDP))
         {
             old_dst_port = uh->dst_port;
             uh->dst_port = vip->encap_args.target_port;
@@ -638,7 +695,7 @@ static_always_inline u8 lb_node_encap_nat(vlib_main_t * vm,
                 uh->checksum = ip_csum_fold (csum);
             }
         }
-        else if (PREDICT_TRUE(ip6->protocol == IP_PROTOCOL_TCP))
+        else if (PREDICT_TRUE(l4_protocol == IP_PROTOCOL_TCP))
         {
             old_dst_port = th->dst_port;
             th->dst_port = vip->encap_args.target_port;
@@ -681,7 +738,7 @@ static_always_inline u8 lb_node_encap_nat_vip_snat(vlib_main_t * vm,
                                           u8 is_input_v4,
                                           lb_encap_type_t encap_type, 
                                           lb_vip_t *vip, u32 asindex, 
-                                          u32 lb_time_now)
+                                          u32 lb_time_now, u32 timeout)
 {
     ip_csum_t csum;
     udp_header_t *uh;
@@ -768,7 +825,7 @@ static_always_inline u8 lb_node_encap_nat_vip_snat(vlib_main_t * vm,
             flow->outside_fib_index = vip->fib_index;
             flow->protocol = ip4->protocol;
             flow->vip_index = vip - lbm->vips;
-            flow->timeout = lb_time_now + lbm->flow_timeout;
+            flow->timeout = lb_time_now + timeout;
 
             kv.value = flow_index;
             //add flow to mapping downlink snat4 table
@@ -790,7 +847,7 @@ static_always_inline u8 lb_node_encap_nat_vip_snat(vlib_main_t * vm,
         else
         {
             flow = pool_elt_at_index (lbm->vip_snat_mappings, value.value);
-            flow->timeout = lb_time_now + lbm->flow_timeout;
+            flow->timeout = lb_time_now + timeout;
         }
 
         ip4->src_address = flow->ip.ip4;
@@ -861,18 +918,24 @@ lb_node_fn (vlib_main_t * vm,
   u32 thread_index = vm->thread_index;
   u32 lb_time = lb_hash_time_now (vm);
 
-  lb_hash_t *sticky_ht = lb_get_sticky_table (thread_index);
+  clib_bihash_8_8_t *sticky_ht = &lbm->sticky_ht;
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
   next_index = node->cached_next_index;
 
   u32 nexthash0 = 0;
   u32 next_vip_idx0 = ~0;
+  u64 next_sticky_hash0 = 0;
+  lb_sticky_kv_t next_kv0;
   if (PREDICT_TRUE(n_left_from > 0))
     {
       vlib_buffer_t *p0 = vlib_get_buffer (vm, from[0]);
       lb_node_get_hash (lbm, p0, is_input_v4, &nexthash0,
                         &next_vip_idx0, per_port_vip);
+
+      next_kv0.lb_key.hash = nexthash0;
+      next_kv0.lb_key.vip_index = next_vip_idx0;
+      next_sticky_hash0 = clib_bihash_hash_8_8((clib_bihash_kv_8_8_t *)&next_kv0);
     }
 
   while (n_left_from > 0)
@@ -886,11 +949,18 @@ lb_node_fn (vlib_main_t * vm,
           u8 error = LB_ERROR_NONE;
           u32 asindex0 = 0;
           u16 len0;
-          u32 available_index0;
           u8 counter = 0;
           u32 hash0 = nexthash0;
           u32 vip_index0 = next_vip_idx0;
+          u32 timeout0 = lbm->flow_timeout;
+          u64 sticky_hash0 = 0;
+          lb_sticky_kv_t k0;
+          lb_sticky_kv_t v0;
           u32 next0;
+
+          k0.lb_key.hash = hash0;
+          k0.lb_key.vip_index = vip_index0;
+          sticky_hash0 = clib_bihash_hash_8_8((clib_bihash_kv_8_8_t *)&k0);
 
           if (PREDICT_TRUE(n_left_from > 1))
             {
@@ -899,7 +969,11 @@ lb_node_fn (vlib_main_t * vm,
               lb_node_get_hash (lbm, p1, is_input_v4,
                                 &nexthash0, &next_vip_idx0,
                                 per_port_vip);
-              lb_hash_prefetch_bucket (sticky_ht, nexthash0);
+
+              next_kv0.lb_key.hash = nexthash0;
+              next_kv0.lb_key.vip_index = next_vip_idx0;
+              next_sticky_hash0 = clib_bihash_hash_8_8((clib_bihash_kv_8_8_t *)&next_kv0);
+              clib_bihash_prefetch_bucket_8_8 (sticky_ht, next_sticky_hash0);
               //Prefetch for encap, next
               CLIB_PREFETCH(vlib_buffer_get_current (p1) - 64, 64, STORE);
             }
@@ -928,6 +1002,7 @@ lb_node_fn (vlib_main_t * vm,
               ip4_header_t *ip40;
               ip40 = vlib_buffer_get_current (p0);
               len0 = clib_net_to_host_u16 (ip40->length);
+              timeout0 = lb_get_ip4_protocol_timeout(vm, p0, ip40);
             }
           else
             {
@@ -935,49 +1010,43 @@ lb_node_fn (vlib_main_t * vm,
               ip60 = vlib_buffer_get_current (p0);
               len0 = clib_net_to_host_u16 (ip60->payload_length)
                   + sizeof(ip6_header_t);
+              timeout0 = lb_get_ip6_protocol_timeout(vm, p0, ip60);
             }
 
-          lb_hash_get (sticky_ht, hash0,
-                       vip_index0, lb_time,
-                       &available_index0, &asindex0);
-
-          if (PREDICT_TRUE(asindex0 != 0))
-            {
-              //Found an existing entry
+          if (!clib_bihash_search_inline_2_with_hash_8_8(sticky_ht, sticky_hash0, (clib_bihash_kv_8_8_t *)&k0, (clib_bihash_kv_8_8_t *)&v0))
+          {
               counter = LB_VIP_COUNTER_NEXT_PACKET;
-            }
-          else if (PREDICT_TRUE(available_index0 != ~0))
-            {
-              //There is an available slot for a new flow
-              asindex0 =
-                  vip0->new_flow_table[hash0 & vip0->new_flow_table_mask].as_index;
+              asindex0 = v0.lb_value.asindex;
+              //update timeout
+              v0.lb_value.timeout = lb_time + timeout0;
+
+              //update sticky
+              clib_bihash_add_del_with_hash_8_8(sticky_ht, (clib_bihash_kv_8_8_t *)&v0, sticky_hash0, 1);
+          }
+          else
+          {
+              asindex0 = vip0->new_flow_table[hash0 & vip0->new_flow_table_mask].as_index;
               counter = LB_VIP_COUNTER_FIRST_PACKET;
               counter = (asindex0 == 0) ? LB_VIP_COUNTER_NO_SERVER : counter;
 
-              //TODO: There are race conditions with as0 and vip0 manipulation.
-              //Configuration may be changed, vectors resized, etc...
+              k0.lb_value.timeout = lb_time + timeout0;
+              k0.lb_value.asindex = asindex0;
 
-              //Dereference previously used
-              vlib_refcount_add (
-                  &lbm->as_refcount, thread_index,
-                  lb_hash_available_value (sticky_ht, hash0, available_index0),
-                  -1);
-              vlib_refcount_add (&lbm->as_refcount, thread_index, asindex0, 1);
+              lb_sticky_is_idle_ctx_t ctx;
+              ctx.lb_time_now = lb_time;
+              ctx.thread_index = thread_index;
 
-              //Add sticky entry
-              //Note that when there is no AS configured, an entry is configured anyway.
-              //But no configured AS is not something that should happen
-              lb_hash_put (sticky_ht, hash0, asindex0,
-                           vip_index0,
-                           available_index0, lb_time);
-            }
-          else
-            {
-              //Could not store new entry in the table
-              asindex0 =
-                  vip0->new_flow_table[hash0 & vip0->new_flow_table_mask].as_index;
-              counter = LB_VIP_COUNTER_UNTRACKED_PACKET;
-            }
+              if (clib_bihash_add_or_overwrite_stale_8_8 (
+                          sticky_ht, (clib_bihash_kv_8_8_t * )&k0,
+                          lb_sticky_is_idle_cb, &ctx))
+              {
+                  counter = LB_VIP_COUNTER_UNTRACKED_PACKET;
+              }
+              else
+              {
+                  clib_atomic_fetch_add (&lbm->as_refcount[asindex0], 1);
+              }
+          }
 
           vlib_increment_simple_counter (
               &lbm->vip_counters[counter], thread_index,
@@ -1014,7 +1083,7 @@ lb_node_fn (vlib_main_t * vm,
 
                 if (error == LB_ERROR_NONE && lb_vip_is_double_nat44(vip0))
                 {
-                    error = lb_node_encap_nat_vip_snat(vm, lbm, p0, is_input_v4, encap_type, vip0, asindex0, lb_time);
+                    error = lb_node_encap_nat_vip_snat(vm, lbm, p0, is_input_v4, encap_type, vip0, asindex0, lb_time, timeout0);
                     if (error != LB_ERROR_NONE)
                     {
                         asindex0 = 0;
@@ -1245,6 +1314,7 @@ lb_nat4_in2out_node_inline (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_f
   u32 next_index;
   u32 pkts_processed = 0;
   lb_main_t *lbm = &lb_main;
+  u32 lb_time_now = lb_hash_time_now (vm);
   u32 stats_node_index;
 
   stats_node_index = lb_nat4_in2out_node.index;
@@ -1267,6 +1337,7 @@ lb_nat4_in2out_node_inline (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_f
           u32 sw_if_index0;
           ip_csum_t csum;
           u16 old_port0, new_port0;
+          u32 timeout0 = lbm->flow_timeout;
 
           ip4_header_t * ip40;
           udp_header_t * udp0;
@@ -1312,6 +1383,8 @@ lb_nat4_in2out_node_inline (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_f
               vnet_feature_next (&next0, b0);
               goto trace0;
             }
+
+          timeout0 = lb_get_ip4_protocol_timeout(vm, b0, ip40);
 
           sm40 = pool_elt_at_index(lbm->snat_mappings, index40);
           new_addr0 = sm40->src_ip.ip4.as_u32;
@@ -1411,6 +1484,8 @@ lb_nat4_in2out_node_inline (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_f
                       udp0->checksum = ip_csum_fold (csum);
                   }
               }
+
+              flow->timeout = lb_time_now + timeout0;
           }
           translated = true;
 
@@ -1470,8 +1545,12 @@ lb_nat6_in2out_node_inline (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_f
           ip_csum_t csum;
 
           ip6_header_t * ip60;
+          u8 l4_protocol0;
+          u16 l4_offset0, frag_hdr_offset0;
+
           udp_header_t * udp0;
           tcp_header_t * tcp0;
+
 
           ip6_address_t old_addr0, new_addr0;
           u16 old_port0, new_port0;
@@ -1499,8 +1578,24 @@ lb_nat6_in2out_node_inline (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_f
               sw_if_index0);
 
           ip60 = vlib_buffer_get_current (b0);
-          udp0 = ip6_next_header (ip60);
-          tcp0 = (tcp_header_t *) udp0;
+
+          if (PREDICT_FALSE (ip6_parse (vm, b0, ip60, b0->current_length,
+                          &l4_protocol0, &l4_offset0, &frag_hdr_offset0)))
+          {
+              b0->error = node->errors[LB_ERROR_PROTO_NOT_SUPPORTED];
+              vnet_feature_next (&next0, b0);
+              goto trace0;
+          }
+
+          if (PREDICT_FALSE(frag_hdr_offset0))
+          {
+              b0->error = node->errors[LB_ERROR_IP6_FRAG_NOT_SUPPORTED];
+              vnet_feature_next (&next0, b0);
+              goto trace0;
+          }
+
+          udp0 = (udp_header_t *) u8_ptr_add (ip60, l4_offset0);
+          tcp0 = (tcp_header_t *) u8_ptr_add (ip60, l4_offset0);
 
           clib_memset(&key60, 0, sizeof(key60));
           key60.addr.as_u64[0] = ip60->src_address.as_u64[0];

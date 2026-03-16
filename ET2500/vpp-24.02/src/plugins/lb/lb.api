@@ -7,9 +7,13 @@ import "vnet/interface_types.api";
     @param context - sender context, to match reply w/ request
     @param ip4_src_address - IPv4 address to be used as source for IPv4 traffic(applicable in GRE4/GRE6/NAT4/NAT6 mode only).
     @param ip6_src_address - IPv6 address to be used as source for IPv6 traffic(applicable in GRE4/GRE6/NAT4/NAT6 mode only).
-    @param sticky_buckets_per_core - Number of buckets *per worker thread* in the
+    @param sticky_buckets - Number of buckets *per worker thread* in the
            established flow table (must be power of 2).
     @param flow_timeout - Time in seconds after which, if no packet is received
+           for a given flow, the flow is removed from the established flow table.
+    @param flow_tcp_transitory_timeout - Time in seconds after which, if no packet is received
+           for a given flow, the flow is removed from the established flow table.
+    @param flow_tcp_closing_timeout - Time in seconds after which, if no packet is received
            for a given flow, the flow is removed from the established flow table.
 */
 autoreply  define lb_conf
@@ -18,8 +22,10 @@ autoreply  define lb_conf
   u32 context;
   vl_api_ip4_address_t ip4_src_address;
   vl_api_ip6_address_t ip6_src_address;
-  u32 sticky_buckets_per_core [default=0xffffffff];
+  u32 sticky_buckets [default=0xffffffff];
   u32 flow_timeout [default=0xffffffff];
+  u32 flow_tcp_transitory_timeout [default=0xffffffff];
+  u32 flow_tcp_closing_timeout [default=0xffffffff];
   option vat_help = "[ip4-src-address <addr>] [ip6-src-address <addr>] [buckets <n>] [timeout <s>]";
 };
 
