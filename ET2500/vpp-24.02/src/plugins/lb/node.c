@@ -125,7 +125,7 @@ format_lb_nat_trace (u8 * s, va_list * args)
   return s;
 }
 
-static int
+int
 lb_sticky_is_idle_cb (clib_bihash_kv_8_8_t * kv, void *arg)
 {
     lb_main_t *lbm = &lb_main;
@@ -275,7 +275,7 @@ lb_vip_snat_alloc_recycle_address_port(lb_main_t *lbm,
                     address->busy_ports[lb_proto]++;
                 }
 
-                address->busy_port_bitmap[lb_proto][portnum] = flow_index;
+                address->flow_index[lb_proto][portnum] = flow_index;
 
                 *new_addr = address->addr;
                 *new_port = clib_host_to_net_u16 (portnum);
@@ -297,7 +297,7 @@ lb_vip_snat_alloc_recycle_address_port(lb_main_t *lbm,
             if (clib_bitmap_get (address->busy_port_bitmap[lb_proto], portnum))
             {
                 //check timeout
-                record_flow = pool_elt_at_index(lbm->vip_snat_mappings, address->busy_port_bitmap[lb_proto][portnum]);
+                record_flow = pool_elt_at_index(lbm->vip_snat_mappings, address->flow_index[lb_proto][portnum]);
                 if (clib_u32_loop_gt(lb_time_now, record_flow->timeout))
                 {
                     /**
@@ -334,7 +334,7 @@ lb_vip_snat_alloc_recycle_address_port(lb_main_t *lbm,
                         clib_warning ("Lb vip-snat vip-mapping snat4 table del failed");
                     }
 
-                    address->busy_port_bitmap[lb_proto][portnum] = flow_index;
+                    address->flow_index[lb_proto][portnum] = flow_index;
 
                     *new_addr = address->addr;
                     *new_port = clib_host_to_net_u16 (portnum);
@@ -353,7 +353,7 @@ lb_vip_snat_alloc_recycle_address_port(lb_main_t *lbm,
                     clib_bitmap_set (address->busy_port_bitmap[lb_proto], portnum, 1);
                 address->busy_ports[lb_proto]++;
 
-                address->busy_port_bitmap[lb_proto][portnum] = flow_index;
+                address->flow_index[lb_proto][portnum] = flow_index;
 
                 *new_addr = address->addr;
                 *new_port = clib_host_to_net_u16 (portnum);

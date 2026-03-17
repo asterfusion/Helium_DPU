@@ -404,6 +404,12 @@ typedef struct {
                             || type == LB_VIP_TYPE_IP6_NAT6 \
                             || type == LB_VIP_TYPE_IP6_NAT4 )
 
+#define lb_vip_encap_is_ip4(type) (type == LB_VIP_TYPE_IP6_GRE4 \
+                                   || type == LB_VIP_TYPE_IP4_GRE4 \
+                                   || type == LB_VIP_TYPE_IP4_L3DSR \
+                                   || type == LB_VIP_TYPE_IP4_NAT4 \
+                                   || type == LB_VIP_TYPE_IP6_NAT4 )
+
 #define lb_encap_is_ip4(vip) ((vip)->type == LB_VIP_TYPE_IP6_GRE4 \
                              || (vip)->type == LB_VIP_TYPE_IP4_GRE4 \
                              || (vip)->type == LB_VIP_TYPE_IP4_L3DSR \
@@ -813,6 +819,7 @@ int lb_nat6_interface_add_del (u32 sw_if_index, int is_del);
 
 format_function_t format_lb_main;
 
+int lb_sticky_is_idle_cb (clib_bihash_kv_8_8_t * kv, void *arg);
 
 #define lb_get_writer_lock() clib_spinlock_lock (&lb_main.writer_lock)
 #define lb_put_writer_lock() clib_spinlock_unlock (&lb_main.writer_lock)
