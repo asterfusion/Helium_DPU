@@ -906,7 +906,10 @@ wg_input_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	    wg_handshake_process (vm, wmp, b[0], node->node_index, is_ip4);
 	  if (ret != WG_INPUT_ERROR_NONE)
 	    {
-              peer->last_handshark = 0;
+              if (peer)
+              {   
+                  peer->last_handshark = 0;
+              }
 	      other_next[n_other] = WG_INPUT_NEXT_ERROR;
 	      b[0]->error = node->errors[ret];
 	      other_bi[n_other] = from[b - bufs];
