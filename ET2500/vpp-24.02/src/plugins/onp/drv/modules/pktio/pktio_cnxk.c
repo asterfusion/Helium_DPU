@@ -1306,18 +1306,38 @@ cnxk_drv_pktio_stop (vlib_main_t *vm, u16 pktio_index)
 }
 
 i32
-cnxk_drv_pktio_link_advertise_set(vlib_main_t* vm, u16 pktio_index,
-			      cnxk_pktio_link_info_t *link_info)
+cnxk_drv_pktio_link_advertise_set (vlib_main_t *vm, u16 pktio_index,
+				   cnxk_pktio_link_info_t *link_info,
+				   cnxk_pktio_platform_type_t platform_type)
 {
-  cnxk_pktio_ops_map_t* ops_map = cnxk_pktio_get_pktio_ops(pktio_index);
+  cnxk_pktio_ops_map_t *ops_map;
+  int rpm_id;
 
-  ASSERT(vm->thread_index == 0);
+  ASSERT (vm->thread_index == 0);
 
-  int rpm_id = 0;
 #ifdef VPP_PLATFORM_ET2500
-  rpm_id = (pktio_index < 8) ? 0 : (pktio_index <= 11) ? 1 : (pktio_index <= 15) ? 2 : -1;
+  switch (platform_type)
+    {
+    case CNXK_PKTIO_PLATFORM_ET2500:
+      {
+	ops_map = cnxk_pktio_get_pktio_ops (pktio_index);
+	rpm_id = (pktio_index < 8) ? 0 : (pktio_index <= 11) ? 1 :
+				     (pktio_index <= 15) ? 2 : -1;
+
+	return ops_map->fops.pktio_link_advertise_set (vm, &ops_map->pktio,
+							link_info, rpm_id);
+
+      }
+    case CNXK_PKTIO_PLATFORM_ET3600:
+    case CNXK_PKTIO_PLATFORM_UNKNOWN:
+    default:
+      {
+	return 0;
+      }
+    }
+#else
+  return 0;
 #endif
-  return ops_map->fops.pktio_link_advertise_set(vm, &ops_map->pktio, link_info, rpm_id);
 }
 
 i32

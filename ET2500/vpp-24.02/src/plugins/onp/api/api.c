@@ -333,7 +333,9 @@ vl_api_onp_set_port_link_info_t_handler(vl_api_onp_set_port_link_info_t* mp) {
   link_info.is_autoneg = mp->is_autoneg;
   link_info.speed = ntohl(mp->speed);
 
-  cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
+  cnxk_drv_pktio_link_advertise_set (
+    vm, pktio->cnxk_pktio_index, &link_info,
+    onp_platform_to_drv_pktio_platform (om->platform_type));
 
   BAD_SW_IF_INDEX_LABEL;
 
