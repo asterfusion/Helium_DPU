@@ -1281,7 +1281,7 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
 	      lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0); 
           if (lipi0 == INDEX_INVALID)
           {
-              if (vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
+              if ((b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
               {
                   u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
 
@@ -1320,7 +1320,7 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
 	      lipi1 = lcp_itf_pair_find_by_phy ( sw_if_index1);
           if (lipi1 == INDEX_INVALID)
           {
-              if (vnet_buffer2(b1)->l2_rx_sw_if_index != ~0)
+              if ((b1->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b1)->l2_rx_sw_if_index != ~0)
               {
                   u32 l2_rx_sw_if_index1 = vnet_buffer2(b1)->l2_rx_sw_if_index;
 
@@ -1437,7 +1437,7 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
 	      lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0); 
           if (lipi0 == INDEX_INVALID)
           {
-              if (vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
+              if ((b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
               {
                   u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
 
@@ -1691,6 +1691,7 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
                       result0.fields.session_index);
               vnet_buffer2(b0)->l2_rx_sw_if_index = vnet_buffer(b0)->sw_if_index[VLIB_RX];
               vnet_buffer(b0)->sw_if_index[VLIB_RX] = t0->sw_if_index;
+              b0->flags |= VLIB_BUFFER_NOT_PHY_INTF;
 
               //current same with interface_output, include ethernet+pppoe
               len0 = vlib_buffer_length_in_chain (vm, b0) + b0->current_data
