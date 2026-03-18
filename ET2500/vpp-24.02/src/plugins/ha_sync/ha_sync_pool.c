@@ -50,13 +50,13 @@ u32 ha_sync_tx_pool_add (u32 seq, u8 msg_type, u8 session_count, u8 *payload, u1
         if (ticks < 1)
             ticks = 1;
         req->timer_handle = tw_timer_start_16t_2w_512sl(&hsm->timer_wheel, index, 0, ticks);
-        clib_warning ("ha_sync_tx_pool_add: start timer seq %u handle %u ticks %u",
-                      seq, req->timer_handle, ticks);
+        // clib_warning ("ha_sync_tx_pool_add: start timer seq %u handle %u ticks %u",
+        //               seq, req->timer_handle, ticks);
     }
     else
     {
-        clib_warning ("ha_sync_tx_pool_add: timer disabled seq %u (times=%u interval=%f)",
-                      seq, hsm->retransmit_times, hsm->retransmit_interval);
+        // clib_warning ("ha_sync_tx_pool_add: timer disabled seq %u (times=%u interval=%f)",
+        //               seq, hsm->retransmit_times, hsm->retransmit_interval);
     }
 
     clib_spinlock_unlock(&hsm->tx_lock);

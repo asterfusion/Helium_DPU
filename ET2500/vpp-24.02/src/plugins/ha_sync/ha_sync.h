@@ -28,12 +28,9 @@
 #define HA_SYNC_MAGIC 0xAF25EE00
 #define HA_SYNC_DEFAULT_INTERVAL_SEC 0.1
 #define HA_SYNC_THREAD_BUFFER_FLUSH_INTERVAL_SEC 0.5
-#define HA_SYNC_SNAPSHOT_INTERVAL_SEC 0.1
 #define HA_SYNC_RETRANSMIT_TIMES 3
 #define HA_SYNC_RETRANSMIT_INTERVAL_SEC 2
 #define HA_SYNC_HELLO_RETRY_INTERVAL_SEC 3
-
-
 
 typedef enum
 {
@@ -43,14 +40,6 @@ typedef enum
     HA_SYNC_MSG_HELLO_RESPONSE = 3,
     HA_SYNC_MSG_HEARTBEAT = 4,
 } ha_sync_msg_type_t;
-
-typedef enum
-{
-    HA_SYNC_SNAPSHOT_DISCONNECTED = 0,
-    HA_SYNC_SNAPSHOT_CONNECTED_WAIT = 1,
-    HA_SYNC_SNAPSHOT_SNAPSHOTTING = 2,
-    HA_SYNC_SNAPSHOT_DONE = 3,
-} ha_sync_snapshot_state_t;
 
 typedef enum
 {
@@ -89,9 +78,19 @@ typedef struct __attribute__ ((packed))
     u8 app_type;            /* application type */
 } ha_sync_session_header_t;
 
+typedef struct
+{
+    u8 ha_sync_enable;
+    u8 ha_sync_config_ready;
+    u8 ha_sync_connected;
+    u16 ha_sync_snapshot_sequence;
+} ha_sync_common_ctx_t;
+/* when register conext to ha_sync, the context must start with ha_sync_common_ctx_t */
+
 typedef struct 
 {
     u8 app_type;
+    /* context must start with ha_sync_common_ctx_t */
     void *context;
     ha_sync_snapshot_send_cb_t snapshot_send_cb;
     ha_sync_session_apply_cb_t session_apply_cb;
@@ -168,13 +167,11 @@ typedef struct
     ha_sync_per_thread_buffer_t *per_thread_buffers;
 
     TWT (tw_timer_wheel) timer_wheel;
+    u32 *timer_expired_vec;         /* reused buffer for tw_timer_expire API */
 
-    u8 snapshot_state;              /* snapshot state machine */
-    f64 snapshot_due_time;          /* earliest time to start snapshot after hello response */
-    f64 snapshot_next_time;         /* next scheduled snapshot tick in SNAPSHOTTING */
-    u8 snapshot_round_inflight;     /* 1 when a per-thread round is running */
-    u8 snapshot_round_pending_main; /* main-thread plugins returned pending in current round */
-    u8 *snapshot_worker_state;      /* per-thread state: 0=not done, 1=done, 2=done but pending */
+    u16 snapshot_sequence;          /* increment on each snapshot trigger */
+    u8 snapshot_trigger_pending;    /* one-shot snapshot trigger flag */
+    u8 snapshot_triggered_for_connection; /* edge guard: once per connection */
 
 } ha_sync_main_t;
 
@@ -184,10 +181,8 @@ extern vlib_node_registration_t ha_sync_process_node;
 extern vlib_node_registration_t ha_sync_input_worker_node;
 extern vlib_node_registration_t ha_sync_output_worker_node;
 extern vlib_node_registration_t ha_sync_snapshot_node;
-extern vlib_node_registration_t ha_sync_snapshot_worker_node;
 extern vlib_node_registration_t ha_sync_timer_node;
 
-void ha_sync_per_thread_buffer_add (u32 thread_index, u8 app_type, u8 *session_data, u16 data_len);
 void ha_sync_per_thread_buffer_flush (u32 thread_index);
 
 u32 ha_sync_tx_pool_add (u32 seq, u8 msg_type, u8 session_count, u8 *payload, u16 payload_len);
@@ -198,12 +193,19 @@ void ha_sync_tx_pool_free ();
 void ha_sync_release_resources ();
 void ha_sync_reset_runtime_state ();
 
-int ha_sync_register_session_application (ha_sync_session_registration_t *reg);
-int ha_sync_unregister_session_application (u32 app_type);
+// int ha_sync_register_session_application (ha_sync_session_registration_t *reg);
+// int ha_sync_unregister_session_application (u32 app_type);
+void ha_sync_update_all_contexts (void);
 void ha_sync_send_response (u32 seq_number, u32 thread_index);
 void ha_sync_send_hello (u32 thread_index);
 void ha_sync_send_hello_response (u32 thread_index);
+void ha_sync_wake_output_thread (u32 thread_index);
 void ha_sync_snapshot_trigger (void);
+
+__clib_export void ha_sync_per_thread_buffer_add (u32 thread_index, u8 app_type, u8 *session_data, u16 data_len);
+__clib_export int ha_sync_register_session_application (ha_sync_session_registration_t *reg);
+__clib_export int ha_sync_unregister_session_application (u32 app_type);
+
 
 
 #endif 

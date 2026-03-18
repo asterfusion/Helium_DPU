@@ -323,7 +323,7 @@ VLIB_NODE_FN (ha_sync_input_worker_node)
               }
               case HA_SYNC_MSG_RESPONSE:
                 ha_sync_tx_pool_del_by_seq (clib_net_to_host_u32 (h0->seq_number));
-                clib_warning("HA_SYNC_MSG_RESPONSE: Sequence number %u packet received.", clib_net_to_host_u32 (h0->seq_number));
+                // clib_warning("HA_SYNC_MSG_RESPONSE: Sequence number %u packet received.", clib_net_to_host_u32 (h0->seq_number));
                 vlib_node_increment_counter (
                   vm, node->node_index, HA_SYNC_INPUT_ERROR_RESPONSE, 1);
                 break;
@@ -334,7 +334,6 @@ VLIB_NODE_FN (ha_sync_input_worker_node)
                 if (hsm->enabled && hsm->config_ready)
                 {
                   ha_sync_send_hello_response (vlib_get_thread_index ());
-                  hsm->connection_established = 1;
                   hsm->hello_retry_count = 0;
                   hsm->last_heartbeat_recv_time = vlib_time_now (vm);
                 }
@@ -342,6 +341,7 @@ VLIB_NODE_FN (ha_sync_input_worker_node)
 
               case HA_SYNC_MSG_HELLO_RESPONSE:
                 hsm->connection_established = 1;
+                ha_sync_update_all_contexts ();
                 vlib_node_increment_counter (
                   vm, node->node_index, HA_SYNC_INPUT_ERROR_HELLO_RESPONSE, 1);
                 hsm->hello_retry_count = 0;
@@ -600,161 +600,23 @@ VLIB_NODE_FN (ha_sync_snapshot_node)
 (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
 {
   ha_sync_main_t *hsm = &ha_sync_main;
-  f64 now = vlib_time_now (vm);
-  CLIB_UNUSED (vlib_node_runtime_t * _node) = node;
-  CLIB_UNUSED (vlib_frame_t * _frame) = frame;
-
-  if (!hsm->enabled)
-    return 0;
-
-  switch (hsm->snapshot_state)
-  {
-    case HA_SYNC_SNAPSHOT_CONNECTED_WAIT:
-      /* Wait for the grace delay after hello-response before starting snapshot. */
-      if (now >= hsm->snapshot_due_time)
-      {
-        hsm->snapshot_state = HA_SYNC_SNAPSHOT_SNAPSHOTTING;
-        hsm->snapshot_next_time = now;
-      }
-      break;
-
-    case HA_SYNC_SNAPSHOT_SNAPSHOTTING:
-      if (now < hsm->snapshot_next_time)
-        break; 
-
-      if (hsm->snapshot_round_inflight)
-      {
-        u8 all_done = 1;
-        u8 any_pending = hsm->snapshot_round_pending_main; /** main thread has pending data. */
-        u32 i;
-
-        /** Check if all workers are done. */
-        for (i = 1; i < vec_len (hsm->snapshot_worker_state); i++)
-        {
-          u8 state = hsm->snapshot_worker_state[i];
-          if (state == 0) /** Worker thread is not done. */
-          {
-            all_done = 0;
-            break;
-          }
-          if (state == 2) /** Worker thread is done but has pending data. */
-            any_pending = 1;
-        }
-
-        if (!all_done) /** Not all workers are done, wait for them. */
-          break;
-
-        /** All workers are done, check if any thread has pending data. */
-        hsm->snapshot_round_inflight = 0;
-        hsm->snapshot_round_pending_main = 0;
-
-        if (any_pending) /** Any thread has pending data, schedule next round. */
-          hsm->snapshot_next_time = now + HA_SYNC_SNAPSHOT_INTERVAL_SEC;
-        else
-          hsm->snapshot_state = HA_SYNC_SNAPSHOT_DONE;
-        break;
-      }
-
-      /** Start a new round. */
-      {
-        ha_sync_session_registration_t *reg;
-        u8 pending_main = 0;
-        u8 has_per_thread = 0;
-
-        vec_foreach (reg, hsm->registrations)
-        {
-          if (!reg->snapshot_send_cb)
-            continue;
-
-          /** Per-thread snapshot mode. */
-          if (reg->snapshot_mode == HA_SYNC_SNAPSHOT_MODE_PER_THREAD)
-          {
-            has_per_thread = 1;
-            continue;
-          }
-
-          /** Single-thread snapshot mode. */
-          if (reg->snapshot_send_cb (reg->app_type, reg->context, 0) != 0)
-            pending_main = 1;
-        }
-
-        /** Start a per-thread round and wait for worker completion. */
-        if (has_per_thread && vec_len (hsm->snapshot_worker_state) > 1)
-        {
-          clib_memset (hsm->snapshot_worker_state, 0,
-                       vec_len (hsm->snapshot_worker_state));
-          hsm->snapshot_round_pending_main = pending_main;
-          hsm->snapshot_round_inflight = 1;
-          hsm->snapshot_next_time = now + HA_SYNC_SNAPSHOT_INTERVAL_SEC;
-
-          u32 ti;
-          for (ti = 1; ti < vec_len (hsm->snapshot_worker_state); ti++)
-            vlib_node_set_interrupt_pending (vlib_get_main_by_index (ti),
-                                             ha_sync_snapshot_worker_node.index);
-        }
-        /** Start a single-thread round. */
-        else
-        {
-          /* No worker threads: run PER_THREAD plugins on main thread too. */
-          if (has_per_thread && vec_len (hsm->snapshot_worker_state) <= 1)
-          {
-            vec_foreach (reg, hsm->registrations)
-            {
-              if (reg->snapshot_send_cb &&
-                  reg->snapshot_mode == HA_SYNC_SNAPSHOT_MODE_PER_THREAD)
-              {
-                if (reg->snapshot_send_cb (reg->app_type, reg->context, 0) != 0)
-                  pending_main = 1;
-              }
-            }
-          }
-
-          if (pending_main)
-            hsm->snapshot_next_time = now + HA_SYNC_SNAPSHOT_INTERVAL_SEC;
-          else
-            hsm->snapshot_state = HA_SYNC_SNAPSHOT_DONE;
-        }
-      }
-      break;
-
-    case HA_SYNC_SNAPSHOT_DONE:
-    case HA_SYNC_SNAPSHOT_DISCONNECTED:
-    default:
-      break;
-  }
-
-  return 0;
-}
-
-VLIB_NODE_FN (ha_sync_snapshot_worker_node)
-(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
-{
-  ha_sync_main_t *hsm = &ha_sync_main;
   ha_sync_session_registration_t *reg;
   u32 thread_index = vm->thread_index;
-  u8 pending = 0;
   CLIB_UNUSED (vlib_node_runtime_t * _node) = node;
   CLIB_UNUSED (vlib_frame_t * _frame) = frame;
 
-  /* Workers only participate when snapshot is active. */
-  if (!hsm->enabled || hsm->snapshot_state != HA_SYNC_SNAPSHOT_SNAPSHOTTING)
+  if (!hsm->enabled || !hsm->connection_established)
     return 0;
 
-  /* Run PER_THREAD plugins on this worker. */
   vec_foreach (reg, hsm->registrations)
-  {
-    if (reg->snapshot_send_cb &&
-        reg->snapshot_mode == HA_SYNC_SNAPSHOT_MODE_PER_THREAD)
     {
-      int rv = reg->snapshot_send_cb (reg->app_type, reg->context,
-                                      thread_index);
-      if (rv != 0)
-        pending = 1;
+      if (!reg->snapshot_send_cb)
+        continue;
+      if (reg->snapshot_mode == HA_SYNC_SNAPSHOT_MODE_PER_THREAD)
+        reg->snapshot_send_cb (reg->app_type, reg->context, thread_index);
+      else if (thread_index == 0)
+        reg->snapshot_send_cb (reg->app_type, reg->context, 0);
     }
-  }
-
-  if (thread_index < vec_len (hsm->snapshot_worker_state))
-    hsm->snapshot_worker_state[thread_index] = pending ? 2 : 1;
 
   return 0;
 }
@@ -807,21 +669,19 @@ VLIB_NODE_FN (ha_sync_process_node)
           fmsg.seq_number = clib_atomic_add_fetch(&hsm->global_seq_number, 1);
           
           clib_fifo_add1(ptb->fast_msg_queue, fmsg);
+          ha_sync_wake_output_thread (thread_index);
           hsm->last_heartbeat_send_time = now;
-          clib_warning ("ha_sync: send heartbeat seq_number %d", fmsg.seq_number);
+          // clib_warning ("ha_sync: send heartbeat seq_number %d", fmsg.seq_number);
         }
 
         if (now > (hsm->last_heartbeat_recv_time +
                    (hsm->heartbeat_interval_sec * hsm->heartbeat_max_fail_counts)))
         {
           hsm->connection_established = 0; 
+          ha_sync_update_all_contexts ();
           hsm->hello_retry_count = 0;
           hsm->next_hello_time = now;
-          hsm->snapshot_state = HA_SYNC_SNAPSHOT_DISCONNECTED;
-          hsm->snapshot_due_time = 0;
-          hsm->snapshot_next_time = 0;
-          hsm->snapshot_round_inflight = 0;
-          hsm->snapshot_round_pending_main = 0;
+          hsm->snapshot_trigger_pending = 0;
           ha_sync_reset_runtime_state ();
         }
 
@@ -839,9 +699,16 @@ VLIB_NODE_FN (ha_sync_process_node)
                                            ha_sync_timer_node.index);
       }
 
-    /** Check if it's time to send a snapshot. */      
-    if (hsm->enabled && hsm->snapshot_state != HA_SYNC_SNAPSHOT_DISCONNECTED)
-      vlib_node_set_interrupt_pending (vlib_get_main_by_index (0), ha_sync_snapshot_node.index);
+    /** Run one-shot snapshot callback when triggered. */
+    if (hsm->enabled && hsm->snapshot_trigger_pending)
+      {
+        u32 ti;
+        u32 n_threads = vlib_get_n_threads ();
+        hsm->snapshot_trigger_pending = 0;
+        for (ti = 0; ti < n_threads; ti++)
+          vlib_node_set_interrupt_pending (vlib_get_main_by_index (ti),
+                                           ha_sync_snapshot_node.index);
+      }
 
     vlib_process_wait_for_event_or_clock (vm, timeout);
   }
@@ -862,23 +729,25 @@ VLIB_NODE_FN (ha_sync_timer_node)
 
   if (ptb->session_count > 0 && (now - ptb->last_flush_time) >= HA_SYNC_THREAD_BUFFER_FLUSH_INTERVAL_SEC)
   {
-    clib_warning ("ha_sync in timer node : flush thread buffer %d", thread_index);
+    // clib_warning ("ha_sync in timer node : flush thread buffer %d", thread_index);
     ha_sync_per_thread_buffer_flush (thread_index);
   }
 
   if (thread_index == 1 && hsm->enabled && hsm->connection_established)
   {
-    static u32 *expired = 0;
     u32 *i;
     u32 num_expired = 0;
     u32 pool_index;
     u32 seq;
 
-    expired = tw_timer_expire_timers_vec_16t_2w_512sl (&hsm->timer_wheel, now, expired);
-    clib_warning ("ha_sync in timer node : expire %d timers", vec_len (expired));
-    vec_foreach (i, expired)
+    hsm->timer_expired_vec =
+      tw_timer_expire_timers_vec_16t_2w_512sl (&hsm->timer_wheel, now,
+                                               hsm->timer_expired_vec);
+    // clib_warning ("ha_sync in timer node : expire %d timers",
+    //               vec_len (hsm->timer_expired_vec));
+    vec_foreach (i, hsm->timer_expired_vec)
     {
-      clib_warning ("ha_sync in timer node : expired timer %d", *i);
+      // clib_warning ("ha_sync in timer node : expired timer %d", *i);
       pool_index = (*i) & ((1 << (32 - LOG2_TW_TIMERS_PER_OBJECT)) - 1);
 
       clib_spinlock_lock (&hsm->tx_lock);
@@ -915,14 +784,14 @@ VLIB_NODE_FN (ha_sync_timer_node)
       {
         ha_sync_per_thread_buffer_t *rptb = &hsm->per_thread_buffers[thread_index];
         clib_fifo_add1 (rptb->pending_fifo, seq);
-        clib_warning ("ha_sync in timer node : retransmit seq_number %d", seq);
+        ha_sync_wake_output_thread (thread_index);
       }
 
       num_expired++;
     }
 
     if (num_expired)
-      vec_delete (expired, num_expired, 0);
+      vec_delete (hsm->timer_expired_vec, num_expired, 0);
   }
 
   return 0;
@@ -950,7 +819,7 @@ VLIB_REGISTER_NODE (ha_sync_output_worker_node) = {
   .format_trace = format_ha_sync_output_trace,
   .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .type = VLIB_NODE_TYPE_INPUT,
-  .state = VLIB_NODE_STATE_POLLING,
+  .state = VLIB_NODE_STATE_INTERRUPT,
   .n_errors = ARRAY_LEN (ha_sync_output_error_strings),
   .error_strings = ha_sync_output_error_strings,
 };
@@ -958,12 +827,6 @@ VLIB_REGISTER_NODE (ha_sync_output_worker_node) = {
 VLIB_REGISTER_NODE (ha_sync_snapshot_node) = {
   .name = "ha-sync-snapshot",
   .vector_size = sizeof (u32),
-  .type = VLIB_NODE_TYPE_INPUT,
-  .state = VLIB_NODE_STATE_INTERRUPT,
-};
-
-VLIB_REGISTER_NODE (ha_sync_snapshot_worker_node) = {
-  .name = "ha-sync-snapshot-worker",
   .type = VLIB_NODE_TYPE_INPUT,
   .state = VLIB_NODE_STATE_INTERRUPT,
 };

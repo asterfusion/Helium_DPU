@@ -33,16 +33,14 @@ ha_sync_resources_init (ha_sync_main_t *hsm)
     vec_reset_length (ptb->data);
     ptb->session_count = 0;
 
+    clib_fifo_free (ptb->pending_fifo);
+    ptb->pending_fifo = 0;
     clib_fifo_validate (ptb->pending_fifo, HA_SYNC_DEFAULT_POOL_SIZE);
-    clib_fifo_reset (ptb->pending_fifo);
 
+    clib_fifo_free (ptb->fast_msg_queue);
+    ptb->fast_msg_queue = 0;
     clib_fifo_validate (ptb->fast_msg_queue, 1024);
-    clib_fifo_reset (ptb->fast_msg_queue);
   }
-
-  vec_validate (hsm->snapshot_worker_state, n_threads - 1);
-  clib_memset (hsm->snapshot_worker_state, 0,
-               vec_len (hsm->snapshot_worker_state));
 
 }
 
@@ -63,17 +61,15 @@ ha_sync_release_resources ()
   vec_free (hsm->per_thread_buffers);
   hsm->per_thread_buffers = 0;
 
-  vec_free (hsm->snapshot_worker_state);
-  hsm->snapshot_worker_state = 0;
-
   hsm->connection_established = 0;
   hsm->hello_retry_count = 0;
   hsm->next_hello_time = 0;
-  hsm->snapshot_state = HA_SYNC_SNAPSHOT_DISCONNECTED;
-  hsm->snapshot_due_time = 0;
-  hsm->snapshot_next_time = 0;
-  hsm->snapshot_round_inflight = 0;
-  hsm->snapshot_round_pending_main = 0;
+  hsm->snapshot_sequence = 0;
+  hsm->snapshot_trigger_pending = 0;
+  hsm->snapshot_triggered_for_connection = 0;
+  vec_free (hsm->timer_expired_vec);
+  hsm->timer_expired_vec = 0;
+  ha_sync_update_all_contexts ();
 }
 
 void
@@ -91,14 +87,24 @@ ha_sync_reset_runtime_state ()
 
   vlib_worker_thread_barrier_sync (vm);
   ha_sync_pool_clear_keep ();
+  hsm->snapshot_sequence = 0;
+  vec_free (hsm->timer_expired_vec);
+  hsm->timer_expired_vec = 0;
+  hsm->snapshot_triggered_for_connection = 0;
+  if (hsm->timer_wheel.timers)
+    tw_timer_wheel_free_16t_2w_512sl (&hsm->timer_wheel);
   tw_timer_wheel_init_16t_2w_512sl (&hsm->timer_wheel, NULL, 0.1, 8192);
 
   vec_foreach (ptb, hsm->per_thread_buffers)
   {
     vec_reset_length (ptb->data);
     ptb->session_count = 0;
-    clib_fifo_reset (ptb->pending_fifo);
-    clib_fifo_reset (ptb->fast_msg_queue);
+    clib_fifo_free (ptb->pending_fifo);
+    ptb->pending_fifo = 0;
+    clib_fifo_validate (ptb->pending_fifo, HA_SYNC_DEFAULT_POOL_SIZE);
+    clib_fifo_free (ptb->fast_msg_queue);
+    ptb->fast_msg_queue = 0;
+    clib_fifo_validate (ptb->fast_msg_queue, 1024);
     ptb->last_flush_time = 0;
   }
   vlib_worker_thread_barrier_release (vm);
@@ -130,6 +136,8 @@ ha_sync_control_command_fn (vlib_main_t *vm, unformat_input_t *input,
   vlib_worker_thread_barrier_sync (vm);
   if (enable_disable)
     {
+      if (!hsm->timer_wheel.timers)
+        tw_timer_wheel_init_16t_2w_512sl (&hsm->timer_wheel, NULL, 0.1, 8192);
       ha_sync_resources_init (hsm);
       hsm->enabled = 1;
       if (hsm->config_ready)
@@ -140,6 +148,7 @@ ha_sync_control_command_fn (vlib_main_t *vm, unformat_input_t *input,
         hsm->hello_retry_count = 0;
         hsm->next_hello_time = vlib_time_now (vm);
       }
+      ha_sync_update_all_contexts ();
     }
   else
     {
@@ -157,6 +166,9 @@ ha_sync_control_command_fn (vlib_main_t *vm, unformat_input_t *input,
       hsm->retransmit_interval = HA_SYNC_RETRANSMIT_INTERVAL_SEC;
       hsm->retransmit_times = HA_SYNC_RETRANSMIT_TIMES;
       ha_sync_release_resources ();
+      if (hsm->timer_wheel.timers)
+        tw_timer_wheel_free_16t_2w_512sl (&hsm->timer_wheel);
+      ha_sync_update_all_contexts ();
     }
   vlib_worker_thread_barrier_release (vm);
   return 0;
@@ -179,6 +191,7 @@ ha_sync_set_src_address_command_fn (vlib_main_t *vm, unformat_input_t *input,
   hsm->src_is_set = 1;
   hsm->config_ready =
     hsm->src_is_set && hsm->peer_is_set && hsm->sw_if_index_is_set;
+  ha_sync_update_all_contexts ();
   if (hsm->enabled && hsm->config_ready)
   {
     now = vlib_time_now (vm);
@@ -193,6 +206,7 @@ ha_sync_set_peer_address_command_fn (vlib_main_t *vm, unformat_input_t *input,
                                      vlib_cli_command_t *cmd)
 {
   ha_sync_main_t *hsm = &ha_sync_main;
+  u8 peer_changed = 0;
   ip4_address_t ip4;
   f64 now;
   CLIB_UNUSED (vlib_main_t * _vm) = vm;
@@ -201,10 +215,24 @@ ha_sync_set_peer_address_command_fn (vlib_main_t *vm, unformat_input_t *input,
   if (!unformat (input, "%U", unformat_ip4_address, &ip4))
     return clib_error_return (0, "usage: ha_sync set peer-address <ip4>");
 
+  peer_changed = (!hsm->peer_is_set || hsm->peer_address.as_u32 != ip4.as_u32);
   hsm->peer_address = ip4;
   hsm->peer_is_set = 1;
   hsm->config_ready =
     hsm->src_is_set && hsm->peer_is_set && hsm->sw_if_index_is_set;
+
+  /*
+   * Peer changed: drop runtime TX state/FIFOs and force a fresh
+   * hello/handshake to rebuild the connection against the new peer.
+   */
+  if (peer_changed)
+  {
+    hsm->connection_established = 0;
+    hsm->snapshot_trigger_pending = 0;
+    ha_sync_reset_runtime_state ();
+  }
+
+  ha_sync_update_all_contexts ();
   if (hsm->enabled && hsm->config_ready)
   {
     now = vlib_time_now (vm);
@@ -229,9 +257,12 @@ ha_sync_clear_peer_address_command_fn (vlib_main_t *vm, unformat_input_t *input,
   hsm->connection_established = 0;
   hsm->hello_retry_count = 0;
   hsm->next_hello_time = 0;
-  hsm->snapshot_state = HA_SYNC_SNAPSHOT_DISCONNECTED;
-  hsm->snapshot_due_time = 0;
-  hsm->snapshot_next_time = 0;
+  hsm->snapshot_sequence = 0;
+  hsm->snapshot_trigger_pending = 0;
+  hsm->snapshot_triggered_for_connection = 0;
+  /* Drop runtime FIFOs/pool/timers when peer is cleared. */
+  ha_sync_reset_runtime_state ();
+  ha_sync_update_all_contexts ();
   return 0;
 }
 
@@ -330,6 +361,7 @@ ha_sync_set_intfc_command_fn (vlib_main_t *vm, unformat_input_t *input,
   hsm->sw_if_index_is_set = 1;
   hsm->config_ready =
     hsm->src_is_set && hsm->peer_is_set && hsm->sw_if_index_is_set;
+  ha_sync_update_all_contexts ();
   if (hsm->enabled && hsm->config_ready)
     vnet_feature_enable_disable ("ip4-unicast", "ha-sync-input-worker",
                                  hsm->sw_if_index, 1, 0, 0);
@@ -378,7 +410,9 @@ ha_sync_show_command_fn (vlib_main_t *vm, unformat_input_t *input,
                    hsm->heartbeat_max_fail_counts);
   vlib_cli_output (vm, "  connection_established: %u",
                    hsm->connection_established);
-  vlib_cli_output (vm, "  snapshot_state: %u", hsm->snapshot_state);
+  vlib_cli_output (vm, "  snapshot_sequence: %u", hsm->snapshot_sequence);
+  vlib_cli_output (vm, "  snapshot_trigger_pending: %u",
+                   hsm->snapshot_trigger_pending);
   return 0;
 }
 
@@ -471,15 +505,15 @@ ha_sync_init (vlib_main_t *vm)
   hsm->retransmit_times = HA_SYNC_RETRANSMIT_TIMES;
   hsm->hello_retry_count = 0;
   hsm->next_hello_time = 0;
-  hsm->snapshot_state = HA_SYNC_SNAPSHOT_DISCONNECTED;
-  hsm->snapshot_due_time = 0;
-  hsm->snapshot_next_time = 0;
-  hsm->snapshot_round_inflight = 0;
-  hsm->snapshot_round_pending_main = 0;
+  hsm->timer_expired_vec = 0;
+  hsm->snapshot_sequence = 0;
+  hsm->snapshot_trigger_pending = 0;
+  hsm->snapshot_triggered_for_connection = 0;
   tw_timer_wheel_init_16t_2w_512sl (&hsm->timer_wheel, NULL, 0.1, 8192);
   
   clib_spinlock_init (&hsm->tx_lock);
   ha_sync_resources_init (hsm);
+  ha_sync_update_all_contexts ();
 
   return 0;
 }
