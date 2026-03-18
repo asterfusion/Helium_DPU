@@ -148,7 +148,7 @@ VLIB_NODE_FN (lip_punt_node)
 	  lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0);
 	  if (PREDICT_FALSE (lipi0 == INDEX_INVALID))
 	  {
-	      if (vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
+	      if ((b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
 	      {
               u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
 
@@ -853,7 +853,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 		vnet_buffer (b0)->sw_if_index[VLIB_RX]);
 	      lip0 = lcp_itf_pair_get (lipi0);
 
-	      if (lip0 == NULL && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
+	      if (lip0 == NULL && (b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
 	      {
               u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
               vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
@@ -902,7 +902,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 		vnet_buffer (b1)->sw_if_index[VLIB_RX]);
 	      lip1 = lcp_itf_pair_get (lipi1);
 
-	      if (lip1 == NULL && vnet_buffer2(b1)->l2_rx_sw_if_index != ~0)
+	      if (lip1 == NULL && (b1->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b1)->l2_rx_sw_if_index != ~0)
 	      {
               u32 l2_rx_sw_if_index1 = vnet_buffer2(b1)->l2_rx_sw_if_index;
               vnet_sw_interface_t *si1 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index1);
@@ -995,7 +995,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 		vnet_buffer (b0)->sw_if_index[VLIB_RX]);
 	      lip0 = lcp_itf_pair_get (lipi0);
 
-	      if (lip0 == NULL && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
+	      if (lip0 == NULL && (b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
 	      {
               u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
               vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
