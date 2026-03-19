@@ -554,9 +554,6 @@ eth_input_tag_lookup (vlib_main_t * vm, vnet_main_t * vnm,
 					   SUBINT_CONFIG_MATCH_1_TAG, mif,
 					   vif, qif, &new_sw_if_index,
 					   &l->err, &is_l2);
-      vnet_buffer2 (b)->l2_rx_sw_if_index = vnet_buffer(b)->sw_if_index[VLIB_RX];
-      b->flags |= VLIB_BUFFER_NOT_PHY_INTF;
-   
             }
 	}
 
@@ -617,6 +614,11 @@ eth_input_tag_lookup (vlib_main_t * vm, vnet_main_t * vnm,
 
   if (l->err == ETHERNET_ERROR_NONE)
     {
+      if (vnet_buffer (b)->sw_if_index[VLIB_RX] != l->sw_if_index)
+	{
+	  vnet_buffer2 (b)->l2_rx_sw_if_index = vnet_buffer(b)->sw_if_index[VLIB_RX];
+	  b->flags |= VLIB_BUFFER_NOT_PHY_INTF;
+	}
       vnet_buffer (b)->sw_if_index[VLIB_RX] = l->sw_if_index;
       ethernet_buffer_set_vlan_count (b, l->n_tags);
     }
@@ -1423,6 +1425,17 @@ ethernet_input_inline (vlib_main_t * vm,
 	    error1 !=
 	    ETHERNET_ERROR_NONE ? old_sw_if_index1 : new_sw_if_index1;
 
+	  if (error0 == ETHERNET_ERROR_NONE)
+	    {
+	      vnet_buffer2 (b0)->l2_rx_sw_if_index = old_sw_if_index0;
+	      b0->flags |= VLIB_BUFFER_NOT_PHY_INTF;
+	    }
+	  if (error1 == ETHERNET_ERROR_NONE)
+	    {
+	      vnet_buffer2 (b1)->l2_rx_sw_if_index = old_sw_if_index1;
+	      b1->flags |= VLIB_BUFFER_NOT_PHY_INTF;
+	    }
+
 	  // Check if there is a stat to take (valid and non-main sw_if_index for pkt 0 or pkt 1)
 	  if (((new_sw_if_index0 != ~0)
 	       && (new_sw_if_index0 != old_sw_if_index0))
@@ -1638,6 +1651,12 @@ ethernet_input_inline (vlib_main_t * vm,
 	  vnet_buffer (b0)->sw_if_index[VLIB_RX] =
 	    error0 !=
 	    ETHERNET_ERROR_NONE ? old_sw_if_index0 : new_sw_if_index0;
+
+	  if (error0 == ETHERNET_ERROR_NONE)
+	    {
+	      vnet_buffer2 (b0)->l2_rx_sw_if_index = old_sw_if_index0;
+	      b0->flags |= VLIB_BUFFER_NOT_PHY_INTF;
+	    }
 
 	  // Increment subinterface stats
 	  // Note that interface-level counters have already been incremented
