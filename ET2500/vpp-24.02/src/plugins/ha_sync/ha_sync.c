@@ -34,11 +34,9 @@ ha_sync_resources_init (ha_sync_main_t *hsm)
     ptb->session_count = 0;
 
     clib_fifo_free (ptb->pending_fifo);
-    ptb->pending_fifo = 0;
     clib_fifo_validate (ptb->pending_fifo, HA_SYNC_DEFAULT_POOL_SIZE);
 
     clib_fifo_free (ptb->fast_msg_queue);
-    ptb->fast_msg_queue = 0;
     clib_fifo_validate (ptb->fast_msg_queue, 1024);
   }
 
@@ -133,6 +131,9 @@ ha_sync_control_command_fn (vlib_main_t *vm, unformat_input_t *input,
   if (enable_disable < 0)
     return clib_error_return (0, "usage: ha_sync control <enable|disable>");
 
+  vlib_global_main_t *vgm = vlib_get_global_main ();
+  int i;
+
   vlib_worker_thread_barrier_sync (vm);
   if (enable_disable)
     {
@@ -149,6 +150,12 @@ ha_sync_control_command_fn (vlib_main_t *vm, unformat_input_t *input,
         hsm->next_hello_time = vlib_time_now (vm);
       }
       ha_sync_update_all_contexts ();
+
+      /* set output worker state, main is INTERUPT, other threads are POLLING */
+      vec_foreach_index(i, vgm->vlib_mains)
+      {
+        vlib_node_set_state(vgm->vlib_mains[i], ha_sync_output_worker_node.index, i == 0? VLIB_NODE_STATE_INTERRUPT : VLIB_NODE_STATE_POLLING);
+      }
     }
   else
     {
@@ -169,6 +176,13 @@ ha_sync_control_command_fn (vlib_main_t *vm, unformat_input_t *input,
       if (hsm->timer_wheel.timers)
         tw_timer_wheel_free_16t_2w_512sl (&hsm->timer_wheel);
       ha_sync_update_all_contexts ();
+        
+      /* set all output worker state is disabled */
+      vec_foreach_index(i, vgm->vlib_mains)
+      {
+        vlib_node_set_state(vgm->vlib_mains[i], ha_sync_output_worker_node.index, VLIB_NODE_STATE_DISABLED);
+      }
+
     }
   vlib_worker_thread_barrier_release (vm);
   return 0;

@@ -95,6 +95,9 @@ ha_sync_wake_output_thread (u32 thread_index)
 {
     ha_sync_main_t *hsm = &ha_sync_main;
 
+    /* output main thread is interrupt-driven, workers are polling */
+    if (thread_index != 0)
+        return;
     if (thread_index >= vlib_get_n_threads ())
         return;
     if (thread_index >= vec_len (hsm->per_thread_buffers))

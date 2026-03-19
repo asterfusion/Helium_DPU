@@ -50,7 +50,6 @@ ha_sync_get_registration (u32 app_type)
       return reg;
   }
 
-  clib_warning ("No registration for app type %d", app_type);
   return NULL;
 
 }
@@ -405,8 +404,14 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
 
   if (!hsm->config_ready)
   {
-    vlib_node_increment_counter (vm, node->node_index,
-                                  HA_SYNC_OUTPUT_ERROR_NO_PEER, 1);
+    if (thread_index < vec_len (hsm->per_thread_buffers))
+    {
+      ha_sync_per_thread_buffer_t *ptb0 = &hsm->per_thread_buffers[thread_index];
+      if (clib_fifo_elts (ptb0->fast_msg_queue) > 0 ||
+          clib_fifo_elts (ptb0->pending_fifo) > 0)
+        vlib_node_increment_counter (vm, node->node_index,
+                                     HA_SYNC_OUTPUT_ERROR_NO_PEER, 1);
+    }
     return 0;
   }
 
@@ -819,7 +824,7 @@ VLIB_REGISTER_NODE (ha_sync_output_worker_node) = {
   .format_trace = format_ha_sync_output_trace,
   .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .type = VLIB_NODE_TYPE_INPUT,
-  .state = VLIB_NODE_STATE_INTERRUPT,
+  .state = VLIB_NODE_STATE_DISABLED,
   .n_errors = ARRAY_LEN (ha_sync_output_error_strings),
   .error_strings = ha_sync_output_error_strings,
 };
