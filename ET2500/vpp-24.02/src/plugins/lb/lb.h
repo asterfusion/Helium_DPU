@@ -515,6 +515,7 @@ typedef struct
 {
     u32 vip_index;
     u32 as_index;
+    u32 thread_index;
 } lb_sticky_is_foreach_ctx_t;
 
 /* Key for Pod's egress SNAT */

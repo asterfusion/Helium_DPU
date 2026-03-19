@@ -18,6 +18,8 @@ add_vpp_plugin(lb
   lb.c
   node.c
   util.c
+  lb_ha_sync.c
+
 
   API_FILES
   lb.api
@@ -26,6 +28,7 @@ add_vpp_plugin(lb
   INSTALL_HEADERS
   lb.h
   util.h
+  lb_ha_sync.h
   lbhash.h
 
   API_TEST_SOURCES

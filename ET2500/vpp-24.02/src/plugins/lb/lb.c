@@ -14,6 +14,7 @@
  */
 
 #include <lb/lb.h>
+#include <lb/lb_ha_sync.h>
 #include <vnet/plugin/plugin.h>
 #include <vpp/app/version.h>
 #include <vnet/api_errno.h>
@@ -354,8 +355,13 @@ lb_sticky_foreach_free_cb (clib_bihash_kv_8_8_t * kv, void *arg)
 
         if (clib_bihash_add_del_8_8(&lbm->sticky_ht, kv, 0))
             clib_warning("foreach stick table : remove entry failed!");
-    }
 
+        //ha sync notify
+        lb_ha_sync_event_sticky_session_notify(ctx->thread_index, LB_HA_OP_DEL,
+                pool_elt_at_index(lbm->vips, lb_kv->lb_key.vip_index),
+                lb_kv->lb_key.hash,
+                &lbm->ass[lb_kv->lb_value.asindex].address, 0);
+    }
     return 1;
 }
 
@@ -465,7 +471,7 @@ void lb_garbage_collection()
   lb_put_writer_lock();
 }
 
-static void lb_free_vip_snat_mappings_by_flow_index(u32 flow_index)
+static void lb_free_vip_snat_mappings_by_flow_index(u32 flow_index, u32 vip_index)
 {
     lb_main_t *lbm = &lb_main;
     lb_vip_snat_mapping_t *flow;
@@ -478,6 +484,11 @@ static void lb_free_vip_snat_mappings_by_flow_index(u32 flow_index)
         return;
 
     flow = pool_elt_at_index (lbm->vip_snat_mappings, flow_index);
+
+    if (vip_index != (~0) && vip_index != flow->vip_index)
+    {
+        return;
+    }
 
     clib_memset(&key, 0, sizeof(key));
 
@@ -507,6 +518,11 @@ static void lb_free_vip_snat_mappings_by_flow_index(u32 flow_index)
     {
         clib_warning ("Lb vip-snat vip-mapping snat4 table del failed");
     }
+
+    //ha sync notify
+    lb_ha_sync_event_vip_snat_session_notify(vlib_get_thread_index(), LB_HA_OP_DEL,
+                                             pool_elt_at_index(lbm->vips, flow->vip_index),
+                                             flow, 0);
 
     pool_put(lbm->vip_snat_mappings, flow);
 
@@ -633,6 +649,7 @@ int lb_conf(ip4_address_t *ip4_address, ip6_address_t *ip6_address,
           lb_sticky_is_foreach_ctx_t ctx;
           ctx.vip_index = ~0;
           ctx.as_index = ~0;
+          ctx.thread_index = vlib_get_thread_index();
           clib_bihash_foreach_key_value_pair_8_8(&lbm->sticky_ht, lb_sticky_foreach_free_cb, &ctx);
       }
 
@@ -1036,6 +1053,7 @@ lb_flush_vip_as (u32 vip_index, u32 as_index)
 
   ctx.vip_index = vip_index;
   ctx.as_index = as_index;
+  ctx.thread_index = vlib_get_thread_index();
 
   clib_bihash_foreach_key_value_pair_8_8(&lbm->sticky_ht, lb_sticky_foreach_free_cb, &ctx);
 
@@ -1516,6 +1534,24 @@ int lb_vip_del(u32 vip_index)
 
           vip->vip_snat_pool_index = (~0);
           vip->flags &= ~LB_VIP_FLAGS_IPV4_SNAT;
+
+          lb_vip_snat_address_t *address = NULL;
+          //flush flow
+          vec_foreach(address, snat_addresses->addresses)
+          {
+              lb_get_vip_nat_address_lock(address);
+              //free resource
+              for (int i = 0 ; i < LB_NAT_N_PROTOCOLS; ++i)
+              {
+                  //free snat session table
+                  int j;
+                  clib_bitmap_foreach (j, address->busy_port_bitmap[i])
+                  {
+                      lb_free_vip_snat_mappings_by_flow_index(address->flow_index[i][j], vip_index);
+                  }
+              }
+              lb_put_vip_nat_address_lock(address);
+          }
       }
   }
 
@@ -1588,7 +1624,7 @@ int lb_del_snat_pool(u32 pool_idx)
           int j;
           clib_bitmap_foreach (j, address->busy_port_bitmap[i])
           {
-              lb_free_vip_snat_mappings_by_flow_index(address->flow_index[i][j]);
+              lb_free_vip_snat_mappings_by_flow_index(address->flow_index[i][j], (~0));
           }
           clib_bitmap_free(address->busy_port_bitmap[i]);
           vec_free(address->flow_index[i]);
@@ -1693,7 +1729,7 @@ int lb_del_snat_pool_address(u32 pool_idx, ip4_address_t *snat_ip_address)
       int j;
       clib_bitmap_foreach (j, del_address.busy_port_bitmap[i])
       {
-          lb_free_vip_snat_mappings_by_flow_index(del_address.flow_index[i][j]);
+          lb_free_vip_snat_mappings_by_flow_index(del_address.flow_index[i][j], (~0));
       }
       clib_bitmap_free(del_address.busy_port_bitmap[i]);
       vec_free(del_address.flow_index[i]);
@@ -2156,7 +2192,12 @@ lb_init (vlib_main_t * vm)
                                    FIB_SOURCE_PRIORITY_HI,
                                    FIB_SOURCE_BH_SIMPLE);
 
+  //lb ha sync register
+  lb_ha_sync_register();
+
   return NULL;
 }
 
-VLIB_INIT_FUNCTION (lb_init);
+VLIB_INIT_FUNCTION (lb_init) = {
+    .runs_after = VLIB_INITS("ha_sync_init"),
+};

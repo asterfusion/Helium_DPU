@@ -14,6 +14,7 @@
  */
 
 #include <lb/lb.h>
+#include <lb/lb_ha_sync.h>
 #include <vnet/fib/ip4_fib.h>
 #include <vnet/ip/ip6_to_ip4.h>
 
@@ -137,6 +138,11 @@ lb_sticky_is_idle_cb (clib_bihash_kv_8_8_t * kv, void *arg)
     if (clib_u32_loop_gt(ctx->lb_time_now, lb_kv->lb_value.timeout))
     {
         clib_atomic_fetch_sub (&lbm->as_refcount[lb_kv->lb_value.asindex], 1);
+        //ha sync notify
+        lb_ha_sync_event_sticky_session_notify(ctx->thread_index, LB_HA_OP_DEL_FORCE,
+                pool_elt_at_index(lbm->vips, lb_kv->lb_key.vip_index),
+                lb_kv->lb_key.hash,
+                &lbm->ass[lb_kv->lb_value.asindex].address, 0);
         return 1;
     }
     return 0;
@@ -232,7 +238,8 @@ lb_snat_random_port (u16 min, u16 max)
 }
 
 static_always_inline u8
-lb_vip_snat_alloc_recycle_address_port(lb_main_t *lbm, 
+lb_vip_snat_alloc_recycle_address_port(vlib_main_t * vm,
+                                       lb_main_t *lbm,
                                        lb_vip_snat_addresses_pool_t *snat_addresses,
                                        u8 proto,
                                        ip4_address_t *new_addr,
@@ -334,6 +341,11 @@ lb_vip_snat_alloc_recycle_address_port(lb_main_t *lbm,
                         clib_warning ("Lb vip-snat vip-mapping snat4 table del failed");
                     }
 
+                    //ha sync notify
+                    lb_ha_sync_event_vip_snat_session_notify(vm->thread_index, LB_HA_OP_DEL_FORCE,
+                                                             pool_elt_at_index(lbm->vips, record_flow->vip_index),
+                                                             record_flow, 0);
+
                     address->flow_index[lb_proto][portnum] = flow_index;
 
                     *new_addr = address->addr;
@@ -371,7 +383,7 @@ lb_vip_snat_alloc_recycle_address_port(lb_main_t *lbm,
 
 static_always_inline void
 lb_node_get_hash (lb_main_t *lbm, vlib_buffer_t *p, u8 is_input_v4, u32 *hash,
-		  u32 *vip_idx, u8 per_port_vip)
+		  u32 *vip_index, u8 per_port_vip)
 {
   vip_port_key_t key;
   clib_bihash_kv_16_8_t kv, value;
@@ -386,7 +398,7 @@ lb_node_get_hash (lb_main_t *lbm, vlib_buffer_t *p, u8 is_input_v4, u32 *hash,
    * By no per port vip :  ip.adj_index is vip_index
    * By per port vip : ip.adj_index is key field by vip_index_per_port
    */
-  *vip_idx = vnet_buffer (p)->ip.adj_index[VLIB_TX];
+  *vip_index = vnet_buffer (p)->ip.adj_index[VLIB_TX];
   fib_index = vnet_buffer (p)->ip.fib_index;
 
   /* Extract the L4 port number from the packet */
@@ -416,7 +428,7 @@ lb_node_get_hash (lb_main_t *lbm, vlib_buffer_t *p, u8 is_input_v4, u32 *hash,
     {
       /* For per-port-vip case, ip lookup stores placeholder index */
       clib_memset(&key, 0, sizeof(key));
-      key.vip_prefix_index = *vip_idx;
+      key.vip_prefix_index = *vip_index;
       key.port = (u16) (ports & 0xFFFF);
       key.fib_index = fib_index;
       if (is_input_v4)
@@ -434,15 +446,15 @@ lb_node_get_hash (lb_main_t *lbm, vlib_buffer_t *p, u8 is_input_v4, u32 *hash,
       if (clib_bihash_search_16_8 (&lbm->vip_index_per_port, &kv, &value) < 0)
 	{
 	  /* Set default vip */
-	  *vip_idx = 0;
+	  *vip_index = 0;
 	}
       else
 	{
-	  *vip_idx = value.value;
+	  *vip_index = value.value;
 	}
     }
 
-  vip0 = pool_elt_at_index (lbm->vips, *vip_idx);
+  vip0 = pool_elt_at_index (lbm->vips, *vip_index);
 
   if (is_input_v4)
     {
@@ -807,7 +819,7 @@ static_always_inline u8 lb_node_encap_nat_vip_snat(vlib_main_t * vm,
 
             flow_index = flow - lbm->vip_snat_mappings;
 
-            if(lb_vip_snat_alloc_recycle_address_port(lbm, snat_addresses, ip4->protocol, &new_addr, &new_port, flow_index, lb_time_now))
+            if(lb_vip_snat_alloc_recycle_address_port(vm, lbm, snat_addresses, ip4->protocol, &new_addr, &new_port, flow_index, lb_time_now))
             {
                 lb_get_writer_lock();
 
@@ -843,6 +855,10 @@ static_always_inline u8 lb_node_encap_nat_vip_snat(vlib_main_t * vm,
 
             if (clib_bihash_add_del_16_8 (&lbm->mapping_by_uplink_dnat4, &kv, 1))
                 clib_warning ("Lb vip-snat vip-mapping snat4 table add failed");
+
+            //ha sync notify
+            lb_ha_sync_event_vip_snat_session_notify(vm->thread_index, LB_HA_OP_ADD_FORCE,
+                                                     vip, flow, timeout);
         }
         else
         {
@@ -1044,6 +1060,11 @@ lb_node_fn (vlib_main_t * vm,
               }
               else
               {
+                  //ha sync notify
+                  lb_ha_sync_event_sticky_session_notify(thread_index, LB_HA_OP_ADD_FORCE,
+                                                         vip0, hash0,
+                                                         &lbm->ass[asindex0].address, timeout0);
+
                   clib_atomic_fetch_add (&lbm->as_refcount[asindex0], 1);
               }
           }
