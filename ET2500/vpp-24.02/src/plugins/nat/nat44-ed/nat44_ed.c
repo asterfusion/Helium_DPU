@@ -3655,7 +3655,7 @@ nat44_ed_add_interface_address (u32 sw_if_index, u8 twice_nat)
   first_int_addr = ip4_interface_first_address (ip4_main, sw_if_index, 0);
   if (first_int_addr)
     {
-      rv = nat44_ed_add_address (first_int_addr, ~0, twice_nat, ~0);
+      rv = nat44_ed_add_address (first_int_addr, 0, twice_nat, ~0);
       if (0 != rv)
 	{
 	  nat44_ed_del_addr_resolve_record (sw_if_index, twice_nat);
