@@ -55,7 +55,7 @@ u8 *format_lb_ha_sync_stick_format (u8 * s, va_list * args)
 {
   lb_ha_sync_stick_table_data_t *data = va_arg (*args, lb_ha_sync_stick_table_data_t *);
 
-  s = format(s, "\tvip_type %u, ip %U, protocol %u, l4_port %u, table_id %u hash %u", 
+  s = format(s, "\tvip_type %U, ip %U, protocol %u, l4_port %u, table_id %u hash %u",
              format_lb_vip_type, data->type,
              format_ip46_prefix, &data->prefix, (u32) data->plen, IP46_TYPE_ANY,
              data->protocol, clib_net_to_host_u16(data->l4_port),
@@ -72,7 +72,7 @@ u8 *format_lb_ha_sync_vip_snat_format (u8 * s, va_list * args)
 {
   lb_ha_sync_vip_snat_session_data_t *data = va_arg (*args, lb_ha_sync_vip_snat_session_data_t *);
 
-  s = format(s, "\tvip_type %u, ip %U, protocol %u, l4_port %u", 
+  s = format(s, "\tvip_type %U, ip %U, protocol %u, l4_port %u",
              format_lb_vip_type, data->type, 
              format_ip46_prefix, &data->prefix, (u32) data->plen, IP46_TYPE_ANY,
              data->protocol, clib_net_to_host_u16(data->l4_port));
@@ -279,8 +279,8 @@ lb_ha_sync_apply_sticky_session_proc(lb_ha_sync_event_sticky_session_t *event)
 {
 #if LB_HASH_SYNC_DEBUG
     u8 *s = 0;
-    s = format(s, "Header: \n%U", format_lb_ha_sync_header_format, event->header);
-    s = format(s, "Data: \n%U", format_lb_ha_sync_stick_format, event->data);
+    s = format(s, "Header: \n%U", format_lb_ha_sync_header_format, &event->header);
+    s = format(s, "Data: \n%U", format_lb_ha_sync_stick_format, &event->data);
     clib_warning("%s", s);
     vec_free(s);
 #endif
@@ -805,8 +805,8 @@ lb_ha_sync_apply_vip_snat_session_proc(lb_ha_sync_event_vip_snat_session_t *even
 
 #if LB_HASH_SYNC_DEBUG
     u8 *s = 0;
-    s = format(s, "Header: \n%U", format_lb_ha_sync_header_format, event->header);
-    s = format(s, "Data: \n%U", format_lb_ha_sync_vip_snat_format, event->data);
+    s = format(s, "Header: \n%U", format_lb_ha_sync_header_format, &event->header);
+    s = format(s, "Data: \n%U", format_lb_ha_sync_vip_snat_format, &event->data);
     clib_warning("%s", s);
     vec_free(s);
 #endif

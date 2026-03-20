@@ -162,7 +162,7 @@ void lb_ha_sync_unregister (void);
                           !lb_ha_sync_ctx.ha_sync_ctx.ha_sync_connected)
 
 
-static_always_inline void lb_ha_sync_event_push (u32 thread_id, lb_ha_sync_header_t *event_entry)
+static_always_inline void lb_ha_sync_event_push (u32 thread_id, u8 *event_entry, u32 length)
 {
     u32 thread_index = vlib_get_thread_index ();
 
@@ -170,8 +170,7 @@ static_always_inline void lb_ha_sync_event_push (u32 thread_id, lb_ha_sync_heade
 
     ((__typeof__ (ha_sync_per_thread_buffer_add) *)
      ha_sync_per_thread_buffer_add_ptr)(
-         thread_index, HA_SYNC_APP_LB, 
-         (u8 *) event_entry, event_entry->event_data_len + sizeof(lb_ha_sync_header_t));
+         thread_index, HA_SYNC_APP_LB, event_entry, length);
 }
 
 static_always_inline void lb_ha_sync_event_sticky_session_notify(u32 thread_id, lb_ha_event_op_e op, 
@@ -201,7 +200,7 @@ static_always_inline void lb_ha_sync_event_sticky_session_notify(u32 thread_id, 
     clib_memcpy (&(event.data.address), address, sizeof(ip46_address_t));
     event.data.timeout = clib_host_to_net_u32(timeout);
 
-    lb_ha_sync_event_push(thread_id, (lb_ha_sync_header_t *)&event);
+    lb_ha_sync_event_push(thread_id, (u8 *)&event, sizeof(lb_ha_sync_event_sticky_session_t));
 }
 
 static_always_inline void lb_ha_sync_event_vip_snat_session_notify(u32 thread_id, lb_ha_event_op_e op, 
@@ -257,5 +256,5 @@ static_always_inline void lb_ha_sync_event_vip_snat_session_notify(u32 thread_id
         event.data.outside_table_id = clib_host_to_net_u32(v4_fib->hash.table_id);
     }
 
-    lb_ha_sync_event_push(thread_id, (lb_ha_sync_header_t *)&event);
+    lb_ha_sync_event_push(thread_id, (u8 *)&event, sizeof(lb_ha_sync_event_vip_snat_session_t));
 }

@@ -353,14 +353,14 @@ lb_sticky_foreach_free_cb (clib_bihash_kv_8_8_t * kv, void *arg)
     {
         clib_atomic_fetch_sub(&lbm->as_refcount[lb_kv->lb_value.asindex], 1);
 
-        if (clib_bihash_add_del_8_8(&lbm->sticky_ht, kv, 0))
-            clib_warning("foreach stick table : remove entry failed!");
-
         //ha sync notify
         lb_ha_sync_event_sticky_session_notify(ctx->thread_index, LB_HA_OP_DEL,
                 pool_elt_at_index(lbm->vips, lb_kv->lb_key.vip_index),
                 lb_kv->lb_key.hash,
                 &lbm->ass[lb_kv->lb_value.asindex].address, 0);
+
+        if (clib_bihash_add_del_8_8(&lbm->sticky_ht, kv, 0))
+            clib_warning("foreach stick table : remove entry failed!");
     }
     return 1;
 }
