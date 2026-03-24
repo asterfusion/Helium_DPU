@@ -66,6 +66,15 @@ typedef struct
   u32 next_index;
 } lb_nat_trace_t;
 
+typedef struct
+{
+  u32 rx_sw_if_index;
+  u32 rx_fib_index;
+  u32 vip_index;
+  u32 vip_prefix_index;
+  u32 next_index;
+} lb_local_trace_t;
+
 u8 *
 format_lb_trace (u8 * s, va_list * args)
 {
@@ -122,6 +131,32 @@ format_lb_nat_trace (u8 * s, va_list * args)
     }
   s = format (s, "lb nat: rx_sw_if_index = %d, next_index = %d",
               t->rx_sw_if_index, t->next_index);
+
+  return s;
+}
+
+u8 *
+format_lb_local_trace (u8 * s, va_list * args)
+{
+  lb_main_t *lbm = &lb_main;
+  CLIB_UNUSED(vlib_main_t * vm) = va_arg (*args, vlib_main_t *);
+  CLIB_UNUSED(vlib_node_t * node) = va_arg (*args, vlib_node_t *);
+  lb_local_trace_t *t = va_arg (*args, lb_local_trace_t *);
+
+  if (pool_is_free_index(lbm->vips, t->vip_index))
+    {
+      s = format (s, "lb vip[%d]: This VIP was freed since capture\n");
+    }
+  else
+    {
+      s = format (s, "lb vip[%d]: %U\n", t->vip_index, format_lb_vip,
+                  &lbm->vips[t->vip_index]);
+    }
+
+  s = format (s, "lb vip[%d]: vip_prefix_index %u\n", t->vip_index, t->vip_prefix_index);
+
+
+  s = format (s, "lb local: rx_sw_if_index = %d, next_index = %d", t->rx_sw_if_index, t->next_index);
 
   return s;
 }
@@ -2072,3 +2107,327 @@ VLIB_REGISTER_NODE (lb_nat6_in2out_node) =
           [LB_NAT6_IN2OUT_NEXT_LOOKUP] = "ip6-lookup",
       },
   };
+
+extern vnet_feature_arc_registration_t vnet_feat_arc_ip4_local;
+
+VLIB_NODE_FN (lb_local4_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+  u32 next_index;
+  u32 n_left_from, *from, *to_next;
+
+  lb_main_t *lbm = &lb_main;
+  vnet_feature_main_t *fm = &feature_main;
+  u8 arc_index = vnet_feat_arc_ip4_local.feature_arc_index;
+  vnet_feature_config_main_t *cm = &fm->feature_config_mains[arc_index];
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = frame->n_vectors;
+  next_index = node->cached_next_index;
+
+  while (n_left_from > 0)
+    {
+      u32 n_left_to_next;
+
+      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  u32 bi0;
+	  vlib_buffer_t *b0;
+
+	  ip4_header_t *ip0;
+	  udp_header_t *udp0;
+
+      lb_vip_local4_key_t key0;
+      uword * value0;
+
+	  u32 sw_if_index0;
+      u32 rx_fib_index0;
+
+      u32 vip_index0 = ~0;
+      u32 vip_prefix_index0 = ADJ_INDEX_INVALID;
+      lb_vip_t *vip0;
+
+	  u32 next0;
+
+	  bi0 = from[0];
+	  to_next[0] = bi0;
+	  from += 1;
+	  to_next += 1;
+	  n_left_from -= 1;
+	  n_left_to_next -= 1;
+
+	  b0 = vlib_get_buffer (vm, bi0);
+	  ip0 = vlib_buffer_get_current (b0);
+	  sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+      rx_fib_index0 = ip4_fib_table_get_index_for_sw_if_index (sw_if_index0);
+
+      vnet_get_config_data (&cm->config_main, &b0->current_config_index, &next0, 0);
+
+      if (ip0->protocol != IP_PROTOCOL_TCP &&
+          ip0->protocol != IP_PROTOCOL_UDP)
+          goto trace0;
+
+      udp0 = ip4_next_header (ip0);
+
+      clib_memset(&key0, 0, sizeof(lb_vip_local4_key_t));
+
+      //try search protocol and dst port
+      key0.address = ip0->dst_address;
+      key0.fib_index = rx_fib_index0;
+      key0.protocol = ip0->protocol;
+      key0.port = udp0->dst_port;
+
+      value0 = hash_get_mem(lbm->vip_index_by_local4, &(key0));
+
+      if (!value0)
+      {
+          //try search only address
+          key0.protocol = (~0);
+          key0.port = 0;
+          value0 = hash_get_mem(lbm->vip_index_by_local4, &(key0));
+      }
+
+      if (value0)
+      {
+          vip_index0 = value0[0];
+          vip0 = pool_elt_at_index(lbm->vips, vip_index0);
+          if (PREDICT_FALSE(!(vip0->flags & LB_VIP_FLAGS_USED)))
+              goto trace0;
+
+          switch(vip0->type)
+          {
+          case LB_VIP_TYPE_IP4_GRE6:
+              next0 = (vip0->port == 0) ? LB_LOCAL4_NEXT_IP4_GRE6 : LB_LOCAL4_NEXT_IP4_GRE6_PORT;
+              vip_prefix_index0 = (vip0->port == 0) ? vip_index0 : vip0->vip_prefix_index;
+              break;
+          case LB_VIP_TYPE_IP4_GRE4:
+              next0 = (vip0->port == 0) ? LB_LOCAL4_NEXT_IP4_GRE4 : LB_LOCAL4_NEXT_IP4_GRE4_PORT;
+              vip_prefix_index0 = (vip0->port == 0) ? vip_index0 : vip0->vip_prefix_index;
+              break;
+          case LB_VIP_TYPE_IP4_L3DSR:
+              next0 = (vip0->port == 0) ? LB_LOCAL4_NEXT_IP4_DSR : LB_LOCAL4_NEXT_IP4_DSR_PORT;
+              vip_prefix_index0 = (vip0->port == 0) ? vip_index0 : vip0->vip_prefix_index;
+              break;
+          case LB_VIP_TYPE_IP4_NAT4:
+              next0 = LB_LOCAL4_NEXT_IP4_NAT4;
+              vip_prefix_index0 = vip0->vip_prefix_index;
+              break;
+          default:
+              goto trace0;
+          }
+          vnet_buffer(b0)->ip.adj_index[VLIB_TX] = vip_prefix_index0;
+      }
+trace0:
+	  if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
+                        (b0->flags & VLIB_BUFFER_IS_TRACED)))
+	    {
+	      lb_local_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
+	      t->rx_sw_if_index = sw_if_index0;
+	      t->rx_fib_index = rx_fib_index0;
+          t->vip_index = vip_index0;
+          t->vip_prefix_index = vip_prefix_index0;
+	      t->next_index = next0;
+	    }
+
+	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
+					   n_left_to_next, bi0, next0);
+	}
+
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+    }
+
+  return frame->n_vectors;
+}
+
+extern vnet_feature_arc_registration_t vnet_feat_arc_ip6_local;
+
+VLIB_NODE_FN (lb_local6_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+  u32 next_index;
+  u32 n_left_from, *from, *to_next;
+
+  lb_main_t *lbm = &lb_main;
+  vnet_feature_main_t *fm = &feature_main;
+  u8 arc_index = vnet_feat_arc_ip6_local.feature_arc_index;
+  vnet_feature_config_main_t *cm = &fm->feature_config_mains[arc_index];
+
+  from = vlib_frame_vector_args (frame);
+  n_left_from = frame->n_vectors;
+  next_index = node->cached_next_index;
+
+  while (n_left_from > 0)
+    {
+      u32 n_left_to_next;
+
+      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
+
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  u32 bi0;
+	  vlib_buffer_t *b0;
+
+	  ip6_header_t *ip0;
+	  udp_header_t *udp0;
+
+      lb_vip_local6_key_t key0;
+      uword * value0;
+
+	  u32 sw_if_index0;
+      u32 rx_fib_index0;
+
+      u32 vip_index0 = ~0;
+      u32 vip_prefix_index0 = ADJ_INDEX_INVALID;
+      lb_vip_t *vip0;
+
+	  u32 next0;
+
+	  bi0 = from[0];
+	  to_next[0] = bi0;
+	  from += 1;
+	  to_next += 1;
+	  n_left_from -= 1;
+	  n_left_to_next -= 1;
+
+	  b0 = vlib_get_buffer (vm, bi0);
+	  ip0 = vlib_buffer_get_current (b0);
+	  sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+      rx_fib_index0 = ip6_fib_table_get_index_for_sw_if_index (sw_if_index0);
+
+      vnet_get_config_data (&cm->config_main, &b0->current_config_index, &next0, 0);
+
+
+      u8 l4_protocol;
+      u16 l4_offset, frag_hdr_offset;
+
+      if (PREDICT_FALSE (ip6_parse (vm, b0, ip0, b0->current_length,
+                      &l4_protocol, &l4_offset, &frag_hdr_offset)))
+          goto trace0;
+
+      if (PREDICT_FALSE(frag_hdr_offset))
+          goto trace0;
+
+      if (l4_protocol != IP_PROTOCOL_TCP &&
+          l4_protocol != IP_PROTOCOL_UDP)
+          goto trace0;
+
+
+      udp0 = (udp_header_t *) u8_ptr_add (ip0, l4_offset);
+
+      clib_memset(&key0, 0, sizeof(lb_vip_local6_key_t));
+
+      //try search protocol and dst port 
+      clib_memcpy(&key0.address, &ip0->dst_address, sizeof(ip6_address_t));
+      key0.fib_index = rx_fib_index0;
+      key0.protocol = l4_protocol;
+      key0.port = udp0->dst_port;
+
+      value0 = hash_get_mem(lbm->vip_index_by_local6, &(key0));
+      if (!value0)
+      {
+          //try search only address
+          key0.protocol = (~0);
+          key0.port = 0;
+          value0 = hash_get_mem(lbm->vip_index_by_local6, &(key0));
+      }
+
+      if (value0)
+      {
+          vip_index0 = value0[0];
+          vip0 = pool_elt_at_index(lbm->vips, vip_index0);
+
+          if (PREDICT_FALSE(vip0->flags & LB_VIP_FLAGS_USED))
+              goto trace0;
+
+          switch(vip0->type)
+          {
+          case LB_VIP_TYPE_IP6_GRE6:
+              next0 = (vip0->port == 0) ? LB_LOCAL6_NEXT_IP6_GRE6 : LB_LOCAL6_NEXT_IP6_GRE6_PORT;
+              vip_prefix_index0 = (vip0->port == 0) ? vip_index0 : vip0->vip_prefix_index;
+              break;
+          case LB_VIP_TYPE_IP6_GRE4:
+              next0 = (vip0->port == 0) ? LB_LOCAL6_NEXT_IP6_GRE4 : LB_LOCAL6_NEXT_IP6_GRE4_PORT;
+              vip_prefix_index0 = (vip0->port == 0) ? vip_index0 : vip0->vip_prefix_index;
+              break;
+          case LB_VIP_TYPE_IP6_NAT6:
+              next0 = LB_LOCAL6_NEXT_IP6_NAT6;
+              vip_prefix_index0 = vip0->vip_prefix_index;
+              break;
+          default:
+              goto trace0;
+          }
+          vnet_buffer(b0)->ip.adj_index[VLIB_TX] = vip_prefix_index0;
+      }
+trace0:
+	  if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
+                        (b0->flags & VLIB_BUFFER_IS_TRACED)))
+	    {
+	      lb_local_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
+	      t->rx_sw_if_index = sw_if_index0;
+	      t->rx_fib_index = rx_fib_index0;
+          t->vip_index = vip_index0;
+          t->vip_prefix_index = vip_prefix_index0;
+	      t->next_index = next0;
+	    }
+
+	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
+					   n_left_to_next, bi0, next0);
+	}
+
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+    }
+
+  return frame->n_vectors;
+}
+
+VNET_FEATURE_INIT (lb_local4_node_fn, static) =
+  {
+    .arc_name = "ip4-local",
+    .node_name = "lb-local4-input",
+    .runs_before = VNET_FEATURES ("ip4-local-end-of-arc"),
+  };
+
+VNET_FEATURE_INIT (lb_local6_node_fn, static) =
+  {
+    .arc_name = "ip6-local",
+    .node_name = "lb-local6-input",
+    .runs_before = VNET_FEATURES ("ip6-local-end-of-arc"),
+  };
+
+VLIB_REGISTER_NODE (lb_local4_node) = {
+  .name = "lb-local4-input",
+  .vector_size = sizeof (u32),
+  .type = VLIB_NODE_TYPE_INTERNAL,
+  .format_trace = format_lb_local_trace,
+  .n_next_nodes = LB_LOCAL4_N_NEXT,
+  .next_nodes = {
+    [LB_LOCAL4_NEXT_DROP] = "error-drop",
+    [LB_LOCAL4_NEXT_LOOKUP] = "ip4-lookup",
+    [LB_LOCAL4_NEXT_IP4_NAT4] = "lb4-nat4-port",
+    [LB_LOCAL4_NEXT_IP4_GRE4] = "lb4-gre4",
+    [LB_LOCAL4_NEXT_IP4_GRE6] = "lb4-gre6",
+    [LB_LOCAL4_NEXT_IP4_GRE4_PORT] = "lb4-gre4-port",
+    [LB_LOCAL4_NEXT_IP4_GRE6_PORT] = "lb4-gre6-port",
+    [LB_LOCAL4_NEXT_IP4_DSR] = "lb4-l3dsr",
+    [LB_LOCAL4_NEXT_IP4_DSR_PORT] = "lb4-l3dsr-port",
+  },
+};
+
+VLIB_REGISTER_NODE (lb_local6_node) = {
+  .name = "lb-local6-input",
+  .vector_size = sizeof (u32),
+  .type = VLIB_NODE_TYPE_INTERNAL,
+  .format_trace = format_lb_local_trace,
+  .n_next_nodes = LB_LOCAL6_N_NEXT,
+  .next_nodes = {
+    [LB_LOCAL6_NEXT_DROP] = "error-drop",
+    [LB_LOCAL6_NEXT_LOOKUP] = "ip6-lookup",
+    [LB_LOCAL6_NEXT_IP6_NAT6] = "lb6-nat6-port",
+    [LB_LOCAL6_NEXT_IP6_GRE4] = "lb6-gre4",
+    [LB_LOCAL6_NEXT_IP6_GRE6] = "lb6-gre6",
+    [LB_LOCAL6_NEXT_IP6_GRE4_PORT] = "lb6-gre4-port",
+    [LB_LOCAL6_NEXT_IP6_GRE6_PORT] = "lb6-gre6-port",
+  },
+};

@@ -76,6 +76,30 @@ typedef enum {
   LB_NAT6_IN2OUT_N_NEXT,
 } LB_nat6_in2out_next_t;
 
+typedef enum {
+  LB_LOCAL4_NEXT_DROP,
+  LB_LOCAL4_NEXT_LOOKUP,
+  LB_LOCAL4_NEXT_IP4_NAT4,
+  LB_LOCAL4_NEXT_IP4_GRE4,
+  LB_LOCAL4_NEXT_IP4_GRE6,
+  LB_LOCAL4_NEXT_IP4_GRE4_PORT,
+  LB_LOCAL4_NEXT_IP4_GRE6_PORT,
+  LB_LOCAL4_NEXT_IP4_DSR,
+  LB_LOCAL4_NEXT_IP4_DSR_PORT,
+  LB_LOCAL4_N_NEXT,
+} LB_local4_next_t;
+
+typedef enum {
+  LB_LOCAL6_NEXT_DROP,
+  LB_LOCAL6_NEXT_LOOKUP,
+  LB_LOCAL6_NEXT_IP6_NAT6,
+  LB_LOCAL6_NEXT_IP6_GRE4,
+  LB_LOCAL6_NEXT_IP6_GRE6,
+  LB_LOCAL6_NEXT_IP6_GRE4_PORT,
+  LB_LOCAL6_NEXT_IP6_GRE6_PORT,
+  LB_LOCAL6_N_NEXT,
+} LB_local6_next_t;
+
 #define foreach_lb_nat_in2out_error                       \
 _(UNSUPPORTED_PROTOCOL, "Unsupported protocol")         \
 _(IN2OUT_PACKETS, "Good in2out packets processed")      \
@@ -280,6 +304,29 @@ typedef struct {
   };
 } vip_port_key_t;
 
+typedef union
+{
+    struct {
+        ip4_address_t address;
+        u32 fib_index;
+        u16 port;
+        u8  protocol;
+    };
+    u64 as_u64[2];
+
+} lb_vip_local4_key_t;
+
+typedef union
+{
+    struct {
+        ip6_address_t address;
+        u32 fib_index;
+        u16 port;
+        u8  protocol;
+    };
+    u64 as_u64[3];
+} lb_vip_local6_key_t;
+
 typedef struct
 {
     clib_spinlock_t lock_self;
@@ -386,7 +433,9 @@ typedef struct {
 #define LB_VIP_FLAGS_USED 0x1
 #define LB_VIP_FLAGS_SRC_IP_STICKY 0x2
 #define LB_VIP_FLAGS_IPV4_SNAT 0x4
+#define LB_VIP_FLAGS_LOCAL 0x8
 
+  u32 local_sw_if_index;
   /**
    * Pool of AS indexes used for this VIP.
    * This also includes ASs that have been removed (but are still referenced).
@@ -421,6 +470,9 @@ typedef struct {
 
 #define lb_vip_is_double_nat44(vip)                                          \
   (((vip)->flags & LB_VIP_FLAGS_IPV4_SNAT) != 0)
+
+#define lb_vip_is_local(vip)                                          \
+  (((vip)->flags & LB_VIP_FLAGS_LOCAL) != 0)
 
 /* clang-format off */
 #define lb_vip_is_gre4(vip) (((vip)->type == LB_VIP_TYPE_IP6_GRE4 \
@@ -651,6 +703,10 @@ typedef struct {
   /* hash lookup vip_index by key: {u16: nodeport} */
   uword * vip_index_by_nodeport;
 
+  /* hash lookup vip_index by key: {fib_index, ip_address, protocol, port}*/
+  uword * vip_index_by_local4;
+  uword * vip_index_by_local6;
+
   /**
    * Node next index for IP adjacencies, for each of the traffic types.
    */
@@ -732,6 +788,10 @@ typedef struct {
   /* lb nat interface */
   u32 *lb_enabled_nat4_by_sw_if;
   u32 *lb_enabled_nat6_by_sw_if;
+
+  /* lb local interface */
+  u32 *lb_enabled_local4_by_sw_if;
+  u32 *lb_enabled_local6_by_sw_if;
 
   /**
    * API dynamically registered base ID.

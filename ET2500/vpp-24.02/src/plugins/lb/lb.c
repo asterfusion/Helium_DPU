@@ -1230,6 +1230,99 @@ static void lb_vip_add_adjacency(lb_main_t *lbm, lb_vip_t *vip,
   dpo_reset(&dpo);
 }
 
+static void lb_vip_add_local_check(lb_main_t *lbm, lb_vip_t *vip)
+{
+    u32 if_address_index;
+    ip_interface_address_t *if_address;
+    if (lb_vip_is_ip4(vip->type))
+    {
+        if (vip->plen - 96 != 32)
+            return;
+
+        ip4_main_t *im = &ip4_main;
+        ip_lookup_main_t *lm = &im->lookup_main;
+        ip4_address_fib_t ip4_af;
+
+        clib_memcpy_fast (&ip4_af.ip4_addr, &vip->prefix.ip4, sizeof (ip4_af.ip4_addr));
+        ip4_af.fib_index = vip->fib_index;
+        if_address_index = ip_interface_address_find (lm, &ip4_af, 32);
+
+        if (~0 == if_address_index)
+            return;
+
+        if_address = pool_elt_at_index (lm->if_address_pool, if_address_index);
+
+        clib_warning("vip is local ip4 by if_address_index %u sw_if_index %u.", if_address_index, if_address->sw_if_index);
+
+        lb_vip_local4_key_t key;
+        clib_memset(&key, 0, sizeof(lb_vip_local4_key_t));
+        key.address = vip->prefix.ip4;
+        key.fib_index = vip->fib_index;
+        key.protocol = vip->protocol;
+        key.port = clib_host_to_net_u16(vip->port);
+        hash_set_mem_alloc (&lbm->vip_index_by_local4, &key, vip - lbm->vips);
+
+        vec_validate (lbm->lb_enabled_local4_by_sw_if, if_address->sw_if_index);
+        if (!lbm->lb_enabled_local4_by_sw_if[if_address->sw_if_index])
+        {
+            ++lbm->lb_enabled_local4_by_sw_if[if_address->sw_if_index];
+            vnet_feature_enable_disable ("ip4-local", "lb-local4-input", if_address->sw_if_index, 1, 0, 0);
+        }
+        else
+        {
+            ++lbm->lb_enabled_local4_by_sw_if[if_address->sw_if_index];
+        }
+
+        vip->flags |= LB_VIP_FLAGS_LOCAL;
+        vip->local_sw_if_index = if_address->sw_if_index;
+    }
+    else
+    {
+        if (vip->plen != 128)
+            return;
+
+        ip6_main_t *im = &ip6_main;
+        ip_lookup_main_t *lm = &im->lookup_main;
+        ip6_address_fib_t ip6_af;
+
+        clib_memcpy_fast (&ip6_af.ip6_addr, &vip->prefix.ip6, sizeof (ip6_af.ip6_addr));
+        ip6_af.fib_index = vip->fib_index;
+
+        if_address_index = ip_interface_address_find (lm, &ip6_af, 128);
+
+        if (~0 == if_address_index)
+            return;
+
+        if_address = pool_elt_at_index (lm->if_address_pool, if_address_index);
+
+        clib_warning("vip is local ip6 by if_address_index %u sw_if_index %u.", if_address_index, if_address->sw_if_index);
+
+        lb_vip_local6_key_t key;
+        clib_memset(&key, 0, sizeof(lb_vip_local6_key_t));
+        clib_memcpy_fast (&key.address, &vip->prefix.ip6, sizeof (key.address));
+        key.fib_index = vip->fib_index;
+        key.protocol = vip->protocol;
+        key.port = clib_host_to_net_u16(vip->port);
+        hash_set_mem_alloc (&lbm->vip_index_by_local6, &key, vip - lbm->vips);
+
+        vec_validate (lbm->lb_enabled_local6_by_sw_if, if_address->sw_if_index);
+        if (!lbm->lb_enabled_local6_by_sw_if[if_address->sw_if_index])
+        {
+            ++lbm->lb_enabled_local6_by_sw_if[if_address->sw_if_index];
+            vnet_feature_enable_disable ("ip6-local", "lb-local6-input", if_address->sw_if_index, 1, 0, 0);
+        }
+        else
+        {
+            ++lbm->lb_enabled_local6_by_sw_if[if_address->sw_if_index];
+        }
+
+        vip->flags |= LB_VIP_FLAGS_LOCAL;
+        vip->local_sw_if_index = if_address->sw_if_index;
+    }
+
+    return;
+}
+
 /**
  * Add the VIP filter entry
  */
@@ -1318,6 +1411,59 @@ static void lb_vip_del_adjacency(lb_main_t *lbm, lb_vip_t *vip)
       pfx.fp_proto = FIB_PROTOCOL_IP6;
   }
   fib_table_entry_special_remove(0, &pfx, lb_fib_src);
+}
+
+static void lb_vip_del_local_check(lb_main_t *lbm, lb_vip_t *vip)
+{
+    if (!lb_vip_is_local(vip))
+        return;
+
+    if (lb_vip_is_ip4(vip->type))
+    {
+        if (vip->plen - 96 != 32)
+            return;
+
+        clib_warning("vip is local ip4 by sw_if_index %u.", vip->local_sw_if_index);
+
+        lb_vip_local4_key_t key;
+        clib_memset(&key, 0, sizeof(lb_vip_local4_key_t));
+        key.address = vip->prefix.ip4;
+        key.fib_index = vip->fib_index;
+        key.protocol = vip->protocol;
+        key.port = clib_host_to_net_u16(vip->port);
+        hash_unset_mem_free (&lbm->vip_index_by_local4, &key);
+
+        vec_validate (lbm->lb_enabled_local4_by_sw_if, vip->local_sw_if_index);
+        if (lbm->lb_enabled_local4_by_sw_if[vip->local_sw_if_index])
+            --lbm->lb_enabled_local4_by_sw_if[vip->local_sw_if_index];
+
+        if (!lbm->lb_enabled_local4_by_sw_if[vip->local_sw_if_index])
+            vnet_feature_enable_disable ("ip4-local", "lb-local4-input", vip->local_sw_if_index, 0, 0, 0);
+    }
+    else
+    {
+        if (vip->plen != 128)
+            return;
+
+        clib_warning("vip is local ip6 by sw_if_index %u.", vip->local_sw_if_index);
+
+        lb_vip_local6_key_t key;
+        clib_memset(&key, 0, sizeof(lb_vip_local6_key_t));
+        clib_memcpy_fast (&key.address, &vip->prefix.ip6, sizeof (key.address));
+        key.fib_index = vip->fib_index;
+        key.protocol = vip->protocol;
+        key.port = clib_host_to_net_u16(vip->port);
+        hash_unset_mem_free (&lbm->vip_index_by_local6, &key);
+
+        vec_validate (lbm->lb_enabled_local6_by_sw_if, vip->local_sw_if_index);
+        if (lbm->lb_enabled_local6_by_sw_if[vip->local_sw_if_index])
+            --lbm->lb_enabled_local6_by_sw_if[vip->local_sw_if_index];
+
+        if (!lbm->lb_enabled_local6_by_sw_if[vip->local_sw_if_index])
+            vnet_feature_enable_disable ("ip6-local", "lb-local6-input", vip->local_sw_if_index, 0, 0, 0);
+    }
+
+    return;
 }
 
 int lb_vip_add(lb_vip_add_args_t args, u32 *vip_index)
@@ -1457,6 +1603,9 @@ int lb_vip_add(lb_vip_add_args_t args, u32 *vip_index)
   //Create adjacency to direct traffic
   lb_vip_add_adjacency(lbm, vip, &vip_prefix_index);
 
+  //enable is local ip feature
+  lb_vip_add_local_check(lbm, vip);
+
   if ( (lb_vip_is_nat4_port(vip) || lb_vip_is_nat6_port(vip))
       && (args.encap_args.srv_type == LB_SRV_TYPE_NODEPORT) )
     {
@@ -1554,6 +1703,9 @@ int lb_vip_del(u32 vip_index)
           }
       }
   }
+
+  //disable is local ip feature
+  lb_vip_del_local_check(lbm, vip);
 
   //Delete adjacency
   lb_vip_del_adjacency(lbm, vip);
@@ -2153,6 +2305,12 @@ lb_init (vlib_main_t * vm)
 
   lbm->vip_index_by_nodeport
     = hash_create_mem (0, sizeof(u16), sizeof (uword));
+
+  lbm->vip_index_by_local4
+    = hash_create_mem (0, sizeof(lb_vip_local4_key_t), sizeof (uword));
+
+  lbm->vip_index_by_local6
+    = hash_create_mem (0, sizeof(lb_vip_local6_key_t), sizeof (uword));
 
 
   clib_bihash_init_8_16 (&lbm->sticky_ht, "lb_stick_ht", lbm->sticky_buckets,
