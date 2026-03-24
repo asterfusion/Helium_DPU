@@ -339,7 +339,7 @@ typedef struct {
 } lb_pseudorand_t;
 
 static int
-lb_sticky_foreach_free_cb (clib_bihash_kv_8_8_t * kv, void *arg)
+lb_sticky_foreach_free_cb (clib_bihash_kv_8_16_t * kv, void *arg)
 {
     lb_main_t *lbm = &lb_main;
 
@@ -359,7 +359,7 @@ lb_sticky_foreach_free_cb (clib_bihash_kv_8_8_t * kv, void *arg)
                 lb_kv->lb_key.hash,
                 &lbm->ass[lb_kv->lb_value.asindex].address, 0);
 
-        if (clib_bihash_add_del_8_8(&lbm->sticky_ht, kv, 0))
+        if (clib_bihash_add_del_8_16(&lbm->sticky_ht, kv, 0))
             clib_warning("foreach stick table : remove entry failed!");
     }
     return 1;
@@ -644,20 +644,20 @@ int lb_conf(ip4_address_t *ip4_address, ip6_address_t *ip6_address,
   {
       lbm->sticky_buckets = sticky_buckets;
 
-      if (clib_bihash_is_initialised_8_8(&lbm->sticky_ht))
+      if (clib_bihash_is_initialised_8_16(&lbm->sticky_ht))
       {
           lb_sticky_is_foreach_ctx_t ctx;
           ctx.vip_index = ~0;
           ctx.as_index = ~0;
           ctx.thread_index = vlib_get_thread_index();
-          clib_bihash_foreach_key_value_pair_8_8(&lbm->sticky_ht, lb_sticky_foreach_free_cb, &ctx);
+          clib_bihash_foreach_key_value_pair_8_16(&lbm->sticky_ht, lb_sticky_foreach_free_cb, &ctx);
       }
 
-      clib_bihash_free_8_8(&lbm->sticky_ht);
+      clib_bihash_free_8_16(&lbm->sticky_ht);
 
       //reinit
-      clib_bihash_init_8_8 (&lbm->sticky_ht, "lb_stick_ht", lbm->sticky_buckets, LB_DEFAULT_STICKY_MEMORY_SIZE);
-      clib_bihash_set_kvp_format_fn_8_8 (&lbm->sticky_ht, format_lb_sticky_ht_kvp);
+      clib_bihash_init_8_16 (&lbm->sticky_ht, "lb_stick_ht", lbm->sticky_buckets, LB_DEFAULT_STICKY_MEMORY_SIZE);
+      clib_bihash_set_kvp_format_fn_8_16 (&lbm->sticky_ht, format_lb_sticky_ht_kvp);
   }
 
   lb_put_writer_lock();
@@ -1055,7 +1055,7 @@ lb_flush_vip_as (u32 vip_index, u32 as_index)
   ctx.as_index = as_index;
   ctx.thread_index = vlib_get_thread_index();
 
-  clib_bihash_foreach_key_value_pair_8_8(&lbm->sticky_ht, lb_sticky_foreach_free_cb, &ctx);
+  clib_bihash_foreach_key_value_pair_8_16(&lbm->sticky_ht, lb_sticky_foreach_free_cb, &ctx);
 
   return 0;
 }
@@ -1986,14 +1986,15 @@ u8 *format_lb_sticky_ht_kvp (u8 *s, va_list *args)
 {
     vlib_main_t *vm = vlib_get_main();
     u32 lb_time = lb_hash_time_now (vm);
-    clib_bihash_kv_8_8_t *v = va_arg (*args, clib_bihash_kv_8_8_t *);
+    clib_bihash_kv_8_16_t *v = va_arg (*args, clib_bihash_kv_8_16_t *);
 
     lb_sticky_kv_t *lb_kv = (lb_sticky_kv_t *)v;
 
-    s = format (s, "Key: hash %u vip %u Value : now_time %u (timeout %u) index %u ",
+    s = format (s, "Key: hash %u vip %u Value : now_time %u (timeout %u) index %u last timeout sync %u",
                 lb_kv->lb_key.hash, lb_kv->lb_key.vip_index,
                 lb_time,
-                lb_kv->lb_value.timeout, lb_kv->lb_value.asindex);
+                lb_kv->lb_value.timeout, lb_kv->lb_value.asindex,
+                lb_kv->lb_value.last_ha_sync_timeout);
     return s;
 }
 
@@ -2154,7 +2155,7 @@ lb_init (vlib_main_t * vm)
     = hash_create_mem (0, sizeof(u16), sizeof (uword));
 
 
-  clib_bihash_init_8_8 (&lbm->sticky_ht, "lb_stick_ht", lbm->sticky_buckets,
+  clib_bihash_init_8_16 (&lbm->sticky_ht, "lb_stick_ht", lbm->sticky_buckets,
                         LB_DEFAULT_STICKY_MEMORY_SIZE);
 
   clib_bihash_init_16_8 (&lbm->vip_index_per_port,
@@ -2177,7 +2178,7 @@ lb_init (vlib_main_t * vm)
                         LB_DYNAMIC_MAPPING_MEMORY_SIZE);
 
 
-  clib_bihash_set_kvp_format_fn_8_8 (&lbm->sticky_ht, format_lb_sticky_ht_kvp);
+  clib_bihash_set_kvp_format_fn_8_16 (&lbm->sticky_ht, format_lb_sticky_ht_kvp);
   clib_bihash_set_kvp_format_fn_16_8 (&lbm->vip_index_per_port, format_lb_vip_index_per_port_kvp);
   clib_bihash_set_kvp_format_fn_16_8 (&lbm->mapping_by_as4, format_lb_mapping_by_as4_kvp);
   clib_bihash_set_kvp_format_fn_24_8 (&lbm->mapping_by_as6, format_lb_mapping_by_as6_kvp);

@@ -9,7 +9,9 @@
 
 #define LB_HA_SYNC_SNAPSHOT_PROCESS_DEFAULT_FREQUENCY   (128)
 
-#define LB_HAS_SYNC_SNAPSHOT_BUCKET_WALK_SCALING        (9)
+#define LB_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING        (9)
+
+#define LB_HA_SYNC_TIMEOUT_UPDATE_INTERVAL             (2) //2s
 
 #define LB_HA_SYNC_CTX_FLAG_SNAPSHOT_STICKY_ACT (1 << 0)
 #define LB_HA_SYNC_CTX_FLAG_SNAPSHOT_VIP_SNAT_ACT (1 << 1)
@@ -23,6 +25,22 @@ typedef struct
 
     u8 ha_sync_plugin_found;
     u8 ha_sync_register;
+
+    /*
+     * The active time of the lb table entry is affected by the corresponding single packet.
+     * Sending event information for each packet to update timeouts will incur significant overhead.
+     * Setting an update interval will effectively reduce this cost.
+     *
+     * The basic idea is as follows: 
+     *   When there is a packet update timeout, it will check whether it exceeds the configured interval, 
+     *   and send an event if it exceeds.
+     *
+     *   When synchronizing table entries, the timeout in the event will be added to it. 
+     *   The actual timeout received by the receiver is (real_timeout+interval). 
+     *   The reason is that we need to ensure that the timeout of the synchronization side device 
+     *   for this table entry is greater than that of the device initiating the table entry event
+     */
+    u32 ha_sync_timeout_update_interval;
 
     u32 flag;
 
@@ -156,6 +174,7 @@ extern void *ha_sync_per_thread_buffer_add_ptr;
 /* func */
 int lb_ha_sync_register (void);
 void lb_ha_sync_unregister (void);
+int lb_ha_sync_set_timeout_update_interval(u32 ha_sync_timeout_update_interval);
 
 #define LB_CHECK_HA_SYNC (!lb_ha_sync_ctx.ha_sync_plugin_found || \
                           !lb_ha_sync_ctx.ha_sync_register || \
@@ -180,6 +199,8 @@ static_always_inline void lb_ha_sync_event_sticky_session_notify(u32 thread_id, 
     if(LB_CHECK_HA_SYNC) return;
 
     lb_ha_sync_event_sticky_session_t event;
+
+    timeout += lb_ha_sync_ctx.ha_sync_timeout_update_interval;
 
     event.header.event_thread_id = thread_id;
     event.header.event_op = op;
@@ -209,6 +230,8 @@ static_always_inline void lb_ha_sync_event_vip_snat_session_notify(u32 thread_id
     if(LB_CHECK_HA_SYNC) return;
 
     lb_ha_sync_event_vip_snat_session_t event;
+
+    timeout += lb_ha_sync_ctx.ha_sync_timeout_update_interval;
 
     event.header.event_thread_id = thread_id;
     event.header.event_op = op;

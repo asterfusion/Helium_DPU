@@ -37,7 +37,7 @@
 #include <vnet/dpo/dpo.h>
 #include <vnet/fib/fib_table.h>
 #include <vppinfra/hash.h>
-#include <vppinfra/bihash_8_8.h>
+#include <vppinfra/bihash_8_16.h>
 #include <vppinfra/bihash_16_8.h>
 #include <vppinfra/bihash_24_8.h>
 #include <lb/lbhash.h>
@@ -487,17 +487,19 @@ typedef union {
 } lb_sticky_key_t;
 
 typedef union {
-    u64 value;
+    u64 value[2];
     struct {
         u32 timeout;
         u32 asindex;
+        u32 last_ha_sync_timeout;
+        u32 reserve;
     };
 } lb_sticky_value_t;
 
 typedef union {
     struct {
         u64 key;
-        u64 value;
+        u64 value[2];
     };
     struct {
         lb_sticky_key_t lb_key;
@@ -613,6 +615,7 @@ typedef struct {
    */
   u32 vip_index;
   u32 timeout;
+  u32 last_ha_sync_timeout;
 } lb_vip_snat_mapping_t;
 
 typedef struct {
@@ -669,7 +672,7 @@ typedef struct {
   u32 sticky_buckets;
 
   /* sticky hash */
-  clib_bihash_8_8_t sticky_ht;
+  clib_bihash_8_16_t sticky_ht;
 
   /**
    * Flow timeout in seconds.
@@ -820,7 +823,7 @@ int lb_nat6_interface_add_del (u32 sw_if_index, int is_del);
 
 format_function_t format_lb_main;
 
-int lb_sticky_is_idle_cb (clib_bihash_kv_8_8_t * kv, void *arg);
+int lb_sticky_is_idle_cb (clib_bihash_kv_8_16_t * kv, void *arg);
 
 #define lb_get_writer_lock() clib_spinlock_lock (&lb_main.writer_lock)
 #define lb_put_writer_lock() clib_spinlock_unlock (&lb_main.writer_lock)

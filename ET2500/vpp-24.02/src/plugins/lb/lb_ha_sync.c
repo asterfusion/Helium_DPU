@@ -120,7 +120,7 @@ void generate_lb_sticky_table_snapshot(vlib_main_t * vm, lb_ha_sync_ctx_t *ctx)
 
     u32 lb_time_now = lb_hash_time_now (vm);
 
-    clib_bihash_8_8_t *sticky_ht = &lbm->sticky_ht;
+    clib_bihash_8_16_t *sticky_ht = &lbm->sticky_ht;
 
     if (PREDICT_FALSE (sticky_ht->instantiated == 0))
     {
@@ -130,34 +130,35 @@ void generate_lb_sticky_table_snapshot(vlib_main_t * vm, lb_ha_sync_ctx_t *ctx)
 
     u32 i, j, k;
 
-    clib_bihash_bucket_8_8_t *b;
-    clib_bihash_value_8_8_t *v;
+    clib_bihash_bucket_8_16_t *b;
+    clib_bihash_value_8_16_t *v;
     lb_sticky_kv_t *lb_kv;
     lb_vip_t *vip;
 
-    u32 bucket_walk_end = (sticky_ht->nbuckets >> LB_HAS_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
+    u32 bucket_walk_end = (sticky_ht->nbuckets >> LB_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
 
     bucket_walk_end = ctx->snapshot_sticky_index + bucket_walk_end > 0 ? bucket_walk_end : sticky_ht->nbuckets;
     bucket_walk_end = bucket_walk_end < sticky_ht->nbuckets ? bucket_walk_end : sticky_ht->nbuckets;
                             
     for (i = ctx->snapshot_sticky_index; i < bucket_walk_end; i++)
     {
-        b = clib_bihash_get_bucket_8_8 (sticky_ht, i);
-        if (clib_bihash_bucket_is_empty_8_8 (b))
+        b = clib_bihash_get_bucket_8_16 (sticky_ht, i);
+        if (clib_bihash_bucket_is_empty_8_16 (b))
             continue;
 
-        v = clib_bihash_get_value_8_8 (sticky_ht, b->offset);
+        v = clib_bihash_get_value_8_16 (sticky_ht, b->offset);
         for (j = 0; j < (1 << b->log2_pages); j++)
         {
-            for (k = 0; k < (sizeof(v->kvp) / sizeof(clib_bihash_kv_8_8_t)); k++) 
+            for (k = 0; k < (sizeof(v->kvp) / sizeof(clib_bihash_kv_8_16_t)); k++)
             {
-                if (clib_bihash_is_free_8_8 (&v->kvp[k])) continue;
+                if (clib_bihash_is_free_8_16 (&v->kvp[k])) continue;
 
                 if (clib_u32_loop_gt(lb_time_now, lb_kv->lb_value.timeout)) continue;
 
                 lb_kv = (lb_sticky_kv_t *)&v->kvp[k];
                 vip = pool_elt_at_index(lbm->vips, lb_kv->lb_key.vip_index);
 
+                lb_kv->lb_value.last_ha_sync_timeout = lb_time_now;
                 lb_ha_sync_event_sticky_session_notify(vm->thread_index, LB_HA_OP_ADD_FORCE, 
                                                        vip, lb_kv->lb_key.hash, 
                                                        &lbm->ass[lb_kv->lb_value.asindex].address, 
@@ -196,7 +197,7 @@ void generate_lb_vip_snat_table_snapshot(vlib_main_t *vm, lb_ha_sync_ctx_t *ctx)
     lb_vip_t *vip;
     lb_vip_snat_mapping_t *flow;
 
-    uword pool_walk_end = (pool_max_num >> LB_HAS_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
+    uword pool_walk_end = (pool_max_num >> LB_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
     pool_walk_end = ctx->snapshot_vip_snat_index + pool_walk_end > 0 ? pool_walk_end : pool_max_num;
     pool_walk_end = pool_walk_end < pool_max_num ? pool_walk_end : pool_max_num;
 
@@ -210,6 +211,7 @@ void generate_lb_vip_snat_table_snapshot(vlib_main_t *vm, lb_ha_sync_ctx_t *ctx)
 
         vip = pool_elt_at_index(lbm->vips, flow->vip_index);
 
+        flow->last_ha_sync_timeout = lb_time_now;
         lb_ha_sync_event_vip_snat_session_notify(vm->thread_index, LB_HA_OP_ADD_FORCE,
                 vip, flow, flow->timeout - lb_time_now);
 
@@ -357,31 +359,34 @@ lb_ha_sync_apply_sticky_session_proc(lb_ha_sync_event_sticky_session_t *event)
     kv.lb_key.vip_index = vip_index;
     kv.lb_value.asindex = as_index;
     kv.lb_value.timeout = clib_net_to_host_u32(data->timeout) + lb_time;
+    kv.lb_value.last_ha_sync_timeout = lb_time;
 
     
-    clib_bihash_8_8_t *sticky_ht = &lbm->sticky_ht;
-    u64 sticky_hash = clib_bihash_hash_8_8((clib_bihash_kv_8_8_t *)&kv);
+    clib_bihash_8_16_t *sticky_ht = &lbm->sticky_ht;
+    u64 sticky_hash = clib_bihash_hash_8_16((clib_bihash_kv_8_16_t *)&kv);
     switch (header->event_op)
     {
     case LB_HA_OP_ADD:
     case LB_HA_OP_ADD_FORCE:
+    case LB_HA_OP_UPDATE:
         {
             lb_sticky_kv_t vv;
             //check kv exists
-            if (!clib_bihash_search_inline_2_with_hash_8_8(sticky_ht, sticky_hash, (clib_bihash_kv_8_8_t *)&kv, (clib_bihash_kv_8_8_t *)&vv))
+            if (!clib_bihash_search_inline_2_with_hash_8_16(sticky_ht, sticky_hash, (clib_bihash_kv_8_16_t *)&kv, (clib_bihash_kv_8_16_t *)&vv))
             {
                 //update timeout
-                vv.lb_value.timeout = lb_time + data->timeout;
+                vv.lb_value.timeout = clib_net_to_host_u32(data->timeout) + lb_time;
+                vv.lb_value.last_ha_sync_timeout = lb_time;
                 //update sticky
-                clib_bihash_add_del_with_hash_8_8(sticky_ht, (clib_bihash_kv_8_8_t *)&vv, sticky_hash, 1);
+                clib_bihash_add_del_with_hash_8_16(sticky_ht, (clib_bihash_kv_8_16_t *)&vv, sticky_hash, 1);
             }
             else
             {
                 lb_sticky_is_idle_ctx_t ctx;
                 ctx.lb_time_now = lb_time;
                 ctx.thread_index = header->event_thread_id;
-                if (clib_bihash_add_or_overwrite_stale_8_8 (
-                          sticky_ht, (clib_bihash_kv_8_8_t * )&kv,
+                if (clib_bihash_add_or_overwrite_stale_8_16 (
+                          sticky_ht, (clib_bihash_kv_8_16_t * )&kv,
                           lb_sticky_is_idle_cb, &ctx))
                 {
                     clib_warning("Lb ha-sync stick table add entry failed!!");
@@ -398,10 +403,10 @@ lb_ha_sync_apply_sticky_session_proc(lb_ha_sync_event_sticky_session_t *event)
         {
             lb_sticky_kv_t vv;
             //check kv exists
-            if (!clib_bihash_search_inline_2_with_hash_8_8(sticky_ht, sticky_hash, (clib_bihash_kv_8_8_t *)&kv, (clib_bihash_kv_8_8_t *)&vv))
+            if (!clib_bihash_search_inline_2_with_hash_8_16(sticky_ht, sticky_hash, (clib_bihash_kv_8_16_t *)&kv, (clib_bihash_kv_8_16_t *)&vv))
             {
                 //del entry
-                clib_bihash_add_del_with_hash_8_8(sticky_ht, (clib_bihash_kv_8_8_t *)&kv, sticky_hash, 0);
+                clib_bihash_add_del_with_hash_8_16(sticky_ht, (clib_bihash_kv_8_16_t *)&kv, sticky_hash, 0);
             }
 #if LB_HASH_SYNC_DEBUG
             else
@@ -411,7 +416,6 @@ lb_ha_sync_apply_sticky_session_proc(lb_ha_sync_event_sticky_session_t *event)
 #endif
         }
         break;
-    case LB_HA_OP_UPDATE:
     case LB_HA_OP_REFRESH:
         clib_warning("LB ha-sync sticky table current not support op %u", header->event_op);
         break;
@@ -503,6 +507,7 @@ lb_ha_sync_vip_snat_sesson_add(lb_ha_sync_vip_snat_session_data_t *data,
         flow->protocol = data->protocol;
         flow->vip_index = vip - lbm->vips;
         flow->timeout = lb_time_now + clib_net_to_host_u32(data->timeout);
+        flow->last_ha_sync_timeout = lb_time_now;
 
         kv0.value = flow_index;
         kv1.value = flow_index;
@@ -517,6 +522,7 @@ lb_ha_sync_vip_snat_sesson_add(lb_ha_sync_vip_snat_session_data_t *data,
         //update flow timeout
         flow = pool_elt_at_index(lbm->vip_snat_mappings, vv0.value);
         flow->timeout = lb_time_now + clib_net_to_host_u32(data->timeout);
+        flow->last_ha_sync_timeout = lb_time_now;
     }
     else
     {
@@ -585,7 +591,8 @@ lb_ha_sync_vip_snat_sesson_add(lb_ha_sync_vip_snat_session_data_t *data,
             flow->outside_fib_index = outside_fib_index;
             flow->protocol = data->protocol;
             flow->vip_index = vip - lbm->vips;
-            flow->timeout = lb_time_now + data->timeout;
+            flow->timeout = lb_time_now + clib_net_to_host_u32(data->timeout);
+            flow->last_ha_sync_timeout = lb_time_now;
 
             kv0.value = flow_index;
             kv1.value = flow_index;
@@ -895,6 +902,7 @@ lb_ha_sync_apply_vip_snat_session_proc(lb_ha_sync_event_vip_snat_session_t *even
     switch (header->event_op)
     {
     case LB_HA_OP_ADD:
+    case LB_HA_OP_UPDATE:
         {
             lb_ha_sync_vip_snat_sesson_add(data, vip, snat_addresses, address, outside_vrf_id, vrf_id, 0);
         }
@@ -913,7 +921,6 @@ lb_ha_sync_apply_vip_snat_session_proc(lb_ha_sync_event_vip_snat_session_t *even
             lb_ha_sync_vip_snat_sesson_del(data, vip, snat_addresses, address, outside_vrf_id, vrf_id, 1);
         }
         break;
-    case LB_HA_OP_UPDATE:
     case LB_HA_OP_REFRESH:
         clib_warning("LB ha-sync sticky table current not support op %u", header->event_op);
         break;
@@ -977,6 +984,12 @@ static int *ha_sync_register_session_application_ptr;
 static int *ha_sync_unregister_session_application_ptr;
 void *ha_sync_per_thread_buffer_add_ptr;
 
+int lb_ha_sync_set_timeout_update_interval(u32 ha_sync_timeout_update_interval)
+{
+    lb_ha_sync_ctx.ha_sync_timeout_update_interval = ha_sync_timeout_update_interval;
+    return 0;
+}
+
 int lb_ha_sync_register (void)
 {
     ha_sync_register_session_application_ptr =
@@ -1010,6 +1023,8 @@ int lb_ha_sync_register (void)
     }
 
     lb_ha_sync_ctx.ha_sync_register = 1;
+
+    lb_ha_sync_ctx.ha_sync_timeout_update_interval = LB_HA_SYNC_TIMEOUT_UPDATE_INTERVAL;
     return 0;
 }
 

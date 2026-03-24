@@ -14,6 +14,7 @@
  */
 
 #include <lb/lb.h>
+#include <lb/lb_ha_sync.h>
 #include <lb/util.h>
 
 static clib_error_t *
@@ -956,4 +957,46 @@ VLIB_CLI_COMMAND (lb_flowtable_flush_command, static) =
   .path = "test lb flowtable flush",
   .short_help = "test lb flowtable flush",
   .function = lb_flowtable_flush_command_fn,
+};
+
+static clib_error_t *
+lb_ha_sync_command_fn (vlib_main_t * vm,
+              unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  int ret;
+  clib_error_t *error = 0;
+
+  u32 ha_sync_timeout_update_interval = LB_HA_SYNC_TIMEOUT_UPDATE_INTERVAL;
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "update-timeout-interval %d", &ha_sync_timeout_update_interval))
+        ;
+    else {
+      error = clib_error_return (0, "parse error: '%U'",
+                                 format_unformat_error, line_input);
+      goto done;
+    }
+  }
+
+  if ((ret = lb_ha_sync_set_timeout_update_interval(ha_sync_timeout_update_interval))) {
+    error = clib_error_return (0, "lb ha-sync error %d", ret);
+    goto done;
+  }
+
+done:
+  unformat_free (line_input);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND (lb_ha_sync_command, static) =
+{
+  .path = "lb ha-sync",
+  .short_help = "lb ha-sync [update-timeout-interval <s>]",
+  .function = lb_ha_sync_command_fn,
 };
