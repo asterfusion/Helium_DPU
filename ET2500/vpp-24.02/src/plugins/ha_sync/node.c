@@ -235,6 +235,23 @@ ha_sync_response_batches_flush_due (u32 thread_index, f64 now)
     }
 }
 
+static_always_inline u32
+ha_sync_request_pacing_budget (ha_sync_main_t *hsm,
+                               ha_sync_per_thread_data_t *ptd, f64 now)
+{
+  if (hsm->request_pacing_interval_sec <= 0 ||
+      hsm->request_pacing_pkts_per_interval == 0)
+    return ~0;
+
+  if (ptd->next_request_send_time <= 0 || now >= ptd->next_request_send_time)
+    {
+      ptd->next_request_send_time = now + hsm->request_pacing_interval_sec;
+      return hsm->request_pacing_pkts_per_interval;
+    }
+
+  return 0;
+}
+
 static_always_inline int
 ha_sync_output_build_request_buffer (vlib_main_t *vm,
                                      vlib_node_runtime_t *node,
@@ -673,6 +690,8 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
   u32 n_tx_hello_response = 0;
   u32 n_tx_heartbeat = 0;
   u32 n_pool_miss = 0;
+  f64 now;
+  u32 request_budget;
 
   if (!hsm->enabled)
     return 0;
@@ -684,6 +703,8 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
     return 0;
   ptb = &hsm->per_thread_data[thread_index];
   ha_sync_drain_ack_fifo (thread_index, ptb);
+  now = vlib_time_now (vm);
+  request_budget = ha_sync_request_pacing_budget (hsm, ptb, now);
   
   /** calculate total number of packets to send */
   u32 n_fast = clib_fifo_elts (ptb->fast_msg_queue);
@@ -778,7 +799,7 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
 
   }
 
-  if (b_idx < n_alloc && n_pending > 0)
+  if (b_idx < n_alloc && n_pending > 0 && request_budget > 0)
   {
     u32 remaining = n_alloc - b_idx;
     u32 retry_reserve = 0;
@@ -787,11 +808,13 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
     if (n_retry > 0 && remaining > 1)
       retry_reserve = clib_min (n_retry, clib_max (1u, remaining >> 3));
 
-    while (b_idx < n_alloc && clib_fifo_elts (ptb->pending_fifo) > 0 &&
+    while (b_idx < n_alloc && request_budget > 0 &&
+           clib_fifo_elts (ptb->pending_fifo) > 0 &&
            (n_alloc - b_idx) > retry_reserve)
       {
         u32 seq;
         clib_fifo_sub1 (ptb->pending_fifo, seq);
+        request_budget--;
         if (ha_sync_output_build_request_buffer (
               vm, node, hsm, thread_index, seq, bi[b_idx], &n_pool_miss,
               &n_tx_request_new, &n_tx_request_retx))
@@ -811,10 +834,12 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
       b_idx++;
     }
 
-  while (b_idx < n_alloc && clib_fifo_elts (ptb->pending_fifo) > 0)
+  while (b_idx < n_alloc && request_budget > 0 &&
+         clib_fifo_elts (ptb->pending_fifo) > 0)
     {
       u32 seq;
       clib_fifo_sub1 (ptb->pending_fifo, seq);
+      request_budget--;
       if (ha_sync_output_build_request_buffer (
             vm, node, hsm, thread_index, seq, bi[b_idx], &n_pool_miss,
             &n_tx_request_new, &n_tx_request_retx))
@@ -894,6 +919,9 @@ VLIB_NODE_FN (ha_sync_process_node)
               HA_SYNC_ACK_AGGREGATION_WINDOW_SEC);
   ha_sync_main_t *hsm = &ha_sync_main;
   f64 now;
+
+  if (hsm->request_pacing_interval_sec > 0)
+    timeout = clib_min (timeout, hsm->request_pacing_interval_sec);
 
   vlib_process_wait_for_event_or_clock (vm, timeout);
   while (1)
@@ -999,6 +1027,14 @@ VLIB_NODE_FN (ha_sync_timer_node)
   }
 
   ha_sync_response_batches_flush_due (thread_index, now);
+
+  if (hsm->enabled && hsm->connection_established &&
+      hsm->request_pacing_interval_sec > 0 &&
+      hsm->request_pacing_pkts_per_interval > 0 &&
+      clib_fifo_elts (ptb->pending_fifo) > 0 &&
+      (ptb->next_request_send_time <= 0 ||
+       now >= ptb->next_request_send_time))
+    ha_sync_wake_output_thread (thread_index);
 
   if (hsm->enabled && hsm->connection_established)
   {

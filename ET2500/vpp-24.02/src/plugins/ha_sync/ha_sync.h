@@ -29,6 +29,9 @@
 #define HA_SYNC_MAGIC 0xAF25EE00
 #define HA_SYNC_DEFAULT_INTERVAL_SEC 0.01
 #define HA_SYNC_ACK_AGGREGATION_WINDOW_SEC 0.005
+#define HA_SYNC_DEFAULT_REQUEST_PACING_INTERVAL_SEC 0.003
+#define HA_SYNC_DEFAULT_REQUEST_PACING_INTERVAL_MS 3
+#define HA_SYNC_DEFAULT_REQUEST_PACING_PKTS 128
 #define HA_SYNC_THREAD_BUFFER_FLUSH_INTERVAL_SEC 0.5
 #define HA_SYNC_RETRANSMIT_TIMES 3
 #define HA_SYNC_RETRANSMIT_INTERVAL_SEC 2
@@ -170,6 +173,7 @@ typedef struct
     u32 *ack_drain_vec;     /* reused temp vector for ack drain */
     u32 ack_wakeup_pending;
     f64 last_flush_time;
+    f64 next_request_send_time;
     ha_sync_fast_msg_t *fast_msg_queue;
     ha_sync_ack_batch_t *response_batches;
     u32 *response_batch_active_threads;
@@ -209,6 +213,8 @@ typedef struct
     f64 next_hello_time;
     u32 retransmit_times;
     f64 retransmit_interval;
+    f64 request_pacing_interval_sec;
+    u32 request_pacing_pkts_per_interval;
     u32 global_seq_number;
 
     ha_sync_session_registration_t *registrations;
@@ -280,6 +286,9 @@ int ha_sync_apply_set_config (u32 domain_id, u16 packet_size,
                               u32 retransmit_interval_ms,
                               u32 heartbeat_interval_ms,
                               u32 heartbeat_max_fail_counts);
+int ha_sync_apply_set_request_pacing (u32 interval_ms,
+                                      u32 pkts_per_interval);
+int ha_sync_apply_clear_request_pacing (void);
 int ha_sync_apply_reset_config (void);
 
 void ha_sync_update_all_contexts (void);

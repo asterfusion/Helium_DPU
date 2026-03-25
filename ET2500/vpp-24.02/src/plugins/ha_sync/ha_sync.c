@@ -117,6 +117,7 @@ ha_sync_resources_init (ha_sync_main_t *hsm)
     ha_sync_ack_fifo_reset (ptd);
     vec_reset_length (ptd->ack_drain_vec);
     ptd->ack_wakeup_pending = 0;
+    ptd->next_request_send_time = 0;
     ha_sync_response_batches_reset (ptd, n_threads);
 
     ha_sync_fast_msg_queue_reset (ptd);
@@ -199,6 +200,7 @@ ha_sync_reset_runtime_state ()
     ha_sync_ack_fifo_reset (ptd);
     vec_reset_length (ptd->ack_drain_vec);
     ptd->ack_wakeup_pending = 0;
+    ptd->next_request_send_time = 0;
     ha_sync_response_batches_reset (ptd, vec_len (hsm->per_thread_data));
     ha_sync_fast_msg_queue_reset (ptd);
     vec_free (ptd->timer_expired_vec);
@@ -291,6 +293,10 @@ ha_sync_apply_enable_disable (u8 enable)
       hsm->heartbeat_max_fail_counts = HA_SYNC_HEARTBEAT_MAX_FAIL_COUNTS;
       hsm->retransmit_interval = HA_SYNC_RETRANSMIT_INTERVAL_SEC;
       hsm->retransmit_times = HA_SYNC_RETRANSMIT_TIMES;
+      hsm->request_pacing_interval_sec =
+        HA_SYNC_DEFAULT_REQUEST_PACING_INTERVAL_SEC;
+      hsm->request_pacing_pkts_per_interval =
+        HA_SYNC_DEFAULT_REQUEST_PACING_PKTS;
       ha_sync_release_resources ();
       ha_sync_update_all_contexts ();
 
@@ -446,6 +452,48 @@ ha_sync_apply_set_config (u32 domain_id, u16 packet_size,
 }
 
 int
+ha_sync_apply_set_request_pacing (u32 interval_ms, u32 pkts_per_interval)
+{
+  vlib_main_t *vm = vlib_get_main ();
+  ha_sync_main_t *hsm = &ha_sync_main;
+  ha_sync_per_thread_data_t *ptd;
+
+  if (vlib_get_thread_index () != 0)
+    return VNET_API_ERROR_INVALID_VALUE;
+  if (interval_ms == 0 || pkts_per_interval == 0)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  vlib_worker_thread_barrier_sync (vm);
+  hsm->request_pacing_interval_sec = ((f64) interval_ms) / 1000.0;
+  hsm->request_pacing_pkts_per_interval = pkts_per_interval;
+  vec_foreach (ptd, hsm->per_thread_data)
+    ptd->next_request_send_time = 0;
+  vlib_worker_thread_barrier_release (vm);
+
+  return 0;
+}
+
+int
+ha_sync_apply_clear_request_pacing (void)
+{
+  vlib_main_t *vm = vlib_get_main ();
+  ha_sync_main_t *hsm = &ha_sync_main;
+  ha_sync_per_thread_data_t *ptd;
+
+  if (vlib_get_thread_index () != 0)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  vlib_worker_thread_barrier_sync (vm);
+  hsm->request_pacing_interval_sec = 0;
+  hsm->request_pacing_pkts_per_interval = 0;
+  vec_foreach (ptd, hsm->per_thread_data)
+    ptd->next_request_send_time = 0;
+  vlib_worker_thread_barrier_release (vm);
+
+  return 0;
+}
+
+int
 ha_sync_apply_reset_config (void)
 {
   ha_sync_main_t *hsm = &ha_sync_main;
@@ -466,6 +514,9 @@ ha_sync_apply_reset_config (void)
   hsm->heartbeat_max_fail_counts = HA_SYNC_HEARTBEAT_MAX_FAIL_COUNTS;
   hsm->retransmit_interval = HA_SYNC_RETRANSMIT_INTERVAL_SEC;
   hsm->retransmit_times = HA_SYNC_RETRANSMIT_TIMES;
+  hsm->request_pacing_interval_sec =
+    HA_SYNC_DEFAULT_REQUEST_PACING_INTERVAL_SEC;
+  hsm->request_pacing_pkts_per_interval = HA_SYNC_DEFAULT_REQUEST_PACING_PKTS;
 
   hsm->src_address.as_u32 = 0;
   hsm->peer_address.as_u32 = 0;
@@ -638,6 +689,47 @@ ha_sync_set_retransmit_interval_command_fn (vlib_main_t *vm,
 }
 
 static clib_error_t *
+ha_sync_set_request_pacing_command_fn (vlib_main_t *vm,
+                                       unformat_input_t *input,
+                                       vlib_cli_command_t *cmd)
+{
+  u32 interval_ms = 0;
+  u32 pkts_per_interval = 0;
+  CLIB_UNUSED (vlib_main_t * _vm) = vm;
+  CLIB_UNUSED (vlib_cli_command_t * _cmd) = cmd;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "interval %u", &interval_ms))
+        ;
+      else if (unformat (input, "pkts %u", &pkts_per_interval))
+        ;
+      else
+        return clib_error_return (0, "unknown input `%U`",
+                                  format_unformat_error, input);
+    }
+
+  if (interval_ms == 0 || pkts_per_interval == 0)
+    return clib_error_return (
+      0, "usage: ha_sync set request-pacing interval <ms> pkts <n>");
+
+  return ha_sync_cli_return_api_error (
+    ha_sync_apply_set_request_pacing (interval_ms, pkts_per_interval));
+}
+
+static clib_error_t *
+ha_sync_clear_request_pacing_command_fn (vlib_main_t *vm,
+                                         unformat_input_t *input,
+                                         vlib_cli_command_t *cmd)
+{
+  CLIB_UNUSED (vlib_main_t * _vm) = vm;
+  CLIB_UNUSED (vlib_cli_command_t * _cmd) = cmd;
+  CLIB_UNUSED (unformat_input_t * _input) = input;
+
+  return ha_sync_cli_return_api_error (ha_sync_apply_clear_request_pacing ());
+}
+
+static clib_error_t *
 ha_sync_set_intfc_command_fn (vlib_main_t *vm, unformat_input_t *input,
                               vlib_cli_command_t *cmd)
 {
@@ -690,6 +782,18 @@ ha_sync_show_command_fn (vlib_main_t *vm, unformat_input_t *input,
   vlib_cli_output (vm, "  retransmit_times: %u", hsm->retransmit_times);
   vlib_cli_output (vm, "  retransmit_interval: %.3f",
                    hsm->retransmit_interval);
+  if (hsm->request_pacing_interval_sec > 0 &&
+      hsm->request_pacing_pkts_per_interval > 0)
+    {
+      vlib_cli_output (
+        vm, "  request_pacing: enabled interval=%u ms pkts=%u (~%u pkt/s)",
+        (u32) (hsm->request_pacing_interval_sec * 1000.0),
+        hsm->request_pacing_pkts_per_interval,
+        (u32) (hsm->request_pacing_pkts_per_interval /
+               hsm->request_pacing_interval_sec));
+    }
+  else
+    vlib_cli_output (vm, "  request_pacing: disabled");
   vlib_cli_output (vm, "  heartbeat_interval: %.3f",
                    hsm->heartbeat_interval_sec);
   vlib_cli_output (vm, "  heartbeat_max_fail_counts: %u",
@@ -814,6 +918,18 @@ VLIB_CLI_COMMAND (ha_sync_set_retransmit_interval_command, static) = {
   .function = ha_sync_set_retransmit_interval_command_fn,
 };
 
+VLIB_CLI_COMMAND (ha_sync_set_request_pacing_command, static) = {
+  .path = "ha_sync set request-pacing",
+  .short_help = "ha_sync set request-pacing interval <ms> pkts <n>",
+  .function = ha_sync_set_request_pacing_command_fn,
+};
+
+VLIB_CLI_COMMAND (ha_sync_clear_request_pacing_command, static) = {
+  .path = "ha_sync clear request-pacing",
+  .short_help = "ha_sync clear request-pacing",
+  .function = ha_sync_clear_request_pacing_command_fn,
+};
+
 VLIB_CLI_COMMAND (ha_sync_set_intfc_command, static) = {
   .path = "ha_sync set intfc",
   .short_help = "ha_sync set intfc <interface>",
@@ -864,6 +980,8 @@ ha_sync_init (vlib_main_t *vm)
   hsm->num_registrations = 0;
   hsm->retransmit_interval = HA_SYNC_RETRANSMIT_INTERVAL_SEC;
   hsm->retransmit_times = HA_SYNC_RETRANSMIT_TIMES;
+  hsm->request_pacing_interval_sec = HA_SYNC_DEFAULT_REQUEST_PACING_INTERVAL_SEC;
+  hsm->request_pacing_pkts_per_interval = HA_SYNC_DEFAULT_REQUEST_PACING_PKTS;
   hsm->hello_retry_count = 0;
   hsm->next_hello_time = 0;
   hsm->snapshot_sequence = 0;
