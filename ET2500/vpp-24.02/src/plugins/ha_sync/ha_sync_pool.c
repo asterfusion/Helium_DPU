@@ -1,238 +1,233 @@
 #include <ha_sync/ha_sync.h>
 
-
-u32 ha_sync_tx_pool_add (u32 seq, u8 msg_type, u8 session_count, u8 *payload, u16 payload_len)
+static_always_inline ha_sync_per_thread_data_t *
+ha_sync_get_ptd (u32 thread_index)
 {
     ha_sync_main_t *hsm = &ha_sync_main;
-    ha_sync_tx_packet_t *req;
-    u32 index;
-    u8 *payload_vec = 0;
-    u8 *old_payload_to_free = 0;
 
-    if (payload_len > 0)
+    if (thread_index >= vec_len (hsm->per_thread_data))
+        return 0;
+    return &hsm->per_thread_data[thread_index];
+}
+
+static_always_inline u32
+ha_sync_timer_ticks (ha_sync_main_t *hsm, ha_sync_per_thread_data_t *ptd)
+{
+    u32 ticks;
+
+    ticks = (u32) (hsm->retransmit_interval / ptd->timer_wheel.timer_interval);
+    if (ticks < 1)
+        ticks = 1;
+    return ticks;
+}
+
+static_always_inline void
+ha_sync_recycle_payload_vec (ha_sync_per_thread_data_t *ptd, u8 *payload)
+{
+    if (!payload)
+        return;
+
+    vec_reset_length (payload);
+    if (!ptd->spare_data)
     {
-        vec_validate(payload_vec, payload_len - 1);
-        clib_memcpy(payload_vec, payload, payload_len);
+        ptd->spare_data = payload;
+        return;
     }
+    vec_free (payload);
+}
 
-    clib_spinlock_lock(&hsm->tx_lock);
+void
+ha_sync_tx_pool_add (u32 thread_index, u32 seq, u8 msg_type, u8 session_count,
+                     u8 *payload, u16 payload_len)
+{
+    ha_sync_per_thread_data_t *ptd = ha_sync_get_ptd (thread_index);
+    ha_sync_tx_packet_t *req;
+    uword *p;
 
-    uword *p = hash_get(hsm->seq_to_pool_index, seq);
-    if (p) {
-        ha_sync_tx_packet_t *old_req = pool_elt_at_index (hsm->ha_sync_tx_pool, p[0]);
-        old_payload_to_free = old_req->payload;
-        index = p[0];
-        req = old_req;
+    if (!ptd)
+        return;
 
+    p = hash_get (ptd->seq_to_pool_index, seq);
+    if (p)
+    {
+        req = pool_elt_at_index (ptd->tx_pool, p[0]);
         if (req->timer_handle != ~0)
         {
-            tw_timer_stop_16t_2w_512sl(&hsm->timer_wheel, req->timer_handle);
+            tw_timer_stop_16t_2w_512sl (&ptd->timer_wheel, req->timer_handle);
             req->timer_handle = ~0;
         }
-    } else {
-        pool_get(hsm->ha_sync_tx_pool, req);
-        index = req - hsm->ha_sync_tx_pool;
-        hash_set(hsm->seq_to_pool_index, seq, index);
+        ha_sync_recycle_payload_vec (ptd, req->payload);
+        req->payload = 0;
+    }
+    else
+    {
+        pool_get (ptd->tx_pool, req);
+        hash_set (ptd->seq_to_pool_index, seq, req - ptd->tx_pool);
+        req->payload = 0;
         req->timer_handle = ~0;
     }
 
     req->seq_number = seq;
     req->msg_type = msg_type;
     req->length = payload_len;
-    req->payload = payload_vec;
     req->session_count = session_count;
     req->retry_count = 0;
-
-    // start timer only when retransmission is enabled
-    if (hsm->retransmit_times > 0 && hsm->retransmit_interval > 0)
-    {
-        u32 ticks = (u32)(hsm->retransmit_interval / hsm->timer_wheel.timer_interval);
-        if (ticks < 1)
-            ticks = 1;
-        req->timer_handle = tw_timer_start_16t_2w_512sl(&hsm->timer_wheel, index, 0, ticks);
-        // clib_warning ("ha_sync_tx_pool_add: start timer seq %u handle %u ticks %u",
-        //               seq, req->timer_handle, ticks);
-    }
-    else
-    {
-        // clib_warning ("ha_sync_tx_pool_add: timer disabled seq %u (times=%u interval=%f)",
-        //               seq, hsm->retransmit_times, hsm->retransmit_interval);
-    }
-
-    clib_spinlock_unlock(&hsm->tx_lock);
-
-    if (old_payload_to_free)
-        vec_free(old_payload_to_free);
-
-    return index;
+    req->payload = payload;
 }
 
-
-int ha_sync_tx_pool_get_by_seq (u32 seq, ha_sync_tx_packet_t *out_data)
+int
+ha_sync_tx_pool_prepare_send (u32 thread_index, u32 seq,
+                              ha_sync_tx_packet_t *out_data)
 {
     ha_sync_main_t *hsm = &ha_sync_main;
+    ha_sync_per_thread_data_t *ptd = ha_sync_get_ptd (thread_index);
     uword *p;
-    int found = 0;
-    u8 *payload_copy = 0;
-
-    clib_spinlock_lock(&hsm->tx_lock);
-    p = hash_get(hsm->seq_to_pool_index, seq);
-    if (p) {
-        ha_sync_tx_packet_t *req = pool_elt_at_index (hsm->ha_sync_tx_pool, p[0]);
-        out_data->seq_number = req->seq_number;
-        out_data->msg_type = req->msg_type;
-        out_data->session_count = req->session_count;
-        out_data->retry_count = req->retry_count;
-        out_data->length = req->length;
-        out_data->payload = 0;
-        if (req->length > 0 && req->payload)
-        {
-            vec_validate(payload_copy, req->length - 1);
-            clib_memcpy(payload_copy, req->payload, req->length);
-            out_data->payload = payload_copy;
-        }
-        found = (req->length == 0 || out_data->payload != 0);
-    }
-    clib_spinlock_unlock(&hsm->tx_lock);
-
-    if (!found && payload_copy)
-        vec_free(payload_copy);
-    return found;
-}
-
-
-void ha_sync_tx_pool_del_by_seq (u32 seq)
-{
-    ha_sync_main_t *hsm = &ha_sync_main;
-    uword *p;
-    u8 *vec_to_free = 0;
-
-    clib_spinlock_lock(&hsm->tx_lock);
-    p = hash_get(hsm->seq_to_pool_index, seq);
-    if (p) {
-        u32 index = p[0];
-        ha_sync_tx_packet_t *req = pool_elt_at_index (hsm->ha_sync_tx_pool, index);
-
-        if (req->timer_handle != ~0)
-        {
-            tw_timer_stop_16t_2w_512sl(&hsm->timer_wheel, req->timer_handle);
-            req->timer_handle = ~0;
-        }
-
-        vec_to_free = req->payload;
-        req->payload = 0;
-        req->length = 0;
-        pool_put_index(hsm->ha_sync_tx_pool, index);
-        hash_unset(hsm->seq_to_pool_index, seq);
-    }
-    clib_spinlock_unlock(&hsm->tx_lock);
-
-    if (vec_to_free)
-        vec_free(vec_to_free);
-}
-
-void ha_sync_pool_clear_keep ()
-{
-    ha_sync_main_t *hsm = &ha_sync_main;
     ha_sync_tx_packet_t *req;
-    u8 **vecs_to_free = 0;
-    uword *keys = 0;
-    hash_pair_t *p;
-    u32 *pool_indices = 0;
-    uword i;
 
-    clib_spinlock_lock(&hsm->tx_lock);
+    if (!ptd || !out_data)
+        return 0;
 
-    if (hsm->ha_sync_tx_pool)
+    p = hash_get (ptd->seq_to_pool_index, seq);
+    if (!p)
+        return 0;
+
+    req = pool_elt_at_index (ptd->tx_pool, p[0]);
+    if (req->msg_type == HA_SYNC_MSG_REQUEST && req->timer_handle == ~0 &&
+        hsm->retransmit_times > 0 && hsm->retransmit_interval > 0)
     {
-        pool_foreach_index (i, hsm->ha_sync_tx_pool)
+        req->timer_handle = tw_timer_start_16t_2w_512sl (
+            &ptd->timer_wheel, p[0], 0, ha_sync_timer_ticks (hsm, ptd));
+    }
+
+    out_data->seq_number = req->seq_number;
+    out_data->msg_type = req->msg_type;
+    out_data->session_count = req->session_count;
+    out_data->length = req->length;
+    out_data->payload = req->payload;
+    out_data->retry_count = req->retry_count;
+    out_data->timer_handle = req->timer_handle;
+    return 1;
+}
+
+void
+ha_sync_tx_pool_del_by_seq (u32 thread_index, u32 seq)
+{
+    ha_sync_per_thread_data_t *ptd = ha_sync_get_ptd (thread_index);
+    uword *p;
+    ha_sync_tx_packet_t *req;
+    u32 index;
+
+    if (!ptd)
+        return;
+
+    p = hash_get (ptd->seq_to_pool_index, seq);
+    if (!p)
+        return;
+
+    index = p[0];
+    req = pool_elt_at_index (ptd->tx_pool, index);
+    if (req->timer_handle != ~0)
+    {
+        tw_timer_stop_16t_2w_512sl (&ptd->timer_wheel, req->timer_handle);
+        req->timer_handle = ~0;
+    }
+
+    ha_sync_recycle_payload_vec (ptd, req->payload);
+    req->payload = 0;
+    req->length = 0;
+    req->retry_count = 0;
+    pool_put_index (ptd->tx_pool, index);
+    hash_unset (ptd->seq_to_pool_index, seq);
+}
+
+void
+ha_sync_pool_clear_keep (void)
+{
+    ha_sync_main_t *hsm = &ha_sync_main;
+    ha_sync_per_thread_data_t *ptd;
+
+    vec_foreach (ptd, hsm->per_thread_data)
+    {
+        ha_sync_tx_packet_t *req;
+        u32 *pool_indices = 0;
+        uword *keys = 0;
+        hash_pair_t *p;
+        uword i;
+
+        if (ptd->tx_pool)
         {
-            vec_add1 (pool_indices, (u32) i);
+            pool_foreach_index (i, ptd->tx_pool)
+            {
+                vec_add1 (pool_indices, (u32) i);
+            }
+
+            u32 *pi;
+            vec_foreach (pi, pool_indices)
+            {
+                req = pool_elt_at_index (ptd->tx_pool, *pi);
+                if (req->timer_handle != ~0)
+                {
+                    tw_timer_stop_16t_2w_512sl (&ptd->timer_wheel,
+                                                req->timer_handle);
+                    req->timer_handle = ~0;
+                }
+                ha_sync_recycle_payload_vec (ptd, req->payload);
+                req->payload = 0;
+                req->length = 0;
+                req->retry_count = 0;
+                pool_put_index (ptd->tx_pool, *pi);
+            }
         }
 
-        u32 *pi;
-        vec_foreach (pi, pool_indices)
+        if (ptd->seq_to_pool_index)
         {
-            req = pool_elt_at_index (hsm->ha_sync_tx_pool, *pi);
-            if (req->timer_handle != ~0)
+            hash_foreach_pair (p, ptd->seq_to_pool_index, ({
+                vec_add1 (keys, p->key);
+            }));
+
+            uword *k;
+            vec_foreach (k, keys)
             {
-                tw_timer_stop_16t_2w_512sl(&hsm->timer_wheel, req->timer_handle);
-                req->timer_handle = ~0;
+                hash_unset (ptd->seq_to_pool_index, *k);
             }
-            if (req->payload)
+        }
+
+        vec_free (pool_indices);
+        vec_free (keys);
+    }
+}
+
+void
+ha_sync_tx_pool_free (void)
+{
+    ha_sync_main_t *hsm = &ha_sync_main;
+    ha_sync_per_thread_data_t *ptd;
+
+    vec_foreach (ptd, hsm->per_thread_data)
+    {
+        ha_sync_tx_packet_t *req;
+
+        if (ptd->tx_pool)
+        {
+            pool_foreach (req, ptd->tx_pool)
             {
-                vec_add1 (vecs_to_free, req->payload);
+                if (req->timer_handle != ~0)
+                {
+                    tw_timer_stop_16t_2w_512sl (&ptd->timer_wheel,
+                                                req->timer_handle);
+                    req->timer_handle = ~0;
+                }
+                ha_sync_recycle_payload_vec (ptd, req->payload);
                 req->payload = 0;
             }
-            req->length = 0;
-            req->retry_count = 0;
-            pool_put_index (hsm->ha_sync_tx_pool, *pi);
+            pool_free (ptd->tx_pool);
+            ptd->tx_pool = 0;
         }
-    }
 
-    if (hsm->seq_to_pool_index)
-    {
-        hash_foreach_pair (p, hsm->seq_to_pool_index, ({
-            vec_add1 (keys, p->key);
-        }));
-
-        uword *k;
-        vec_foreach (k, keys)
+        if (ptd->seq_to_pool_index)
         {
-            hash_unset (hsm->seq_to_pool_index, *k);
+            hash_free (ptd->seq_to_pool_index);
+            ptd->seq_to_pool_index = 0;
         }
     }
-
-    clib_spinlock_unlock(&hsm->tx_lock);
-
-    u8 **v;
-    vec_foreach(v, vecs_to_free)
-    {
-        vec_free(*v);
-    }
-    vec_free(vecs_to_free);
-    vec_free(keys);
-    vec_free(pool_indices);
-}
-
-
-void ha_sync_tx_pool_free ()
-{
-    ha_sync_main_t *hsm = &ha_sync_main;
-    ha_sync_tx_packet_t *req;
-    u8 **vecs_to_free = 0;
-
-    clib_spinlock_lock(&hsm->tx_lock);
-
-    if (hsm->ha_sync_tx_pool)
-    {
-        pool_foreach (req, hsm->ha_sync_tx_pool)
-        {
-            if (req->timer_handle != ~0)
-            {
-                tw_timer_stop_16t_2w_512sl(&hsm->timer_wheel, req->timer_handle);
-                req->timer_handle = ~0;
-            }
-            if (req->payload)
-                vec_add1 (vecs_to_free, req->payload);
-        }
-        pool_free(hsm->ha_sync_tx_pool);
-        hsm->ha_sync_tx_pool = 0;
-    }
-
-    if (hsm->seq_to_pool_index)
-    {
-        hash_free(hsm->seq_to_pool_index);
-        hsm->seq_to_pool_index = 0;
-    }
-
-    clib_spinlock_unlock(&hsm->tx_lock);
-
-    u8 **v;
-    vec_foreach(v, vecs_to_free)
-    {
-        vec_free(v[0]);
-    }
-    vec_free(vecs_to_free);
-
 }

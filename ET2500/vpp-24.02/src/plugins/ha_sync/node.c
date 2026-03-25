@@ -90,6 +90,223 @@ ha_sync_prepare_udp_header (vlib_buffer_t *b, u16 payload_len,
   udp->checksum = 0;
 }
 
+static_always_inline void
+ha_sync_drain_ack_fifo (u32 thread_index, ha_sync_per_thread_data_t *ptd)
+{
+  u32 *ack_vec = ptd->ack_drain_vec;
+
+  if (PREDICT_FALSE (!ptd->ack_fifo))
+    return;
+
+  vec_reset_length (ack_vec);
+  for (;;)
+    {
+      u32 n_ack = hqos_fifo_count (ptd->ack_fifo);
+
+      if (n_ack > 0)
+        {
+          u32 old_len = vec_len (ack_vec);
+          vec_validate (ack_vec, old_len + n_ack - 1);
+          n_ack =
+            hqos_fifo_dequeue_sc (ptd->ack_fifo, n_ack, ack_vec + old_len);
+          vec_set_len (ack_vec, old_len + n_ack);
+        }
+
+      clib_atomic_store_rel_n (&ptd->ack_wakeup_pending, 0);
+      __atomic_thread_fence (__ATOMIC_ACQUIRE);
+      if (hqos_fifo_empty (ptd->ack_fifo))
+        break;
+    }
+
+  if (vec_len (ack_vec) > 0)
+    {
+      u32 *seqp;
+      vec_foreach (seqp, ack_vec)
+        ha_sync_tx_pool_del_by_seq (thread_index, *seqp);
+    }
+
+  ptd->ack_drain_vec = ack_vec;
+}
+
+static_always_inline u32
+ha_sync_response_max_acks (ha_sync_main_t *hsm)
+{
+  u32 max_acks = hsm->packet_size / sizeof (u32);
+
+  if (max_acks < 1)
+    max_acks = 1;
+  if (max_acks > 255)
+    max_acks = 255;
+  return max_acks;
+}
+
+static_always_inline void
+ha_sync_response_batch_send (u32 thread_index, u8 owner_thread,
+                             const u32 *seqs, u32 n_seqs)
+{
+  u32 first_seq;
+  u32 i;
+  u32 *payload = 0;
+
+  if (PREDICT_FALSE (n_seqs == 0 || !seqs))
+    return;
+
+  first_seq = seqs[0];
+  if (n_seqs == 1)
+    {
+      ha_sync_send_response (first_seq, owner_thread, thread_index);
+      return;
+    }
+
+  vec_validate (payload, n_seqs - 1);
+  for (i = 0; i < n_seqs; i++)
+    payload[i] = clib_host_to_net_u32 (seqs[i]);
+
+  ha_sync_send_response_aggregated (first_seq, owner_thread, thread_index,
+                                    (u8) n_seqs,
+                                    (u16) (n_seqs * sizeof (u32)),
+                                    (u8 *) payload);
+}
+
+static_always_inline void
+ha_sync_response_batch_flush_one (u32 thread_index, u8 owner_thread,
+                                  ha_sync_ack_batch_t *batch)
+{
+  u32 n_seqs = vec_len (batch->seqs);
+
+  if (PREDICT_FALSE (n_seqs == 0))
+    return;
+
+  ha_sync_response_batch_send (thread_index, owner_thread, batch->seqs,
+                               n_seqs);
+  vec_reset_length (batch->seqs);
+  batch->first_enqueue_time = 0;
+}
+
+static_always_inline void
+ha_sync_response_batch_add (u32 thread_index, f64 now, u8 owner_thread,
+                            u32 seq)
+{
+  ha_sync_main_t *hsm = &ha_sync_main;
+  ha_sync_per_thread_data_t *ptd = &hsm->per_thread_data[thread_index];
+  ha_sync_ack_batch_t *batch;
+
+  if (PREDICT_FALSE (owner_thread >= vec_len (ptd->response_batches)))
+    {
+      ha_sync_send_response (seq, owner_thread, thread_index);
+      return;
+    }
+
+  batch = &ptd->response_batches[owner_thread];
+  if (!batch->in_active_list)
+    {
+      vec_add1 (ptd->response_batch_active_threads, owner_thread);
+      batch->in_active_list = 1;
+    }
+
+  if (vec_len (batch->seqs) == 0)
+    batch->first_enqueue_time = now;
+
+  vec_add1 (batch->seqs, seq);
+  if (vec_len (batch->seqs) >= ha_sync_response_max_acks (hsm))
+    ha_sync_response_batch_flush_one (thread_index, owner_thread, batch);
+}
+
+static_always_inline void
+ha_sync_response_batches_flush_due (u32 thread_index, f64 now)
+{
+  ha_sync_main_t *hsm = &ha_sync_main;
+  ha_sync_per_thread_data_t *ptd = &hsm->per_thread_data[thread_index];
+  u32 *ownerp;
+
+  vec_foreach (ownerp, ptd->response_batch_active_threads)
+    {
+      if (*ownerp < vec_len (ptd->response_batches))
+        {
+          ha_sync_ack_batch_t *batch = &ptd->response_batches[*ownerp];
+          if (vec_len (batch->seqs) > 0 && batch->first_enqueue_time > 0 &&
+              (now - batch->first_enqueue_time) >=
+                HA_SYNC_ACK_AGGREGATION_WINDOW_SEC)
+            {
+              ha_sync_response_batch_flush_one (thread_index, (u8) *ownerp,
+                                                batch);
+            }
+        }
+    }
+}
+
+static_always_inline int
+ha_sync_output_build_request_buffer (vlib_main_t *vm,
+                                     vlib_node_runtime_t *node,
+                                     ha_sync_main_t *hsm, u32 thread_index,
+                                     u32 seq, u32 bi, u32 *n_pool_miss,
+                                     u32 *n_tx_request_new,
+                                     u32 *n_tx_request_retx)
+{
+  ha_sync_tx_packet_t pkt_info;
+  vlib_buffer_t *b;
+  u16 l3_l4_hdr_size = sizeof (ip4_header_t) + sizeof (udp_header_t);
+  ha_sync_packet_header_t *h;
+  u16 payload_len;
+
+  if (PREDICT_FALSE (
+        !ha_sync_tx_pool_prepare_send (thread_index, seq, &pkt_info)))
+    {
+      vlib_buffer_free_one (vm, bi);
+      (*n_pool_miss)++;
+      return 0;
+    }
+  if (PREDICT_FALSE (pkt_info.length > 0 && !pkt_info.payload))
+    {
+      vlib_buffer_free_one (vm, bi);
+      (*n_pool_miss)++;
+      return 0;
+    }
+
+  b = vlib_get_buffer (vm, bi);
+  b->current_data = 0;
+  b->current_length = 0;
+  b->flags |= VNET_BUFFER_F_LOCALLY_ORIGINATED;
+
+  h = (void *) ((u8 *) vlib_buffer_get_current (b) + l3_l4_hdr_size);
+  h->magic = clib_host_to_net_u32 (HA_SYNC_MAGIC);
+  h->src_ip = hsm->src_address;
+  h->domain = hsm->domain_id;
+  h->msg_type = pkt_info.msg_type;
+  h->length = clib_host_to_net_u16 (pkt_info.length);
+  h->seq_number = clib_host_to_net_u32 (pkt_info.seq_number);
+  h->count = pkt_info.session_count;
+  h->thread_index = thread_index;
+  memset (h->reserve, 0, sizeof (h->reserve));
+
+  if (pkt_info.length > 0 && pkt_info.payload)
+    clib_memcpy_fast (h + 1, pkt_info.payload, pkt_info.length);
+
+  payload_len = sizeof (ha_sync_packet_header_t) + pkt_info.length;
+  b->current_length = l3_l4_hdr_size + payload_len;
+  ha_sync_prepare_udp_header (b, payload_len, &hsm->peer_address);
+
+  vnet_buffer (b)->sw_if_index[VLIB_TX] = hsm->fib_index;
+  vnet_buffer (b)->sw_if_index[VLIB_RX] = hsm->sw_if_index;
+
+  if (pkt_info.retry_count > 0)
+    (*n_tx_request_retx)++;
+  else
+    (*n_tx_request_new)++;
+
+  if (PREDICT_FALSE (b->flags & VLIB_BUFFER_IS_TRACED))
+    {
+      ha_sync_output_trace_t *t = vlib_add_trace (vm, node, b, sizeof (*t));
+      t->msg_type = pkt_info.msg_type;
+      t->dst = hsm->peer_address;
+      t->dst_port = hsm->dst_port;
+      t->payload_len = pkt_info.length;
+      t->seq_number = pkt_info.seq_number;
+    }
+
+  return 1;
+}
+
 
 #ifndef CLIB_MARCH_VARIANT
 static u8 *
@@ -173,24 +390,12 @@ typedef enum
   HA_SYNC_INPUT_N_NEXT,
 } ha_sync_input_next_t;
 
-static_always_inline u8
-ha_sync_is_udp_10311 (vlib_buffer_t *b)
-{
-  ip4_header_t *ip4 = vlib_buffer_get_current (b);
-  udp_header_t *udp;
-
-  if (PREDICT_FALSE (ip4->protocol != IP_PROTOCOL_UDP))
-    return 0;
-
-  udp = ip4_next_header (ip4);
-  return clib_net_to_host_u16 (udp->dst_port) == HA_SYNC_UDP_PORT;
-}
-
 #define foreach_ha_sync_output_error \
   _(TX, "output packets sent")     \
   _(NO_BUFFER, "buffer allocation failed") \
   _(POOL_MISS, "tx pool sequence not found") \
   _(NO_PEER, "peer address not configured") \
+  _(RETRY_EXCEEDED, "ha_sync retransmit retry exceeded") \
   _(TX_REQUEST_NEW, "ha_sync request packets sent (new)") \
   _(TX_REQUEST_RETX, "ha_sync request packets sent (retransmit)") \
   _(TX_RESPONSE, "ha_sync response packets sent") \
@@ -222,6 +427,14 @@ VLIB_NODE_FN (ha_sync_input_worker_node)
   u32 n_left_from, n_left_to_next;
   u32 next_index = node->cached_next_index;
   u32 n_match = 0;
+  u32 n_request = 0;
+  u32 n_response = 0;
+  u32 n_response_batch_pkts = 0;
+  u32 n_response_batch_acks = 0;
+  u32 n_hello = 0;
+  u32 n_hello_response = 0;
+  u32 n_heartbeat = 0;
+  f64 now = vlib_time_now (vm);
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
@@ -239,6 +452,17 @@ VLIB_NODE_FN (ha_sync_input_worker_node)
       ha_sync_packet_header_t *h0;
       u32 next0;
       u8 is_ha_packet = 0;
+
+      if (PREDICT_TRUE (n_left_from >= 4))
+      {
+        vlib_buffer_t *b2 = vlib_get_buffer (vm, from[2]);
+        vlib_buffer_t *b3 = vlib_get_buffer (vm, from[3]);
+
+        vlib_prefetch_buffer_header (b2, LOAD);
+        vlib_prefetch_buffer_header (b3, LOAD);
+        vlib_prefetch_buffer_data (b2, LOAD);
+        vlib_prefetch_buffer_data (b3, LOAD);
+      }
       
       bi0 = to_next[0] = from[0];
       from += 1;
@@ -250,114 +474,148 @@ VLIB_NODE_FN (ha_sync_input_worker_node)
 
       vnet_feature_next (&next0, b0);
 
-      if (hsm->enabled && ha_sync_is_udp_10311 (b0))
+      ip0 = vlib_buffer_get_current (b0);
+      if (hsm->enabled && PREDICT_TRUE (ip0->protocol == IP_PROTOCOL_UDP))
       {
-        ip0 = vlib_buffer_get_current (b0);
         udp0 = ip4_next_header (ip0);
-        u32 udp_len = clib_net_to_host_u16 (udp0->length);
-
-        if (udp_len >= (sizeof(udp_header_t) + sizeof(ha_sync_packet_header_t)))
+        if (PREDICT_TRUE (
+              clib_net_to_host_u16 (udp0->dst_port) == HA_SYNC_UDP_PORT))
         {
-          h0 = (ha_sync_packet_header_t *) (udp0 + 1);
-          u16 total_payload_len = clib_net_to_host_u16 (h0->length);
-          if (PREDICT_FALSE (total_payload_len >
-                             udp_len - sizeof (udp_header_t) -
-                               sizeof (ha_sync_packet_header_t)))
-            goto trace_and_next;
+          u32 udp_len = clib_net_to_host_u16 (udp0->length);
 
-          if (clib_net_to_host_u32 (h0->magic) == HA_SYNC_MAGIC &&
-                ha_sync_peer_find (hsm, &h0->src_ip) >= 0 &&
-                h0->domain == hsm->domain_id)
-          {
-            is_ha_packet = 1;
-            n_match++;
-            
-            /** match success, drop this packet */
-            next0 = HA_SYNC_INPUT_NEXT_DROP;
-              
-            u8 msg_type = h0->msg_type;
-            switch (msg_type)
+          if (udp_len >=
+              (sizeof (udp_header_t) + sizeof (ha_sync_packet_header_t)))
             {
-              case HA_SYNC_MSG_REQUEST: 
-              {
-                u8 session_count = h0->count;
-                u8 *packet_end = (u8 *)h0 + sizeof(ha_sync_packet_header_t) + total_payload_len;
-                ha_sync_session_header_t *session_hdr = (ha_sync_session_header_t *)((h0 + 1));
-                vlib_node_increment_counter (
-                  vm, node->node_index, HA_SYNC_INPUT_ERROR_REQUEST, 1);
-                
-                for (int i = 0; i < session_count; i++)
+              h0 = (ha_sync_packet_header_t *) (udp0 + 1);
+              u16 total_payload_len = clib_net_to_host_u16 (h0->length);
+              if (PREDICT_FALSE (total_payload_len >
+                                 udp_len - sizeof (udp_header_t) -
+                                   sizeof (ha_sync_packet_header_t)))
+                goto trace_and_next;
+
+              if (clib_net_to_host_u32 (h0->magic) == HA_SYNC_MAGIC &&
+                  ha_sync_peer_find (hsm, &h0->src_ip) >= 0 &&
+                  h0->domain == hsm->domain_id)
                 {
-                  // check session header boundary
-                  if (PREDICT_FALSE((u8 *)session_hdr + sizeof(ha_sync_session_header_t) > packet_end))
-                  {
-                    clib_warning("HA_SYNC_MSG_REQUEST: Session header exceeds packet boundary");
-                    break;
-                  }
+                  is_ha_packet = 1;
+                  n_match++;
 
-                  u16 session_data_len = clib_net_to_host_u16 (session_hdr->session_length);
-                  u8 app_type = session_hdr->app_type;
-                  u8 *session_data = (u8 *)(session_hdr + 1);
-                  
-                  if (PREDICT_FALSE(session_data + session_data_len > packet_end))
-                  {
-                    clib_warning("HA_SYNC_MSG_REQUEST: Session data exceeds packet boundary");
-                    break;
-                  }
+                  /** match success, drop this packet */
+                  next0 = HA_SYNC_INPUT_NEXT_DROP;
 
-                  ha_sync_session_registration_t *reg = ha_sync_get_registration (app_type);
-                  if (PREDICT_FALSE(reg != NULL && reg->session_apply_cb != NULL))
-                  {
-                    reg->session_apply_cb((u32)app_type, reg->context, session_data, session_data_len);
-                  }
+                  u8 msg_type = h0->msg_type;
+                  switch (msg_type)
+                    {
+                    case HA_SYNC_MSG_REQUEST:
+                      {
+                        u8 session_count = h0->count;
+                        u8 *packet_end =
+                          (u8 *) h0 + sizeof (ha_sync_packet_header_t) +
+                          total_payload_len;
+                        ha_sync_session_header_t *session_hdr =
+                          (ha_sync_session_header_t *) ((h0 + 1));
+                        n_request++;
 
-                  session_hdr = (ha_sync_session_header_t *)(session_data + session_data_len);
-                  if ((u8 *)session_hdr >= packet_end)
-                    break;
+                        for (int i = 0; i < session_count; i++)
+                          {
+                            if (PREDICT_FALSE (
+                                  (u8 *) session_hdr +
+                                    sizeof (ha_sync_session_header_t) >
+                                  packet_end))
+                              {
+                                clib_warning ("HA_SYNC_MSG_REQUEST: Session "
+                                              "header exceeds packet boundary");
+                                break;
+                              }
+
+                            u16 session_data_len = clib_net_to_host_u16 (session_hdr->session_length);
+                            u8 app_type = session_hdr->app_type;
+                            u8 *session_data = (u8 *) (session_hdr + 1);
+
+                            if (PREDICT_FALSE (session_data + session_data_len > packet_end))
+                              {
+                                clib_warning ("HA_SYNC_MSG_REQUEST: Session "
+                                              "data exceeds packet boundary");
+                                break;
+                              }
+
+                            ha_sync_session_registration_t *reg = ha_sync_get_registration (app_type);
+                            if (PREDICT_TRUE ( reg != NULL && reg->session_apply_cb != NULL))
+                              {
+                                reg->session_apply_cb (
+                                  (u32) app_type, reg->context, session_data,
+                                  session_data_len);
+                              }
+
+                            session_hdr = (ha_sync_session_header_t *) (
+                              session_data + session_data_len);
+                            if ((u8 *) session_hdr >= packet_end)
+                              break;
+                          }
+
+                        ha_sync_response_batch_add (
+                          vlib_get_thread_index (), now, h0->thread_index,
+                          clib_net_to_host_u32 (h0->seq_number));
+                        break;
+                      }
+                    case HA_SYNC_MSG_RESPONSE:
+                      if (total_payload_len == 0)
+                        {
+                          ha_sync_enqueue_ack (
+                            h0->thread_index,
+                            clib_net_to_host_u32 (h0->seq_number));
+                        }
+                      else if (h0->count > 0 &&
+                               total_payload_len ==
+                                 (u16) (h0->count * sizeof (u32)))
+                        {
+                          u32 acks[255];
+                          u32 i;
+                          u32 *ack_payload = (u32 *) (h0 + 1);
+
+                          n_response_batch_pkts++;
+                          n_response_batch_acks += h0->count;
+
+                          for (i = 0; i < h0->count; i++)
+                            acks[i] =
+                              clib_net_to_host_u32 (ack_payload[i]);
+                          ha_sync_enqueue_acks (h0->thread_index, acks,
+                                                h0->count);
+                        }
+                      n_response++;
+                      break;
+
+                    case HA_SYNC_MSG_HELLO:
+                      n_hello++;
+                      if (hsm->enabled && hsm->config_ready)
+                        {
+                          ha_sync_send_hello_response (
+                            vlib_get_thread_index ());
+                          hsm->hello_retry_count = 0;
+                          hsm->last_heartbeat_recv_time =
+                            vlib_time_now (vm);
+                        }
+                      break;
+
+                    case HA_SYNC_MSG_HELLO_RESPONSE:
+                      hsm->connection_established = 1;
+                      ha_sync_update_all_contexts ();
+                      n_hello_response++;
+                      hsm->hello_retry_count = 0;
+                      hsm->last_heartbeat_recv_time = vlib_time_now (vm);
+                      ha_sync_snapshot_trigger ();
+                      break;
+
+                    case HA_SYNC_MSG_HEARTBEAT:
+                      hsm->last_heartbeat_recv_time = vlib_time_now (vm);
+                      n_heartbeat++;
+                      break;
+
+                    default:
+                      next0 = HA_SYNC_INPUT_NEXT_DROP;
+                    }
                 }
-
-                u32 thread_index = vlib_get_thread_index ();
-                ha_sync_send_response (clib_net_to_host_u32 (h0->seq_number), thread_index);
-                break;
-              }
-              case HA_SYNC_MSG_RESPONSE:
-                ha_sync_tx_pool_del_by_seq (clib_net_to_host_u32 (h0->seq_number));
-                // clib_warning("HA_SYNC_MSG_RESPONSE: Sequence number %u packet received.", clib_net_to_host_u32 (h0->seq_number));
-                vlib_node_increment_counter (
-                  vm, node->node_index, HA_SYNC_INPUT_ERROR_RESPONSE, 1);
-                break;
-
-              case HA_SYNC_MSG_HELLO:
-                vlib_node_increment_counter (
-                  vm, node->node_index, HA_SYNC_INPUT_ERROR_HELLO, 1);
-                if (hsm->enabled && hsm->config_ready)
-                {
-                  ha_sync_send_hello_response (vlib_get_thread_index ());
-                  hsm->hello_retry_count = 0;
-                  hsm->last_heartbeat_recv_time = vlib_time_now (vm);
-                }
-                break;
-
-              case HA_SYNC_MSG_HELLO_RESPONSE:
-                hsm->connection_established = 1;
-                ha_sync_update_all_contexts ();
-                vlib_node_increment_counter (
-                  vm, node->node_index, HA_SYNC_INPUT_ERROR_HELLO_RESPONSE, 1);
-                hsm->hello_retry_count = 0;
-                hsm->last_heartbeat_recv_time = vlib_time_now (vm);
-                ha_sync_snapshot_trigger ();
-                break;
-
-              case HA_SYNC_MSG_HEARTBEAT:
-                hsm->last_heartbeat_recv_time = vlib_time_now (vm);
-                vlib_node_increment_counter (
-                  vm, node->node_index, HA_SYNC_INPUT_ERROR_HEARTBEAT, 1);
-                break;
-
-              default:
-                next0 = HA_SYNC_INPUT_NEXT_DROP;
             }
-          }
         }
       }
 trace_and_next:
@@ -385,9 +643,17 @@ trace_and_next:
     }
     vlib_put_next_frame (vm, node, next_index, n_left_to_next);
   }
-  /** increment error counters */
-  vlib_node_increment_counter (vm, node->node_index, HA_SYNC_INPUT_ERROR_RX, frame->n_vectors);
-  vlib_node_increment_counter (vm, node->node_index, HA_SYNC_INPUT_ERROR_MATCH, n_match);
+  ha_sync_stat_inc (HA_SYNC_STAT_RX, frame->n_vectors);
+  ha_sync_stat_inc (HA_SYNC_STAT_RX_MATCH, n_match);
+  ha_sync_stat_inc (HA_SYNC_STAT_RX_REQUEST, n_request);
+  ha_sync_stat_inc (HA_SYNC_STAT_RX_RESPONSE, n_response);
+  ha_sync_stat_inc (HA_SYNC_STAT_RX_RESPONSE_BATCH_PKTS,
+                    n_response_batch_pkts);
+  ha_sync_stat_inc (HA_SYNC_STAT_RX_RESPONSE_BATCH_ACKS,
+                    n_response_batch_acks);
+  ha_sync_stat_inc (HA_SYNC_STAT_RX_HELLO, n_hello);
+  ha_sync_stat_inc (HA_SYNC_STAT_RX_HELLO_RESPONSE, n_hello_response);
+  ha_sync_stat_inc (HA_SYNC_STAT_RX_HEARTBEAT, n_heartbeat);
   return frame->n_vectors;
 }
 
@@ -396,33 +662,34 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
 {
   ha_sync_main_t *hsm = &ha_sync_main;
   u32 thread_index = vm->thread_index;
-  ha_sync_per_thread_buffer_t *ptb;
+  ha_sync_per_thread_data_t *ptb;
   CLIB_UNUSED (vlib_frame_t * _frame) = frame;
+  u32 n_tx_request_new = 0;
+  u32 n_tx_request_retx = 0;
+  u32 n_tx_response = 0;
+  u32 n_tx_response_batch_pkts = 0;
+  u32 n_tx_response_batch_acks = 0;
+  u32 n_tx_hello = 0;
+  u32 n_tx_hello_response = 0;
+  u32 n_tx_heartbeat = 0;
+  u32 n_pool_miss = 0;
 
   if (!hsm->enabled)
     return 0;
 
   if (!hsm->config_ready)
-  {
-    if (thread_index < vec_len (hsm->per_thread_buffers))
-    {
-      ha_sync_per_thread_buffer_t *ptb0 = &hsm->per_thread_buffers[thread_index];
-      if (clib_fifo_elts (ptb0->fast_msg_queue) > 0 ||
-          clib_fifo_elts (ptb0->pending_fifo) > 0)
-        vlib_node_increment_counter (vm, node->node_index,
-                                     HA_SYNC_OUTPUT_ERROR_NO_PEER, 1);
-    }
     return 0;
-  }
 
-  if (thread_index >= vec_len (hsm->per_thread_buffers))
+  if (thread_index >= vec_len (hsm->per_thread_data))
     return 0;
-  ptb = &hsm->per_thread_buffers[thread_index];
+  ptb = &hsm->per_thread_data[thread_index];
+  ha_sync_drain_ack_fifo (thread_index, ptb);
   
   /** calculate total number of packets to send */
   u32 n_fast = clib_fifo_elts (ptb->fast_msg_queue);
   u32 n_pending = clib_fifo_elts (ptb->pending_fifo);
-  u32 n_total = n_fast + n_pending;
+  u32 n_retry = clib_fifo_elts (ptb->retry_fifo);
+  u32 n_total = n_fast + n_pending + n_retry;
 
   if (n_total == 0)
     return 0;
@@ -439,6 +706,7 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
   {
     vlib_node_increment_counter (vm, node->node_index,
                                   HA_SYNC_OUTPUT_ERROR_NO_BUFFER, n_total);
+    ha_sync_stat_inc (HA_SYNC_STAT_TX_NO_BUFFER, n_total);
     return 0;
   }
   
@@ -464,12 +732,16 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
     h->src_ip = hsm->src_address;
     h->domain = hsm->domain_id;
     h->msg_type = fmsg.msg_type;
-    h->length = 0;
+    h->length = clib_host_to_net_u16 (fmsg.length);
     h->seq_number = clib_host_to_net_u32 (fmsg.seq_number);
-    h->count = 0;
+    h->count = fmsg.count;
+    h->thread_index = fmsg.owner_thread;
     memset (h->reserve, 0, sizeof (h->reserve));
 
-    u16 payload_len = sizeof (ha_sync_packet_header_t);
+    if (fmsg.length > 0 && fmsg.payload)
+      clib_memcpy_fast (h + 1, fmsg.payload, fmsg.length);
+
+    u16 payload_len = sizeof (ha_sync_packet_header_t) + fmsg.length;
     b->current_length = l3_l4_hdr_size + payload_len;
     /** prepare udp header */
     ha_sync_prepare_udp_header (b, payload_len, &hsm->peer_address);
@@ -478,17 +750,20 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
 
     bi_to_send[sent++] = bi[b_idx++];
     if (fmsg.msg_type == HA_SYNC_MSG_RESPONSE)
-      vlib_node_increment_counter (vm, node->node_index,
-                                   HA_SYNC_OUTPUT_ERROR_TX_RESPONSE, 1);
+      {
+        n_tx_response++;
+        if (fmsg.length > 0 && fmsg.count > 0)
+          {
+            n_tx_response_batch_pkts++;
+            n_tx_response_batch_acks += fmsg.count;
+          }
+      }
     else if (fmsg.msg_type == HA_SYNC_MSG_HELLO)
-      vlib_node_increment_counter (vm, node->node_index,
-                                   HA_SYNC_OUTPUT_ERROR_TX_HELLO, 1);
+      n_tx_hello++;
     else if (fmsg.msg_type == HA_SYNC_MSG_HELLO_RESPONSE)
-      vlib_node_increment_counter (vm, node->node_index,
-                                   HA_SYNC_OUTPUT_ERROR_TX_HELLO_RESPONSE, 1);
+      n_tx_hello_response++;
     else if (fmsg.msg_type == HA_SYNC_MSG_HEARTBEAT)
-      vlib_node_increment_counter (vm, node->node_index,
-                                   HA_SYNC_OUTPUT_ERROR_TX_HEARTBEAT, 1);
+      n_tx_heartbeat++;
 
     if (PREDICT_FALSE (b->flags & VLIB_BUFFER_IS_TRACED))
     {
@@ -496,89 +771,56 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
       t->msg_type = fmsg.msg_type;
       t->dst = hsm->peer_address;
       t->dst_port = hsm->dst_port;
-      t->payload_len = 0;
+      t->payload_len = fmsg.length;
       t->seq_number = fmsg.seq_number;
     }
+    vec_free (fmsg.payload);
 
   }
+
+  if (b_idx < n_alloc && n_pending > 0)
+  {
+    u32 remaining = n_alloc - b_idx;
+    u32 retry_reserve = 0;
+
+    /* reserve retry buffers, make sure  */
+    if (n_retry > 0 && remaining > 1)
+      retry_reserve = clib_min (n_retry, clib_max (1u, remaining >> 3));
+
+    while (b_idx < n_alloc && clib_fifo_elts (ptb->pending_fifo) > 0 &&
+           (n_alloc - b_idx) > retry_reserve)
+      {
+        u32 seq;
+        clib_fifo_sub1 (ptb->pending_fifo, seq);
+        if (ha_sync_output_build_request_buffer (
+              vm, node, hsm, thread_index, seq, bi[b_idx], &n_pool_miss,
+              &n_tx_request_new, &n_tx_request_retx))
+          bi_to_send[sent++] = bi[b_idx];
+        b_idx++;
+      }
+  }
+
+  while (b_idx < n_alloc && clib_fifo_elts (ptb->retry_fifo) > 0)
+    {
+      u32 seq;
+      clib_fifo_sub1 (ptb->retry_fifo, seq);
+      if (ha_sync_output_build_request_buffer (
+            vm, node, hsm, thread_index, seq, bi[b_idx], &n_pool_miss,
+            &n_tx_request_new, &n_tx_request_retx))
+        bi_to_send[sent++] = bi[b_idx];
+      b_idx++;
+    }
 
   while (b_idx < n_alloc && clib_fifo_elts (ptb->pending_fifo) > 0)
-  {
-    u32 seq;
-    clib_fifo_sub1 (ptb->pending_fifo, seq);
-
-    ha_sync_tx_packet_t pkt_info;
-    if (PREDICT_FALSE (!ha_sync_tx_pool_get_by_seq (seq, &pkt_info)))
     {
-      vlib_buffer_free_one (vm, bi[b_idx]);
+      u32 seq;
+      clib_fifo_sub1 (ptb->pending_fifo, seq);
+      if (ha_sync_output_build_request_buffer (
+            vm, node, hsm, thread_index, seq, bi[b_idx], &n_pool_miss,
+            &n_tx_request_new, &n_tx_request_retx))
+        bi_to_send[sent++] = bi[b_idx];
       b_idx++;
-      vlib_node_increment_counter (vm, node->node_index,
-                                   HA_SYNC_OUTPUT_ERROR_POOL_MISS, 1);
-      continue;
     }
-    if (PREDICT_FALSE (pkt_info.length > 0 && !pkt_info.payload))
-    {
-      vlib_buffer_free_one (vm, bi[b_idx]);
-      b_idx++;
-      vlib_node_increment_counter (vm, node->node_index,
-                                   HA_SYNC_OUTPUT_ERROR_POOL_MISS, 1);
-      continue;
-    }
-
-    vlib_buffer_t *b = vlib_get_buffer (vm, bi[b_idx]);
-    b->current_data = 0;
-    b->current_length = 0;
-    b->flags |= VNET_BUFFER_F_LOCALLY_ORIGINATED;
-
-    u16 l3_l4_hdr_size = sizeof (ip4_header_t) + sizeof (udp_header_t);
-
-    /** 1. prepare ha sync packet header */
-    ha_sync_packet_header_t *h = (void *)((u8 *)vlib_buffer_get_current(b) + l3_l4_hdr_size);
-    h->magic = clib_host_to_net_u32 (HA_SYNC_MAGIC);
-    h->src_ip = hsm->src_address;
-    h->domain = hsm->domain_id;
-    h->msg_type = pkt_info.msg_type;
-    h->length = clib_host_to_net_u16 (pkt_info.length);
-    h->seq_number = clib_host_to_net_u32 (pkt_info.seq_number);
-    h->count = pkt_info.session_count;
-    memset (h->reserve, 0, sizeof (h->reserve));
-
-    /** 2. copy payload */
-    if (pkt_info.length > 0 && pkt_info.payload)
-      clib_memcpy (h + 1, pkt_info.payload, pkt_info.length);
-    u16 payload_len = sizeof (ha_sync_packet_header_t) + pkt_info.length;
-    b->current_length = l3_l4_hdr_size + payload_len;
-    /** 3. prepare udp header */
-    ha_sync_prepare_udp_header (b, payload_len, &hsm->peer_address);
-
-    /** 4. set send parameters */
-    vnet_buffer (b)->sw_if_index[VLIB_TX] = hsm->fib_index;
-    vnet_buffer (b)->sw_if_index[VLIB_RX] = hsm->sw_if_index;
-
-    bi_to_send[sent++] = bi[b_idx++];
-    if (pkt_info.msg_type == HA_SYNC_MSG_REQUEST)
-      {
-        vlib_node_increment_counter (vm, node->node_index,
-                                     (pkt_info.retry_count > 0) ?
-                                       HA_SYNC_OUTPUT_ERROR_TX_REQUEST_RETX :
-                                       HA_SYNC_OUTPUT_ERROR_TX_REQUEST_NEW,
-                                     1);
-      }
-
-    if (PREDICT_FALSE (b->flags & VLIB_BUFFER_IS_TRACED))
-    {
-      ha_sync_output_trace_t *t = vlib_add_trace (vm, node, b, sizeof(*t));
-      t->msg_type = pkt_info.msg_type;
-      t->dst = hsm->peer_address;
-      t->dst_port = hsm->dst_port;
-      t->payload_len = pkt_info.length;
-      t->seq_number = pkt_info.seq_number;
-    }
-
-    if (pkt_info.payload)
-      vec_free (pkt_info.payload);
-
-  }
 
   /** 5. batch configure and submit */
   if (PREDICT_TRUE (sent > 0))
@@ -595,8 +837,23 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
     vlib_buffer_free (vm, bi + b_idx, n_alloc - b_idx);
   }
 
-  vlib_node_increment_counter (vm, node->node_index, 
-                               HA_SYNC_OUTPUT_ERROR_TX, sent);
+  ha_sync_stat_inc (HA_SYNC_STAT_TX, sent);
+  if (n_pool_miss)
+    {
+      vlib_node_increment_counter (
+        vm, node->node_index, HA_SYNC_OUTPUT_ERROR_POOL_MISS, n_pool_miss);
+      ha_sync_stat_inc (HA_SYNC_STAT_TX_POOL_MISS, n_pool_miss);
+    }
+  ha_sync_stat_inc (HA_SYNC_STAT_TX_REQUEST_NEW, n_tx_request_new);
+  ha_sync_stat_inc (HA_SYNC_STAT_TX_REQUEST_RETX, n_tx_request_retx);
+  ha_sync_stat_inc (HA_SYNC_STAT_TX_RESPONSE, n_tx_response);
+  ha_sync_stat_inc (HA_SYNC_STAT_TX_RESPONSE_BATCH_PKTS,
+                    n_tx_response_batch_pkts);
+  ha_sync_stat_inc (HA_SYNC_STAT_TX_RESPONSE_BATCH_ACKS,
+                    n_tx_response_batch_acks);
+  ha_sync_stat_inc (HA_SYNC_STAT_TX_HELLO, n_tx_hello);
+  ha_sync_stat_inc (HA_SYNC_STAT_TX_HELLO_RESPONSE, n_tx_hello_response);
+  ha_sync_stat_inc (HA_SYNC_STAT_TX_HEARTBEAT, n_tx_heartbeat);
 
   return sent;
 }
@@ -632,7 +889,9 @@ VLIB_NODE_FN (ha_sync_process_node)
   CLIB_UNUSED (vlib_node_runtime_t * _node) = node;
   CLIB_UNUSED (vlib_frame_t * _frame) = frame;
 
-  f64 timeout = HA_SYNC_DEFAULT_INTERVAL_SEC;
+  f64 timeout =
+    clib_min (HA_SYNC_DEFAULT_INTERVAL_SEC,
+              HA_SYNC_ACK_AGGREGATION_WINDOW_SEC);
   ha_sync_main_t *hsm = &ha_sync_main;
   f64 now;
 
@@ -667,11 +926,12 @@ VLIB_NODE_FN (ha_sync_process_node)
         if (now >= (hsm->last_heartbeat_send_time + hsm->heartbeat_interval_sec))
         {
           u32 thread_index = vlib_get_thread_index ();
-          ha_sync_per_thread_buffer_t *ptb = &hsm->per_thread_buffers[thread_index];
+          ha_sync_per_thread_data_t *ptb = &hsm->per_thread_data[thread_index];
 
-          ha_sync_fast_msg_t fmsg;
+          ha_sync_fast_msg_t fmsg = { 0 };
           fmsg.msg_type = HA_SYNC_MSG_HEARTBEAT;
-          fmsg.seq_number = clib_atomic_add_fetch(&hsm->global_seq_number, 1);
+          fmsg.seq_number = ha_sync_next_seq_number ();
+          fmsg.owner_thread = (u8) thread_index;
           
           clib_fifo_add1(ptb->fast_msg_queue, fmsg);
           ha_sync_wake_output_thread (thread_index);
@@ -728,7 +988,7 @@ VLIB_NODE_FN (ha_sync_timer_node)
 { 
   u32 thread_index = vm->thread_index;
   ha_sync_main_t *hsm = &ha_sync_main;
-  ha_sync_per_thread_buffer_t *ptb = &hsm->per_thread_buffers[thread_index];
+  ha_sync_per_thread_data_t *ptb = &hsm->per_thread_data[thread_index];
 
   f64 now = vlib_time_now (vm);
 
@@ -738,65 +998,56 @@ VLIB_NODE_FN (ha_sync_timer_node)
     ha_sync_per_thread_buffer_flush (thread_index);
   }
 
-  if (thread_index == 1 && hsm->enabled && hsm->connection_established)
+  ha_sync_response_batches_flush_due (thread_index, now);
+
+  if (hsm->enabled && hsm->connection_established)
   {
     u32 *i;
     u32 num_expired = 0;
     u32 pool_index;
     u32 seq;
 
-    hsm->timer_expired_vec =
-      tw_timer_expire_timers_vec_16t_2w_512sl (&hsm->timer_wheel, now,
-                                               hsm->timer_expired_vec);
+    ha_sync_drain_ack_fifo (thread_index, ptb);
+
+    ptb->timer_expired_vec =
+      tw_timer_expire_timers_vec_16t_2w_512sl (&ptb->timer_wheel, now,
+                                               ptb->timer_expired_vec);
     // clib_warning ("ha_sync in timer node : expire %d timers",
-    //               vec_len (hsm->timer_expired_vec));
-    vec_foreach (i, hsm->timer_expired_vec)
+    //               vec_len (ptb->timer_expired_vec));
+    vec_foreach (i, ptb->timer_expired_vec)
     {
       // clib_warning ("ha_sync in timer node : expired timer %d", *i);
       pool_index = (*i) & ((1 << (32 - LOG2_TW_TIMERS_PER_OBJECT)) - 1);
 
-      clib_spinlock_lock (&hsm->tx_lock);
-      if (pool_is_free_index (hsm->ha_sync_tx_pool, pool_index))
+      if (pool_is_free_index (ptb->tx_pool, pool_index))
       {
-        clib_spinlock_unlock (&hsm->tx_lock);
         num_expired++;
         continue;
       }
 
-      ha_sync_tx_packet_t *req = pool_elt_at_index (hsm->ha_sync_tx_pool, pool_index);
+      ha_sync_tx_packet_t *req = pool_elt_at_index (ptb->tx_pool, pool_index);
       req->timer_handle = ~0;
       seq = req->seq_number;
 
       if (req->retry_count >= hsm->retransmit_times)
       {
-        clib_warning ("ha_sync in timer node : retransmit seq_number %d timeout, retry_count %d", seq, req->retry_count);
-        clib_spinlock_unlock (&hsm->tx_lock);
-        ha_sync_tx_pool_del_by_seq (seq);
+        vlib_node_increment_counter (
+          vm, node->node_index, HA_SYNC_OUTPUT_ERROR_RETRY_EXCEEDED, 1);
+        ha_sync_stat_inc (HA_SYNC_STAT_RETRY_EXCEEDED, 1);
+        ha_sync_tx_pool_del_by_seq (thread_index, seq);
         num_expired++;
         continue;
       }
 
       req->retry_count++;
-
-      // restart timer
-      u32 ticks = (u32)(hsm->retransmit_interval / hsm->timer_wheel.timer_interval);
-      if (ticks < 1)
-        ticks = 1;
-      req->timer_handle = tw_timer_start_16t_2w_512sl (&hsm->timer_wheel, pool_index, 0, ticks);
-      clib_spinlock_unlock (&hsm->tx_lock);
-
-      if (thread_index < vec_len (hsm->per_thread_buffers))
-      {
-        ha_sync_per_thread_buffer_t *rptb = &hsm->per_thread_buffers[thread_index];
-        clib_fifo_add1 (rptb->pending_fifo, seq);
-        ha_sync_wake_output_thread (thread_index);
-      }
-
+      clib_fifo_add1 (ptb->retry_fifo, seq);
+      ha_sync_wake_output_thread (thread_index);
       num_expired++;
+      continue;
     }
 
     if (num_expired)
-      vec_delete (hsm->timer_expired_vec, num_expired, 0);
+      vec_delete (ptb->timer_expired_vec, num_expired, 0);
   }
 
   return 0;
