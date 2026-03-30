@@ -1233,6 +1233,7 @@ static void lb_vip_add_adjacency(lb_main_t *lbm, lb_vip_t *vip,
 static void lb_vip_add_local_check(lb_main_t *lbm, lb_vip_t *vip)
 {
     u32 if_address_index;
+    u32 sw_if_index;
     ip_interface_address_t *if_address;
     if (lb_vip_is_ip4(vip->type))
     {
@@ -1262,19 +1263,24 @@ static void lb_vip_add_local_check(lb_main_t *lbm, lb_vip_t *vip)
         key.port = clib_host_to_net_u16(vip->port);
         hash_set_mem_alloc (&lbm->vip_index_by_local4, &key, vip - lbm->vips);
 
-        vec_validate (lbm->lb_enabled_local4_by_sw_if, if_address->sw_if_index);
-        if (!lbm->lb_enabled_local4_by_sw_if[if_address->sw_if_index])
-        {
-            ++lbm->lb_enabled_local4_by_sw_if[if_address->sw_if_index];
-            vnet_feature_enable_disable ("ip4-local", "lb-local4-input", if_address->sw_if_index, 1, 0, 0);
-        }
-        else
-        {
-            ++lbm->lb_enabled_local4_by_sw_if[if_address->sw_if_index];
-        }
-
         vip->flags |= LB_VIP_FLAGS_LOCAL;
-        vip->local_sw_if_index = if_address->sw_if_index;
+
+        vec_foreach_index(sw_if_index, im->fib_index_by_sw_if_index)
+        {
+            if (im->fib_index_by_sw_if_index[sw_if_index] != vip->fib_index)
+                continue;
+
+            vec_validate (lbm->lb_enabled_local4_by_sw_if, sw_if_index);
+            if (!lbm->lb_enabled_local4_by_sw_if[sw_if_index])
+            {
+                ++lbm->lb_enabled_local4_by_sw_if[sw_if_index];
+                vnet_feature_enable_disable ("ip4-local", "lb-local4-input", sw_if_index, 1, 0, 0);
+            }
+            else
+            {
+                ++lbm->lb_enabled_local4_by_sw_if[sw_if_index];
+            }
+        }
     }
     else
     {
@@ -1305,19 +1311,21 @@ static void lb_vip_add_local_check(lb_main_t *lbm, lb_vip_t *vip)
         key.port = clib_host_to_net_u16(vip->port);
         hash_set_mem_alloc (&lbm->vip_index_by_local6, &key, vip - lbm->vips);
 
-        vec_validate (lbm->lb_enabled_local6_by_sw_if, if_address->sw_if_index);
-        if (!lbm->lb_enabled_local6_by_sw_if[if_address->sw_if_index])
-        {
-            ++lbm->lb_enabled_local6_by_sw_if[if_address->sw_if_index];
-            vnet_feature_enable_disable ("ip6-local", "lb-local6-input", if_address->sw_if_index, 1, 0, 0);
-        }
-        else
-        {
-            ++lbm->lb_enabled_local6_by_sw_if[if_address->sw_if_index];
-        }
-
         vip->flags |= LB_VIP_FLAGS_LOCAL;
-        vip->local_sw_if_index = if_address->sw_if_index;
+
+        vec_foreach_index(sw_if_index, im->fib_index_by_sw_if_index)
+        {
+            vec_validate (lbm->lb_enabled_local6_by_sw_if, sw_if_index);
+            if (!lbm->lb_enabled_local6_by_sw_if[sw_if_index])
+            {
+                ++lbm->lb_enabled_local6_by_sw_if[sw_if_index];
+                vnet_feature_enable_disable ("ip6-local", "lb-local6-input", sw_if_index, 1, 0, 0);
+            }
+            else
+            {
+                ++lbm->lb_enabled_local6_by_sw_if[sw_if_index];
+            }
+        }
     }
 
     return;
@@ -1415,6 +1423,8 @@ static void lb_vip_del_adjacency(lb_main_t *lbm, lb_vip_t *vip)
 
 static void lb_vip_del_local_check(lb_main_t *lbm, lb_vip_t *vip)
 {
+    u32 sw_if_index;
+
     if (!lb_vip_is_local(vip))
         return;
 
@@ -1423,7 +1433,7 @@ static void lb_vip_del_local_check(lb_main_t *lbm, lb_vip_t *vip)
         if (vip->plen - 96 != 32)
             return;
 
-        clib_warning("vip is local ip4 by sw_if_index %u.", vip->local_sw_if_index);
+        ip4_main_t *im = &ip4_main;
 
         lb_vip_local4_key_t key;
         clib_memset(&key, 0, sizeof(lb_vip_local4_key_t));
@@ -1433,19 +1443,22 @@ static void lb_vip_del_local_check(lb_main_t *lbm, lb_vip_t *vip)
         key.port = clib_host_to_net_u16(vip->port);
         hash_unset_mem_free (&lbm->vip_index_by_local4, &key);
 
-        vec_validate (lbm->lb_enabled_local4_by_sw_if, vip->local_sw_if_index);
-        if (lbm->lb_enabled_local4_by_sw_if[vip->local_sw_if_index])
-            --lbm->lb_enabled_local4_by_sw_if[vip->local_sw_if_index];
+        vec_foreach_index(sw_if_index, im->fib_index_by_sw_if_index)
+        {
+            vec_validate (lbm->lb_enabled_local4_by_sw_if, sw_if_index);
+            if (lbm->lb_enabled_local4_by_sw_if[sw_if_index])
+                --lbm->lb_enabled_local4_by_sw_if[sw_if_index];
 
-        if (!lbm->lb_enabled_local4_by_sw_if[vip->local_sw_if_index])
-            vnet_feature_enable_disable ("ip4-local", "lb-local4-input", vip->local_sw_if_index, 0, 0, 0);
+            if (!lbm->lb_enabled_local4_by_sw_if[sw_if_index])
+                vnet_feature_enable_disable ("ip4-local", "lb-local4-input", sw_if_index, 0, 0, 0);
+        }
     }
     else
     {
         if (vip->plen != 128)
             return;
 
-        clib_warning("vip is local ip6 by sw_if_index %u.", vip->local_sw_if_index);
+        ip6_main_t *im = &ip6_main;
 
         lb_vip_local6_key_t key;
         clib_memset(&key, 0, sizeof(lb_vip_local6_key_t));
@@ -1455,14 +1468,16 @@ static void lb_vip_del_local_check(lb_main_t *lbm, lb_vip_t *vip)
         key.port = clib_host_to_net_u16(vip->port);
         hash_unset_mem_free (&lbm->vip_index_by_local6, &key);
 
-        vec_validate (lbm->lb_enabled_local6_by_sw_if, vip->local_sw_if_index);
-        if (lbm->lb_enabled_local6_by_sw_if[vip->local_sw_if_index])
-            --lbm->lb_enabled_local6_by_sw_if[vip->local_sw_if_index];
+        vec_foreach_index(sw_if_index, im->fib_index_by_sw_if_index)
+        {
+            vec_validate (lbm->lb_enabled_local6_by_sw_if, sw_if_index);
+            if (lbm->lb_enabled_local6_by_sw_if[sw_if_index])
+                --lbm->lb_enabled_local6_by_sw_if[sw_if_index];
 
-        if (!lbm->lb_enabled_local6_by_sw_if[vip->local_sw_if_index])
-            vnet_feature_enable_disable ("ip6-local", "lb-local6-input", vip->local_sw_if_index, 0, 0, 0);
+            if (!lbm->lb_enabled_local6_by_sw_if[sw_if_index])
+                vnet_feature_enable_disable ("ip6-local", "lb-local6-input", sw_if_index, 0, 0, 0);
+        }
     }
-
     return;
 }
 
@@ -2136,6 +2151,90 @@ int lb_nat6_interface_add_del (u32 sw_if_index, int is_del)
   return 0;
 }
 
+static void lb_interface_ip4_table_bind_cb (ip4_main_t *im, uword opaque,
+					    u32 sw_if_index, u32 new_fib_index,
+					    u32 old_fib_index)
+{
+    lb_main_t *lbm = &lb_main;
+    lb_vip_t *vip;
+
+    pool_foreach (vip, lbm->vips) {
+        if(!(vip->flags & LB_VIP_FLAGS_USED))
+            continue;
+
+        if(!(lb_vip_is_local(vip)))
+            continue;
+
+        vec_validate (lbm->lb_enabled_local4_by_sw_if, sw_if_index);
+
+        //try disable local feature
+        if (vip->fib_index == old_fib_index)
+        {
+            if (lbm->lb_enabled_local4_by_sw_if[sw_if_index])
+                --lbm->lb_enabled_local4_by_sw_if[sw_if_index];
+
+            if (!lbm->lb_enabled_local4_by_sw_if[sw_if_index])
+                vnet_feature_enable_disable ("ip4-local", "lb-local4-input", sw_if_index, 0, 0, 0);
+        }
+
+        //try enable local feature
+        if(vip->fib_index == new_fib_index)
+        {
+            if (!lbm->lb_enabled_local4_by_sw_if[sw_if_index])
+            {
+                ++lbm->lb_enabled_local4_by_sw_if[sw_if_index];
+                vnet_feature_enable_disable ("ip4-local", "lb-local4-input", sw_if_index, 1, 0, 0);
+            }
+            else
+            {
+                ++lbm->lb_enabled_local4_by_sw_if[sw_if_index];
+            }
+        }
+    }
+}
+
+static void lb_interface_ip6_table_bind_cb (ip6_main_t *im, uword opaque,
+					    u32 sw_if_index, u32 new_fib_index,
+					    u32 old_fib_index)
+{
+    lb_main_t *lbm = &lb_main;
+    lb_vip_t *vip;
+
+    pool_foreach (vip, lbm->vips) {
+        if(!(vip->flags & LB_VIP_FLAGS_USED))
+            continue;
+
+        if(!(lb_vip_is_local(vip)))
+            continue;
+
+        vec_validate (lbm->lb_enabled_local6_by_sw_if, sw_if_index);
+
+        //try disable local feature
+        if (vip->fib_index == old_fib_index)
+        {
+            if (lbm->lb_enabled_local6_by_sw_if[sw_if_index])
+                --lbm->lb_enabled_local6_by_sw_if[sw_if_index];
+
+            if (!lbm->lb_enabled_local6_by_sw_if[sw_if_index])
+                vnet_feature_enable_disable ("ip6-local", "lb-local6-input", sw_if_index, 0, 0, 0);
+        }
+
+        //try enable local feature
+        if(vip->fib_index == new_fib_index)
+        {
+            if (!lbm->lb_enabled_local6_by_sw_if[sw_if_index])
+            {
+                ++lbm->lb_enabled_local6_by_sw_if[sw_if_index];
+                vnet_feature_enable_disable ("ip6-local", "lb-local6-input", sw_if_index, 1, 0, 0);
+            }
+            else
+            {
+                ++lbm->lb_enabled_local6_by_sw_if[sw_if_index];
+            }
+        }
+    }
+}
+
 u8 *format_lb_sticky_ht_kvp (u8 *s, va_list *args)
 {
     vlib_main_t *vm = vlib_get_main();
@@ -2313,6 +2412,17 @@ lb_init (vlib_main_t * vm)
 
   lbm->vip_index_by_local6
     = hash_create_mem (0, sizeof(lb_vip_local6_key_t), sizeof (uword));
+
+
+  ip4_table_bind_callback_t cbt4 = {
+      .function = lb_interface_ip4_table_bind_cb,
+  };
+  vec_add1 (ip4_main.table_bind_callbacks, cbt4);
+
+  ip6_table_bind_callback_t cbt6 = {
+      .function = lb_interface_ip6_table_bind_cb,
+  };
+  vec_add1 (ip6_main.table_bind_callbacks, cbt6);
 
 
   clib_bihash_init_8_16 (&lbm->sticky_ht, "lb_stick_ht", lbm->sticky_buckets,

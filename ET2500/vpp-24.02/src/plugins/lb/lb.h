@@ -436,7 +436,6 @@ typedef struct {
 #define LB_VIP_FLAGS_IPV4_SNAT 0x4
 #define LB_VIP_FLAGS_LOCAL 0x8
 
-  u32 local_sw_if_index;
   /**
    * Pool of AS indexes used for this VIP.
    * This also includes ASs that have been removed (but are still referenced).
