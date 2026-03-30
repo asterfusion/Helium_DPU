@@ -403,6 +403,7 @@ typedef struct {
 
   /* tcp port or udp port. If not per-port vip, set to 0 */
   u16 port;
+  u16 net_port;
 
   /* Valid for per-port vip */
   u32 vip_prefix_index;

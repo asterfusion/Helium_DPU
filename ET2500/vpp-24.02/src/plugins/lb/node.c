@@ -1406,26 +1406,784 @@ lb_nat4_in2out_node_inline (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_f
 
       vlib_get_next_frame(vm, node, next_index, to_next, n_left_to_next);
 
+      while (n_left_from >= 8  && n_left_to_next >= 4)
+        {
+          u32 bi0, bi1, bi2, bi3;
+          vlib_buffer_t *b0, *b1, *b2, *b3;
+          u32 next0, next1, next2, next3;
+          u32 sw_if_index0, sw_if_index1, sw_if_index2, sw_if_index3;
+
+          ip_csum_t csum0, csum1, csum2, csum3;
+
+          u32 timeout0 = lbm->flow_timeout;
+          u32 timeout1 = lbm->flow_timeout;
+          u32 timeout2 = lbm->flow_timeout;
+          u32 timeout3 = lbm->flow_timeout;
+
+          ip4_header_t *ip40, *ip41, *ip42, *ip43;
+          udp_header_t *udp0, *udp1, *udp2, *udp3;
+          tcp_header_t *tcp0, *tcp1, *tcp2, *tcp3;
+
+          u32 old_saddr0, new_saddr0, old_saddr1, new_saddr1, old_saddr2, new_saddr2, old_saddr3, new_saddr3;
+          u16 old_sport0, new_sport0, old_sport1, new_sport1, old_sport2, new_sport2, old_sport3, new_sport3;
+          u32 old_daddr0, new_daddr0, old_daddr1, new_daddr1, old_daddr2, new_daddr2, old_daddr3, new_daddr3;
+          u16 old_dport0, new_dport0, old_dport1, new_dport1, old_dport2, new_dport2, old_dport3, new_dport3;
+
+          lb_snat4_key_t key40, key41, key42, key43;
+          lb_snat_mapping_t *sm40, *sm41, *sm42, *sm43;
+          u32 index40, index41, index42, index43;
+
+          lb_snat_vip_key_t dnat_key40, dnat_key41, dnat_key42, dnat_key43;
+          lb_vip_snat_mapping_t *flow0, *flow1, *flow2, *flow3;
+          u32 dindex40, dindex41, dindex42, dindex43;
+
+          bool translated0 = false;
+          bool translated1 = false;
+          bool translated2 = false;
+          bool translated3 = false;
+
+          lb_vip_t *vip0, *vip1, *vip2, *vip3;
+
+          u32 next_fib_index0, next_fib_index1, next_fib_index2, next_fib_index3;
+          u32 rx_fib_index0, rx_fib_index1, rx_fib_index2, rx_fib_index3;
+
+          /* Prefetch next iteration. */
+          {
+              vlib_buffer_t *p4, *p5, *p6, *p7;
+
+              p4 = vlib_get_buffer (vm, from[4]);
+              p5 = vlib_get_buffer (vm, from[5]);
+              p6 = vlib_get_buffer (vm, from[6]);
+              p7 = vlib_get_buffer (vm, from[7]);
+
+              vlib_prefetch_buffer_header (p4, LOAD);
+              vlib_prefetch_buffer_header (p5, LOAD);
+              vlib_prefetch_buffer_header (p6, LOAD);
+              vlib_prefetch_buffer_header (p7, LOAD);
+
+              clib_prefetch_store (p4->data);
+              clib_prefetch_store (p5->data);
+              clib_prefetch_store (p6->data);
+              clib_prefetch_store (p7->data);
+          }
+
+          /* speculatively enqueue b0 to the current next frame */
+          to_next[0] = bi0 = from[0];
+          to_next[1] = bi1 = from[1];
+          to_next[2] = bi2 = from[2];
+          to_next[3] = bi3 = from[3];
+          from += 4;
+          to_next += 4;
+          n_left_from -= 4;
+          n_left_to_next -= 4;
+
+          b0 = vlib_get_buffer (vm, bi0);
+          b1 = vlib_get_buffer (vm, bi1);
+          b2 = vlib_get_buffer (vm, bi2);
+          b3 = vlib_get_buffer (vm, bi3);
+
+          next0 = LB_NAT4_IN2OUT_NEXT_LOOKUP;
+          next1 = LB_NAT4_IN2OUT_NEXT_LOOKUP;
+          next2 = LB_NAT4_IN2OUT_NEXT_LOOKUP;
+          next3 = LB_NAT4_IN2OUT_NEXT_LOOKUP;
+
+          sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
+          sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
+          sw_if_index2 = vnet_buffer(b2)->sw_if_index[VLIB_RX];
+          sw_if_index3 = vnet_buffer(b3)->sw_if_index[VLIB_RX];
+
+          rx_fib_index0 = ip4_fib_table_get_index_for_sw_if_index(sw_if_index0);
+          rx_fib_index1 = ip4_fib_table_get_index_for_sw_if_index(sw_if_index1);
+          rx_fib_index2 = ip4_fib_table_get_index_for_sw_if_index(sw_if_index2);
+          rx_fib_index3 = ip4_fib_table_get_index_for_sw_if_index(sw_if_index3);
+
+          ip40 = vlib_buffer_get_current (b0);
+          ip41 = vlib_buffer_get_current (b1);
+          ip42 = vlib_buffer_get_current (b2);
+          ip43 = vlib_buffer_get_current (b3);
+
+          udp0 = ip4_next_header (ip40);
+          udp1 = ip4_next_header (ip41);
+          udp2 = ip4_next_header (ip42);
+          udp3 = ip4_next_header (ip43);
+
+          tcp0 = (tcp_header_t *) udp0;
+          tcp1 = (tcp_header_t *) udp1;
+          tcp2 = (tcp_header_t *) udp2;
+          tcp3 = (tcp_header_t *) udp3;
+
+          clib_memset(&dnat_key40, 0, sizeof(dnat_key40));
+          clib_memset(&dnat_key41, 0, sizeof(dnat_key41));
+          clib_memset(&dnat_key42, 0, sizeof(dnat_key42));
+          clib_memset(&dnat_key43, 0, sizeof(dnat_key43));
+
+          dnat_key40.addr = ip40->dst_address;
+          dnat_key40.protocol = ip40->protocol;
+          dnat_key40.port = udp0->dst_port;
+          dnat_key40.fib_index = rx_fib_index0;
+
+          dnat_key41.addr = ip41->dst_address;
+          dnat_key41.protocol = ip41->protocol;
+          dnat_key41.port = udp1->dst_port;
+          dnat_key41.fib_index = rx_fib_index1;
+
+          dnat_key42.addr = ip42->dst_address;
+          dnat_key42.protocol = ip42->protocol;
+          dnat_key42.port = udp2->dst_port;
+          dnat_key42.fib_index = rx_fib_index2;
+
+          dnat_key43.addr = ip43->dst_address;
+          dnat_key43.protocol = ip43->protocol;
+          dnat_key43.port = udp3->dst_port;
+          dnat_key43.fib_index = rx_fib_index3;
+
+          if (lb_nat44_dnat_mapping_match (lbm, &dnat_key40, &dindex40) == 0)
+          {
+              flow0 = pool_elt_at_index (lbm->vip_snat_mappings, dindex40);
+
+              vip0 = pool_elt_at_index(lbm->vips, flow0->vip_index);
+
+              if (!lb_vip_is_double_nat44(vip0))
+              {
+                  vnet_feature_next (&next0, b0);
+                  goto trace00;
+              }
+
+              next_fib_index0 = flow0->outside_fib_index;
+
+              timeout0 = lb_get_ip4_protocol_timeout(vm, b0, ip40);
+
+              old_saddr0 = ip40->src_address.as_u32;
+              old_daddr0 = ip40->dst_address.as_u32;
+              new_saddr0 = vip0->prefix.ip4.as_u32;
+              new_daddr0 = flow0->outside_ip.ip4.as_u32;
+              ip40->src_address.as_u32 = new_saddr0;
+              ip40->dst_address.as_u32 = new_daddr0;
+
+              new_sport0 = vip0->net_port;
+              new_dport0 = flow0->outside_port;
+
+              csum0 = ip40->checksum;
+              csum0 = ip_csum_sub_even (csum0, old_saddr0);
+              csum0 = ip_csum_sub_even (csum0, old_daddr0);
+              csum0 = ip_csum_add_even (csum0, new_saddr0);
+              csum0 = ip_csum_add_even (csum0, new_daddr0);
+              ip40->checksum = ip_csum_fold (csum0);
+
+              if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_TCP))
+              {
+                  old_sport0 = tcp0->src_port;
+                  old_dport0 = tcp0->dst_port;
+                  tcp0->src_port = new_sport0;
+                  tcp0->dst_port = new_dport0;
+
+                  csum0 = tcp0->checksum;
+                  csum0 = ip_csum_sub_even (csum0, old_saddr0);
+                  csum0 = ip_csum_sub_even (csum0, old_daddr0);
+                  csum0 = ip_csum_sub_even (csum0, old_sport0);
+                  csum0 = ip_csum_sub_even (csum0, old_dport0);
+                  csum0 = ip_csum_add_even (csum0, new_saddr0);
+                  csum0 = ip_csum_add_even (csum0, new_daddr0);
+                  csum0 = ip_csum_add_even (csum0, new_sport0);
+                  csum0 = ip_csum_add_even (csum0, new_dport0);
+                  tcp0->checksum = ip_csum_fold (csum0);
+              }
+              else if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_UDP))
+              {
+                  old_sport0 = tcp0->src_port;
+                  old_dport0 = udp0->dst_port;
+                  udp0->src_port = new_sport0;
+                  udp0->dst_port = new_dport0;
+
+                  if (udp0->checksum)
+                  {
+                      csum0 = udp0->checksum;
+                      csum0 = ip_csum_sub_even (csum0, old_saddr0);
+                      csum0 = ip_csum_sub_even (csum0, old_daddr0);
+                      csum0 = ip_csum_sub_even (csum0, old_sport0);
+                      csum0 = ip_csum_sub_even (csum0, old_dport0);
+                      csum0 = ip_csum_add_even (csum0, flow0->outside_ip.ip4.as_u32);
+                      csum0 = ip_csum_add_even (csum0, flow0->outside_ip.ip4.as_u32);
+                      csum0 = ip_csum_add_even (csum0, new_sport0);
+                      csum0 = ip_csum_add_even (csum0, new_dport0);
+                      udp0->checksum = ip_csum_fold (csum0);
+                  }
+              }
+
+              if (lb_time_now - flow0->last_ha_sync_timeout >
+                  lb_ha_sync_ctx.ha_sync_timeout_update_interval)
+              {
+                  lb_ha_sync_event_vip_snat_session_notify(vm->thread_index, LB_HA_OP_UPDATE,
+                          vip0, flow0, timeout0);
+                  flow0->last_ha_sync_timeout = lb_time_now;
+              }
+
+              flow0->timeout = lb_time_now + timeout0;
+          }
+          else
+          {
+              clib_memset(&key40, 0, sizeof(key40));
+              key40.addr = ip40->src_address;
+              key40.protocol = ip40->protocol;
+              key40.port = udp0->src_port;
+              key40.fib_index = rx_fib_index0;
+
+              if (lb_nat44_mapping_match (lbm, &key40, &index40))
+              {
+                  vnet_feature_next (&next0, b0);
+                  goto trace00;
+              }
+
+              sm40 = pool_elt_at_index(lbm->snat_mappings, index40);
+
+              next_fib_index0 = sm40->fib_index;
+
+              new_saddr0 = sm40->src_ip.ip4.as_u32;
+              new_sport0 = sm40->src_port;
+              old_saddr0 = ip40->src_address.as_u32;
+              ip40->src_address.as_u32 = new_saddr0;
+
+              csum0 = ip40->checksum;
+              csum0 = ip_csum_sub_even (csum0, old_saddr0);
+              csum0 = ip_csum_add_even (csum0, new_saddr0);
+              ip40->checksum = ip_csum_fold (csum0);
+
+              if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_TCP))
+              {
+                  old_sport0 = tcp0->src_port;
+                  tcp0->src_port = new_sport0;
+
+                  csum0 = tcp0->checksum;
+                  csum0 = ip_csum_sub_even (csum0, old_saddr0);
+                  csum0 = ip_csum_sub_even (csum0, old_sport0);
+                  csum0 = ip_csum_add_even (csum0, new_saddr0);
+                  csum0 = ip_csum_add_even (csum0, new_sport0);
+                  tcp0->checksum = ip_csum_fold (csum0);
+              }
+              else if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_UDP))
+              {
+                  old_sport0 = udp0->src_port;
+                  udp0->src_port = new_sport0;
+
+                  if (udp0->checksum)
+                  {
+                      csum0 = udp0->checksum;
+                      csum0 = ip_csum_sub_even (csum0, old_saddr0);
+                      csum0 = ip_csum_sub_even (csum0, old_sport0);
+                      csum0 = ip_csum_add_even (csum0, new_saddr0);
+                      csum0 = ip_csum_add_even (csum0, new_sport0);
+                      udp0->checksum = ip_csum_fold (csum0);
+                  }
+              }
+          }
+
+          vnet_buffer(b0)->sw_if_index[VLIB_TX] = next_fib_index0;
+          translated0 = true;
+
+          trace00:
+          pkts_processed += translated0 != true;
+          if (PREDICT_FALSE(
+              (node->flags & VLIB_NODE_FLAG_TRACE) && (b0->flags & VLIB_BUFFER_IS_TRACED)))
+            {
+              lb_nat_trace_t *t = vlib_add_trace (vm, node, b0, sizeof(*t));
+              t->rx_sw_if_index = sw_if_index0;
+              t->next_index = next0;
+            }
+
+          if (lb_nat44_dnat_mapping_match (lbm, &dnat_key41, &dindex41) == 0)
+          {
+              flow1 = pool_elt_at_index (lbm->vip_snat_mappings, dindex41);
+
+              vip1 = pool_elt_at_index(lbm->vips, flow1->vip_index);
+
+              if (!lb_vip_is_double_nat44(vip1))
+              {
+                  vnet_feature_next (&next1, b1);
+                  goto trace01;
+              }
+
+              next_fib_index1 = flow1->outside_fib_index;
+
+              timeout1 = lb_get_ip4_protocol_timeout(vm, b1, ip41);
+
+              old_saddr1 = ip41->src_address.as_u32;
+              old_daddr1 = ip41->dst_address.as_u32;
+              new_saddr1 = vip1->prefix.ip4.as_u32;
+              new_daddr1 = flow1->outside_ip.ip4.as_u32;
+              ip41->src_address.as_u32 = new_saddr1;
+              ip41->dst_address.as_u32 = new_daddr1;
+
+              new_sport1 = vip1->net_port;
+              new_dport1 = flow1->outside_port;
+
+              csum1 = ip41->checksum;
+              csum1 = ip_csum_sub_even (csum1, old_saddr1);
+              csum1 = ip_csum_sub_even (csum1, old_daddr1);
+              csum1 = ip_csum_add_even (csum1, new_saddr1);
+              csum1 = ip_csum_add_even (csum1, new_daddr1);
+              ip41->checksum = ip_csum_fold (csum1);
+
+              if (PREDICT_TRUE(ip41->protocol == IP_PROTOCOL_TCP))
+              {
+                  old_sport1 = tcp1->src_port;
+                  old_dport1 = tcp1->dst_port;
+                  tcp1->src_port = new_sport1;
+                  tcp1->dst_port = new_dport1;
+
+                  csum1 = tcp1->checksum;
+                  csum1 = ip_csum_sub_even (csum1, old_saddr1);
+                  csum1 = ip_csum_sub_even (csum1, old_daddr1);
+                  csum1 = ip_csum_sub_even (csum1, old_sport1);
+                  csum1 = ip_csum_sub_even (csum1, old_dport1);
+                  csum1 = ip_csum_add_even (csum1, new_saddr1);
+                  csum1 = ip_csum_add_even (csum1, new_daddr1);
+                  csum1 = ip_csum_add_even (csum1, new_sport1);
+                  csum1 = ip_csum_add_even (csum1, new_dport1);
+                  tcp1->checksum = ip_csum_fold (csum1);
+              }
+              else if (PREDICT_TRUE(ip41->protocol == IP_PROTOCOL_UDP))
+              {
+                  old_sport1 = tcp1->src_port;
+                  old_dport1 = udp1->dst_port;
+                  udp1->src_port = new_sport1;
+                  udp1->dst_port = new_dport1;
+
+                  if (udp1->checksum)
+                  {
+                      csum1 = udp1->checksum;
+                      csum1 = ip_csum_sub_even (csum1, old_saddr1);
+                      csum1 = ip_csum_sub_even (csum1, old_daddr1);
+                      csum1 = ip_csum_sub_even (csum1, old_sport1);
+                      csum1 = ip_csum_sub_even (csum1, old_dport1);
+                      csum1 = ip_csum_add_even (csum1, flow1->outside_ip.ip4.as_u32);
+                      csum1 = ip_csum_add_even (csum1, flow1->outside_ip.ip4.as_u32);
+                      csum1 = ip_csum_add_even (csum1, new_sport1);
+                      csum1 = ip_csum_add_even (csum1, new_dport1);
+                      udp1->checksum = ip_csum_fold (csum1);
+                  }
+              }
+
+              if (lb_time_now - flow1->last_ha_sync_timeout >
+                  lb_ha_sync_ctx.ha_sync_timeout_update_interval)
+              {
+                  lb_ha_sync_event_vip_snat_session_notify(vm->thread_index, LB_HA_OP_UPDATE,
+                          vip1, flow1, timeout1);
+                  flow1->last_ha_sync_timeout = lb_time_now;
+              }
+
+              flow1->timeout = lb_time_now + timeout1;
+          }
+          else
+          {
+              clib_memset(&key41, 0, sizeof(key41));
+              key41.addr = ip41->src_address;
+              key41.protocol = ip41->protocol;
+              key41.port = udp1->src_port;
+              key41.fib_index = rx_fib_index1;
+
+              if (lb_nat44_mapping_match (lbm, &key41, &index41))
+              {
+                  vnet_feature_next (&next1, b1);
+                  goto trace01;
+              }
+
+              sm41 = pool_elt_at_index(lbm->snat_mappings, index41);
+
+              next_fib_index1 = sm41->fib_index;
+
+              new_saddr1 = sm41->src_ip.ip4.as_u32;
+              new_sport1 = sm41->src_port;
+              old_saddr1 = ip41->src_address.as_u32;
+              ip41->src_address.as_u32 = new_saddr1;
+
+              csum1 = ip41->checksum;
+              csum1 = ip_csum_sub_even (csum1, old_saddr1);
+              csum1 = ip_csum_add_even (csum1, new_saddr1);
+              ip41->checksum = ip_csum_fold (csum1);
+
+              if (PREDICT_TRUE(ip41->protocol == IP_PROTOCOL_TCP))
+              {
+                  old_sport1 = tcp1->src_port;
+                  tcp1->src_port = new_sport1;
+
+                  csum1 = tcp1->checksum;
+                  csum1 = ip_csum_sub_even (csum1, old_saddr1);
+                  csum1 = ip_csum_sub_even (csum1, old_sport1);
+                  csum1 = ip_csum_add_even (csum1, new_saddr1);
+                  csum1 = ip_csum_add_even (csum1, new_sport1);
+                  tcp1->checksum = ip_csum_fold (csum1);
+              }
+              else if (PREDICT_TRUE(ip41->protocol == IP_PROTOCOL_UDP))
+              {
+                  old_sport1 = udp1->src_port;
+                  udp1->src_port = new_sport1;
+
+                  if (udp1->checksum)
+                  {
+                      csum1 = udp1->checksum;
+                      csum1 = ip_csum_sub_even (csum1, old_saddr1);
+                      csum1 = ip_csum_sub_even (csum1, old_sport1);
+                      csum1 = ip_csum_add_even (csum1, new_saddr1);
+                      csum1 = ip_csum_add_even (csum1, new_sport1);
+                      udp1->checksum = ip_csum_fold (csum1);
+                  }
+              }
+          }
+
+          vnet_buffer(b1)->sw_if_index[VLIB_TX] = next_fib_index1;
+          translated1 = true;
+
+          trace01:
+          pkts_processed += translated1 != true;
+          if (PREDICT_FALSE(
+              (node->flags & VLIB_NODE_FLAG_TRACE) && (b1->flags & VLIB_BUFFER_IS_TRACED)))
+            {
+              lb_nat_trace_t *t = vlib_add_trace (vm, node, b1, sizeof(*t));
+              t->rx_sw_if_index = sw_if_index1;
+              t->next_index = next1;
+            }
+
+          if (lb_nat44_dnat_mapping_match (lbm, &dnat_key42, &dindex42) == 0)
+          {
+              flow2 = pool_elt_at_index (lbm->vip_snat_mappings, dindex42);
+
+              vip2 = pool_elt_at_index(lbm->vips, flow2->vip_index);
+
+              if (!lb_vip_is_double_nat44(vip2))
+              {
+                  vnet_feature_next (&next2, b2);
+                  goto trace02;
+              }
+
+              next_fib_index2 = flow2->outside_fib_index;
+
+              timeout2 = lb_get_ip4_protocol_timeout(vm, b2, ip42);
+
+              old_saddr2 = ip42->src_address.as_u32;
+              old_daddr2 = ip42->dst_address.as_u32;
+              new_saddr2 = vip2->prefix.ip4.as_u32;
+              new_daddr2 = flow2->outside_ip.ip4.as_u32;
+              ip42->src_address.as_u32 = new_saddr2;
+              ip42->dst_address.as_u32 = new_daddr2;
+
+              new_sport2 = vip2->net_port;
+              new_dport2 = flow2->outside_port;
+
+              csum2 = ip42->checksum;
+              csum2 = ip_csum_sub_even (csum2, old_saddr2);
+              csum2 = ip_csum_sub_even (csum2, old_daddr2);
+              csum2 = ip_csum_add_even (csum2, new_saddr2);
+              csum2 = ip_csum_add_even (csum2, new_daddr2);
+              ip42->checksum = ip_csum_fold (csum2);
+
+              if (PREDICT_TRUE(ip42->protocol == IP_PROTOCOL_TCP))
+              {
+                  old_sport2 = tcp2->src_port;
+                  old_dport2 = tcp2->dst_port;
+                  tcp2->src_port = new_sport2;
+                  tcp2->dst_port = new_dport2;
+
+                  csum2 = tcp2->checksum;
+                  csum2 = ip_csum_sub_even (csum2, old_saddr2);
+                  csum2 = ip_csum_sub_even (csum2, old_daddr2);
+                  csum2 = ip_csum_sub_even (csum2, old_sport2);
+                  csum2 = ip_csum_sub_even (csum2, old_dport2);
+                  csum2 = ip_csum_add_even (csum2, new_saddr2);
+                  csum2 = ip_csum_add_even (csum2, new_daddr2);
+                  csum2 = ip_csum_add_even (csum2, new_sport2);
+                  csum2 = ip_csum_add_even (csum2, new_dport2);
+                  tcp2->checksum = ip_csum_fold (csum2);
+              }
+              else if (PREDICT_TRUE(ip42->protocol == IP_PROTOCOL_UDP))
+              {
+                  old_sport2 = tcp2->src_port;
+                  old_dport2 = udp2->dst_port;
+                  udp2->src_port = new_sport2;
+                  udp2->dst_port = new_dport2;
+
+                  if (udp2->checksum)
+                  {
+                      csum2 = udp2->checksum;
+                      csum2 = ip_csum_sub_even (csum2, old_saddr2);
+                      csum2 = ip_csum_sub_even (csum2, old_daddr2);
+                      csum2 = ip_csum_sub_even (csum2, old_sport2);
+                      csum2 = ip_csum_sub_even (csum2, old_dport2);
+                      csum2 = ip_csum_add_even (csum2, flow2->outside_ip.ip4.as_u32);
+                      csum2 = ip_csum_add_even (csum2, flow2->outside_ip.ip4.as_u32);
+                      csum2 = ip_csum_add_even (csum2, new_sport2);
+                      csum2 = ip_csum_add_even (csum2, new_dport2);
+                      udp2->checksum = ip_csum_fold (csum2);
+                  }
+              }
+
+              if (lb_time_now - flow2->last_ha_sync_timeout >
+                  lb_ha_sync_ctx.ha_sync_timeout_update_interval)
+              {
+                  lb_ha_sync_event_vip_snat_session_notify(vm->thread_index, LB_HA_OP_UPDATE,
+                          vip2, flow2, timeout2);
+                  flow2->last_ha_sync_timeout = lb_time_now;
+              }
+
+              flow2->timeout = lb_time_now + timeout2;
+          }
+          else
+          {
+              clib_memset(&key42, 0, sizeof(key42));
+              key42.addr = ip42->src_address;
+              key42.protocol = ip42->protocol;
+              key42.port = udp2->src_port;
+              key42.fib_index = rx_fib_index2;
+
+              if (lb_nat44_mapping_match (lbm, &key42, &index42))
+              {
+                  vnet_feature_next (&next2, b2);
+                  goto trace02;
+              }
+
+              sm42 = pool_elt_at_index(lbm->snat_mappings, index42);
+
+              next_fib_index2 = sm42->fib_index;
+
+              new_saddr2 = sm42->src_ip.ip4.as_u32;
+              new_sport2 = sm42->src_port;
+              old_saddr2 = ip42->src_address.as_u32;
+              ip42->src_address.as_u32 = new_saddr2;
+
+              csum2 = ip42->checksum;
+              csum2 = ip_csum_sub_even (csum2, old_saddr2);
+              csum2 = ip_csum_add_even (csum2, new_saddr2);
+              ip42->checksum = ip_csum_fold (csum2);
+
+              if (PREDICT_TRUE(ip42->protocol == IP_PROTOCOL_TCP))
+              {
+                  old_sport2 = tcp2->src_port;
+                  tcp2->src_port = new_sport2;
+
+                  csum2 = tcp2->checksum;
+                  csum2 = ip_csum_sub_even (csum2, old_saddr2);
+                  csum2 = ip_csum_sub_even (csum2, old_sport2);
+                  csum2 = ip_csum_add_even (csum2, new_saddr2);
+                  csum2 = ip_csum_add_even (csum2, new_sport2);
+                  tcp2->checksum = ip_csum_fold (csum2);
+              }
+              else if (PREDICT_TRUE(ip42->protocol == IP_PROTOCOL_UDP))
+              {
+                  old_sport2 = udp2->src_port;
+                  udp2->src_port = new_sport2;
+
+                  if (udp2->checksum)
+                  {
+                      csum2 = udp2->checksum;
+                      csum2 = ip_csum_sub_even (csum2, old_saddr2);
+                      csum2 = ip_csum_sub_even (csum2, old_sport2);
+                      csum2 = ip_csum_add_even (csum2, new_saddr2);
+                      csum2 = ip_csum_add_even (csum2, new_sport2);
+                      udp2->checksum = ip_csum_fold (csum2);
+                  }
+              }
+          }
+
+          vnet_buffer(b2)->sw_if_index[VLIB_TX] = next_fib_index2;
+          translated2 = true;
+
+          trace02:
+          pkts_processed += translated2 != true;
+          if (PREDICT_FALSE(
+              (node->flags & VLIB_NODE_FLAG_TRACE) && (b2->flags & VLIB_BUFFER_IS_TRACED)))
+            {
+              lb_nat_trace_t *t = vlib_add_trace (vm, node, b2, sizeof(*t));
+              t->rx_sw_if_index = sw_if_index2;
+              t->next_index = next2;
+            }
+
+          if (lb_nat44_dnat_mapping_match (lbm, &dnat_key43, &dindex43) == 0)
+          {
+              flow3 = pool_elt_at_index (lbm->vip_snat_mappings, dindex43);
+
+              vip3 = pool_elt_at_index(lbm->vips, flow3->vip_index);
+
+              if (!lb_vip_is_double_nat44(vip3))
+              {
+                  vnet_feature_next (&next3, b3);
+                  goto trace03;
+              }
+
+              next_fib_index3 = flow3->outside_fib_index;
+
+              timeout3 = lb_get_ip4_protocol_timeout(vm, b3, ip43);
+
+              old_saddr3 = ip43->src_address.as_u32;
+              old_daddr3 = ip43->dst_address.as_u32;
+              new_saddr3 = vip3->prefix.ip4.as_u32;
+              new_daddr3 = flow3->outside_ip.ip4.as_u32;
+              ip43->src_address.as_u32 = new_saddr3;
+              ip43->dst_address.as_u32 = new_daddr3;
+
+              new_sport3 = vip3->net_port;
+              new_dport3 = flow3->outside_port;
+
+              csum3 = ip43->checksum;
+              csum3 = ip_csum_sub_even (csum3, old_saddr3);
+              csum3 = ip_csum_sub_even (csum3, old_daddr3);
+              csum3 = ip_csum_add_even (csum3, new_saddr3);
+              csum3 = ip_csum_add_even (csum3, new_daddr3);
+              ip43->checksum = ip_csum_fold (csum3);
+
+              if (PREDICT_TRUE(ip43->protocol == IP_PROTOCOL_TCP))
+              {
+                  old_sport3 = tcp3->src_port;
+                  old_dport3 = tcp3->dst_port;
+                  tcp3->src_port = new_sport3;
+                  tcp3->dst_port = new_dport3;
+
+                  csum3 = tcp3->checksum;
+                  csum3 = ip_csum_sub_even (csum3, old_saddr3);
+                  csum3 = ip_csum_sub_even (csum3, old_daddr3);
+                  csum3 = ip_csum_sub_even (csum3, old_sport3);
+                  csum3 = ip_csum_sub_even (csum3, old_dport3);
+                  csum3 = ip_csum_add_even (csum3, new_saddr3);
+                  csum3 = ip_csum_add_even (csum3, new_daddr3);
+                  csum3 = ip_csum_add_even (csum3, new_sport3);
+                  csum3 = ip_csum_add_even (csum3, new_dport3);
+                  tcp3->checksum = ip_csum_fold (csum3);
+              }
+              else if (PREDICT_TRUE(ip43->protocol == IP_PROTOCOL_UDP))
+              {
+                  old_sport3 = tcp3->src_port;
+                  old_dport3 = udp3->dst_port;
+                  udp3->src_port = new_sport3;
+                  udp3->dst_port = new_dport3;
+
+                  if (udp3->checksum)
+                  {
+                      csum3 = udp3->checksum;
+                      csum3 = ip_csum_sub_even (csum3, old_saddr3);
+                      csum3 = ip_csum_sub_even (csum3, old_daddr3);
+                      csum3 = ip_csum_sub_even (csum3, old_sport3);
+                      csum3 = ip_csum_sub_even (csum3, old_dport3);
+                      csum3 = ip_csum_add_even (csum3, flow3->outside_ip.ip4.as_u32);
+                      csum3 = ip_csum_add_even (csum3, flow3->outside_ip.ip4.as_u32);
+                      csum3 = ip_csum_add_even (csum3, new_sport3);
+                      csum3 = ip_csum_add_even (csum3, new_dport3);
+                      udp3->checksum = ip_csum_fold (csum3);
+                  }
+              }
+
+              if (lb_time_now - flow3->last_ha_sync_timeout >
+                  lb_ha_sync_ctx.ha_sync_timeout_update_interval)
+              {
+                  lb_ha_sync_event_vip_snat_session_notify(vm->thread_index, LB_HA_OP_UPDATE,
+                          vip3, flow3, timeout3);
+                  flow3->last_ha_sync_timeout = lb_time_now;
+              }
+
+              flow3->timeout = lb_time_now + timeout3;
+          }
+          else
+          {
+              clib_memset(&key43, 0, sizeof(key43));
+              key43.addr = ip43->src_address;
+              key43.protocol = ip43->protocol;
+              key43.port = udp3->src_port;
+              key43.fib_index = rx_fib_index3;
+
+              if (lb_nat44_mapping_match (lbm, &key43, &index43))
+              {
+                  vnet_feature_next (&next3, b3);
+                  goto trace03;
+              }
+
+              sm43 = pool_elt_at_index(lbm->snat_mappings, index43);
+
+              next_fib_index3 = sm43->fib_index;
+
+              new_saddr3 = sm43->src_ip.ip4.as_u32;
+              new_sport3 = sm43->src_port;
+              old_saddr3 = ip43->src_address.as_u32;
+              ip43->src_address.as_u32 = new_saddr3;
+
+              csum3 = ip43->checksum;
+              csum3 = ip_csum_sub_even (csum3, old_saddr3);
+              csum3 = ip_csum_add_even (csum3, new_saddr3);
+              ip43->checksum = ip_csum_fold (csum3);
+
+              if (PREDICT_TRUE(ip43->protocol == IP_PROTOCOL_TCP))
+              {
+                  old_sport3 = tcp3->src_port;
+                  tcp3->src_port = new_sport3;
+
+                  csum3 = tcp3->checksum;
+                  csum3 = ip_csum_sub_even (csum3, old_saddr3);
+                  csum3 = ip_csum_sub_even (csum3, old_sport3);
+                  csum3 = ip_csum_add_even (csum3, new_saddr3);
+                  csum3 = ip_csum_add_even (csum3, new_sport3);
+                  tcp3->checksum = ip_csum_fold (csum3);
+              }
+              else if (PREDICT_TRUE(ip43->protocol == IP_PROTOCOL_UDP))
+              {
+                  old_sport3 = udp3->src_port;
+                  udp3->src_port = new_sport3;
+
+                  if (udp3->checksum)
+                  {
+                      csum3 = udp3->checksum;
+                      csum3 = ip_csum_sub_even (csum3, old_saddr3);
+                      csum3 = ip_csum_sub_even (csum3, old_sport3);
+                      csum3 = ip_csum_add_even (csum3, new_saddr3);
+                      csum3 = ip_csum_add_even (csum3, new_sport3);
+                      udp3->checksum = ip_csum_fold (csum3);
+                  }
+              }
+          }
+
+          vnet_buffer(b3)->sw_if_index[VLIB_TX] = next_fib_index3;
+          translated3 = true;
+
+          trace03:
+          pkts_processed += translated3 != true;
+          if (PREDICT_FALSE(
+              (node->flags & VLIB_NODE_FLAG_TRACE) && (b3->flags & VLIB_BUFFER_IS_TRACED)))
+            {
+              lb_nat_trace_t *t = vlib_add_trace (vm, node, b3, sizeof(*t));
+              t->rx_sw_if_index = sw_if_index3;
+              t->next_index = next3;
+            }
+
+          /* verify speculative enqueue, maybe switch current next frame */
+	      vlib_validate_buffer_enqueue_x4 (vm, node, next_index,
+                  to_next, n_left_to_next,
+                  bi0, bi1, bi2, bi3,
+                  next0, next1, next2, next3);
+        }
+
       while (n_left_from > 0 && n_left_to_next > 0)
         {
           u32 bi0;
           vlib_buffer_t * b0;
           u32 next0;
           u32 sw_if_index0;
-          ip_csum_t csum;
-          u16 old_port0, new_port0;
           u32 timeout0 = lbm->flow_timeout;
 
           ip4_header_t * ip40;
           udp_header_t * udp0;
           tcp_header_t * tcp0;
 
-          u32 old_addr0, new_addr0;
+          ip_csum_t csum0;
+          u32 old_saddr0, new_saddr0;
+          u16 old_sport0, new_sport0;
+          u32 old_daddr0, new_daddr0;
+          u16 old_dport0, new_dport0;
+
           lb_snat4_key_t key40;
           lb_snat_mapping_t *sm40;
           u32 index40;
 
-          bool translated = false;
+          lb_snat_vip_key_t dnat_key40;
+          lb_vip_snat_mapping_t *flow0;
+          u32 dindex40;
+
+          u32 next_fib_index0;
+          bool translated0 = false;
 
           lb_vip_t *vip0;
 
@@ -1449,134 +2207,159 @@ lb_nat4_in2out_node_inline (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_f
           udp0 = ip4_next_header (ip40);
           tcp0 = (tcp_header_t *) udp0;
 
-          clib_memset(&key40, 0, sizeof(key40));
-          key40.addr = ip40->src_address;
-          key40.protocol = ip40->protocol;
-          key40.port = udp0->src_port;
-          key40.fib_index = rx_fib_index0;
+          clib_memset(&dnat_key40, 0, sizeof(dnat_key40));
+          dnat_key40.addr = ip40->dst_address;
+          dnat_key40.protocol = ip40->protocol;
+          dnat_key40.port = udp0->dst_port;
+          dnat_key40.fib_index = rx_fib_index0;
 
-          if (lb_nat44_mapping_match (lbm, &key40, &index40))
-            {
-              vnet_feature_next (&next0, b0);
-              goto trace0;
-            }
-
-          timeout0 = lb_get_ip4_protocol_timeout(vm, b0, ip40);
-
-          sm40 = pool_elt_at_index(lbm->snat_mappings, index40);
-          new_addr0 = sm40->src_ip.ip4.as_u32;
-          new_port0 = sm40->src_port;
-          vnet_buffer(b0)->sw_if_index[VLIB_TX] = sm40->fib_index;
-          old_addr0 = ip40->src_address.as_u32;
-          ip40->src_address.as_u32 = new_addr0;
-
-          csum = ip40->checksum;
-          csum = ip_csum_sub_even (csum, old_addr0);
-          csum = ip_csum_add_even (csum, new_addr0);
-          ip40->checksum = ip_csum_fold (csum);
-
-          if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_TCP))
-            {
-              old_port0 = tcp0->src_port;
-              tcp0->src_port = new_port0;
-
-              csum = tcp0->checksum;
-              csum = ip_csum_sub_even (csum, old_addr0);
-              csum = ip_csum_sub_even (csum, old_port0);
-              csum = ip_csum_add_even (csum, new_addr0);
-              csum = ip_csum_add_even (csum, new_port0);
-              tcp0->checksum = ip_csum_fold (csum);
-            }
-          else if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_UDP))
-            {
-              old_port0 = udp0->src_port;
-              udp0->src_port = new_port0;
-
-              if (udp0->checksum)
-              {
-                  csum = udp0->checksum;
-                  csum = ip_csum_sub_even (csum, old_addr0);
-                  csum = ip_csum_sub_even (csum, old_port0);
-                  csum = ip_csum_add_even (csum, new_addr0);
-                  csum = ip_csum_add_even (csum, new_port0);
-                  udp0->checksum = ip_csum_fold (csum);
-              }
-            }
-
-
-          vip0 = pool_elt_at_index(lbm->vips, sm40->vip_index);
-
-          if (lb_vip_is_double_nat44(vip0))
+          if (lb_nat44_dnat_mapping_match (lbm, &dnat_key40, &dindex40) == 0)
           {
-              lb_snat_vip_key_t dnat_key40;
-              u32 dindex40;
-              lb_vip_snat_mapping_t *flow = NULL;
+              flow0 = pool_elt_at_index (lbm->vip_snat_mappings, dindex40);
 
-              clib_memset(&dnat_key40, 0, sizeof(dnat_key40));
-              dnat_key40.addr = ip40->dst_address;
-              dnat_key40.protocol = ip40->protocol;
-              dnat_key40.port = udp0->dst_port;
-              dnat_key40.fib_index = rx_fib_index0;
+              vip0 = pool_elt_at_index(lbm->vips, flow0->vip_index);
 
-              if (lb_nat44_dnat_mapping_match (lbm, &dnat_key40, &dindex40))
+              if (!lb_vip_is_double_nat44(vip0))
               {
                   vnet_feature_next (&next0, b0);
                   goto trace0;
               }
 
-              flow = pool_elt_at_index (lbm->vip_snat_mappings, dindex40);
+              next_fib_index0 = flow0->outside_fib_index;
 
-              old_addr0 = ip40->dst_address.as_u32;
-              ip40->dst_address.as_u32 = flow->outside_ip.ip4.as_u32;
+              timeout0 = lb_get_ip4_protocol_timeout(vm, b0, ip40);
 
-              csum = ip40->checksum;
-              csum = ip_csum_sub_even (csum, old_addr0);
-              csum = ip_csum_add_even (csum, flow->outside_ip.ip4.as_u32);
-              ip40->checksum = ip_csum_fold (csum);
+              old_saddr0 = ip40->src_address.as_u32;
+              old_daddr0 = ip40->dst_address.as_u32;
+              new_saddr0 = vip0->prefix.ip4.as_u32;
+              new_daddr0 = flow0->outside_ip.ip4.as_u32;
+              ip40->src_address.as_u32 = new_saddr0;
+              ip40->dst_address.as_u32 = new_daddr0;
+
+              new_sport0 = vip0->net_port;
+              new_dport0 = flow0->outside_port;
+
+              csum0 = ip40->checksum;
+              csum0 = ip_csum_sub_even (csum0, old_saddr0);
+              csum0 = ip_csum_sub_even (csum0, old_daddr0);
+              csum0 = ip_csum_add_even (csum0, new_saddr0);
+              csum0 = ip_csum_add_even (csum0, new_daddr0);
+              ip40->checksum = ip_csum_fold (csum0);
 
               if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_TCP))
               {
-                  old_port0 = tcp0->dst_port;
-                  tcp0->dst_port = flow->outside_port;
+                  old_sport0 = tcp0->src_port;
+                  old_dport0 = tcp0->dst_port;
+                  tcp0->src_port = new_sport0;
+                  tcp0->dst_port = new_dport0;
 
-                  csum = tcp0->checksum;
-                  csum = ip_csum_sub_even (csum, old_addr0);
-                  csum = ip_csum_add_even (csum, flow->outside_ip.ip4.as_u32);
-                  csum = ip_csum_sub_even (csum, old_port0);
-                  csum = ip_csum_add_even (csum, flow->outside_port);
-                  tcp0->checksum = ip_csum_fold (csum);
+                  csum0 = tcp0->checksum;
+                  csum0 = ip_csum_sub_even (csum0, old_saddr0);
+                  csum0 = ip_csum_sub_even (csum0, old_daddr0);
+                  csum0 = ip_csum_sub_even (csum0, old_sport0);
+                  csum0 = ip_csum_sub_even (csum0, old_dport0);
+                  csum0 = ip_csum_add_even (csum0, new_saddr0);
+                  csum0 = ip_csum_add_even (csum0, new_daddr0);
+                  csum0 = ip_csum_add_even (csum0, new_sport0);
+                  csum0 = ip_csum_add_even (csum0, new_dport0);
+                  tcp0->checksum = ip_csum_fold (csum0);
               }
               else if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_UDP))
               {
-                  old_port0 = udp0->dst_port;
-                  udp0->dst_port = flow->outside_port;
+                  old_sport0 = tcp0->src_port;
+                  old_dport0 = udp0->dst_port;
+                  udp0->src_port = new_sport0;
+                  udp0->dst_port = new_dport0;
 
                   if (udp0->checksum)
                   {
-                      csum = udp0->checksum;
-                      csum = ip_csum_sub_even (csum, old_addr0);
-                      csum = ip_csum_add_even (csum, flow->outside_ip.ip4.as_u32);
-                      csum = ip_csum_sub_even (csum, old_port0);
-                      csum = ip_csum_add_even (csum, flow->outside_port);
-                      udp0->checksum = ip_csum_fold (csum);
+                      csum0 = udp0->checksum;
+                      csum0 = ip_csum_sub_even (csum0, old_saddr0);
+                      csum0 = ip_csum_sub_even (csum0, old_daddr0);
+                      csum0 = ip_csum_sub_even (csum0, old_sport0);
+                      csum0 = ip_csum_sub_even (csum0, old_dport0);
+                      csum0 = ip_csum_add_even (csum0, flow0->outside_ip.ip4.as_u32);
+                      csum0 = ip_csum_add_even (csum0, flow0->outside_ip.ip4.as_u32);
+                      csum0 = ip_csum_add_even (csum0, new_sport0);
+                      csum0 = ip_csum_add_even (csum0, new_dport0);
+                      udp0->checksum = ip_csum_fold (csum0);
                   }
               }
 
-              if (lb_time_now - flow->last_ha_sync_timeout >
+              if (lb_time_now - flow0->last_ha_sync_timeout >
                   lb_ha_sync_ctx.ha_sync_timeout_update_interval)
               {
                   lb_ha_sync_event_vip_snat_session_notify(vm->thread_index, LB_HA_OP_UPDATE,
-                          vip0, flow, timeout0);
-                  flow->last_ha_sync_timeout = lb_time_now;
+                          vip0, flow0, timeout0);
+                  flow0->last_ha_sync_timeout = lb_time_now;
               }
 
-              flow->timeout = lb_time_now + timeout0;
+              flow0->timeout = lb_time_now + timeout0;
           }
-          translated = true;
+          else
+          {
+              clib_memset(&key40, 0, sizeof(key40));
+              key40.addr = ip40->src_address;
+              key40.protocol = ip40->protocol;
+              key40.port = udp0->src_port;
+              key40.fib_index = rx_fib_index0;
+
+              if (lb_nat44_mapping_match (lbm, &key40, &index40))
+              {
+                  vnet_feature_next (&next0, b0);
+                  goto trace0;
+              }
+
+              sm40 = pool_elt_at_index(lbm->snat_mappings, index40);
+
+              next_fib_index0 = sm40->fib_index;
+
+              new_saddr0 = sm40->src_ip.ip4.as_u32;
+              new_sport0 = sm40->src_port;
+              old_saddr0 = ip40->src_address.as_u32;
+              ip40->src_address.as_u32 = new_saddr0;
+
+              csum0 = ip40->checksum;
+              csum0 = ip_csum_sub_even (csum0, old_saddr0);
+              csum0 = ip_csum_add_even (csum0, new_saddr0);
+              ip40->checksum = ip_csum_fold (csum0);
+
+              if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_TCP))
+              {
+                  old_sport0 = tcp0->src_port;
+                  tcp0->src_port = new_sport0;
+
+                  csum0 = tcp0->checksum;
+                  csum0 = ip_csum_sub_even (csum0, old_saddr0);
+                  csum0 = ip_csum_sub_even (csum0, old_sport0);
+                  csum0 = ip_csum_add_even (csum0, new_saddr0);
+                  csum0 = ip_csum_add_even (csum0, new_sport0);
+                  tcp0->checksum = ip_csum_fold (csum0);
+              }
+              else if (PREDICT_TRUE(ip40->protocol == IP_PROTOCOL_UDP))
+              {
+                  old_sport0 = udp0->src_port;
+                  udp0->src_port = new_sport0;
+
+                  if (udp0->checksum)
+                  {
+                      csum0 = udp0->checksum;
+                      csum0 = ip_csum_sub_even (csum0, old_saddr0);
+                      csum0 = ip_csum_sub_even (csum0, old_sport0);
+                      csum0 = ip_csum_add_even (csum0, new_saddr0);
+                      csum0 = ip_csum_add_even (csum0, new_sport0);
+                      udp0->checksum = ip_csum_fold (csum0);
+                  }
+              }
+          }
+
+          vnet_buffer(b0)->sw_if_index[VLIB_TX] = next_fib_index0;
+
+          translated0 = true;
 
           trace0: 
 
-          pkts_processed += translated != true;
+          pkts_processed += translated0 != true;
 
           if (PREDICT_FALSE(
               (node->flags & VLIB_NODE_FLAG_TRACE) && (b0->flags & VLIB_BUFFER_IS_TRACED)))
@@ -2131,6 +2914,357 @@ VLIB_NODE_FN (lb_local4_node)
 
       vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 
+      while (n_left_from >= 8 && n_left_to_next >= 4)
+	{
+        u32 bi0, bi1, bi2, bi3;
+        vlib_buffer_t *b0, *b1, *b2, *b3;
+
+        ip4_header_t *ip0, *ip1, *ip2, *ip3;
+        udp_header_t *udp0, *udp1, *udp2, *udp3;
+
+        lb_vip_local4_key_t key0, key1, key2, key3;
+        uword *value0, *value1, *value2, *value3;
+
+        u32 sw_if_index0, sw_if_index1, sw_if_index2, sw_if_index3;
+        u32 rx_fib_index0, rx_fib_index1, rx_fib_index2, rx_fib_index3;
+
+        u32 vip_index0 = ~0, vip_index1 = ~0, vip_index2 = ~0, vip_index3 = ~0;
+        u32 vip_prefix_index0 = ADJ_INDEX_INVALID, vip_prefix_index1 = ADJ_INDEX_INVALID;
+        u32 vip_prefix_index2 = ADJ_INDEX_INVALID, vip_prefix_index3 = ADJ_INDEX_INVALID;
+        lb_vip_t *vip0, *vip1, *vip2, *vip3;
+
+        u32 next0, next1, next2, next3;
+
+        /* Prefetch next iteration. */
+        {
+            vlib_buffer_t *p4, *p5, *p6, *p7;
+
+            p4 = vlib_get_buffer (vm, from[4]);
+            p5 = vlib_get_buffer (vm, from[5]);
+            p6 = vlib_get_buffer (vm, from[6]);
+            p7 = vlib_get_buffer (vm, from[7]);
+
+            vlib_prefetch_buffer_header (p4, LOAD);
+            vlib_prefetch_buffer_header (p5, LOAD);
+            vlib_prefetch_buffer_header (p6, LOAD);
+            vlib_prefetch_buffer_header (p7, LOAD);
+
+            clib_prefetch_load (p4->data);
+            clib_prefetch_load (p5->data);
+            clib_prefetch_load (p6->data);
+            clib_prefetch_load (p7->data);
+        }
+
+        to_next[0] = bi0 = from[0];
+        to_next[1] = bi1 = from[1];
+        to_next[2] = bi2 = from[2];
+        to_next[3] = bi3 = from[3];
+
+        from += 4;
+        to_next += 4;
+        n_left_from -= 4;
+        n_left_to_next -= 4;
+
+        b0 = vlib_get_buffer (vm, bi0);
+        b1 = vlib_get_buffer (vm, bi1);
+        b2 = vlib_get_buffer (vm, bi2);
+        b3 = vlib_get_buffer (vm, bi3);
+
+        b0 = vlib_get_buffer (vm, bi0);
+        b1 = vlib_get_buffer (vm, bi1);
+        b2 = vlib_get_buffer (vm, bi2);
+        b3 = vlib_get_buffer (vm, bi3);
+
+        ip0 = vlib_buffer_get_current (b0);
+        ip1 = vlib_buffer_get_current (b1);
+        ip2 = vlib_buffer_get_current (b2);
+        ip3 = vlib_buffer_get_current (b3);
+
+        sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+        sw_if_index1 = vnet_buffer (b1)->sw_if_index[VLIB_RX];
+        sw_if_index2 = vnet_buffer (b2)->sw_if_index[VLIB_RX];
+        sw_if_index3 = vnet_buffer (b3)->sw_if_index[VLIB_RX];
+
+        rx_fib_index0 = ip4_fib_table_get_index_for_sw_if_index (sw_if_index0);
+        rx_fib_index1 = ip4_fib_table_get_index_for_sw_if_index (sw_if_index1);
+        rx_fib_index2 = ip4_fib_table_get_index_for_sw_if_index (sw_if_index2);
+        rx_fib_index3 = ip4_fib_table_get_index_for_sw_if_index (sw_if_index3);
+
+        vnet_get_config_data (&cm->config_main, &b0->current_config_index, &next0, 0);
+        vnet_get_config_data (&cm->config_main, &b1->current_config_index, &next1, 0);
+        vnet_get_config_data (&cm->config_main, &b2->current_config_index, &next2, 0);
+        vnet_get_config_data (&cm->config_main, &b3->current_config_index, &next3, 0);
+
+        if (ip0->protocol != IP_PROTOCOL_TCP &&
+                ip0->protocol != IP_PROTOCOL_UDP)
+            goto trace00;
+
+        udp0 = ip4_next_header (ip0);
+
+        clib_memset(&key0, 0, sizeof(lb_vip_local4_key_t));
+
+        //try search protocol and dst port
+        key0.address = ip0->dst_address;
+        key0.fib_index = rx_fib_index0;
+        key0.protocol = ip0->protocol;
+        key0.port = udp0->dst_port;
+
+        value0 = hash_get_mem(lbm->vip_index_by_local4, &(key0));
+
+        if (!value0)
+        {
+            //try search only address
+            key0.protocol = (~0);
+            key0.port = 0;
+            value0 = hash_get_mem(lbm->vip_index_by_local4, &(key0));
+        }
+
+        if (value0)
+        {
+            vip_index0 = value0[0];
+            vip0 = pool_elt_at_index(lbm->vips, vip_index0);
+            if (PREDICT_FALSE(!(vip0->flags & LB_VIP_FLAGS_USED)))
+                goto trace00;
+
+            switch(vip0->type)
+            {
+            case LB_VIP_TYPE_IP4_GRE6:
+                next0 = (vip0->port == 0) ? LB_LOCAL4_NEXT_IP4_GRE6 : LB_LOCAL4_NEXT_IP4_GRE6_PORT;
+                vip_prefix_index0 = (vip0->port == 0) ? vip_index0 : vip0->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP4_GRE4:
+                next0 = (vip0->port == 0) ? LB_LOCAL4_NEXT_IP4_GRE4 : LB_LOCAL4_NEXT_IP4_GRE4_PORT;
+                vip_prefix_index0 = (vip0->port == 0) ? vip_index0 : vip0->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP4_L3DSR:
+                next0 = (vip0->port == 0) ? LB_LOCAL4_NEXT_IP4_DSR : LB_LOCAL4_NEXT_IP4_DSR_PORT;
+                vip_prefix_index0 = (vip0->port == 0) ? vip_index0 : vip0->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP4_NAT4:
+                next0 = LB_LOCAL4_NEXT_IP4_NAT4;
+                vip_prefix_index0 = vip0->vip_prefix_index;
+                break;
+            default:
+                goto trace00;
+            }
+            vnet_buffer(b0)->ip.adj_index[VLIB_TX] = vip_prefix_index0;
+        }
+trace00:
+        if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
+                    (b0->flags & VLIB_BUFFER_IS_TRACED)))
+        {
+            lb_local_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
+            t->rx_sw_if_index = sw_if_index0;
+            t->rx_fib_index = rx_fib_index0;
+            t->vip_index = vip_index0;
+            t->vip_prefix_index = vip_prefix_index0;
+            t->next_index = next0;
+        }
+
+        if (ip1->protocol != IP_PROTOCOL_TCP &&
+                ip1->protocol != IP_PROTOCOL_UDP)
+            goto trace01;
+
+        udp1 = ip4_next_header (ip1);
+
+        clib_memset(&key1, 0, sizeof(lb_vip_local4_key_t));
+
+        //try search protocol and dst port
+        key1.address = ip1->dst_address;
+        key1.fib_index = rx_fib_index1;
+        key1.protocol = ip1->protocol;
+        key1.port = udp1->dst_port;
+
+        value1 = hash_get_mem(lbm->vip_index_by_local4, &(key1));
+
+        if (!value1)
+        {
+            //try search only address
+            key1.protocol = (~0);
+            key1.port = 0;
+            value1 = hash_get_mem(lbm->vip_index_by_local4, &(key1));
+        }
+
+        if (value1)
+        {
+            vip_index1 = value1[0];
+            vip1 = pool_elt_at_index(lbm->vips, vip_index1);
+            if (PREDICT_FALSE(!(vip1->flags & LB_VIP_FLAGS_USED)))
+                goto trace01;
+
+            switch(vip1->type)
+            {
+            case LB_VIP_TYPE_IP4_GRE6:
+                next1 = (vip1->port == 0) ? LB_LOCAL4_NEXT_IP4_GRE6 : LB_LOCAL4_NEXT_IP4_GRE6_PORT;
+                vip_prefix_index1 = (vip1->port == 0) ? vip_index1 : vip1->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP4_GRE4:
+                next1 = (vip1->port == 0) ? LB_LOCAL4_NEXT_IP4_GRE4 : LB_LOCAL4_NEXT_IP4_GRE4_PORT;
+                vip_prefix_index1 = (vip1->port == 0) ? vip_index1 : vip1->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP4_L3DSR:
+                next1 = (vip1->port == 0) ? LB_LOCAL4_NEXT_IP4_DSR : LB_LOCAL4_NEXT_IP4_DSR_PORT;
+                vip_prefix_index1 = (vip1->port == 0) ? vip_index1 : vip1->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP4_NAT4:
+                next1 = LB_LOCAL4_NEXT_IP4_NAT4;
+                vip_prefix_index1 = vip1->vip_prefix_index;
+                break;
+            default:
+                goto trace01;
+            }
+            vnet_buffer(b1)->ip.adj_index[VLIB_TX] = vip_prefix_index1;
+        }
+trace01:
+        if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
+                    (b1->flags & VLIB_BUFFER_IS_TRACED)))
+        {
+            lb_local_trace_t *t = vlib_add_trace (vm, node, b1, sizeof (*t));
+            t->rx_sw_if_index = sw_if_index1;
+            t->rx_fib_index = rx_fib_index1;
+            t->vip_index = vip_index1;
+            t->vip_prefix_index = vip_prefix_index1;
+            t->next_index = next1;
+        }
+
+        if (ip2->protocol != IP_PROTOCOL_TCP &&
+                ip2->protocol != IP_PROTOCOL_UDP)
+            goto trace02;
+
+        udp2 = ip4_next_header (ip2);
+
+        clib_memset(&key2, 0, sizeof(lb_vip_local4_key_t));
+
+        //try search protocol and dst port
+        key2.address = ip2->dst_address;
+        key2.fib_index = rx_fib_index2;
+        key2.protocol = ip2->protocol;
+        key2.port = udp2->dst_port;
+
+        value2 = hash_get_mem(lbm->vip_index_by_local4, &(key2));
+
+        if (!value2)
+        {
+            //try search only address
+            key2.protocol = (~0);
+            key2.port = 0;
+            value2 = hash_get_mem(lbm->vip_index_by_local4, &(key2));
+        }
+
+        if (value2)
+        {
+            vip_index2 = value2[0];
+            vip2 = pool_elt_at_index(lbm->vips, vip_index2);
+            if (PREDICT_FALSE(!(vip2->flags & LB_VIP_FLAGS_USED)))
+                goto trace02;
+
+            switch(vip2->type)
+            {
+            case LB_VIP_TYPE_IP4_GRE6:
+                next2 = (vip2->port == 0) ? LB_LOCAL4_NEXT_IP4_GRE6 : LB_LOCAL4_NEXT_IP4_GRE6_PORT;
+                vip_prefix_index2 = (vip2->port == 0) ? vip_index2 : vip2->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP4_GRE4:
+                next2 = (vip2->port == 0) ? LB_LOCAL4_NEXT_IP4_GRE4 : LB_LOCAL4_NEXT_IP4_GRE4_PORT;
+                vip_prefix_index2 = (vip2->port == 0) ? vip_index2 : vip2->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP4_L3DSR:
+                next2 = (vip2->port == 0) ? LB_LOCAL4_NEXT_IP4_DSR : LB_LOCAL4_NEXT_IP4_DSR_PORT;
+                vip_prefix_index2 = (vip2->port == 0) ? vip_index2 : vip2->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP4_NAT4:
+                next2 = LB_LOCAL4_NEXT_IP4_NAT4;
+                vip_prefix_index2 = vip2->vip_prefix_index;
+                break;
+            default:
+                goto trace02;
+            }
+            vnet_buffer(b2)->ip.adj_index[VLIB_TX] = vip_prefix_index2;
+        }
+trace02:
+        if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
+                    (b2->flags & VLIB_BUFFER_IS_TRACED)))
+        {
+            lb_local_trace_t *t = vlib_add_trace (vm, node, b2, sizeof (*t));
+            t->rx_sw_if_index = sw_if_index2;
+            t->rx_fib_index = rx_fib_index2;
+            t->vip_index = vip_index2;
+            t->vip_prefix_index = vip_prefix_index2;
+            t->next_index = next2;
+        }
+
+        if (ip3->protocol != IP_PROTOCOL_TCP &&
+                ip3->protocol != IP_PROTOCOL_UDP)
+            goto trace03;
+
+        udp3 = ip4_next_header (ip3);
+
+        clib_memset(&key3, 0, sizeof(lb_vip_local4_key_t));
+
+        //try search protocol and dst port
+        key3.address = ip3->dst_address;
+        key3.fib_index = rx_fib_index3;
+        key3.protocol = ip3->protocol;
+        key3.port = udp3->dst_port;
+
+        value3 = hash_get_mem(lbm->vip_index_by_local4, &(key3));
+
+        if (!value3)
+        {
+            //try search only address
+            key3.protocol = (~0);
+            key3.port = 0;
+            value3 = hash_get_mem(lbm->vip_index_by_local4, &(key3));
+        }
+
+        if (value3)
+        {
+            vip_index3 = value3[0];
+            vip3 = pool_elt_at_index(lbm->vips, vip_index3);
+            if (PREDICT_FALSE(!(vip3->flags & LB_VIP_FLAGS_USED)))
+                goto trace03;
+
+            switch(vip3->type)
+            {
+            case LB_VIP_TYPE_IP4_GRE6:
+                next3 = (vip3->port == 0) ? LB_LOCAL4_NEXT_IP4_GRE6 : LB_LOCAL4_NEXT_IP4_GRE6_PORT;
+                vip_prefix_index3 = (vip3->port == 0) ? vip_index3 : vip3->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP4_GRE4:
+                next3 = (vip3->port == 0) ? LB_LOCAL4_NEXT_IP4_GRE4 : LB_LOCAL4_NEXT_IP4_GRE4_PORT;
+                vip_prefix_index3 = (vip3->port == 0) ? vip_index3 : vip3->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP4_L3DSR:
+                next3 = (vip3->port == 0) ? LB_LOCAL4_NEXT_IP4_DSR : LB_LOCAL4_NEXT_IP4_DSR_PORT;
+                vip_prefix_index3 = (vip3->port == 0) ? vip_index3 : vip3->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP4_NAT4:
+                next3 = LB_LOCAL4_NEXT_IP4_NAT4;
+                vip_prefix_index3 = vip3->vip_prefix_index;
+                break;
+            default:
+                goto trace03;
+            }
+            vnet_buffer(b3)->ip.adj_index[VLIB_TX] = vip_prefix_index3;
+        }
+trace03:
+        if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
+                    (b3->flags & VLIB_BUFFER_IS_TRACED)))
+        {
+            lb_local_trace_t *t = vlib_add_trace (vm, node, b3, sizeof (*t));
+            t->rx_sw_if_index = sw_if_index3;
+            t->rx_fib_index = rx_fib_index3;
+            t->vip_index = vip_index3;
+            t->vip_prefix_index = vip_prefix_index3;
+            t->next_index = next3;
+        }
+
+        vlib_validate_buffer_enqueue_x4 (vm, node, next_index,
+                to_next, n_left_to_next,
+                bi0, bi1, bi2, bi3,
+                next0, next1, next2, next3);
+	}
+
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  u32 bi0;
@@ -2264,6 +3398,377 @@ VLIB_NODE_FN (lb_local6_node)
 
       vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 
+      while (n_left_from >= 8 && n_left_to_next >= 4)
+	{
+        u32 bi0, bi1, bi2, bi3;
+        vlib_buffer_t *b0, *b1, *b2, *b3;
+
+        ip6_header_t *ip0, *ip1, *ip2, *ip3;
+        udp_header_t *udp0, *udp1, *udp2, *udp3;
+
+        lb_vip_local4_key_t key0, key1, key2, key3;
+        uword *value0, *value1, *value2, *value3;
+
+        u32 sw_if_index0, sw_if_index1, sw_if_index2, sw_if_index3;
+        u32 rx_fib_index0, rx_fib_index1, rx_fib_index2, rx_fib_index3;
+
+        u32 vip_index0 = ~0, vip_index1 = ~0, vip_index2 = ~0, vip_index3 = ~0;
+        u32 vip_prefix_index0 = ADJ_INDEX_INVALID, vip_prefix_index1 = ADJ_INDEX_INVALID;
+        u32 vip_prefix_index2 = ADJ_INDEX_INVALID, vip_prefix_index3 = ADJ_INDEX_INVALID;
+        lb_vip_t *vip0, *vip1, *vip2, *vip3;
+
+        u32 next0, next1, next2, next3;
+
+        u8 l4_protocol0, l4_protocol1, l4_protocol2, l4_protocol3;
+        u16 l4_offset0, l4_offset1, l4_offset2, l4_offset3;
+        u16 frag_hdr_offset0, frag_hdr_offset1, frag_hdr_offset2, frag_hdr_offset3;
+
+        /* Prefetch next iteration. */
+        {
+            vlib_buffer_t *p4, *p5, *p6, *p7;
+
+            p4 = vlib_get_buffer (vm, from[4]);
+            p5 = vlib_get_buffer (vm, from[5]);
+            p6 = vlib_get_buffer (vm, from[6]);
+            p7 = vlib_get_buffer (vm, from[7]);
+
+            vlib_prefetch_buffer_header (p4, LOAD);
+            vlib_prefetch_buffer_header (p5, LOAD);
+            vlib_prefetch_buffer_header (p6, LOAD);
+            vlib_prefetch_buffer_header (p7, LOAD);
+
+            clib_prefetch_load (p4->data);
+            clib_prefetch_load (p5->data);
+            clib_prefetch_load (p6->data);
+            clib_prefetch_load (p7->data);
+        }
+
+        to_next[0] = bi0 = from[0];
+        to_next[1] = bi1 = from[1];
+        to_next[2] = bi2 = from[2];
+        to_next[3] = bi3 = from[3];
+
+        from += 4;
+        to_next += 4;
+        n_left_from -= 4;
+        n_left_to_next -= 4;
+
+        b0 = vlib_get_buffer (vm, bi0);
+        b1 = vlib_get_buffer (vm, bi1);
+        b2 = vlib_get_buffer (vm, bi2);
+        b3 = vlib_get_buffer (vm, bi3);
+
+        b0 = vlib_get_buffer (vm, bi0);
+        b1 = vlib_get_buffer (vm, bi1);
+        b2 = vlib_get_buffer (vm, bi2);
+        b3 = vlib_get_buffer (vm, bi3);
+
+        ip0 = vlib_buffer_get_current (b0);
+        ip1 = vlib_buffer_get_current (b1);
+        ip2 = vlib_buffer_get_current (b2);
+        ip3 = vlib_buffer_get_current (b3);
+
+        sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+        sw_if_index1 = vnet_buffer (b1)->sw_if_index[VLIB_RX];
+        sw_if_index2 = vnet_buffer (b2)->sw_if_index[VLIB_RX];
+        sw_if_index3 = vnet_buffer (b3)->sw_if_index[VLIB_RX];
+
+        rx_fib_index0 = ip6_fib_table_get_index_for_sw_if_index (sw_if_index0);
+        rx_fib_index1 = ip6_fib_table_get_index_for_sw_if_index (sw_if_index1);
+        rx_fib_index2 = ip6_fib_table_get_index_for_sw_if_index (sw_if_index2);
+        rx_fib_index3 = ip6_fib_table_get_index_for_sw_if_index (sw_if_index3);
+
+        vnet_get_config_data (&cm->config_main, &b0->current_config_index, &next0, 0);
+        vnet_get_config_data (&cm->config_main, &b1->current_config_index, &next1, 0);
+        vnet_get_config_data (&cm->config_main, &b2->current_config_index, &next2, 0);
+        vnet_get_config_data (&cm->config_main, &b3->current_config_index, &next3, 0);
+
+        if (PREDICT_FALSE (ip6_parse (vm, b0, ip0, b0->current_length,
+                        &l4_protocol0, &l4_offset0, &frag_hdr_offset0)))
+            goto trace00;
+
+        if (PREDICT_FALSE(frag_hdr_offset0))
+            goto trace00;
+
+        if (l4_protocol0 != IP_PROTOCOL_TCP &&
+                l4_protocol0 != IP_PROTOCOL_UDP)
+            goto trace00;
+
+
+        udp0 = (udp_header_t *) u8_ptr_add (ip0, l4_offset0);
+
+        clib_memset(&key0, 0, sizeof(lb_vip_local6_key_t));
+
+        //try search protocol and dst port
+        clib_memcpy(&key0.address, &ip0->dst_address, sizeof(ip6_address_t));
+        key0.fib_index = rx_fib_index0;
+        key0.protocol = l4_protocol0;
+        key0.port = udp0->dst_port;
+
+        value0 = hash_get_mem(lbm->vip_index_by_local6, &(key0));
+        if (!value0)
+        {
+            //try search only address
+            key0.protocol = (~0);
+            key0.port = 0;
+            value0 = hash_get_mem(lbm->vip_index_by_local6, &(key0));
+        }
+
+        if (value0)
+        {
+            vip_index0 = value0[0];
+            vip0 = pool_elt_at_index(lbm->vips, vip_index0);
+
+            if (PREDICT_FALSE(vip0->flags & LB_VIP_FLAGS_USED))
+                goto trace00;
+
+            switch(vip0->type)
+            {
+            case LB_VIP_TYPE_IP6_GRE6:
+                next0 = (vip0->port == 0) ? LB_LOCAL6_NEXT_IP6_GRE6 : LB_LOCAL6_NEXT_IP6_GRE6_PORT;
+                vip_prefix_index0 = (vip0->port == 0) ? vip_index0 : vip0->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP6_GRE4:
+                next0 = (vip0->port == 0) ? LB_LOCAL6_NEXT_IP6_GRE4 : LB_LOCAL6_NEXT_IP6_GRE4_PORT;
+                vip_prefix_index0 = (vip0->port == 0) ? vip_index0 : vip0->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP6_NAT6:
+                next0 = LB_LOCAL6_NEXT_IP6_NAT6;
+                vip_prefix_index0 = vip0->vip_prefix_index;
+                break;
+            default:
+                goto trace00;
+            }
+            vnet_buffer(b0)->ip.adj_index[VLIB_TX] = vip_prefix_index0;
+        }
+trace00:
+        if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
+                    (b0->flags & VLIB_BUFFER_IS_TRACED)))
+        {
+            lb_local_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
+            t->rx_sw_if_index = sw_if_index0;
+            t->rx_fib_index = rx_fib_index0;
+            t->vip_index = vip_index0;
+            t->vip_prefix_index = vip_prefix_index0;
+            t->next_index = next0;
+        }
+
+        if (PREDICT_FALSE (ip6_parse (vm, b1, ip1, b1->current_length,
+                        &l4_protocol1, &l4_offset1, &frag_hdr_offset1)))
+            goto trace01;
+
+        if (PREDICT_FALSE(frag_hdr_offset1))
+            goto trace01;
+
+        if (l4_protocol1 != IP_PROTOCOL_TCP &&
+                l4_protocol1 != IP_PROTOCOL_UDP)
+            goto trace01;
+
+
+        udp1 = (udp_header_t *) u8_ptr_add (ip1, l4_offset1);
+
+        clib_memset(&key1, 0, sizeof(lb_vip_local6_key_t));
+
+        //try search protocol and dst port
+        clib_memcpy(&key1.address, &ip1->dst_address, sizeof(ip6_address_t));
+        key1.fib_index = rx_fib_index1;
+        key1.protocol = l4_protocol1;
+        key1.port = udp1->dst_port;
+
+        value1 = hash_get_mem(lbm->vip_index_by_local6, &(key1));
+        if (!value1)
+        {
+            //try search only address
+            key1.protocol = (~0);
+            key1.port = 0;
+            value1 = hash_get_mem(lbm->vip_index_by_local6, &(key1));
+        }
+
+        if (value1)
+        {
+            vip_index1 = value1[0];
+            vip1 = pool_elt_at_index(lbm->vips, vip_index1);
+
+            if (PREDICT_FALSE(vip1->flags & LB_VIP_FLAGS_USED))
+                goto trace01;
+
+            switch(vip1->type)
+            {
+            case LB_VIP_TYPE_IP6_GRE6:
+                next1 = (vip1->port == 0) ? LB_LOCAL6_NEXT_IP6_GRE6 : LB_LOCAL6_NEXT_IP6_GRE6_PORT;
+                vip_prefix_index1 = (vip1->port == 0) ? vip_index1 : vip1->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP6_GRE4:
+                next1 = (vip1->port == 0) ? LB_LOCAL6_NEXT_IP6_GRE4 : LB_LOCAL6_NEXT_IP6_GRE4_PORT;
+                vip_prefix_index1 = (vip1->port == 0) ? vip_index1 : vip1->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP6_NAT6:
+                next1 = LB_LOCAL6_NEXT_IP6_NAT6;
+                vip_prefix_index1 = vip1->vip_prefix_index;
+                break;
+            default:
+                goto trace01;
+            }
+            vnet_buffer(b1)->ip.adj_index[VLIB_TX] = vip_prefix_index1;
+        }
+trace01:
+        if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
+                    (b1->flags & VLIB_BUFFER_IS_TRACED)))
+        {
+            lb_local_trace_t *t = vlib_add_trace (vm, node, b1, sizeof (*t));
+            t->rx_sw_if_index = sw_if_index1;
+            t->rx_fib_index = rx_fib_index1;
+            t->vip_index = vip_index1;
+            t->vip_prefix_index = vip_prefix_index1;
+            t->next_index = next1;
+        }
+
+        if (PREDICT_FALSE (ip6_parse (vm, b2, ip2, b2->current_length,
+                        &l4_protocol2, &l4_offset2, &frag_hdr_offset2)))
+            goto trace02;
+
+        if (PREDICT_FALSE(frag_hdr_offset2))
+            goto trace02;
+
+        if (l4_protocol2 != IP_PROTOCOL_TCP &&
+                l4_protocol2 != IP_PROTOCOL_UDP)
+            goto trace02;
+
+
+        udp2 = (udp_header_t *) u8_ptr_add (ip2, l4_offset2);
+
+        clib_memset(&key2, 0, sizeof(lb_vip_local6_key_t));
+
+        //try search protocol and dst port
+        clib_memcpy(&key2.address, &ip2->dst_address, sizeof(ip6_address_t));
+        key2.fib_index = rx_fib_index2;
+        key2.protocol = l4_protocol2;
+        key2.port = udp2->dst_port;
+
+        value2 = hash_get_mem(lbm->vip_index_by_local6, &(key2));
+        if (!value2)
+        {
+            //try search only address
+            key2.protocol = (~0);
+            key2.port = 0;
+            value2 = hash_get_mem(lbm->vip_index_by_local6, &(key2));
+        }
+
+        if (value2)
+        {
+            vip_index2 = value2[0];
+            vip2 = pool_elt_at_index(lbm->vips, vip_index2);
+
+            if (PREDICT_FALSE(vip2->flags & LB_VIP_FLAGS_USED))
+                goto trace02;
+
+            switch(vip2->type)
+            {
+            case LB_VIP_TYPE_IP6_GRE6:
+                next2 = (vip2->port == 0) ? LB_LOCAL6_NEXT_IP6_GRE6 : LB_LOCAL6_NEXT_IP6_GRE6_PORT;
+                vip_prefix_index2 = (vip2->port == 0) ? vip_index2 : vip2->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP6_GRE4:
+                next2 = (vip2->port == 0) ? LB_LOCAL6_NEXT_IP6_GRE4 : LB_LOCAL6_NEXT_IP6_GRE4_PORT;
+                vip_prefix_index2 = (vip2->port == 0) ? vip_index2 : vip2->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP6_NAT6:
+                next2 = LB_LOCAL6_NEXT_IP6_NAT6;
+                vip_prefix_index2 = vip2->vip_prefix_index;
+                break;
+            default:
+                goto trace02;
+            }
+            vnet_buffer(b2)->ip.adj_index[VLIB_TX] = vip_prefix_index2;
+        }
+trace02:
+        if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
+                    (b2->flags & VLIB_BUFFER_IS_TRACED)))
+        {
+            lb_local_trace_t *t = vlib_add_trace (vm, node, b2, sizeof (*t));
+            t->rx_sw_if_index = sw_if_index2;
+            t->rx_fib_index = rx_fib_index2;
+            t->vip_index = vip_index2;
+            t->vip_prefix_index = vip_prefix_index2;
+            t->next_index = next2;
+        }
+
+        if (PREDICT_FALSE (ip6_parse (vm, b3, ip3, b3->current_length,
+                        &l4_protocol3, &l4_offset3, &frag_hdr_offset3)))
+            goto trace03;
+
+        if (PREDICT_FALSE(frag_hdr_offset3))
+            goto trace03;
+
+        if (l4_protocol3 != IP_PROTOCOL_TCP &&
+                l4_protocol3 != IP_PROTOCOL_UDP)
+            goto trace03;
+
+
+        udp3 = (udp_header_t *) u8_ptr_add (ip3, l4_offset3);
+
+        clib_memset(&key3, 0, sizeof(lb_vip_local6_key_t));
+
+        //try search protocol and dst port
+        clib_memcpy(&key3.address, &ip3->dst_address, sizeof(ip6_address_t));
+        key3.fib_index = rx_fib_index3;
+        key3.protocol = l4_protocol3;
+        key3.port = udp3->dst_port;
+
+        value3 = hash_get_mem(lbm->vip_index_by_local6, &(key3));
+        if (!value3)
+        {
+            //try search only address
+            key3.protocol = (~0);
+            key3.port = 0;
+            value3 = hash_get_mem(lbm->vip_index_by_local6, &(key3));
+        }
+
+        if (value3)
+        {
+            vip_index3 = value3[0];
+            vip3 = pool_elt_at_index(lbm->vips, vip_index3);
+
+            if (PREDICT_FALSE(vip3->flags & LB_VIP_FLAGS_USED))
+                goto trace03;
+
+            switch(vip3->type)
+            {
+            case LB_VIP_TYPE_IP6_GRE6:
+                next3 = (vip3->port == 0) ? LB_LOCAL6_NEXT_IP6_GRE6 : LB_LOCAL6_NEXT_IP6_GRE6_PORT;
+                vip_prefix_index3 = (vip3->port == 0) ? vip_index3 : vip3->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP6_GRE4:
+                next3 = (vip3->port == 0) ? LB_LOCAL6_NEXT_IP6_GRE4 : LB_LOCAL6_NEXT_IP6_GRE4_PORT;
+                vip_prefix_index3 = (vip3->port == 0) ? vip_index3 : vip3->vip_prefix_index;
+                break;
+            case LB_VIP_TYPE_IP6_NAT6:
+                next3 = LB_LOCAL6_NEXT_IP6_NAT6;
+                vip_prefix_index3 = vip3->vip_prefix_index;
+                break;
+            default:
+                goto trace03;
+            }
+            vnet_buffer(b3)->ip.adj_index[VLIB_TX] = vip_prefix_index3;
+        }
+trace03:
+        if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
+                    (b3->flags & VLIB_BUFFER_IS_TRACED)))
+        {
+            lb_local_trace_t *t = vlib_add_trace (vm, node, b3, sizeof (*t));
+            t->rx_sw_if_index = sw_if_index3;
+            t->rx_fib_index = rx_fib_index3;
+            t->vip_index = vip_index3;
+            t->vip_prefix_index = vip_prefix_index3;
+            t->next_index = next3;
+        }
+
+        vlib_validate_buffer_enqueue_x4 (vm, node, next_index,
+                to_next, n_left_to_next,
+                bi0, bi1, bi2, bi3,
+                next0, next1, next2, next3);
+	}
+
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  u32 bi0;
@@ -2298,7 +3803,6 @@ VLIB_NODE_FN (lb_local6_node)
 
       vnet_get_config_data (&cm->config_main, &b0->current_config_index, &next0, 0);
 
-
       u8 l4_protocol;
       u16 l4_offset, frag_hdr_offset;
 
@@ -2318,7 +3822,7 @@ VLIB_NODE_FN (lb_local6_node)
 
       clib_memset(&key0, 0, sizeof(lb_vip_local6_key_t));
 
-      //try search protocol and dst port 
+      //try search protocol and dst port
       clib_memcpy(&key0.address, &ip0->dst_address, sizeof(ip6_address_t));
       key0.fib_index = rx_fib_index0;
       key0.protocol = l4_protocol;

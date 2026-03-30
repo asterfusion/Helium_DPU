@@ -1557,11 +1557,13 @@ int lb_vip_add(lb_vip_add_args_t args, u32 *vip_index)
     {
       vip->protocol = args.protocol;
       vip->port = args.port;
+      vip->net_port = clib_host_to_net_u16(args.port);
     }
   else
     {
       vip->protocol = (u8)~0;
       vip->port = 0;
+      vip->net_port = 0;
     }
   vip->last_garbage_collection = (u32) vlib_time_now(vlib_get_main());
   vip->type = args.type;
