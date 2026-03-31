@@ -2352,6 +2352,9 @@ lb_init (vlib_main_t * vm)
       .dv_format = format_lb_dpo,
   };
 
+  //Init random_seed
+  lbm->random_seed = (u32)unix_time_now_nsec();
+
   //Allocate and init default VIP.
   lbm->vips = 0;
   pool_get(lbm->vips, default_vip);
