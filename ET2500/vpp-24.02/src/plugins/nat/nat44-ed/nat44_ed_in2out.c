@@ -1394,6 +1394,11 @@ nat44_ed_in2out_fast_path_node_fn_inline (vlib_main_t *vm,
 	}
 
       b0->flags |= VNET_BUFFER_F_IS_NATED;
+      if ((b0->flags & VLIB_BUFFER_ACL_INDEX_VALID) && b0->acl_index)
+      {
+        b0->flags &= ~VLIB_BUFFER_ACL_INDEX_VALID;
+        b0->acl_index = ~0;
+      }
 
       if (nat_6t_t_eq (&s0->i2o.match, &lookup))
 	{
@@ -1747,6 +1752,11 @@ nat44_ed_in2out_slow_path_node_fn_inline (vlib_main_t *vm,
 					 thread_index, cntr_sw_if_index0, 1);
 	}
 
+      if ((b0->flags & VLIB_BUFFER_ACL_INDEX_VALID) && b0->acl_index)
+      {
+          b0->flags &= ~VLIB_BUFFER_ACL_INDEX_VALID;
+          b0->acl_index = ~0;
+      }
       n_left_from--;
       next++;
       b++;
