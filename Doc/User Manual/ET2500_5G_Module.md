@@ -3,7 +3,7 @@
 - cd /sys/bus/usb/drivers
 check *option、qmi_wwan_q、cdc_mbim* exist
 
-The RM520N should support both `qmi_wwan_q` and `cdc_mbim` driver modes. Currently, `qmi_wwan_q` is being used.
+The RM520N should support both `qmi_wwan_q` and `cdc_mbim` driver modes. Currently, `cdc_mbim` is being used.
 
 - check driver insmod
 

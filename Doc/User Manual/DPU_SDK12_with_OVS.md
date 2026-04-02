@@ -57,12 +57,23 @@ If it does, you need to run rmmod first, wait for the NIC to finish restarting, 
         ovs-ctl restart
 2 . dpdk bind
         ./dpdk-devbind.py -b vfio-pci 0002:02:00.0 0002:03:00.0 0002:0f:00.2 0002:0f:00.3
+Verify binding status:
+		./dpdk-devbind.py -s
+Expected output:
+		Network devices using DPDK-compatible driver
+		============================================
+		0002:02:00.0 'Device a063' drv=vfio-pci unused=
+		0002:03:00.0 'Device a063' drv=vfio-pci unused=
+		0002:0f:00.2 'Device a063' drv=vfio-pci unused=
+		0002:0f:00.3 'Device a063' drv=vfio-pci unused=
 3 . create bridge and add if to bridge
 		ovs-vsctl add-br br0 -- set bridge br0 datapath_type=netdev
 		ovs-vsctl add-port br0 sdp1 -- set Interface sdp1 type=dpdk  options:dpdk-devargs=0002:0f:00.2
 		ovs-vsctl add-port br0 sdp2 -- set Interface sdp2 type=dpdk  options:dpdk-devargs=0002:0f:00.3
 		ovs-vsctl add-port br0 eth2 -- set Interface eth1 type=dpdk  options:dpdk-devargs=0002:02:00.0
 		ovs-vsctl add-port br0 eth2 -- set Interface eth2 type=dpdk  options:dpdk-devargs=0002:03:00.0
+
+
 * you can use this to check interface config
 		ovs-vsctl list interface sdp1 
 4 . flow config
@@ -76,3 +87,6 @@ If it does, you need to run rmmod first, wait for the NIC to finish restarting, 
 	if you tcpreplay from sdp1 on host,the traffic will from sdp1 on host ->sdp1 on dpu->eth1->eth2->sdp2 on dpu ,and last you can tcpdump on sdp2 on host
 5 . show flow counters
 		ovs-ofctl dump-flows br0
+Expected output:
+		cookie=0x0, duration=12s, table=0, n_packets=248, n_bytes=19840, in_port=1 actions=output:2
+
