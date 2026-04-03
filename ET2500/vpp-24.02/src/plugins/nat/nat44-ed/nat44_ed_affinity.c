@@ -21,6 +21,7 @@
 
 #include <nat/nat44-ed/nat44_ed.h>
 #include <nat/nat44-ed/nat44_ed_affinity.h>
+#include <nat/nat44-ed/nat44_ed_ha_sync.h>
 
 nat_affinity_main_t nat_affinity_main;
 
@@ -148,6 +149,7 @@ nat_affinity_find_and_lock (vlib_main_t *vm, ip4_address_t client_addr,
   clib_bihash_kv_16_8_t kv, value;
   nat_affinity_t *a;
   int rv = 0;
+  u32 thread_index = vlib_get_thread_index ();
 
   make_affinity_kv (&kv, client_addr, service_addr, proto, service_port);
   clib_spinlock_lock_if_init (&nam->affinity_lock);
@@ -163,6 +165,9 @@ nat_affinity_find_and_lock (vlib_main_t *vm, ip4_address_t client_addr,
     {
       if (a->expire < vlib_time_now (vm))
 	{
+	  /* ha sync */
+	  nat44_ed_ha_sync_event_affinity_notify(thread_index, NAT44_ED_HA_OP_DEL_FORCE, a);
+
 	  clib_dlist_remove (nam->list_pool, a->per_service_index);
 	  pool_put_index (nam->list_pool, a->per_service_index);
 	  pool_put_index (nam->affinity_pool, value.value);
@@ -186,12 +191,16 @@ affinity_is_expired_cb (clib_bihash_kv_16_8_t * kv, void *arg)
   snat_main_t *sm = &snat_main;
   nat_affinity_main_t *nam = &nat_affinity_main;
   nat_affinity_t *a;
+  u32 thread_index = vlib_get_thread_index ();
 
   a = pool_elt_at_index (nam->affinity_pool, kv->value);
   if (a->ref_cnt == 0)
     {
       if (a->expire < vlib_time_now (nam->vlib_main))
 	{
+	  /* ha sync */
+	  nat44_ed_ha_sync_event_affinity_notify(thread_index, NAT44_ED_HA_OP_DEL_FORCE, a);
+
 	  clib_dlist_remove (nam->list_pool, a->per_service_index);
 	  pool_put_index (nam->list_pool, a->per_service_index);
 	  pool_put_index (nam->affinity_pool, kv->value);
@@ -217,6 +226,7 @@ nat_affinity_create_and_lock (ip4_address_t client_addr,
   nat_affinity_t *a;
   dlist_elt_t *list_elt;
   int rv = 0;
+  u32 thread_index = vlib_get_thread_index ();
 
   make_affinity_kv (&kv, client_addr, service_addr, proto, service_port);
   clib_spinlock_lock_if_init (&nam->affinity_lock);
@@ -251,6 +261,8 @@ nat_affinity_create_and_lock (ip4_address_t client_addr,
   clib_dlist_addtail (nam->list_pool, affinity_per_service_list_head_index,
 		      a->per_service_index);
 
+  /* ha sync */
+  nat44_ed_ha_sync_event_affinity_notify(thread_index, NAT44_ED_HA_OP_ADD_FORCE, a);
 unlock:
   clib_spinlock_unlock_if_init (&nam->affinity_lock);
   return rv;

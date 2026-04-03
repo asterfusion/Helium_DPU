@@ -338,6 +338,29 @@ typedef struct {
   u32 skip;
 } lb_pseudorand_t;
 
+int
+lb_sticky_is_idle_cb (clib_bihash_kv_8_16_t * kv, void *arg)
+{
+    lb_main_t *lbm = &lb_main;
+
+    lb_sticky_is_idle_ctx_t *ctx = arg;
+
+    lb_sticky_kv_t *lb_kv = (lb_sticky_kv_t *)kv;
+
+    if (clib_u32_loop_gt(ctx->lb_time_now, lb_kv->lb_value.timeout))
+    {
+        clib_atomic_fetch_sub (&lbm->as_refcount[lb_kv->lb_value.asindex], 1);
+        //ha sync notify
+        lb_ha_sync_event_sticky_session_notify(ctx->thread_index, LB_HA_OP_DEL_FORCE,
+                pool_elt_at_index(lbm->vips, lb_kv->lb_key.vip_index),
+                lb_kv->lb_key.hash,
+                &lbm->ass[lb_kv->lb_value.asindex].address, 0);
+        return 1;
+    }
+    return 0;
+}
+
+
 static int
 lb_sticky_foreach_free_cb (clib_bihash_kv_8_16_t * kv, void *arg)
 {
