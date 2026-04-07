@@ -10,7 +10,6 @@ typedef struct
     u32 snapshot_version;
 
     uword snapshot_flow_index;
-    uword snapshot_affinity_index;
 
 } nat44_ed_ha_sync_snapshot_runtime_t;
 
@@ -27,7 +26,6 @@ static char *nat44_ed_event_op_string[] = {
 static char *nat44_ed_event_type_string[] = {
     [NAT44_ED_HA_TYPE_NONE] = "none",
     [NAT44_ED_HA_TYPE_FLOW] = "flow",
-    [NAT44_ED_HA_TYPE_AFFINITY] = "affinity",
 };
 
 static u8 *format_nat44_ed_event_op (u8 * s, va_list * args)
@@ -121,18 +119,6 @@ u8 *format_nat44_ed_ha_sync_flow_format (u8 * s, va_list * args)
   return s;
 }
 
-u8 *format_nat44_ed_ha_sync_affinity_format (u8 * s, va_list * args)
-{
-    nat44_ed_ha_sync_affinity_data_t *data = va_arg (*args, nat44_ed_ha_sync_affinity_data_t *);
-
-    s = format (s, "client %U backend %U:%d proto %U",
-            format_ip4_address, &data->key.client_addr, 
-            format_ip4_address, &data->key.service_addr, 
-            clib_net_to_host_u16 (data->key.service_port), 
-            format_ip_protocol, data->key.proto);
-    return s;
-}
-
 static int
 nat44_ed_ha_sync_snapshot_send_cb (u32 app_type, void *ctx, u32 thread_index)
 {
@@ -193,45 +179,6 @@ void generate_flow_table_snapshot(vlib_main_t * vm,
     return;
 }
 
-static_always_inline 
-void generate_affinity_table_snapshot(vlib_main_t * vm, 
-                                      nat44_ed_ha_sync_ctx_t *ctx, 
-                                      nat44_ed_ha_sync_snapshot_runtime_t *rt)
-{
-    u32 thread_index = vm->thread_index;
-    nat_affinity_main_t *nam = &nat_affinity_main;
-
-    nat_affinity_t *a = NULL;
-
-    uword pool_active_num = pool_elts(nam->affinity_pool);
-    uword pool_max_num = pool_max_len(nam->affinity_pool);
-
-    if (PREDICT_FALSE (pool_active_num == 0))
-    {
-        ctx->snapshot_affinity_end[thread_index] = 1;
-        return;
-    }
-
-    uword i;
-    uword pool_walk_end = (pool_max_num >> NAT44_ED_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
-    pool_walk_end = rt->snapshot_affinity_index + pool_walk_end > 0 ? pool_walk_end : pool_max_num;
-    pool_walk_end = pool_walk_end < pool_max_num ? pool_walk_end : pool_max_num;
-
-    pool_foreach_stepping_index(i, rt->snapshot_affinity_index, pool_walk_end, nam->affinity_pool)
-    {
-        a = pool_elt_at_index (nam->affinity_pool, i);
-        nat44_ed_ha_sync_event_affinity_notify(vm->thread_index, NAT44_ED_HA_OP_ADD_FORCE, a);
-    }
-    rt->snapshot_affinity_index = i;
-
-    if (rt->snapshot_affinity_index >= pool_max_num)
-    {
-        ctx->snapshot_affinity_end[thread_index] = 1;
-    }
-
-    return;
-}
-
 static uword
 nat44_ed_ha_sync_snapshot_process (vlib_main_t * vm, vlib_node_runtime_t * rt, vlib_frame_t * f)
 {
@@ -244,7 +191,6 @@ nat44_ed_ha_sync_snapshot_process (vlib_main_t * vm, vlib_node_runtime_t * rt, v
     u64 max_timer_wait_interval = cpu_cps / NAT44_ED_HA_SYNC_SNAPSHOT_PROCESS_DEFAULT_FREQUENCY;
 
     vec_validate(nat44_ed_ha_sync_ctx.snapshot_flow_end, n_threads);
-    vec_validate(nat44_ed_ha_sync_ctx.snapshot_affinity_end, n_threads);
 
     while (1)
     {
@@ -265,24 +211,19 @@ nat44_ed_ha_sync_snapshot_process (vlib_main_t * vm, vlib_node_runtime_t * rt, v
         if (event_type == NAT44_ED_HA_SYNC_SNAPSHOT_PROCESS_RESTART)
         {
             nat44_ed_ha_sync_ctx.flag |= NAT44_ED_HA_SYNC_CTX_FLAG_SNAPSHOT_FLOW;
-            nat44_ed_ha_sync_ctx.flag |= NAT44_ED_HA_SYNC_CTX_FLAG_SNAPSHOT_AFFINITY;
             vec_zero(nat44_ed_ha_sync_ctx.snapshot_flow_end);
-            vec_zero(nat44_ed_ha_sync_ctx.snapshot_affinity_end);
         }
 
         u32 ti;
         u32 flow_end_cnt = 0;
-        u32 affinity_end_cnt = 0;
         for (ti = 0; ti < n_threads; ti++)
         {
            flow_end_cnt += nat44_ed_ha_sync_ctx.snapshot_flow_end[ti] ? 1 : 0;
-           affinity_end_cnt += nat44_ed_ha_sync_ctx.snapshot_affinity_end[ti] ? 1 : 0;
         }
 
-        if (flow_end_cnt == n_threads && affinity_end_cnt == n_threads)
+        if (flow_end_cnt == n_threads)
         {
             nat44_ed_ha_sync_ctx.flag &= ~NAT44_ED_HA_SYNC_CTX_FLAG_SNAPSHOT_FLOW;
-            nat44_ed_ha_sync_ctx.flag &= ~NAT44_ED_HA_SYNC_CTX_FLAG_SNAPSHOT_AFFINITY;
         }
 
         /*
@@ -322,13 +263,7 @@ VLIB_NODE_FN (nat44_ed_ha_sync_snapshot_node)
         generate_flow_table_snapshot(vm, &nat44_ed_ha_sync_ctx, rt);
     }
 
-    if (!nat44_ed_ha_sync_ctx.snapshot_affinity_end[thread_index])
-    {
-        generate_affinity_table_snapshot(vm, &nat44_ed_ha_sync_ctx, rt);
-    }
-
-    if (nat44_ed_ha_sync_ctx.snapshot_flow_end[thread_index] && 
-        nat44_ed_ha_sync_ctx.snapshot_affinity_end[thread_index])
+    if (nat44_ed_ha_sync_ctx.snapshot_flow_end[thread_index])
     {
         rt->snapshot_version = nat44_ed_ha_sync_ctx.current_snapshot_version;
     }
@@ -583,36 +518,6 @@ nat44_ed_ha_sync_apply_flow_proc(nat44_ed_ha_sync_event_flow_t *event)
     return;
 }
 
-static_always_inline void
-nat44_ed_ha_sync_apply_affinity_proc(nat44_ed_ha_sync_event_affinity_t *event)
-{
-#if NAT44_ED_HASH_SYNC_DEBUG
-    u8 *s = 0;
-    s = format(s, "Header: \n%U", format_nat44_ed_ha_sync_header_format, &event->header);
-    s = format(s, "Data: \n%U", format_nat44_ed_ha_sync_affinity_format, &event->data);
-    clib_warning("%s", s);
-    vec_free(s);
-#endif
-
-    nat44_ed_ha_sync_header_t *header  = &event->header;
-
-    //TODO
-
-    switch (header->event_op)
-    {
-    case NAT44_ED_HA_OP_ADD:
-    case NAT44_ED_HA_OP_ADD_FORCE:
-    case NAT44_ED_HA_OP_UPDATE:
-    case NAT44_ED_HA_OP_DEL:
-    case NAT44_ED_HA_OP_DEL_FORCE:
-    case NAT44_ED_HA_OP_REFRESH:
-        clib_warning("NAT44-ED ha-sync affinity current not support op %u", header->event_op);
-        break;
-    }
-
-    return;
-}
-
 static void
 nat44_ed_ha_sync_session_apply_cb (u32 app_type, void *ctx, u8 *session, u16 session_len)
 {
@@ -643,14 +548,6 @@ nat44_ed_ha_sync_session_apply_cb (u32 app_type, void *ctx, u8 *session, u16 ses
             return;
         }
         nat44_ed_ha_sync_apply_flow_proc((nat44_ed_ha_sync_event_flow_t *)session);
-        break;
-    case NAT44_ED_HA_TYPE_AFFINITY:
-        if (session_len < sizeof(nat44_ed_ha_sync_event_affinity_t))
-        {
-            clib_warning("nat44-ed ha sync received affinity event length too small (current %u expected %u)", session_len, sizeof(nat44_ed_ha_sync_event_affinity_t));
-            return;
-        }
-        nat44_ed_ha_sync_apply_affinity_proc((nat44_ed_ha_sync_event_affinity_t *)session);
         break;
     }
     return;

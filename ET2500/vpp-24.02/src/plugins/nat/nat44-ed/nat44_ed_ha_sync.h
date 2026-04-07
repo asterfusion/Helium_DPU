@@ -2,7 +2,6 @@
 #define included_nat44_ed_ha_h
 
 #include <nat/nat44-ed/nat44_ed.h>
-#include <nat/nat44-ed/nat44_ed_affinity.h>
 #include <vnet/fib/ip4_fib.h>
 #include <vnet/fib/ip6_fib.h>
 #include <ha_sync/ha_sync.h>
@@ -13,10 +12,8 @@
 #define NAT44_ED_HA_SYNC_TIMEOUT_UPDATE_INTERVAL             (2) //2s
 
 #define NAT44_ED_HA_SYNC_CTX_FLAG_SNAPSHOT_FLOW (1 << 0)
-#define NAT44_ED_HA_SYNC_CTX_FLAG_SNAPSHOT_AFFINITY (1 << 0)
 
-#define nat44_ed_ha_sync_snapshot_act(flag) ((flag & NAT44_ED_HA_SYNC_CTX_FLAG_SNAPSHOT_FLOW) ||  \
-                                             (flag & NAT44_ED_HA_SYNC_CTX_FLAG_SNAPSHOT_AFFINITY))
+#define nat44_ed_ha_sync_snapshot_act(flag) ((flag & NAT44_ED_HA_SYNC_CTX_FLAG_SNAPSHOT_FLOW))
 
 typedef struct
 {
@@ -33,7 +30,6 @@ typedef struct
 
     u8 snapshot_start; 
     u8 *snapshot_flow_end;
-    u8 *snapshot_affinity_end;
 
 } nat44_ed_ha_sync_ctx_t;
 
@@ -74,7 +70,6 @@ typedef enum
     NAT44_ED_HA_TYPE_NONE = 0,
 
     NAT44_ED_HA_TYPE_FLOW,
-    NAT44_ED_HA_TYPE_AFFINITY,
 
     NAT44_ED_HA_TYPE_VALID,
     NAT44_ED_HA_TYPE_MAX = 255,
@@ -131,34 +126,10 @@ typedef struct
 
 typedef struct 
 {
-    struct
-    {
-        ip4_address_t service_addr;
-        ip4_address_t client_addr;
-        /* align by making this 4 octets even though its a 1 octet field */
-        u32 proto;
-        /* align by making this 4 octets even though its a 2 octets field */
-        u32 service_port;
-    } key;
-
-    u32 sticky_time;
-    u8 backend_index;
-
-} __attribute__ ((packed))nat44_ed_ha_sync_affinity_data_t;
-
-typedef struct 
-{
     nat44_ed_ha_sync_header_t header; 
     nat44_ed_ha_sync_flow_data_t data;
 
 } __attribute__ ((packed))nat44_ed_ha_sync_event_flow_t;
-
-typedef struct 
-{
-    nat44_ed_ha_sync_header_t header; 
-    nat44_ed_ha_sync_affinity_data_t data;
-
-} __attribute__ ((packed))nat44_ed_ha_sync_event_affinity_t;
 
 int nat44_ed_ha_sync_register (void);
 void nat44_ed_ha_sync_unregister (void);
@@ -218,28 +189,6 @@ static_always_inline void nat44_ed_ha_sync_event_flow_notify(u32 thread_id, nat4
     event.data.tcp_state = s->tcp_state;
 
     nat44_ed_ha_sync_event_push(thread_id, (u8 *)&event, sizeof(nat44_ed_ha_sync_event_flow_t));
-}
-
-static_always_inline void nat44_ed_ha_sync_event_affinity_notify(u32 thread_id, nat44_ed_ha_event_op_e op, nat_affinity_t *a)
-{
-    if(NAT44_ED_CHECK_HA_SYNC) return;
-
-    nat44_ed_ha_sync_event_affinity_t event;
-
-    event.header.event_thread_id = thread_id;
-    event.header.event_op = op;
-    event.header.event_type = NAT44_ED_HA_TYPE_AFFINITY;
-    event.header.resv = 0;
-    event.header.event_data_len = clib_host_to_net_u16(sizeof(event.data));
-
-    event.data.key.service_addr = a->key.service_addr;
-    event.data.key.client_addr = a->key.client_addr;
-    event.data.key.proto = a->key.proto;
-    event.data.key.service_port = a->key.service_port;
-    event.data.sticky_time = a->sticky_time;
-    event.data.backend_index = a->backend_index;
-
-    nat44_ed_ha_sync_event_push(thread_id, (u8 *)&event, sizeof(nat44_ed_ha_sync_event_affinity_t));
 }
 
 #endif /* included_nat44_ed_ha_h */
