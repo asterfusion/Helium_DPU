@@ -17,7 +17,7 @@
 #include <vppinfra/fifo.h>
 #include <vnet/ip/format.h>
 #include <vppinfra/tw_timer_16t_2w_512sl.h>
-#include <hqos/fifo/fifo.h>
+#include <vppinfra/lffifo.h>
 
 #define HA_SYNC_UDP_PORT 10311
 #define HA_SYNC_MAX_TX_PAYLOAD 1400
@@ -169,7 +169,7 @@ typedef struct
     u32 session_count;
     u32 *pending_fifo;      /* sequence number queue waiting to be sent */
     u32 *retry_fifo;        /* retransmit queue isolated from new traffic */
-    hqos_fifo_t *ack_fifo;  /* MPSC ack queue using shared HQOS fifo */
+    lf_fifo_t *ack_fifo;  /* MPSC ack queue using shared HQOS fifo */
     u32 *ack_drain_vec;     /* reused temp vector for ack drain */
     u32 ack_wakeup_pending;
     f64 last_flush_time;
