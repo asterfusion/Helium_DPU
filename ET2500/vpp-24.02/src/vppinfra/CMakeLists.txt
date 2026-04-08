@@ -102,6 +102,7 @@ set(VPPINFRA_SRCS
   vector.c
   vector/toeplitz.c
   cJSON.c
+  lffifo.c
 )
 
 set(VPPINFRA_HEADERS
@@ -214,6 +215,7 @@ set(VPPINFRA_HEADERS
   warnings.h
   xxhash.h
   linux/sysfs.h
+  lffifo.h
 )
 
 if("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")

@@ -13,6 +13,11 @@ typedef struct
 
 } nat44_ed_ha_sync_snapshot_runtime_t;
 
+typedef struct
+{
+    nat44_ed_ha_sync_event_flow_t *flow_session;
+} nat44_ed_ha_sync_handoff_runtime_t;
+
 static char *nat44_ed_event_op_string[] = {
     [NAT44_ED_HA_OP_NONE] = "none",
     [NAT44_ED_HA_OP_ADD] = "add",
@@ -166,6 +171,8 @@ void generate_flow_table_snapshot(vlib_main_t * vm,
 
     pool_foreach_stepping_index(i, rt->snapshot_flow_index, pool_walk_end, tsm->sessions)
     {
+        if (pool_is_free_index(tsm->sessions, i)) continue;
+
         s = pool_elt_at_index (tsm->sessions, i);
         nat44_ed_ha_sync_event_flow_notify(vm->thread_index, NAT44_ED_HA_OP_ADD_FORCE, s);
     }
@@ -174,6 +181,7 @@ void generate_flow_table_snapshot(vlib_main_t * vm,
     if (rt->snapshot_flow_index >= pool_max_num)
     {
         ctx->snapshot_flow_end[thread_index] = 1;
+        rt->snapshot_flow_index = 0;
     }
 
     return;
@@ -281,7 +289,6 @@ VLIB_REGISTER_NODE (nat44_ed_ha_sync_snapshot_node) = {
 static_always_inline void
 nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, int is_force)
 {
-    //TODO woker core diff 
     vlib_main_t *vm = vlib_get_main();
     snat_main_t *sm = &snat_main;
     f64 now = vlib_time_now (vm);
@@ -365,7 +372,6 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
 static_always_inline void
 nat44_ed_ha_sync_flow_update(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data)
 {
-    //TODO woker core diff 
     vlib_main_t *vm = vlib_get_main();
     snat_main_t *sm = &snat_main;
     f64 now = vlib_time_now (vm);
@@ -417,7 +423,6 @@ nat44_ed_ha_sync_flow_update(u32 thread_index, nat44_ed_ha_sync_flow_data_t *dat
 static_always_inline void
 nat44_ed_ha_sync_flow_del(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, int is_force)
 {
-    //TODO woker core diff 
     snat_main_t *sm = &snat_main;
 
     snat_main_per_thread_data_t *tsm = &sm->per_thread_data[thread_index];
@@ -523,6 +528,7 @@ nat44_ed_ha_sync_session_apply_cb (u32 app_type, void *ctx, u8 *session, u16 ses
 {
     ASSERT(app_type == HA_SYNC_APP_NAT);
 
+    u32 thread_index = vlib_get_thread_index();
     nat44_ed_ha_sync_header_t *header = (nat44_ed_ha_sync_header_t *)session;
 
     if (header->event_type >= NAT44_ED_HA_TYPE_VALID)
@@ -542,16 +548,63 @@ nat44_ed_ha_sync_session_apply_cb (u32 app_type, void *ctx, u8 *session, u16 ses
     switch(header->event_type)
     {
     case NAT44_ED_HA_TYPE_FLOW:
-        if (session_len < sizeof(nat44_ed_ha_sync_event_flow_t))
         {
-            clib_warning("nat44-ed ha sync received flow event length too small (current %u expected %u)", session_len, sizeof(nat44_ed_ha_sync_event_flow_t));
-            return;
+            if (session_len < sizeof(nat44_ed_ha_sync_event_flow_t))
+            {
+                clib_warning("nat44-ed ha sync received flow event length too small (current %u expected %u)", session_len, sizeof(nat44_ed_ha_sync_event_flow_t));
+                return;
+            }
+            if (header->event_thread_id != thread_index)
+            {
+                lf_fifo_enqueue_mp(nat44_ed_ha_sync_ctx.handoff[header->event_thread_id].flow_fifo, 1, (void *)session);
+                return;
+            }
+            nat44_ed_ha_sync_apply_flow_proc((nat44_ed_ha_sync_event_flow_t *)session);
         }
-        nat44_ed_ha_sync_apply_flow_proc((nat44_ed_ha_sync_event_flow_t *)session);
         break;
     }
     return;
 }
+
+VLIB_NODE_FN (nat44_ed_ha_sync_handoff_proc_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+    u32 thread_index = vm->thread_index;
+    nat44_ed_ha_sync_handoff_runtime_t *rt = (nat44_ed_ha_sync_handoff_runtime_t *) node->runtime_data;
+    nat44_ed_ha_sync_event_flow_handoff_t *handoff = &nat44_ed_ha_sync_ctx.handoff[thread_index];
+
+    if (PREDICT_FALSE(!rt->flow_session))
+    {
+        vec_validate(rt->flow_session, NAT44_ED_HA_SYNC_HANDOFF_PER_NUM);
+    }
+
+    if (lf_fifo_empty(handoff->flow_fifo))
+    {
+        return 0;
+    }
+
+    u32 num = 0;
+    u32 i;
+
+    num = lf_fifo_dequeue_sc (handoff->flow_fifo, NAT44_ED_HA_SYNC_HANDOFF_PER_NUM, rt->flow_session);
+
+    if (num > 0)
+    {
+        for (i = 0; i < num; i++)
+        {
+            nat44_ed_ha_sync_apply_flow_proc(&rt->flow_session[i]);
+        }
+    }
+    return num;
+}
+
+VLIB_REGISTER_NODE (nat44_ed_ha_sync_handoff_proc_node) = {
+  .name = "nat44-ed-ha-sync-handoff",
+  .vector_size = sizeof (u32),
+  .type = VLIB_NODE_TYPE_INPUT,
+  .state = VLIB_NODE_STATE_DISABLED,
+  .runtime_data_bytes = sizeof (nat44_ed_ha_sync_handoff_runtime_t),
+};
 
 static int *nat44_ed_ha_sync_register_session_application_ptr;
 static int *nat44_ed_ha_sync_unregister_session_application_ptr;
@@ -571,8 +624,55 @@ int nat44_ed_ha_sync_set_timeout_update_interval(u32 ha_sync_timeout_update_inte
     return 0;
 }
 
+static_always_inline void nat44_ed_ha_sync_handoff_init()
+{
+    u32 num_workers = vlib_num_workers();
+    vlib_global_main_t *vgm = vlib_get_global_main ();
+    int i;
+
+    nat44_ed_ha_sync_event_flow_handoff_t *handoff;
+
+    vec_validate (nat44_ed_ha_sync_ctx.handoff, num_workers);
+
+    vec_foreach (handoff, nat44_ed_ha_sync_ctx.handoff)
+    {
+        handoff->flow_fifo = lf_fifo_alloc(NAT44_ED_HA_SYNC_HANDOFF_QUEUE_SIZE, sizeof(nat44_ed_ha_sync_event_flow_t));
+    }
+
+    vec_foreach_index (i, vgm->vlib_mains)
+    {
+        if (i == 0) continue;
+        vlib_node_set_state (vgm->vlib_mains[i], nat44_ed_ha_sync_handoff_proc_node.index, VLIB_NODE_STATE_POLLING);
+    }
+
+    return;
+}
+
+static_always_inline void nat44_ed_ha_sync_handoff_deinit()
+{
+    nat44_ed_ha_sync_event_flow_handoff_t *handoff;
+    vlib_global_main_t *vgm = vlib_get_global_main ();
+    int i;
+
+    vec_foreach_index (i, vgm->vlib_mains)
+    {
+        if (i == 0) continue;
+        vlib_node_set_state (vgm->vlib_mains[i], nat44_ed_ha_sync_handoff_proc_node.index, VLIB_NODE_STATE_DISABLED);
+    }
+
+    vec_foreach (handoff, nat44_ed_ha_sync_ctx.handoff)
+    {
+        lf_fifo_free(handoff->flow_fifo);
+    }
+
+    vec_free (nat44_ed_ha_sync_ctx.handoff);
+    return;
+}
+
 int nat44_ed_ha_sync_register (void)
 {
+    nat44_ed_ha_sync_handoff_init();
+
     nat44_ed_ha_sync_register_session_application_ptr =
         vlib_get_plugin_symbol ("ha_sync_plugin.so", "ha_sync_register_session_application");
 
@@ -604,11 +704,16 @@ int nat44_ed_ha_sync_register (void)
     }
 
     nat44_ed_ha_sync_ctx.ha_sync_register = 1;
+
+    nat44_ed_ha_sync_ctx.ha_sync_timeout_update_interval = NAT44_ED_HA_SYNC_TIMEOUT_UPDATE_INTERVAL;
+
     return 0;
 }
 
 void nat44_ed_ha_sync_unregister (void)
 {
+    nat44_ed_ha_sync_handoff_deinit();
+
     nat44_ed_ha_sync_unregister_session_application_ptr =
         vlib_get_plugin_symbol ("ha_sync_plugin.so", "ha_sync_unregister_session_application");
 

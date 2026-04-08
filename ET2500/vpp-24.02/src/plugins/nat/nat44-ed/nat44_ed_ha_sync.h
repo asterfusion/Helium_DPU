@@ -5,6 +5,7 @@
 #include <vnet/fib/ip4_fib.h>
 #include <vnet/fib/ip6_fib.h>
 #include <ha_sync/ha_sync.h>
+#include <vppinfra/lffifo.h>
 
 #define NAT44_ED_HA_SYNC_SNAPSHOT_PROCESS_DEFAULT_FREQUENCY   (128)
 #define NAT44_ED_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING        (9)
@@ -15,33 +16,14 @@
 
 #define nat44_ed_ha_sync_snapshot_act(flag) ((flag & NAT44_ED_HA_SYNC_CTX_FLAG_SNAPSHOT_FLOW))
 
-typedef struct
-{
-    ha_sync_common_ctx_t ha_sync_ctx;
-
-    u8 ha_sync_plugin_found;
-    u8 ha_sync_register;
-
-    u32 ha_sync_timeout_update_interval;
-
-    u32 flag;
-
-    u32 current_snapshot_version;
-
-    u8 snapshot_start; 
-    u8 *snapshot_flow_end;
-
-} nat44_ed_ha_sync_ctx_t;
+#define NAT44_ED_HA_SYNC_HANDOFF_QUEUE_SIZE                  (16384)
+#define NAT44_ED_HA_SYNC_HANDOFF_PER_NUM                     (1024)
 
 typedef enum
 {
     NAT44_ED_HA_SYNC_SNAPSHOT_PROCESS_RESTART = 1,
 
 } nat44_ed_ha_sync_snapshot_event_e;
-
-extern nat44_ed_ha_sync_ctx_t nat44_ed_ha_sync_ctx;
-extern vlib_node_registration_t nat44_ed_ha_sync_snapshot_process_node;
-extern vlib_node_registration_t nat44_ed_ha_sync_snapshot_node;
 
 #define NAT44_ED_CHECK_HA_SYNC (!nat44_ed_ha_sync_ctx.ha_sync_plugin_found || \
                                 !nat44_ed_ha_sync_ctx.ha_sync_register || \
@@ -127,13 +109,46 @@ typedef struct
 typedef struct 
 {
     nat44_ed_ha_sync_header_t header; 
+
+    CLIB_CACHE_LINE_ALIGN_MARK(cacheline0);
+
     nat44_ed_ha_sync_flow_data_t data;
 
 } __attribute__ ((packed))nat44_ed_ha_sync_event_flow_t;
 
+typedef struct
+{
+    /* fifo */
+    lf_fifo_t *flow_fifo;
+} nat44_ed_ha_sync_event_flow_handoff_t;
+
+typedef struct
+{
+    ha_sync_common_ctx_t ha_sync_ctx;
+
+    u8 ha_sync_plugin_found;
+    u8 ha_sync_register;
+
+    u32 ha_sync_timeout_update_interval;
+
+    u32 flag;
+
+    u32 current_snapshot_version;
+
+    u8 snapshot_start;
+    u8 *snapshot_flow_end;
+
+    nat44_ed_ha_sync_event_flow_handoff_t *handoff;
+} nat44_ed_ha_sync_ctx_t;
+
+extern nat44_ed_ha_sync_ctx_t nat44_ed_ha_sync_ctx;
+
 int nat44_ed_ha_sync_register (void);
 void nat44_ed_ha_sync_unregister (void);
 int nat44_ed_ha_sync_set_timeout_update_interval(u32 ha_sync_timeout_update_interval);
+
+extern vlib_node_registration_t nat44_ed_ha_sync_snapshot_process_node;
+extern vlib_node_registration_t nat44_ed_ha_sync_snapshot_node;
 
 extern void *nat44_ed_ha_sync_per_thread_buffer_add_ptr;
 
