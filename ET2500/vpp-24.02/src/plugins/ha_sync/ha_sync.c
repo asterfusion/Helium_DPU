@@ -281,9 +281,6 @@ ha_sync_apply_enable_disable (u8 enable)
   else
     {
       hsm->enabled = 0;
-      if (hsm->sw_if_index_is_set)
-        vnet_feature_enable_disable ("ip4-unicast", "ha-sync-input-worker",
-                                     hsm->sw_if_index, 0, 0, 0);
       hsm->fib_index = 0;
       hsm->src_port = HA_SYNC_UDP_PORT;
       hsm->dst_port = HA_SYNC_UDP_PORT;
@@ -359,9 +356,6 @@ ha_sync_apply_add_del_peer_address (u8 is_add, const ip4_address_t *addr)
       hsm->peer_address.as_u32 = 0;
       ha_sync_refresh_config_ready (hsm);
       ha_sync_clear_connection_state (hsm);
-      if (hsm->enabled && hsm->sw_if_index_is_set)
-        vnet_feature_enable_disable ("ip4-unicast", "ha-sync-input-worker",
-                                     hsm->sw_if_index, 0, 0, 0);
       ha_sync_reset_runtime_state ();
       ha_sync_update_all_contexts ();
       return 0;
