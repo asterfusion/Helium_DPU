@@ -7,7 +7,6 @@ add_vpp_plugin(ha_sync
   ha_sync_protocol.c
   ha_sync_test.c
   node.c
-  ../hqos/fifo/fifo.c
 
   API_FILES
   ha_sync.api

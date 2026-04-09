@@ -205,6 +205,8 @@ void generate_lb_vip_snat_table_snapshot(vlib_main_t *vm, lb_ha_sync_ctx_t *ctx)
 
     pool_foreach_stepping_index(i, ctx->snapshot_vip_snat_index, pool_walk_end, lbm->vip_snat_mappings)
     {
+        if (pool_is_free_index(lbm->vip_snat_mappings, i)) continue;
+
         flow = pool_elt_at_index (lbm->vip_snat_mappings, i);
 
         if (clib_u32_loop_gt(lb_time_now, flow->timeout)) continue;

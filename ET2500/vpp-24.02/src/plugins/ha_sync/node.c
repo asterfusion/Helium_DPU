@@ -101,20 +101,20 @@ ha_sync_drain_ack_fifo (u32 thread_index, ha_sync_per_thread_data_t *ptd)
   vec_reset_length (ack_vec);
   for (;;)
     {
-      u32 n_ack = hqos_fifo_count (ptd->ack_fifo);
+      u32 n_ack = lf_fifo_count (ptd->ack_fifo);
 
       if (n_ack > 0)
         {
           u32 old_len = vec_len (ack_vec);
           vec_validate (ack_vec, old_len + n_ack - 1);
           n_ack =
-            hqos_fifo_dequeue_sc (ptd->ack_fifo, n_ack, ack_vec + old_len);
+            lf_fifo_dequeue_sc (ptd->ack_fifo, n_ack, ack_vec + old_len);
           vec_set_len (ack_vec, old_len + n_ack);
         }
 
       clib_atomic_store_rel_n (&ptd->ack_wakeup_pending, 0);
       __atomic_thread_fence (__ATOMIC_ACQUIRE);
-      if (hqos_fifo_empty (ptd->ack_fifo))
+      if (lf_fifo_empty (ptd->ack_fifo))
         break;
     }
 

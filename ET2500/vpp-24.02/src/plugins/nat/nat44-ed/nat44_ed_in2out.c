@@ -30,6 +30,7 @@
 
 #include <nat/nat44-ed/nat44_ed.h>
 #include <nat/nat44-ed/nat44_ed_inlines.h>
+#include <nat/nat44-ed/nat44_ed_ha_sync.h>
 
 static char *nat_in2out_ed_error_strings[] = {
 #define _(sym,string) string,
@@ -796,6 +797,9 @@ slow_path_ed (vlib_main_t *vm, snat_main_t *sm, vlib_buffer_t *b,
                s->out2in.addr.as_u32, s->out2in.port,
                s->proto);
 
+  /* ha sync */
+  nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_ADD_FORCE, s);
+
   per_vrf_sessions_register_session (s, thread_index);
 
   *sessionp = s;
@@ -1206,6 +1210,9 @@ nat44_ed_in2out_slowpath_unknown_proto (snat_main_t *sm, vlib_buffer_t *b,
       nat_ed_session_delete (sm, s, thread_index, 1);
       return NULL;
     }
+
+  /* ha sync */
+  nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_ADD_FORCE, s);
 
   per_vrf_sessions_register_session (s, thread_index);
 

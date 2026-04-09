@@ -551,6 +551,10 @@ create_session_for_static_mapping_ed (
 			 &s->ext_host_addr, s->ext_host_port, s->proto,
 			 nat44_ed_is_twice_nat_session (s));
 
+  /* ha sync */
+  nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_ADD_FORCE, s);
+
+
   per_vrf_sessions_register_session (s, thread_index);
 
   return s;

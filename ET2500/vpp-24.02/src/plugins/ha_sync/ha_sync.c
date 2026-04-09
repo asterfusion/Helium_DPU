@@ -18,8 +18,8 @@ static void
 ha_sync_ack_fifo_reset (ha_sync_per_thread_data_t *ptd)
 {
   if (ptd->ack_fifo)
-    hqos_fifo_free (ptd->ack_fifo);
-  ptd->ack_fifo = hqos_fifo_alloc (HA_SYNC_ACK_FIFO_SIZE, sizeof (u32));
+    lf_fifo_free (ptd->ack_fifo);
+  ptd->ack_fifo = lf_fifo_alloc (HA_SYNC_ACK_FIFO_SIZE, sizeof (u32));
 }
 
 static void
@@ -144,7 +144,7 @@ ha_sync_release_resources ()
     vec_free (ptd->ack_drain_vec);
     ha_sync_fast_msg_queue_free (ptd);
     vec_free (ptd->timer_expired_vec);
-    hqos_fifo_free (ptd->ack_fifo);
+    lf_fifo_free (ptd->ack_fifo);
     ptd->ack_fifo = 0;
     ha_sync_response_batches_free (ptd);
     if (ptd->timer_wheel.timers)

@@ -1,3 +1,6 @@
+#ifndef included_lb_ha_h
+#define included_lb_ha_h
+
 #include <lb/lb.h>
 #include <vnet/fib/ip4_fib.h>
 #include <vnet/fib/ip6_fib.h>
@@ -281,3 +284,5 @@ static_always_inline void lb_ha_sync_event_vip_snat_session_notify(u32 thread_id
 
     lb_ha_sync_event_push(thread_id, (u8 *)&event, sizeof(lb_ha_sync_event_vip_snat_session_t));
 }
+
+#endif /* included_lb_ha_h */

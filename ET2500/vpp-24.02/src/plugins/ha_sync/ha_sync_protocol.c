@@ -170,7 +170,7 @@ ha_sync_enqueue_acks (u8 owner_thread, const u32 *seq_numbers,
 
     while (n_left > 0)
       {
-        u32 n_enq = hqos_fifo_enqueue_mp (ptd->ack_fifo, n_left, src);
+        u32 n_enq = lf_fifo_enqueue_mp (ptd->ack_fifo, n_left, src);
         if (PREDICT_FALSE (n_enq == 0))
           {
             CLIB_PAUSE ();

@@ -20,6 +20,8 @@ add_vpp_plugin(lb
   util.c
   lb_ha_sync.c
 
+  MULTIARCH_SOURCES
+  node.c
 
   API_FILES
   lb.api

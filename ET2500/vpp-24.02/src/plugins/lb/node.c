@@ -75,7 +75,7 @@ typedef struct
   u32 next_index;
 } lb_local_trace_t;
 
-u8 *
+static u8 *
 format_lb_trace (u8 * s, va_list * args)
 {
   lb_main_t *lbm = &lb_main;
@@ -103,7 +103,7 @@ format_lb_trace (u8 * s, va_list * args)
   return s;
 }
 
-u8 *
+static u8 *
 format_lb_nat_trace (u8 * s, va_list * args)
 {
   lb_main_t *lbm = &lb_main;
@@ -135,7 +135,7 @@ format_lb_nat_trace (u8 * s, va_list * args)
   return s;
 }
 
-u8 *
+static u8 *
 format_lb_local_trace (u8 * s, va_list * args)
 {
   lb_main_t *lbm = &lb_main;
@@ -159,28 +159,6 @@ format_lb_local_trace (u8 * s, va_list * args)
   s = format (s, "lb local: rx_sw_if_index = %d, next_index = %d", t->rx_sw_if_index, t->next_index);
 
   return s;
-}
-
-int
-lb_sticky_is_idle_cb (clib_bihash_kv_8_16_t * kv, void *arg)
-{
-    lb_main_t *lbm = &lb_main;
-
-    lb_sticky_is_idle_ctx_t *ctx = arg;
-
-    lb_sticky_kv_t *lb_kv = (lb_sticky_kv_t *)kv;
-
-    if (clib_u32_loop_gt(ctx->lb_time_now, lb_kv->lb_value.timeout))
-    {
-        clib_atomic_fetch_sub (&lbm->as_refcount[lb_kv->lb_value.asindex], 1);
-        //ha sync notify
-        lb_ha_sync_event_sticky_session_notify(ctx->thread_index, LB_HA_OP_DEL_FORCE,
-                pool_elt_at_index(lbm->vips, lb_kv->lb_key.vip_index),
-                lb_kv->lb_key.hash,
-                &lbm->ass[lb_kv->lb_value.asindex].address, 0);
-        return 1;
-    }
-    return 0;
 }
 
 static_always_inline u32
@@ -245,13 +223,13 @@ lb_get_ip6_protocol_timeout(vlib_main_t *vm, vlib_buffer_t *b, ip6_header_t *ip6
     return lbm->flow_tcp_transitory_timeout;
 }
 
-u64
+static_always_inline u64
 lb_node_get_other_ports4 (ip4_header_t *ip40)
 {
   return 0;
 }
 
-u64
+static_always_inline u64
 lb_node_get_other_ports6 (ip6_header_t *ip60)
 {
   return 0;
@@ -1191,7 +1169,7 @@ lb_node_fn (vlib_main_t * vm,
 }
 /* clang-format on */
 
-u8 *
+static u8 *
 format_nodeport_lb_trace (u8 * s, va_list * args)
 {
   lb_main_t *lbm = &lb_main;
@@ -1311,7 +1289,7 @@ lb_nodeport_node_fn (vlib_main_t * vm, vlib_node_runtime_t * node,
  *
  * @returns 0 if match found, otherwise -1.
  */
-int
+static_always_inline int
 lb_nat44_mapping_match (lb_main_t *lbm, lb_snat4_key_t * match, u32 *index)
 {
   clib_bihash_kv_16_8_t kv4, value;
@@ -1338,7 +1316,7 @@ lb_nat44_mapping_match (lb_main_t *lbm, lb_snat4_key_t * match, u32 *index)
  *
  * @returns 0 if match found otherwise 1.
  */
-int
+static_always_inline int
 lb_nat66_mapping_match (lb_main_t *lbm, lb_snat6_key_t * match, u32 *index)
 {
   clib_bihash_kv_24_8_t kv6, value;
@@ -1366,7 +1344,7 @@ lb_nat66_mapping_match (lb_main_t *lbm, lb_snat6_key_t * match, u32 *index)
  *
  * @returns 0 if match found, otherwise -1.
  */
-int
+static_always_inline int
 lb_nat44_dnat_mapping_match (lb_main_t *lbm, lb_snat_vip_key_t * match, u32 *index)
 {
   clib_bihash_kv_16_8_t kv4, value;
