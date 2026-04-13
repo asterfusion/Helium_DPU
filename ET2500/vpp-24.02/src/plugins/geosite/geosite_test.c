@@ -102,6 +102,29 @@ static int api_geosite_reload_data (vat_main_t * vam)
 }
 
 
+static int api_geosite_enable_disable_all (vat_main_t * vam)
+{
+  
+ 
+  vl_api_geosite_enable_disable_all_t * mp;
+  int ret;
+
+
+  bool is_geosite = true; // default to geosite
+  /* Construct the API message */
+  M(GEOSITE_ENABLE_DISABLE_ALL, mp);
+  
+  mp->enable_disable = is_geosite;
+
+  /* send it... */
+  S(mp);
+
+  /* Wait for a reply... */
+  W (ret);
+  return ret;
+}
+
+
 /*
  * List of messages that the geosite test plugin sends,
  * and that the data plane plugin processes

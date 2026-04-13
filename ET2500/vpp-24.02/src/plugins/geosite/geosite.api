@@ -53,6 +53,23 @@ autoreply define geosite_enable_disable {
 /** @brief API to enable / disable geosite on an interface
     @param client_index - opaque cookie to identify the sender
     @param context - sender context, to match reply w/ request
+    @param enable_disable - 1 to enable, 0 to disable the feature
+*/
+
+autoreply define geosite_enable_disable_all {
+    /* Client identifier, set from api_main.my_client_index */
+    u32 client_index;
+
+    /* Arbitrary context, so client can match reply to request */
+    u32 context;
+
+    /* Enable / disable the feature */
+    bool enable_disable;
+};
+
+/** @brief API to enable / disable geosite on an interface
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
     @param is_geosite - 1 to geosite, 0 to geoip
 */
 
