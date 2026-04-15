@@ -3634,6 +3634,7 @@ nat44_ed_add_interface_address (u32 sw_if_index, u8 twice_nat)
   ip4_main_t *ip4_main = sm->ip4_main;
   ip4_address_t *first_int_addr;
   snat_address_resolve_t *ap;
+  u32 fib_index;
   int rv;
 
   if (!sm->enabled)
@@ -3652,10 +3653,13 @@ nat44_ed_add_interface_address (u32 sw_if_index, u8 twice_nat)
   ap->is_twice_nat = twice_nat;
   ap->is_resolved = 0;
 
+  fib_index = ip4_fib_table_get_index_for_sw_if_index(sw_if_index);
+  ip4_fib_t *fib = ip4_fib_get (fib_index);
+
   first_int_addr = ip4_interface_first_address (ip4_main, sw_if_index, 0);
   if (first_int_addr)
     {
-      rv = nat44_ed_add_address (first_int_addr, 0, twice_nat, ~0);
+      rv = nat44_ed_add_address (first_int_addr, fib->hash.table_id, twice_nat, ~0);
       if (0 != rv)
 	{
 	  nat44_ed_del_addr_resolve_record (sw_if_index, twice_nat);
