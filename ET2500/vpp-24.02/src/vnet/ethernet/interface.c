@@ -44,6 +44,7 @@
 //#include <vnet/ethernet/arp.h>
 #include <vnet/l2/l2_input.h>
 #include <vnet/l2/l2_bd.h>
+#include <vnet/l2/l2_in_out_feat_arc.h>
 #include <vnet/adj/adj.h>
 #include <vnet/adj/adj_mcast.h>
 #include <vnet/ip-neighbor/ip_neighbor.h>
@@ -1272,6 +1273,26 @@ ethernet_config (vlib_main_t * vm, unformat_input_t * input)
 }
 
 VLIB_CONFIG_FUNCTION (ethernet_config, "ethernet");
+
+static clib_error_t *
+vnet_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_add)
+{
+    if (is_add)
+    {
+
+        vnet_feature_enable_disable("ip4-multicast", "linux-cp-vrrp", sw_if_index, 1, NULL, 0);
+        vnet_feature_enable_disable("ip6-multicast", "linux-cp-vrrp6", sw_if_index, 1, NULL, 0);
+
+
+        vnet_l2_feature_enable_disable("l2-input-ip4", "linux-cp-l2-vrrp", sw_if_index, 1, NULL, 0);
+        vnet_l2_feature_enable_disable("l2-input-ip6", "linux-cp-l2-vrrp6", sw_if_index, 1, NULL, 0);
+        vnet_l2_in_out_feat_arc_enable_disable (sw_if_index, 0, 1);
+    }
+
+    return 0;
+}
+
+VNET_SW_INTERFACE_ADD_DEL_FUNCTION (vnet_sw_interface_add_del);
 
 /*
  * fd.io coding-style-patch-verification: ON

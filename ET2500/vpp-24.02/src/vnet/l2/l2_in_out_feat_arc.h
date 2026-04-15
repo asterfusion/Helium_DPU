@@ -47,6 +47,9 @@ int vnet_l2_feature_enable_disable (const char *arc_name,
 				    int enable_disable, void *feature_config,
 				    u32 n_feature_config_bytes);
 
+void vnet_l2_in_out_feat_arc_enable_disable (u32 sw_if_index, int is_output,
+                                    int enable_disable);
+
 extern vlib_node_registration_t l2_in_feat_arc_end_node;
 extern vlib_node_registration_t l2_out_feat_arc_end_node;
 extern vlib_node_registration_t l2_out_feat_arc_node;
