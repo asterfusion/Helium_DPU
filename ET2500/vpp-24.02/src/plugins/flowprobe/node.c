@@ -582,6 +582,7 @@ flowprobe_export_send (vlib_main_t * vm, vlib_buffer_t * b0,
     {
       vec_validate (exp->streams, index);
       exp->streams[index].domain_id = 1;
+      exp->streams[index].src_port = UDP_DST_PORT_ipfix;
     }
   stream = &exp->streams[index];
 
