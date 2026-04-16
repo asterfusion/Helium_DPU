@@ -51,30 +51,74 @@ bool geoip_load_default = false;
 /* Action function shared between message handler and debug CLI */
 
 int geosite_enable_disable (geosite_main_t * gmp, u32 sw_if_index,
-                                   int enable_disable)
+                                   int enable_disable,bool is_single)
 {
 
   int rv = 0;
 
   /* Utterly wrong? */
-  if (pool_is_free_index (gmp->vnet_main->interface_main.sw_interfaces,
-                          sw_if_index))
-    return VNET_API_ERROR_INVALID_SW_IF_INDEX;
+  if (pool_is_free_index (gmp->vnet_main->interface_main.sw_interfaces,sw_if_index))
+   {
+     return VNET_API_ERROR_INVALID_SW_IF_INDEX;
+   }
+    geosite_type_t geosite_type;
+    geosite_type =get_port_type(sw_if_index);
+    if(enable_disable){
+        if(geosite_type == PORT_TYPE_OFF){
 
+            geosite_create_periodic_process (gmp);
 
-  geosite_create_periodic_process (gmp);
+            vnet_feature_enable_disable ("device-input", "geosite",
+                                        sw_if_index, enable_disable, 0, 0);
 
-  vnet_feature_enable_disable ("device-input", "geosite",
-                               sw_if_index, enable_disable, 0, 0);
+            vnet_feature_enable_disable ("ip4-unicast", "geosite-input",
+                                        sw_if_index, enable_disable, 0, 0);
+            vnet_feature_enable_disable ("ip6-unicast", "geosite-input",
+                                        sw_if_index, enable_disable, 0, 0);  
+            vnet_feature_enable_disable ("l2-input-ip4", "geosite-input",
+                                        sw_if_index, enable_disable, 0, 0);
+            vnet_feature_enable_disable ("l2-input-ip6", "geosite-input",
+                                        sw_if_index, enable_disable, 0, 0);  
 
-  vnet_feature_enable_disable ("ip4-unicast", "geosite-input",
-                               sw_if_index, enable_disable, 0, 0);
-  vnet_feature_enable_disable ("ip6-unicast", "geosite-input",
-                               sw_if_index, enable_disable, 0, 0);  
-  vnet_feature_enable_disable ("l2-input-ip4", "geosite-input",
-                               sw_if_index, enable_disable, 0, 0);
-  vnet_feature_enable_disable ("l2-input-ip6", "geosite-input",
-                               sw_if_index, enable_disable, 0, 0);                           
+            
+        }   
+            if(is_single)
+            {
+                set_port_type(sw_if_index,PORT_TYPE_SINGLE);
+            }
+            else{
+
+                set_port_type(sw_if_index,PORT_TYPE_ALL);
+            }                           
+                                    
+        }
+    else{
+            if(geosite_type == PORT_TYPE_SINGLE || geosite_type == PORT_TYPE_ALL){
+            geosite_create_periodic_process (gmp);
+
+            vnet_feature_enable_disable ("device-input", "geosite",
+                                        sw_if_index, enable_disable, 0, 0);
+
+            vnet_feature_enable_disable ("ip4-unicast", "geosite-input",
+                                        sw_if_index, enable_disable, 0, 0);
+            vnet_feature_enable_disable ("ip6-unicast", "geosite-input",
+                                        sw_if_index, enable_disable, 0, 0);  
+            vnet_feature_enable_disable ("l2-input-ip4", "geosite-input",
+                                        sw_if_index, enable_disable, 0, 0);
+            vnet_feature_enable_disable ("l2-input-ip6", "geosite-input",
+                                        sw_if_index, enable_disable, 0, 0); 
+            }    
+            if(is_single)  
+            {
+
+                clear_port_type(sw_if_index,PORT_TYPE_SINGLE);
+            }
+            else{
+
+                clear_port_type(sw_if_index,PORT_TYPE_ALL);
+            }
+
+    }
   /* Send an event to enable/disable the periodic scanner process */
   vlib_process_signal_event (gmp->vlib_main,
                              gmp->periodic_node_index,
@@ -108,7 +152,7 @@ geosite_enable_disable_command_fn (vlib_main_t * vm,
   if (sw_if_index == ~0)
     return clib_error_return (0, "Please specify an interface...");
 
-  rv = geosite_enable_disable (gmp, sw_if_index, enable_disable);
+  rv = geosite_enable_disable (gmp, sw_if_index, enable_disable,true);
 
   switch(rv)
     {
@@ -874,8 +918,57 @@ return NULL;
 }
 
 
+void set_port_type(u32 sw_if_index,
+                   geosite_type_t type)
+{
+      geosite_main_t *gmp = &geosite_main;
 
+    if (sw_if_index >=
+        vec_len(gmp->port_type_by_sw_if_index))
+    {
+        vec_validate_init_empty(
+            gmp->port_type_by_sw_if_index,
+            sw_if_index,
+            PORT_TYPE_OFF);
+    }
 
+    if (type == PORT_TYPE_OFF)
+    {
+       
+        gmp->port_type_by_sw_if_index[sw_if_index] =
+            PORT_TYPE_OFF;
+    }
+    else
+    {
+       
+        gmp->port_type_by_sw_if_index[sw_if_index] |=
+            type;
+    }
+}
+
+void clear_port_type(u32 sw_if_index,
+                     geosite_type_t type)
+{
+    geosite_main_t *gmp = &geosite_main;
+
+    if (sw_if_index >=
+        vec_len(gmp->port_type_by_sw_if_index))
+        return;
+
+    gmp->port_type_by_sw_if_index[sw_if_index] &=
+        ~type;
+}
+
+geosite_type_t get_port_type(u32 sw_if_index)
+{
+    geosite_main_t *gmp = &geosite_main;
+
+    if (sw_if_index >=
+        vec_len(gmp->port_type_by_sw_if_index))
+        return PORT_TYPE_OFF;
+
+    return gmp->port_type_by_sw_if_index[sw_if_index];
+}
 
 
 /* API message handler */
@@ -904,11 +997,33 @@ static void vl_api_geosite_enable_disable_t_handler
   int rv;
 
   rv = geosite_enable_disable (gmp, ntohl(mp->sw_if_index),
-                                      (int) (mp->enable_disable));
- 
+                                      (int) (mp->enable_disable),true);
+  
+
   REPLY_MACRO(VL_API_GEOSITE_ENABLE_DISABLE_REPLY);
 }
 
+
+static void vl_api_geosite_enable_disable_all_t_handler
+(vl_api_geosite_enable_disable_all_t * mp)
+{
+  vl_api_geosite_enable_disable_all_reply_t * rmp;
+  geosite_main_t * gmp = &geosite_main;
+  vnet_main_t *vnm = vnet_get_main ();
+  vnet_interface_main_t *im = &vnm->interface_main;
+  vnet_sw_interface_t *si;
+  u32 sw_if_index = ~0;
+  int rv;
+    pool_foreach (si, im->sw_interfaces)
+    {
+        sw_if_index = si->sw_if_index;
+     
+                rv = geosite_enable_disable (gmp, sw_if_index,
+                                            (int) (mp->enable_disable),false);
+
+    }
+  REPLY_MACRO(VL_API_GEOSITE_ENABLE_DISABLE_REPLY);
+}
 
 
 
@@ -927,7 +1042,6 @@ static clib_error_t * geosite_init (vlib_main_t * vm)
   
   /* Add our API messages to the global name_crc hash table */
   gmp->msg_id_base = setup_message_id_table ();
-
 
 
   return error;

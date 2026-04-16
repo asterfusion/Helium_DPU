@@ -26,6 +26,13 @@
 #include <vppinfra/error.h>
 #include "domain_trie.h"
 #include "geoip_trie.h"
+typedef enum
+{
+    PORT_TYPE_OFF    = 0,
+    PORT_TYPE_SINGLE = 1 << 0,
+    PORT_TYPE_ALL    = 1 << 1,
+
+} geosite_type_t;
 
 typedef struct {
     /* API message ID base */
@@ -43,6 +50,7 @@ typedef struct {
 
     domain_trie_t * domain_trie;
     geoip_db_t *geoip_trie;
+    geosite_type_t *port_type_by_sw_if_index;
 } geosite_main_t;
 
 extern geosite_main_t geosite_main;
@@ -89,6 +97,10 @@ u32 *geoip_get_country_code_by_ip6(ip6_address_t ip6);
 // u32 *cc_cache_get(u32 index);
 // u32 cc_cache_add(u32 *cc_indices);
 // u32 *geosite_get_country_index_by_domain2( char *domain);
+void set_port_type(u32 sw_if_index,geosite_type_t type);
+
+void clear_port_type(u32 sw_if_index,geosite_type_t type);
+geosite_type_t get_port_type(u32 sw_if_index);
 #endif /* __included_geosite_h__ */
 
 /*
