@@ -596,8 +596,8 @@ lb_ha_sync_vip_snat_sesson_add(lb_ha_sync_vip_snat_session_data_t *data,
             flow->timeout = lb_time_now + clib_net_to_host_u32(data->timeout);
             flow->last_ha_sync_timeout = lb_time_now;
 
-            kv0.value = flow_index;
-            kv1.value = flow_index;
+            kv0.value = vv0.value;
+            kv1.value = vv0.value;
             if (clib_bihash_add_del_16_8 (&lbm->mapping_by_downlink_snat4, &kv0, 1))
                 clib_warning ("Lb vip-snat vip-mapping snat4 table add failed");
 
