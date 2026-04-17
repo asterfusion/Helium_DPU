@@ -292,16 +292,103 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
     vlib_main_t *vm = vlib_get_main();
     snat_main_t *sm = &snat_main;
     f64 now = vlib_time_now (vm);
+    snat_main_per_thread_data_t *tsm = &sm->per_thread_data[thread_index];
 
     snat_session_t *s = NULL;
 
+    nat_6t_flow_t i2o;
+    nat_6t_flow_t o2i;
+    clib_bihash_kv_16_8_t kv_i2o, value_i2o;
+    clib_bihash_kv_16_8_t kv_o2i, value_o2i;
+
+    int search_i2o = 0,  search_o2i = 0;
+
+    clib_memcpy(&i2o, &data->i2o, sizeof(nat_6t_flow_t));
+    clib_memcpy(&o2i, &data->o2i, sizeof(nat_6t_flow_t));
+
+    nat_6t_flow_to_ed_k (&kv_i2o, &i2o);
+    nat_6t_flow_to_ed_k (&kv_o2i, &o2i);
+
+    search_i2o = clib_bihash_search_16_8 (&sm->flow_hash, &kv_i2o, &value_i2o);
+    search_o2i = clib_bihash_search_16_8 (&sm->flow_hash, &kv_o2i, &value_o2i);
+
+    if (!search_i2o && !search_o2i)
+    {
+        if (value_i2o.value == value_o2i.value)
+        {
+            s = pool_elt_at_index (tsm->sessions, ed_value_get_session_index (&value_i2o));
+
+            s->flags = data->flags;
+
+            clib_memcpy(&s->tcp_flags, &data->tcp_flags, sizeof(u8) * NAT44_ED_N_DIR);
+            s->tcp_state = data->tcp_state;
+            s->last_heard = now;
+
+            per_vrf_sessions_register_session (s, thread_index);
+
+            nat44_session_update_lru (sm, s, thread_index);
+
+            return;
+        }
+        else
+        {
+            /*
+             * If the sessions corresponding to i2i and o2i are inconsistent:
+             * not_force:
+             *    Ignore this
+             * is_force:
+             *    Remove existing session and add new session
+             */
+            if (!is_force)
+                return;
+
+            s = pool_elt_at_index (tsm->sessions, ed_value_get_session_index (&value_i2o));
+            nat44_ed_free_session_data (sm, s, thread_index, 1);
+            nat_ed_session_delete (sm, s, thread_index, 1);
+
+            s = pool_elt_at_index (tsm->sessions, ed_value_get_session_index (&value_o2i));
+            nat44_ed_free_session_data (sm, s, thread_index, 1);
+            nat_ed_session_delete (sm, s, thread_index, 1);
+
+            goto session_create;
+        }
+    }
+    else if (!search_i2o && search_o2i)
+    {
+        /*
+         * session inconsistent
+         */
+        if (!is_force)
+            return;
+
+        s = pool_elt_at_index (tsm->sessions, ed_value_get_session_index (&value_i2o));
+        nat44_ed_free_session_data (sm, s, thread_index, 1);
+        nat_ed_session_delete (sm, s, thread_index, 1);
+
+        goto session_create;
+    }
+    else if (search_i2o && !search_o2i)
+    {
+        /*
+         * session inconsistent
+         */
+        if (!is_force)
+            return;
+
+        s = pool_elt_at_index (tsm->sessions, ed_value_get_session_index (&value_o2i));
+        nat44_ed_free_session_data (sm, s, thread_index, 1);
+        nat_ed_session_delete (sm, s, thread_index, 1);
+
+        goto session_create;
+    }
+
+session_create:
     s = nat_ed_session_alloc(sm, thread_index, now, data->proto);
     if (!s)
     {
         clib_warning("NAT44-ED ha sync create NAT session failed!");
         return;
     }
-
     //in2out
     clib_memcpy(&s->i2o, &data->i2o, sizeof(nat_6t_flow_t));
     s->in2out.addr = data->in2out.addr;
@@ -313,19 +400,17 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
     s->out2in.addr = data->out2in.addr;
     s->out2in.fib_index = fib_table_find (FIB_PROTOCOL_IP4, data->out2in.table_id);
     s->out2in.port = data->out2in.port;
-    
+
     s->proto = data->proto;
-
-    s->flags = data->flags;
-
     s->ext_host_addr = data->ext_host_addr;
     s->ext_host_port = data->ext_host_port;
     s->ext_host_nat_addr = data->ext_host_nat_addr;
     s->ext_host_nat_port = data->ext_host_nat_port;
 
+    s->flags = data->flags;
+
     clib_memcpy(&s->tcp_flags, &data->tcp_flags, sizeof(u8) * NAT44_ED_N_DIR);
     s->tcp_state = data->tcp_state;
-
     s->last_heard = now;
 
     if (is_force)
@@ -343,9 +428,6 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
             nat_ed_session_delete (sm, s, thread_index, 1);
             return;
         }
-        per_vrf_sessions_register_session (s, thread_index);
-
-        nat44_session_update_lru (sm, s, thread_index);
     }
     else
     {
@@ -362,10 +444,12 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
             nat_ed_session_delete (sm, s, thread_index, 1);
             return;
         }
-        per_vrf_sessions_register_session (s, thread_index);
-
-        nat44_session_update_lru (sm, s, thread_index);
     }
+
+    per_vrf_sessions_register_session (s, thread_index);
+
+    nat44_session_update_lru (sm, s, thread_index);
+
     return;
 }
 
