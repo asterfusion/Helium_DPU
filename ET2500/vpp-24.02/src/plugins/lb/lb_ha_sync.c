@@ -153,9 +153,10 @@ void generate_lb_sticky_table_snapshot(vlib_main_t * vm, lb_ha_sync_ctx_t *ctx)
             {
                 if (clib_bihash_is_free_8_16 (&v->kvp[k])) continue;
 
+                lb_kv = (lb_sticky_kv_t *)&v->kvp[k];
+
                 if (clib_u32_loop_gt(lb_time_now, lb_kv->lb_value.timeout)) continue;
 
-                lb_kv = (lb_sticky_kv_t *)&v->kvp[k];
                 vip = pool_elt_at_index(lbm->vips, lb_kv->lb_key.vip_index);
 
                 lb_kv->lb_value.last_ha_sync_timeout = lb_time_now;
