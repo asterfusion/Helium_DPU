@@ -21,6 +21,7 @@ add_vpp_plugin(spi
   spi_node.c
   spi_aging.c
   spi_handoff_node.c
+  spi_ha_sync.c
   
 
   MULTIARCH_SOURCES

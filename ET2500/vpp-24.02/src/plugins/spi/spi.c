@@ -27,6 +27,7 @@
 #include <vlib/threads.h>
 #include <spi/spi.h>
 #include <spi/spi_inline.h>
+#include <spi/spi_ha_sync.h>
 
 spi_main_t spi_main;
 
@@ -354,7 +355,7 @@ spi_worker_resource_deinit (spi_main_t *spim, spi_per_thread_data_t *tspi)
     //free session pool
     pool_foreach (i, tspi->sessions)
     {
-        spi_delete_session(spim, tspi, i);
+        spi_delete_session(spim, tspi, i, false);
     }
     pool_free (tspi->sessions);
 
@@ -501,6 +502,8 @@ int spi_feature_enable (spi_config_t *config)
 
     vlib_process_signal_event (vm, spim->spi_session_timer_process_node_index, SPI_AGING_PROCESS_RECONF, 0);
 
+    spi_ha_sync_register();
+
     return error;
 }
 
@@ -534,6 +537,8 @@ int spi_feature_disable ()
     spim->fq_ip6_output_index = ~0;
 
     clib_memset (&spim->spi_config, 0, sizeof (spi_config_t));
+
+    spi_ha_sync_unregister();
 
     return error;
 }

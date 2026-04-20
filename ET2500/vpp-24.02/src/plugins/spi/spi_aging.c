@@ -108,7 +108,7 @@ spi_aging_tcp_session(spi_main_t *spim,
 
     if (do_free)
     {
-        if(PREDICT_FALSE(spi_delete_session(spim, tspi, session)))
+        if(PREDICT_FALSE(spi_delete_session(spim, tspi, session, false)))
         {
             clib_warning ("spi del session is failed\n");
         }
@@ -155,7 +155,7 @@ spi_aging_tcp_session(spi_main_t *spim,
             }
             break;
         }
-        spi_submit_or_update_session_timer(tspi, session, timeout);
+        spi_submit_or_update_session_timer(tspi, session, timeout, false);
     }
 }
 
@@ -190,7 +190,7 @@ spi_aging_icmp_session(spi_main_t *spim,
 
     if (do_free)
     {
-        if(PREDICT_FALSE(spi_delete_session(spim, tspi, session)))
+        if(PREDICT_FALSE(spi_delete_session(spim, tspi, session, false)))
         {
             clib_warning ("spi del session is failed\n");
         }
@@ -227,7 +227,7 @@ spi_aging_icmp_session(spi_main_t *spim,
             }
             break;
         }
-        spi_submit_or_update_session_timer(tspi, session, timeout);
+        spi_submit_or_update_session_timer(tspi, session, timeout, false);
     }
 }
 
@@ -262,7 +262,7 @@ spi_aging_udp_session(spi_main_t *spim,
 
     if (do_free)
     {
-        if(PREDICT_FALSE(spi_delete_session(spim, tspi, session)))
+        if(PREDICT_FALSE(spi_delete_session(spim, tspi, session, false)))
         {
             clib_warning ("spi del session is failed\n");
         }
@@ -299,7 +299,7 @@ spi_aging_udp_session(spi_main_t *spim,
             }
             break;
         }
-        spi_submit_or_update_session_timer(tspi, session, timeout);
+        spi_submit_or_update_session_timer(tspi, session, timeout, false);
     }
 }
 
@@ -334,7 +334,7 @@ spi_aging_other_session(spi_main_t *spim,
 
     if (do_free)
     {
-        if(PREDICT_FALSE(spi_delete_session(spim, tspi, session)))
+        if(PREDICT_FALSE(spi_delete_session(spim, tspi, session, false)))
         {
             clib_warning ("spi del session is failed\n");
         }
@@ -371,7 +371,7 @@ spi_aging_other_session(spi_main_t *spim,
             }
             break;
         }
-        spi_submit_or_update_session_timer(tspi, session, timeout);
+        spi_submit_or_update_session_timer(tspi, session, timeout, false);
     }
 }
 
