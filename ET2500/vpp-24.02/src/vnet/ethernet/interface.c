@@ -1274,11 +1274,52 @@ ethernet_config (vlib_main_t * vm, unformat_input_t * input)
 
 VLIB_CONFIG_FUNCTION (ethernet_config, "ethernet");
 
+int identify_hardware_port_lag_or_eth(vnet_main_t *vnm, u32 sw_if_index)
+{
+    vnet_hw_interface_t *hw = vnet_get_sup_hw_interface(vnm, sw_if_index);
+    if (!hw) return 0;
+
+    vnet_device_class_t *dev_class = vnet_get_device_class (vnm, hw->dev_class_index);
+
+    if ((strcmp(dev_class->name, "bond")) == 0 || (strcmp(dev_class->name, "BVI") == 0))
+    {
+        return 1;
+    }
+
+    else
+    {
+        return 0;
+    }
+}
+
 static clib_error_t *
 vnet_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_add)
 {
+    int add_flag = 0;
+
+    vnet_sw_interface_t *sw;
+
     if (is_add)
     {
+        sw = vnet_get_sw_interface (vnm, sw_if_index);
+
+        switch (sw->type) {
+            case VNET_SW_INTERFACE_TYPE_HARDWARE:
+                add_flag = identify_hardware_port_lag_or_eth(vnm, sw_if_index);
+                break;
+
+            case VNET_SW_INTERFACE_TYPE_SUB:
+                add_flag = 1;
+                break;
+
+            default:
+                break;
+        }
+
+        if (0 == add_flag)
+        {
+            return 0;
+        }
 
         vnet_feature_enable_disable("ip4-multicast", "linux-cp-vrrp", sw_if_index, 1, NULL, 0);
         vnet_feature_enable_disable("ip6-multicast", "linux-cp-vrrp6", sw_if_index, 1, NULL, 0);
