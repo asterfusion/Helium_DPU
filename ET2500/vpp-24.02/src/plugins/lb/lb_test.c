@@ -81,7 +81,7 @@ static int api_lb_conf (vat_main_t * vam)
   vl_api_lb_conf_t *mp;
   u32 ip4_src_address = 0xffffffff;
   ip46_address_t ip6_src_address;
-  u32 sticky_buckets_per_core = LB_DEFAULT_PER_CPU_STICKY_BUCKETS;
+  u32 sticky_buckets = LB_DEFAULT_STICKY_BUCKETS;
   u32 flow_timeout = LB_DEFAULT_FLOW_TIMEOUT;
   int ret;
 
@@ -94,7 +94,7 @@ static int api_lb_conf (vat_main_t * vam)
       ;
     else if (unformat(line_input, "ip6-src-address %U", unformat_ip6_address, &ip6_src_address))
       ;
-    else if (unformat(line_input, "buckets %d", &sticky_buckets_per_core))
+    else if (unformat(line_input, "buckets %d", &sticky_buckets))
       ;
     else if (unformat(line_input, "timeout %d", &flow_timeout))
       ;
@@ -107,7 +107,7 @@ static int api_lb_conf (vat_main_t * vam)
   M(LB_CONF, mp);
   clib_memcpy (&(mp->ip4_src_address), &ip4_src_address, sizeof (ip4_src_address));
   clib_memcpy (&(mp->ip6_src_address), &ip6_src_address, sizeof (ip6_src_address));
-  mp->sticky_buckets_per_core = htonl (sticky_buckets_per_core);
+  mp->sticky_buckets = htonl (sticky_buckets);
   mp->flow_timeout = htonl (flow_timeout);
 
   S(mp);
@@ -129,6 +129,7 @@ static int api_lb_add_del_vip (vat_main_t * vam)
   u32 srv_type = LB_SRV_TYPE_CLUSTERIP;
   u32 target_port = 0;
   u32 new_length = 1024;
+  u32 vrf_id = 0;
   int is_del = 0;
 
   if (!unformat(line_input, "%U", unformat_ip46_prefix, &ip_prefix,
@@ -171,6 +172,8 @@ static int api_lb_add_del_vip (vat_main_t * vam)
       srv_type = LB_SRV_TYPE_NODEPORT;
     else if (unformat(line_input, "target_port %d", &target_port))
       ;
+    else if (unformat(line_input, "vrf %d", &vrf_id))
+      ;
     else {
         errmsg ("invalid arguments\n");
         return -99;
@@ -191,6 +194,7 @@ static int api_lb_add_del_vip (vat_main_t * vam)
 
   M(LB_ADD_DEL_VIP, mp);
   ip_address_encode(&ip_prefix, IP46_TYPE_ANY, &mp->pfx.address);
+  mp->vrf_id = htonl(vrf_id);
   mp->pfx.len = prefix_length;
   mp->protocol = (u8)protocol;
   mp->port = htons((u16)port);
@@ -198,7 +202,6 @@ static int api_lb_add_del_vip (vat_main_t * vam)
   mp->dscp = (u8)dscp;
   mp->type = (u8)srv_type;
   mp->target_port = htons((u16)target_port);
-  mp->node_port = htons((u16)target_port);
   mp->new_flows_table_length = htonl(new_length);
   mp->is_del = is_del;
 
@@ -223,6 +226,7 @@ api_lb_add_del_vip_v2 (vat_main_t *vam)
   u32 target_port = 0;
   u32 new_length = 1024;
   u8 src_ip_sticky = 0;
+  u32 vrf_id = 0;
   int is_del = 0;
 
   if (!unformat (line_input, "%U", unformat_ip46_prefix, &ip_prefix,
@@ -268,6 +272,8 @@ api_lb_add_del_vip_v2 (vat_main_t *vam)
 	srv_type = LB_SRV_TYPE_NODEPORT;
       else if (unformat (line_input, "target_port %d", &target_port))
 	;
+    else if (unformat(line_input, "vrf %d", &vrf_id))
+      ;
       else
 	{
 	  errmsg ("invalid arguments\n");
@@ -289,6 +295,7 @@ api_lb_add_del_vip_v2 (vat_main_t *vam)
 
   M (LB_ADD_DEL_VIP, mp);
   ip_address_encode (&ip_prefix, IP46_TYPE_ANY, &mp->pfx.address);
+  mp->vrf_id = htonl(vrf_id);
   mp->pfx.len = prefix_length;
   mp->protocol = (u8) protocol;
   mp->port = htons ((u16) port);
@@ -296,12 +303,214 @@ api_lb_add_del_vip_v2 (vat_main_t *vam)
   mp->dscp = (u8) dscp;
   mp->type = (u8) srv_type;
   mp->target_port = htons ((u16) target_port);
-  mp->node_port = htons ((u16) target_port);
   mp->new_flows_table_length = htonl (new_length);
   mp->is_del = is_del;
   mp->src_ip_sticky = src_ip_sticky;
 
   S (mp);
+  W (ret);
+  return ret;
+}
+
+static int api_lb_add_snat_pool (vat_main_t * vam)
+{
+  vl_api_lb_add_snat_pool_t *mp;
+  int ret;
+
+  M(LB_ADD_SNAT_POOL, mp);
+
+  S(mp);
+  W (ret);
+  return ret;
+}
+
+static void vl_api_lb_add_snat_pool_reply_t_handler (vl_api_lb_add_snat_pool_reply_t *mp)
+{
+  vat_main_t *vam = &vat_main;
+
+  print (vam->ofp, "ret: %d, pool index : %u", ntohl(mp->retval), ntohl(mp->pool_idx));
+}
+
+static int api_lb_del_snat_pool (vat_main_t * vam)
+{
+  unformat_input_t *line_input = vam->input;
+  vl_api_lb_del_snat_pool_t *mp;
+  int ret;
+  u32 pool_idx = (~0);
+
+  if (!unformat(line_input, "%u", pool_idx))
+  {
+      errmsg ("lb_del_snat_pool: invalid pool_idx\n");
+      return -99;
+  }
+
+  M(LB_DEL_SNAT_POOL, mp);
+
+  mp->pool_idx = htonl(pool_idx);
+
+  S(mp);
+  W (ret);
+  return ret;
+}
+
+static int api_lb_add_del_snat_pool_address (vat_main_t * vam)
+{
+
+  unformat_input_t *line_input = vam->input;
+  vl_api_lb_add_del_snat_pool_address_t *mp;
+  int ret;
+  u8 is_del = 0;
+  ip4_address_t address;
+  u32 pool_idx = (~0);
+  bool pool_idx_valid = false;
+  bool address_valid = false;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "%U", unformat_ip4_address, &address))
+      {
+        address_valid = true;
+      }
+    else if (unformat(line_input, "del"))
+      {
+        is_del = 1;
+      }
+    else if (unformat(line_input, "pool_idx %d", &pool_idx))
+      {
+        pool_idx_valid = true;
+      }
+    else {
+        errmsg ("invalid arguments\n");
+        return -99;
+    }
+  }
+
+  if (!pool_idx_valid) {
+    errmsg ("No pool idx provided \n");
+    return -99;
+  }
+
+  if (!address_valid) {
+    errmsg ("No address provided \n");
+    return -99;
+  }
+
+  M(LB_ADD_DEL_SNAT_POOL_ADDRESS, mp);
+  mp->pool_idx = htonl(pool_idx);
+  ip4_address_encode(&address, mp->ip_address);
+  mp->is_del = is_del;
+
+  S(mp);
+  W (ret);
+  return ret;
+}
+
+static int api_lb_set_vip_src_ip_sticky (vat_main_t * vam)
+{
+
+  unformat_input_t *line_input = vam->input;
+  vl_api_lb_set_vip_src_ip_sticky_t *mp;
+  int ret;
+  ip46_address_t vip_prefix;
+  bool src_ip_sticky = false;
+  u8 vip_plen;
+  u32 port = 0;
+  u8 protocol = 0;
+  u32 vrf_id = 0;
+
+  if (!unformat(line_input, "%U", unformat_ip46_prefix,
+                &vip_prefix, &vip_plen, IP46_TYPE_ANY))
+  {
+      errmsg ("lb_set_vip_snat_address_pool: invalid vip prefix\n");
+      return -99;
+  }
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "protocol tcp"))
+      {
+          protocol = IP_PROTOCOL_TCP;
+      }
+    else if (unformat(line_input, "protocol udp"))
+      {
+          protocol = IP_PROTOCOL_UDP;
+      }
+    else if (unformat(line_input, "port %d", &port))
+      ;
+    else if (unformat(line_input, "vrf %d", &vrf_id))
+      ;
+    else if (unformat (line_input, "src_ip_sticky"))
+        src_ip_sticky = true;
+    else {
+        errmsg ("invalid arguments\n");
+        return -99;
+    }
+  }
+
+  M(LB_SET_VIP_SNAT_ADDRESS_POOL, mp);
+  ip_address_encode(&vip_prefix, IP46_TYPE_ANY, &mp->pfx.address);
+  mp->vrf_id = htonl(vrf_id);
+  mp->pfx.len = vip_plen;
+  mp->protocol = (u8)protocol;
+  mp->port = htons((u16)port);
+  mp->src_ip_sticky = src_ip_sticky;
+
+  S(mp);
+  W (ret);
+  return ret;
+}
+
+static int api_lb_set_vip_snat_address_pool (vat_main_t * vam)
+{
+
+  unformat_input_t *line_input = vam->input;
+  vl_api_lb_set_vip_snat_address_pool_t *mp;
+  int ret;
+  ip46_address_t vip_prefix;
+  u32 pool_idx = ~0;
+  u8 vip_plen;
+  u32 port = 0;
+  u8 protocol = 0;
+  u32 vrf_id = 0;
+
+  if (!unformat(line_input, "%U", unformat_ip46_prefix,
+                &vip_prefix, &vip_plen, IP46_TYPE_ANY))
+  {
+      errmsg ("lb_set_vip_snat_address_pool: invalid vip prefix\n");
+      return -99;
+  }
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "%u", &pool_idx))
+      ;
+    else if (unformat(line_input, "protocol tcp"))
+      {
+          protocol = IP_PROTOCOL_TCP;
+      }
+    else if (unformat(line_input, "protocol udp"))
+      {
+          protocol = IP_PROTOCOL_UDP;
+      }
+    else if (unformat(line_input, "port %d", &port))
+      ;
+    else if (unformat(line_input, "vrf %d", &vrf_id))
+      ;
+    else {
+        errmsg ("invalid arguments\n");
+        return -99;
+    }
+  }
+
+  M(LB_SET_VIP_SNAT_ADDRESS_POOL, mp);
+  ip_address_encode(&vip_prefix, IP46_TYPE_ANY, &mp->pfx.address);
+  mp->vrf_id = htonl(vrf_id);
+  mp->pfx.len = vip_plen;
+  mp->protocol = (u8)protocol;
+  mp->port = htons((u16)port);
+  mp->snat_pool_index = htonl(pool_idx);
+
+  S(mp);
   W (ret);
   return ret;
 }
@@ -317,6 +526,8 @@ static int api_lb_add_del_as (vat_main_t * vam)
   ip46_address_t *as_array = 0;
   u32 port = 0;
   u8 protocol = 0;
+  u32 vrf_id = 0;
+  u32 as_vrf_id = 0;
   u8 is_del = 0;
   u8 is_flush = 0;
 
@@ -352,6 +563,10 @@ static int api_lb_add_del_as (vat_main_t * vam)
       }
     else if (unformat(line_input, "port %d", &port))
       ;
+    else if (unformat(line_input, "vrf %d", &vrf_id))
+      ;
+    else if (unformat(line_input, "as_vrf %d", &as_vrf_id))
+      ;
     else {
         errmsg ("invalid arguments\n");
         return -99;
@@ -363,14 +578,108 @@ static int api_lb_add_del_as (vat_main_t * vam)
     return -99;
   }
 
+  if (vec_len(as_array) > 1)
+  {
+    errmsg ("Multiple AS addresses, please use V2\n");
+    return -99;
+  }
+
   M(LB_ADD_DEL_AS, mp);
   ip_address_encode(&vip_prefix, IP46_TYPE_ANY, &mp->pfx.address);
+  mp->vrf_id = htonl(vrf_id);
   mp->pfx.len = vip_plen;
   mp->protocol = (u8)protocol;
   mp->port = htons((u16)port);
   ip_address_encode(&as_addr, IP46_TYPE_ANY, &mp->as_address);
+  mp->as_vrf_id = htonl(as_vrf_id);
   mp->is_del = is_del;
   mp->is_flush = is_flush;
+
+  S(mp);
+  W (ret);
+  return ret;
+}
+
+static int api_lb_add_del_as_v2 (vat_main_t * vam)
+{
+
+  unformat_input_t *line_input = vam->input;
+  vl_api_lb_add_del_as_v2_t *mp;
+  int ret, ii;
+  ip46_address_t vip_prefix, as_addr;
+  u8 vip_plen;
+  ip46_address_t *as_array = 0;
+  u32 as_len = 0;
+  u32 port = 0;
+  u8 protocol = 0;
+  u32 vrf_id = 0;
+  u32 as_vrf_id = 0;
+  u8 is_del = 0;
+  u8 is_flush = 0;
+
+  if (!unformat(line_input, "%U", unformat_ip46_prefix,
+                &vip_prefix, &vip_plen, IP46_TYPE_ANY))
+  {
+      errmsg ("lb_add_del_as: invalid vip prefix\n");
+      return -99;
+  }
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "%U", unformat_ip46_address,
+                 &as_addr, IP46_TYPE_ANY))
+      {
+        vec_add1(as_array, as_addr);
+      }
+    else if (unformat(line_input, "del"))
+      {
+        is_del = 1;
+      }
+    else if (unformat(line_input, "flush"))
+      {
+        is_flush = 1;
+      }
+    else if (unformat(line_input, "protocol tcp"))
+      {
+          protocol = IP_PROTOCOL_TCP;
+      }
+    else if (unformat(line_input, "protocol udp"))
+      {
+          protocol = IP_PROTOCOL_UDP;
+      }
+    else if (unformat(line_input, "port %d", &port))
+      ;
+    else if (unformat(line_input, "vrf %d", &vrf_id))
+      ;
+    else if (unformat(line_input, "as_vrf %d", &as_vrf_id))
+      ;
+    else {
+        errmsg ("invalid arguments\n");
+        return -99;
+    }
+  }
+
+  as_len = vec_len(as_array);
+  if (!as_len) {
+    errmsg ("No AS address provided \n");
+    return -99;
+  }
+
+  M2(LB_ADD_DEL_AS_V2, mp, sizeof (vl_api_address_t) * vec_len(as_array));
+  ip_address_encode(&vip_prefix, IP46_TYPE_ANY, &mp->pfx.address);
+  mp->vrf_id = htonl(vrf_id);
+  mp->pfx.len = vip_plen;
+  mp->protocol = (u8)protocol;
+  mp->port = htons((u16)port);
+  mp->as_vrf_id = htonl(as_vrf_id);
+  mp->n_address = htonl(as_len);
+  mp->is_del = is_del;
+  mp->is_flush = is_flush;
+
+  for(ii = 0; ii < as_len; ii++)
+  {
+      ip_address_encode(&as_array[ii], IP46_TYPE_ANY, &mp->as_addresses[ii]);
+  }
 
   S(mp);
   W (ret);
@@ -385,17 +694,29 @@ static int api_lb_flush_vip (vat_main_t * vam)
   int ret;
   ip46_address_t vip_prefix;
   u8 vip_plen;
+  u32 vrf_id;
 
   if (!unformat(line_input, "%U", unformat_ip46_prefix,
                 &vip_prefix, &vip_plen, IP46_TYPE_ANY))
   {
-      errmsg ("lb_add_del_as: invalid vip prefix\n");
+      errmsg ("lb_flush_vip: invalid vip prefix\n");
       return -99;
+  }
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "vrf %d", &vrf_id))
+      ;
+    else {
+        errmsg ("invalid arguments\n");
+        return -99;
+    }
   }
 
   M(LB_FLUSH_VIP, mp);
   clib_memcpy (mp->pfx.address.un.ip6, &vip_prefix.ip6, sizeof (vip_prefix.ip6));
   mp->pfx.len = vip_plen;
+  mp->vrf_id = htonl(vrf_id);
   S(mp);
   W (ret);
   return ret;
@@ -458,31 +779,14 @@ static void vl_api_lb_as_details_t_handler
 {
   vat_main_t *vam = &vat_main;
 
-  print (vam->ofp, "%24U%14d%14d%18d%d%d",
+  print (vam->ofp, "%24U%14d%14d%18d%18d%d%d",
        format_ip46_address, &mp->vip.pfx.address, IP46_TYPE_ANY,
        mp->vip.pfx.len,
        mp->vip.protocol,
        ntohs (mp->vip.port),
+       ntohl (mp->vip.vrf_id),
        mp->flags,
        mp->in_use_since);
-
-  //u32 i = 0;
-
-/*
-  lb_main_t *lbm = &lb_main;
-  print (vam->ofp, "%11d", pool_len(lbm->ass));
-  for (i=0; i<pool_len(lbm->ass); i--)
-    {
-      print (vam->ofp, "%24U%14d%14d%18d",
-           format_ip46_address, &mp->pfx.address, IP46_TYPE_ANY,
-           mp->pfx.len,
-           mp->pfx.protocol,
-           ntohs (mp->pfx.port),
-           ntohl(mp->app_srv),
-           mp->flags,
-           mp->in_use_;
-    }
-    */
 }
 
 static int api_lb_as_dump (vat_main_t * vam)
@@ -495,6 +799,7 @@ static int api_lb_as_dump (vat_main_t * vam)
   u8 vip_plen;
   ip46_address_t *as_array = 0;
   u32 port = 0;
+  u32 vrf_id = 0;
   u8 protocol = 0;
 
   if (!unformat(line_input, "%U", unformat_ip46_prefix,
@@ -521,6 +826,8 @@ static int api_lb_as_dump (vat_main_t * vam)
       }
     else if (unformat(line_input, "port %d", &port))
       ;
+    else if (unformat(line_input, "vrf %d", &vrf_id))
+      ;
     else {
         errmsg ("invalid arguments\n");
         return -99;
@@ -537,6 +844,7 @@ static int api_lb_as_dump (vat_main_t * vam)
   mp->pfx.len = vip_plen;
   mp->protocol = (u8)protocol;
   mp->port = htons((u16)port);
+  mp->vrf_id = htonl(vrf_id);
 
   S(mp);
   W (ret);

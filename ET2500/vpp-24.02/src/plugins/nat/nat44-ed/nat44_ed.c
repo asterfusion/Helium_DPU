@@ -239,6 +239,12 @@ nat44_ed_free_session_data (snat_main_t *sm, snat_session_t *s,
 	thread_index, s->in2out.addr.as_u32, s->out2in.addr.as_u32, s->proto,
 	s->in2out.port, s->out2in.port, s->in2out.fib_index);
     }
+
+  /* ha sync */
+  if (!is_ha)
+    {
+    nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_DEL, s);
+    }
 }
 
 static ip_interface_address_t *
@@ -2549,6 +2555,9 @@ nat44_plugin_enable (nat44_config_t c)
   sm->enabled = 1;
   sm->rconfig = c;
 
+  //nat44-ed ha sync register
+  nat44_ed_ha_sync_register();
+
   return 0;
 }
 
@@ -2757,6 +2766,9 @@ nat44_plugin_disable ()
 
   sm->forwarding_enabled = 0;
   sm->enabled = 0;
+
+  //nat44-ed ha sync unregister
+  nat44_ed_ha_sync_unregister();
 
   return error;
 }

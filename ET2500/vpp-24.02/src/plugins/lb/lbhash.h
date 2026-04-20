@@ -57,7 +57,6 @@ typedef struct {
 
 typedef struct {
   u32 buckets_mask;
-  u32 timeout;
   lb_hash_bucket_t buckets[];
 } lb_hash_t;
 
@@ -78,7 +77,7 @@ typedef struct {
        if (!clib_u32_loop_gt((now), bucket->timeout[i]))
 
 static_always_inline
-lb_hash_t *lb_hash_alloc(u32 buckets, u32 timeout)
+lb_hash_t *lb_hash_alloc(u32 buckets)
 {
   if (!is_pow2(buckets))
     return NULL;
@@ -91,7 +90,6 @@ lb_hash_t *lb_hash_alloc(u32 buckets, u32 timeout)
   vec_validate_aligned (mem, size - 1, CLIB_CACHE_LINE_BYTES);
   h = (lb_hash_t *)mem;
   h->buckets_mask = (buckets - 1);
-  h->timeout = timeout;
   return h;
 }
 
@@ -110,7 +108,7 @@ void lb_hash_prefetch_bucket(lb_hash_t *ht, u32 hash)
 }
 
 static_always_inline
-void lb_hash_get(lb_hash_t *ht, u32 hash, u32 vip, u32 time_now,
+void lb_hash_get(lb_hash_t *ht, u32 hash, u32 vip, u32 time_now, u32 timeout,
 		 u32 *available_index, u32 *found_value)
 {
   lb_hash_bucket_t *bucket = &ht->buckets[hash & ht->buckets_mask];
@@ -148,18 +146,18 @@ void lb_hash_get(lb_hash_t *ht, u32 hash, u32 vip, u32 time_now,
   ASSERT(found_index < 4);
   *found_value = (bitmask)?bucket->value[found_index]:*found_value;
   bucket->timeout[found_index] =
-      (bitmask)?time_now + ht->timeout:bucket->timeout[found_index];
+      (bitmask)?time_now + timeout:bucket->timeout[found_index];
 #else
   u32 i;
   for (i = 0; i < LBHASH_ENTRY_PER_BUCKET; i++) {
       u8 cmp = (bucket->hash[i] == hash && bucket->vip[i] == vip);
       u8 timeouted = clib_u32_loop_gt(time_now, bucket->timeout[i]);
-      *found_value = (cmp || timeouted)?*found_value:bucket->value[i];
-      bucket->timeout[i] = (cmp || timeouted)?time_now + ht->timeout:bucket->timeout[i];
+      *found_value = (cmp && !timeouted)?bucket->value[i] : *found_value;
+      bucket->timeout[i] = (cmp && !timeouted)?time_now + timeout:bucket->timeout[i];
       *available_index = (timeouted && (*available_index == ~0))?i:*available_index;
 
-      if (!cmp)
-	return;
+      if (timeouted)
+          return;
   }
 #endif
 }
@@ -172,12 +170,12 @@ u32 lb_hash_available_value(lb_hash_t *h, u32 hash, u32 available_index)
 
 static_always_inline
 void lb_hash_put(lb_hash_t *h, u32 hash, u32 value, u32 vip,
-		 u32 available_index, u32 time_now)
+		 u32 available_index, u32 time_now, u32 timeout)
 {
   lb_hash_bucket_t *bucket = &h->buckets[hash & h->buckets_mask];
   bucket->hash[available_index] = hash;
   bucket->value[available_index] = value;
-  bucket->timeout[available_index] = time_now + h->timeout;
+  bucket->timeout[available_index] = time_now + timeout;
   bucket->vip[available_index] = vip;
 }
 

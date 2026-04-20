@@ -27,6 +27,7 @@
 #include <nat/lib/log.h>
 #include <nat/lib/ipfix_logging.h>
 #include <nat/nat44-ed/nat44_ed.h>
+#include <nat/nat44-ed/nat44_ed_ha_sync.h>
 
 always_inline void
 init_ed_k (clib_bihash_kv_16_8_t *kv, u32 l_addr, u16 l_port, u32 r_addr,
@@ -722,6 +723,9 @@ nat44_ed_session_reopen (u32 thread_index, snat_session_t *s)
 			 &s->ext_host_addr, s->ext_host_port, s->proto, 0);
   s->total_pkts = 0;
   s->total_bytes = 0;
+
+  /* ha sync */
+  nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_UPDATE, s);
 }
 
 /*
@@ -818,6 +822,13 @@ nat44_session_update_counters (snat_session_t *s, f64 now, uword bytes,
   s->last_heard = now;
   s->total_pkts++;
   s->total_bytes += bytes;
+
+  if (now - s->ha_last_refreshed > 
+          nat44_ed_ha_sync_ctx.ha_sync_timeout_update_interval)
+  {
+      nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_UPDATE, s);
+      s->ha_last_refreshed = now;
+  }
 }
 
 /** \brief Per-user LRU list maintenance */

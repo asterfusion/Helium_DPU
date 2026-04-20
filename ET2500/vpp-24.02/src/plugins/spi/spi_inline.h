@@ -22,6 +22,7 @@
 #include <vnet/vnet.h>
 #include <vppinfra/error.h>
 #include <spi/spi.h>
+#include <spi/spi_ha_sync.h>
 
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/ip/ip.h>
@@ -66,7 +67,7 @@ spi_create_session_associated_session_proc(spi_main_t *spim,
 }
 
 static_always_inline void
-spi_submit_or_update_session_timer(spi_per_thread_data_t *tspi, spi_session_t *session, u32 timeout)
+spi_submit_or_update_session_timer(spi_per_thread_data_t *tspi, spi_session_t *session, u32 timeout, bool is_ha)
 {
     //update
     if (session->session_timer_handle != (~0) &&
@@ -93,6 +94,9 @@ spi_submit_or_update_session_timer(spi_per_thread_data_t *tspi, spi_session_t *s
                                            timeout);
     }
 
+    //ha sync
+    if (!is_ha)
+        spi_ha_sync_event_session_notify(session->thread_index, SPI_HA_OP_UPDATE, session, timeout);
 }
 
 static_always_inline void
@@ -377,7 +381,7 @@ spi_tcp_session_timeout_proc(spi_main_t *spim,
         break;
     }
 
-    spi_submit_or_update_session_timer(tspi, session, timeout);
+    spi_submit_or_update_session_timer(tspi, session, timeout, false);
     session->need_change_timeout = 0;
 
     return err;
@@ -451,7 +455,7 @@ spi_icmp_session_timeout_proc(spi_main_t *spim,
         break;
     }
 
-    spi_submit_or_update_session_timer(tspi, session, timeout);
+    spi_submit_or_update_session_timer(tspi, session, timeout, false);
     session->need_change_timeout = 0;
 
     return err;
@@ -525,7 +529,7 @@ spi_udp_session_timeout_proc(spi_main_t *spim,
         break;
     }
 
-    spi_submit_or_update_session_timer(tspi, session, timeout);
+    spi_submit_or_update_session_timer(tspi, session, timeout, false);
     session->need_change_timeout = 0;
 
     return err;
@@ -599,7 +603,7 @@ spi_other_session_timeout_proc(spi_main_t *spim,
         break;
     }
 
-    spi_submit_or_update_session_timer(tspi, session, timeout);
+    spi_submit_or_update_session_timer(tspi, session, timeout, false);
     session->need_change_timeout = 0;
 
     return err;
@@ -760,7 +764,8 @@ spi_create_session(f64 now,
 static_always_inline int
 spi_delete_session(spi_main_t *spim,
                    spi_per_thread_data_t *tspi,
-                   spi_session_t *session)
+                   spi_session_t *session,
+                   bool is_ha)
 {
     clib_bihash_kv_48_8_t kv;
     spi_session_type_e type;
@@ -814,6 +819,9 @@ spi_delete_session(spi_main_t *spim,
     clib_bihash_add_del_with_hash_48_8(&spim->session_table, &kv, session->hash, 0);
 
     session->session_is_free = 1;
+
+    //ha sync
+    spi_ha_sync_event_session_notify(session->thread_index, SPI_HA_OP_DEL_FORCE, session, 0);
 
     pool_put_index (tspi->sessions, session->index);
 
@@ -1005,6 +1013,8 @@ spi_proc_session_fn(vlib_main_t *vm,
 
         spi_create_session_associated_session_proc(spim, buffer, session, is_output);
 
+        //ha sync
+        spi_ha_sync_event_session_notify(vm->thread_index, SPI_HA_OP_ADD_FORCE, session, SPI_HA_SYNC_FIRST_TIMEOUT);
     }
 
     dir = spi_check_flow_dir(session, pkt);
