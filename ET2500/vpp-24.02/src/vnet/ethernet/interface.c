@@ -44,6 +44,7 @@
 //#include <vnet/ethernet/arp.h>
 #include <vnet/l2/l2_input.h>
 #include <vnet/l2/l2_bd.h>
+#include <vnet/l2/l2_in_out_feat_arc.h>
 #include <vnet/adj/adj.h>
 #include <vnet/adj/adj_mcast.h>
 #include <vnet/ip-neighbor/ip_neighbor.h>
@@ -1272,6 +1273,67 @@ ethernet_config (vlib_main_t * vm, unformat_input_t * input)
 }
 
 VLIB_CONFIG_FUNCTION (ethernet_config, "ethernet");
+
+int identify_hardware_port_lag_or_eth(vnet_main_t *vnm, u32 sw_if_index)
+{
+    vnet_hw_interface_t *hw = vnet_get_sup_hw_interface(vnm, sw_if_index);
+    if (!hw) return 0;
+
+    vnet_device_class_t *dev_class = vnet_get_device_class (vnm, hw->dev_class_index);
+
+    if ((strcmp(dev_class->name, "bond")) == 0 || (strcmp(dev_class->name, "BVI") == 0))
+    {
+        return 1;
+    }
+
+    else
+    {
+        return 0;
+    }
+}
+
+static clib_error_t *
+vnet_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_add)
+{
+    int add_flag = 0;
+
+    vnet_sw_interface_t *sw;
+
+    if (is_add)
+    {
+        sw = vnet_get_sw_interface (vnm, sw_if_index);
+
+        switch (sw->type) {
+            case VNET_SW_INTERFACE_TYPE_HARDWARE:
+                add_flag = identify_hardware_port_lag_or_eth(vnm, sw_if_index);
+                break;
+
+            case VNET_SW_INTERFACE_TYPE_SUB:
+                add_flag = 1;
+                break;
+
+            default:
+                break;
+        }
+
+        if (0 == add_flag)
+        {
+            return 0;
+        }
+
+        vnet_feature_enable_disable("ip4-multicast", "linux-cp-vrrp", sw_if_index, 1, NULL, 0);
+        vnet_feature_enable_disable("ip6-multicast", "linux-cp-vrrp6", sw_if_index, 1, NULL, 0);
+
+
+        vnet_l2_feature_enable_disable("l2-input-ip4", "linux-cp-l2-vrrp", sw_if_index, 1, NULL, 0);
+        vnet_l2_feature_enable_disable("l2-input-ip6", "linux-cp-l2-vrrp6", sw_if_index, 1, NULL, 0);
+        vnet_l2_in_out_feat_arc_enable_disable (sw_if_index, 0, 1);
+    }
+
+    return 0;
+}
+
+VNET_SW_INTERFACE_ADD_DEL_FUNCTION (vnet_sw_interface_add_del);
 
 /*
  * fd.io coding-style-patch-verification: ON
