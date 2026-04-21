@@ -1501,5 +1501,6 @@ if (${ASROUTER_NAME} MATCHES "octeon10")
   add_compile_definitions(ET2500_IPFIX)
   add_compile_definitions(CLEAR_L2FIB_DISABLE)
   add_compile_definitions(ARP_FAIL_PUNT)
+  add_compile_definitions(ASTERFUSION_VERIFY_L3_DMAC)
 endif()
 
