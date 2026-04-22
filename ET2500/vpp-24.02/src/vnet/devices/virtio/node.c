@@ -214,6 +214,61 @@ virtio_get_len (vnet_virtio_vring_t *vring, const int packed, const int hdr_sz,
     }                                                                         \
   while (0)
 
+static_always_inline void virtio_handle_vrrp_no_nat (vlib_buffer_t *b0)
+{
+    u16 ethertype = 0;
+    u16 l2hdr_sz = 0;
+    ethernet_header_t *eh = (ethernet_header_t *) b0->data;
+    ethertype = clib_net_to_host_u16 (eh->type);
+    l2hdr_sz = sizeof (ethernet_header_t);
+
+    //vrrp4 smac 00:00:5e:00:01:vr_id, IP protocol: 0x70
+    //vrrp6 smac 00:00:5e:00:02:vr_id, Next Header: 0x70
+    if (eh->src_address[0] == 0x00 && eh->src_address[1] == 0x00 && eh->src_address[2] == 0x5e && eh->src_address[3] == 0x00)
+    {
+        if (ethernet_frame_is_tagged (ethertype))
+        {
+            ethernet_vlan_header_t *vlan = (ethernet_vlan_header_t *) (eh + 1);
+
+            ethertype = clib_net_to_host_u16 (vlan->type);
+            l2hdr_sz += sizeof (*vlan);
+            if (ethertype == ETHERNET_TYPE_VLAN)
+            {
+                vlan++;
+                ethertype = clib_net_to_host_u16 (vlan->type);
+                l2hdr_sz += sizeof (*vlan);
+            }
+        }
+        //vrrp4
+        if (PREDICT_TRUE (ethertype == ETHERNET_TYPE_IP4) && eh->src_address[4] == 0x01)
+        {
+            ip4_header_t *ip4 = (ip4_header_t *) (b0->data + l2hdr_sz);
+            if (PREDICT_FALSE(ip4->protocol == 0x70))
+            {
+                b0->no_nat = 1;
+                b0->flags |= VLIB_BUFFER_NO_NAT_VALID;
+            }
+
+        }
+
+        //vrrp6
+        else if (PREDICT_TRUE (ethertype == ETHERNET_TYPE_IP6) && eh->src_address[4] == 0x02)
+        {
+            ip6_header_t *ip6 = (ip6_header_t *) (b0->data + l2hdr_sz);
+            if (PREDICT_FALSE(ip6->protocol == 0x70))
+            {
+                b0->no_nat = 1;
+                b0->flags |= VLIB_BUFFER_NO_NAT_VALID;
+            }
+        }
+
+        else
+        {
+            return;
+        }
+    }
+}
+
 static_always_inline void
 virtio_device_input_ethernet (vlib_main_t *vm, vlib_node_runtime_t *node,
 			      const u32 next_index, const u32 sw_if_index,
@@ -373,6 +428,10 @@ virtio_device_input_gso_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	    }
 	  else
 	    {
+              if (type == VIRTIO_IF_TYPE_TAP)
+              {
+		virtio_handle_vrrp_no_nat(b0);
+              }
 	      /* copy feature arc data from template */
 	      b0->current_config_index = bt.current_config_index;
 	      vnet_buffer (b0)->feature_arc_index =
