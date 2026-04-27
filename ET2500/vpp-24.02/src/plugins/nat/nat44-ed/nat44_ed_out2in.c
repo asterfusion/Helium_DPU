@@ -671,6 +671,9 @@ create_bypass_for_fwd (snat_main_t *sm, vlib_buffer_t *b, snat_session_t *s,
 	  return;
 	}
 
+      /* ha sync */
+      nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_ADD_FORCE, s);
+
       per_vrf_sessions_register_session (s, thread_index);
     }
 
@@ -749,6 +752,9 @@ nat44_ed_out2in_slowpath_unknown_proto (snat_main_t *sm, vlib_buffer_t *b,
       nat_ed_session_delete (sm, s, thread_index, 1);
       return NULL;
     }
+
+  /* ha sync */
+  nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_ADD_FORCE, s);
 
   per_vrf_sessions_register_session (s, thread_index);
 

@@ -821,7 +821,8 @@ spi_delete_session(spi_main_t *spim,
     session->session_is_free = 1;
 
     //ha sync
-    spi_ha_sync_event_session_notify(session->thread_index, SPI_HA_OP_DEL_FORCE, session, 0);
+    if (!is_ha)
+        spi_ha_sync_event_session_notify(session->thread_index, SPI_HA_OP_DEL_FORCE, session, 0);
 
     pool_put_index (tspi->sessions, session->index);
 

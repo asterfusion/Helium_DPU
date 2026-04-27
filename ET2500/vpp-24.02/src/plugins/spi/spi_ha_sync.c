@@ -442,6 +442,10 @@ spi_ha_sync_session_add(u32 thread_index, spi_ha_sync_session_data_t *data, int 
             SPI_THREAD_UNLOCK(tspi);
             return;
         }
+
+        vlib_set_simple_counter (&spim->total_sessions_counter, tspi->thread_index, 0, pool_elts (tspi->sessions));
+        vlib_increment_simple_counter (&spim->session_ip_type_counter, tspi->thread_index, data->is_ip6, 1);
+        vlib_increment_simple_counter (&spim->session_type_counter[data->session_type], tspi->thread_index, data->is_ip6, 1);
     }
     else
     {
@@ -480,6 +484,7 @@ spi_ha_sync_session_add(u32 thread_index, spi_ha_sync_session_data_t *data, int 
             associated_session->associated_session.session_thread = session->thread_index;
             associated_session->associated_session.session_index = session->index;
 
+            session->associated_session_valid = data->associated_session.associated_session_valid;
             session->associated_session.session_thread = associated_session->thread_index;
             session->associated_session.session_index = associated_session->index;
         }
@@ -562,6 +567,31 @@ spi_ha_sync_session_update(u32 thread_index, spi_ha_sync_session_data_t *data)
     spi_submit_or_update_session_timer(tspi, session, data->timeout, true);
 
     SPI_THREAD_UNLOCK(tspi);
+
+    //associated session proc
+    if (data->associated_session.associated_session_valid && !session->associated_session_valid)
+    {
+        clib_bihash_kv_48_8_t associated_kv;
+
+        if (!clib_bihash_search_inline_2_with_hash_48_8 (&spim->session_table, 
+                    data->associated_session.hash, 
+                    (clib_bihash_kv_48_8_t *)data->associated_session.association_key.key,
+                    &associated_kv))
+        {
+            spi_per_thread_data_t *associated_tspi = NULL;
+            spi_session_t *associated_session = NULL;
+            associated_tspi = &spim->per_thread_data[SPI_BIHASH_SESSION_VALUE_GET_THREAD(associated_kv.value)];
+            associated_session = pool_elt_at_index (associated_tspi->sessions, SPI_BIHASH_SESSION_VALUE_GET_SESSION_ID(associated_kv.value));
+
+            associated_session->associated_session_valid = data->associated_session.associated_session_valid;
+            associated_session->associated_session.session_thread = session->thread_index;
+            associated_session->associated_session.session_index = session->index;
+
+            session->associated_session_valid = data->associated_session.associated_session_valid;
+            session->associated_session.session_thread = associated_session->thread_index;
+            session->associated_session.session_index = associated_session->index;
+        }
+    }
     return;
 }
 static_always_inline void

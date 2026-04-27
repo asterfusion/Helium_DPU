@@ -204,6 +204,8 @@ static_always_inline void spi_ha_sync_event_session_notify(u32 thread_id, spi_ha
 
     spi_ha_sync_event_session_t event;
 
+    clib_memset(&event, 0, sizeof(spi_ha_sync_event_session_t));
+
     event.header.event_thread_id = thread_id;
     event.header.event_op = op;
     event.header.event_type = SPI_HA_TYPE_SESSION;
@@ -254,7 +256,6 @@ static_always_inline void spi_ha_sync_event_session_notify(u32 thread_id, spi_ha
     {
         spi_main_t *spim = &spi_main;
 
-        event.data.associated_session.associated_session_valid = s->associated_session_valid;
         spi_session_t *associated_session = NULL;
         spi_per_thread_data_t *tspi = NULL;
 
