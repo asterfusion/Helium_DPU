@@ -39,6 +39,7 @@
 
 #include <vnet/vnet.h>
 #include <vnet/llc/llc.h>
+#include <vnet/ethernet/ethernet.h>
 
 /* Global main structure. */
 llc_main_t llc_main;
@@ -225,6 +226,8 @@ llc_init (vlib_main_t * vm)
 
   if ((error = vlib_call_init_function (vm, snap_init)))
     return error;
+
+  ethernet_register_input_type (vm, ETHERNET_TYPE_LLC_ENCAP, llc_input_node.index);
 
   return vlib_call_init_function (vm, llc_input_init);
 }
