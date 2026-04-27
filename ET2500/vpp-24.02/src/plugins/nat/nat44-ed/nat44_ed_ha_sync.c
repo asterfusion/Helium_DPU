@@ -845,10 +845,11 @@ void nat44_ed_ha_sync_unregister (void)
     nat44_ed_ha_sync_unregister_session_application_ptr =
         vlib_get_plugin_symbol ("ha_sync_plugin.so", "ha_sync_unregister_session_application");
 
-    if(nat44_ed_ha_sync_register_session_application_ptr == NULL)
+    if(nat44_ed_ha_sync_unregister_session_application_ptr == NULL)
     {
         clib_warning ("ha_sync_plugin.so ha_sync_unregister_session_application is not found");
         nat44_ed_ha_sync_ctx.ha_sync_plugin_found = 0;
+        return 0;
     }
 
     nat44_ed_ha_sync_ctx.ha_sync_plugin_found = 1;

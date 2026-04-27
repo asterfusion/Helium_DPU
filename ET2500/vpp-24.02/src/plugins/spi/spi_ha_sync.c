@@ -900,10 +900,11 @@ void spi_ha_sync_unregister (void)
     spi_ha_sync_unregister_session_application_ptr =
         vlib_get_plugin_symbol ("ha_sync_plugin.so", "ha_sync_unregister_session_application");
 
-    if(spi_ha_sync_register_session_application_ptr == NULL)
+    if(spi_ha_sync_unregister_session_application_ptr == NULL)
     {
         clib_warning ("ha_sync_plugin.so ha_sync_unregister_session_application is not found");
         spi_ha_sync_ctx.ha_sync_plugin_found = 0;
+        return;
     }
 
     spi_ha_sync_ctx.ha_sync_plugin_found = 1;

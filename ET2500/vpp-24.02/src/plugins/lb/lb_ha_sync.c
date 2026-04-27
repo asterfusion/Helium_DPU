@@ -1036,10 +1036,11 @@ void lb_ha_sync_unregister (void)
     ha_sync_unregister_session_application_ptr =
         vlib_get_plugin_symbol ("ha_sync_plugin.so", "ha_sync_unregister_session_application");
 
-    if(ha_sync_register_session_application_ptr == NULL)
+    if(ha_sync_unregister_session_application_ptr == NULL)
     {
         clib_warning ("ha_sync_plugin.so ha_sync_unregister_session_application is not found");
         lb_ha_sync_ctx.ha_sync_plugin_found = 0;
+        return;
     }
 
     lb_ha_sync_ctx.ha_sync_plugin_found = 1;
