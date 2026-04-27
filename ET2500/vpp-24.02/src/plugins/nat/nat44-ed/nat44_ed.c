@@ -2649,6 +2649,7 @@ nat44_ed_sw_interface_add_del (vnet_main_t *vnm, u32 sw_if_index, u32 is_add)
   snat_main_t *sm = &snat_main;
   snat_interface_t *i;
   int error = 0;
+  int j;
 
   if (is_add)
     return 0;
@@ -2686,6 +2687,35 @@ nat44_ed_sw_interface_add_del (vnet_main_t *vnm, u32 sw_if_index, u32 is_add)
 	  nat_log_err ("error occurred while removing output interface");
 	}
     }
+
+  for (j = 0; j < vec_len (sm->addr_to_resolve); j++)
+    {
+      snat_address_resolve_t *rp = sm->addr_to_resolve + j;
+
+      if (rp->sw_if_index == sw_if_index)
+	    {
+            vec_del1(sm->addr_to_resolve, j);
+            j--;
+	    }
+    }
+
+#if 0
+  /*
+   * Static NAT will not be cleared temporarily
+   */
+  for (j = 0; j < vec_len (sm->sm_to_resolve); j++)
+    {
+      snat_static_mapping_resolve_t *rp = sm->sm_to_resolve + j;
+
+      if (rp->sw_if_index == sw_if_index)
+	    {
+            vec_free(rp->tag);
+            vec_del1(sm->addr_to_resolve, j);
+            j--;
+	    }
+    }
+#endif
+
 
   return 0;
 }
@@ -3551,6 +3581,8 @@ nat44_ed_add_del_interface_address_cb (ip4_main_t *im, uword opaque,
   u8 twice_nat = 0;
   int i, rv;
 
+  u32 fib_index = ip4_fib_table_get_index_for_sw_if_index (sw_if_index);
+
   if (!sm->enabled)
     {
       return;
@@ -3561,8 +3593,6 @@ nat44_ed_add_del_interface_address_cb (ip4_main_t *im, uword opaque,
       twice_nat = 1;
       if (nat44_ed_get_addr_resolve_record (sw_if_index, twice_nat, &i))
 	{
-	  u32 fib_index =
-	    ip4_fib_table_get_index_for_sw_if_index (sw_if_index);
 	  vec_foreach (ap, sm->addresses)
 	    {
 	      if ((fib_index == ap->fib_index) &&
@@ -3600,7 +3630,8 @@ nat44_ed_add_del_interface_address_cb (ip4_main_t *im, uword opaque,
 	  return;
 	}
 
-      rv = nat44_ed_add_address (address, ~0, arp->is_twice_nat, ~0);
+      ip4_fib_t *fib = ip4_fib_get (fib_index);
+      rv = nat44_ed_add_address (address, fib->hash.table_id, arp->is_twice_nat, ~0);
       if (0 == rv)
 	{
 	  arp->is_resolved = 1;
