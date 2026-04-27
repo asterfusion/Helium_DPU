@@ -3551,6 +3551,8 @@ nat44_ed_add_del_interface_address_cb (ip4_main_t *im, uword opaque,
   u8 twice_nat = 0;
   int i, rv;
 
+  u32 fib_index = ip4_fib_table_get_index_for_sw_if_index (sw_if_index);
+
   if (!sm->enabled)
     {
       return;
@@ -3561,8 +3563,6 @@ nat44_ed_add_del_interface_address_cb (ip4_main_t *im, uword opaque,
       twice_nat = 1;
       if (nat44_ed_get_addr_resolve_record (sw_if_index, twice_nat, &i))
 	{
-	  u32 fib_index =
-	    ip4_fib_table_get_index_for_sw_if_index (sw_if_index);
 	  vec_foreach (ap, sm->addresses)
 	    {
 	      if ((fib_index == ap->fib_index) &&
@@ -3600,7 +3600,8 @@ nat44_ed_add_del_interface_address_cb (ip4_main_t *im, uword opaque,
 	  return;
 	}
 
-      rv = nat44_ed_add_address (address, ~0, arp->is_twice_nat, ~0);
+      ip4_fib_t *fib = ip4_fib_get (fib_index);
+      rv = nat44_ed_add_address (address, fib->hash.table_id, arp->is_twice_nat, ~0);
       if (0 == rv)
 	{
 	  arp->is_resolved = 1;
