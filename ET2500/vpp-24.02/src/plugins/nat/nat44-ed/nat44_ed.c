@@ -2722,6 +2722,7 @@ nat44_ed_sw_interface_add_del (vnet_main_t *vnm, u32 sw_if_index, u32 is_add)
   snat_main_t *sm = &snat_main;
   snat_interface_t *i;
   int error = 0;
+  int j;
 
   if (is_add)
     return 0;
@@ -2759,6 +2760,35 @@ nat44_ed_sw_interface_add_del (vnet_main_t *vnm, u32 sw_if_index, u32 is_add)
 	  nat_log_err ("error occurred while removing output interface");
 	}
     }
+
+  for (j = 0; j < vec_len (sm->addr_to_resolve); j++)
+    {
+      snat_address_resolve_t *rp = sm->addr_to_resolve + j;
+
+      if (rp->sw_if_index == sw_if_index)
+	    {
+            vec_del1(sm->addr_to_resolve, j);
+            j--;
+	    }
+    }
+
+#if 0
+  /*
+   * Static NAT will not be cleared temporarily
+   */
+  for (j = 0; j < vec_len (sm->sm_to_resolve); j++)
+    {
+      snat_static_mapping_resolve_t *rp = sm->sm_to_resolve + j;
+
+      if (rp->sw_if_index == sw_if_index)
+	    {
+            vec_free(rp->tag);
+            vec_del1(sm->addr_to_resolve, j);
+            j--;
+	    }
+    }
+#endif
+
 
   return 0;
 }
