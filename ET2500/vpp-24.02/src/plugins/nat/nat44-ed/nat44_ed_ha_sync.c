@@ -849,7 +849,7 @@ void nat44_ed_ha_sync_unregister (void)
     {
         clib_warning ("ha_sync_plugin.so ha_sync_unregister_session_application is not found");
         nat44_ed_ha_sync_ctx.ha_sync_plugin_found = 0;
-        return 0;
+        return;
     }
 
     nat44_ed_ha_sync_ctx.ha_sync_plugin_found = 1;
