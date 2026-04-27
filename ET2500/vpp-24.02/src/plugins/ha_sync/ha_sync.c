@@ -281,19 +281,6 @@ ha_sync_apply_enable_disable (u8 enable)
   else
     {
       hsm->enabled = 0;
-      hsm->fib_index = 0;
-      hsm->src_port = HA_SYNC_UDP_PORT;
-      hsm->dst_port = HA_SYNC_UDP_PORT;
-      hsm->domain_id = HA_SYNC_DEFAULT_DOMAIN_ID;
-      hsm->packet_size = HA_SYNC_MAX_TX_PAYLOAD;
-      hsm->heartbeat_interval_sec = HA_SYNC_HEARTBEAT_INTERVAL_SEC;
-      hsm->heartbeat_max_fail_counts = HA_SYNC_HEARTBEAT_MAX_FAIL_COUNTS;
-      hsm->retransmit_interval = HA_SYNC_RETRANSMIT_INTERVAL_SEC;
-      hsm->retransmit_times = HA_SYNC_RETRANSMIT_TIMES;
-      hsm->request_pacing_interval_sec =
-        HA_SYNC_DEFAULT_REQUEST_PACING_INTERVAL_SEC;
-      hsm->request_pacing_pkts_per_interval =
-        HA_SYNC_DEFAULT_REQUEST_PACING_PKTS;
       ha_sync_release_resources ();
       ha_sync_update_all_contexts ();
 
