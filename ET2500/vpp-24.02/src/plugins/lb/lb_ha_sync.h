@@ -7,7 +7,7 @@
 #include <ha_sync/ha_sync.h>
 
 
-#define LB_HASH_SYNC_DEBUG  1
+//#define LB_HASH_SYNC_DEBUG  1
 
 
 #define LB_HA_SYNC_SNAPSHOT_PROCESS_DEFAULT_FREQUENCY   (128)

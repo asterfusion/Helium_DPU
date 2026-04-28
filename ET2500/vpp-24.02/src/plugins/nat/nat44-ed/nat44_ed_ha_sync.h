@@ -7,6 +7,8 @@
 #include <ha_sync/ha_sync.h>
 #include <vppinfra/lffifo.h>
 
+//#define NAT44_ED_HASH_SYNC_DEBUG 1
+
 #define NAT44_ED_HA_SYNC_SNAPSHOT_PROCESS_DEFAULT_FREQUENCY   (128)
 #define NAT44_ED_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING        (9)
 

@@ -7,7 +7,7 @@
 #include <ha_sync/ha_sync.h>
 #include <vppinfra/lffifo.h>
 
-#define SPI_HASH_SYNC_DEBUG 1
+//#define SPI_HASH_SYNC_DEBUG 1
 
 #define SPI_HA_SYNC_SNAPSHOT_PROCESS_DEFAULT_FREQUENCY   (128)
 #define SPI_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING        (9)
@@ -309,7 +309,7 @@ static_always_inline void spi_ha_sync_event_session_notify(u32 thread_id, spi_ha
         }
     }
 
-    clib_warning("timeout %u", event.data.timeout);
+    //clib_warning("timeout %u", event.data.timeout);
     spi_ha_sync_event_push(thread_id, (u8 *)&event, sizeof(spi_ha_sync_event_session_t));
 }
 
