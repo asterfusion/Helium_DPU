@@ -189,13 +189,11 @@ extern void *spi_ha_sync_per_thread_buffer_add_ptr;
 
 static_always_inline void spi_ha_sync_event_push (u32 thread_id, u8 *event_entry, u32 length)
 {
-    u32 thread_index = vlib_get_thread_index ();
-
     if (PREDICT_FALSE(spi_ha_sync_per_thread_buffer_add_ptr == NULL)) return;
 
     ((__typeof__ (ha_sync_per_thread_buffer_add) *)
      spi_ha_sync_per_thread_buffer_add_ptr)(
-         thread_index, HA_SYNC_APP_SPI, event_entry, length);
+         thread_id, HA_SYNC_APP_SPI, event_entry, length);
 }
 
 static_always_inline void spi_ha_sync_event_session_notify(u32 thread_id, spi_ha_event_op_e op, spi_session_t *s, u32 timeout)

@@ -124,6 +124,8 @@ ha_sync_resources_init (ha_sync_main_t *hsm)
 
     vec_free (ptd->timer_expired_vec);
     ptd->timer_expired_vec = 0;
+
+    clib_spinlock_init (&ptd->lock);
   }
 }
 
@@ -149,6 +151,8 @@ ha_sync_release_resources ()
     ha_sync_response_batches_free (ptd);
     if (ptd->timer_wheel.timers)
       tw_timer_wheel_free_16t_2w_512sl (&ptd->timer_wheel);
+
+    clib_spinlock_free (&ptd->lock);
   }
   vec_free (hsm->per_thread_data);
   hsm->per_thread_data = 0;

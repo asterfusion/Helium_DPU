@@ -154,13 +154,11 @@ extern void *nat44_ed_ha_sync_per_thread_buffer_add_ptr;
 
 static_always_inline void nat44_ed_ha_sync_event_push (u32 thread_id, u8 *event_entry, u32 length)
 {
-    u32 thread_index = vlib_get_thread_index ();
-
     if (PREDICT_FALSE(nat44_ed_ha_sync_per_thread_buffer_add_ptr == NULL)) return;
 
     ((__typeof__ (ha_sync_per_thread_buffer_add) *)
      nat44_ed_ha_sync_per_thread_buffer_add_ptr)(
-         thread_index, HA_SYNC_APP_NAT, event_entry, length);
+         thread_id, HA_SYNC_APP_NAT, event_entry, length);
 }
 
 static_always_inline void nat44_ed_ha_sync_event_flow_notify(u32 thread_id, nat44_ed_ha_event_op_e op, snat_session_t *s)

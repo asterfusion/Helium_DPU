@@ -186,13 +186,11 @@ int lb_ha_sync_set_timeout_update_interval(u32 ha_sync_timeout_update_interval);
 
 static_always_inline void lb_ha_sync_event_push (u32 thread_id, u8 *event_entry, u32 length)
 {
-    u32 thread_index = vlib_get_thread_index ();
-
     if (PREDICT_FALSE(ha_sync_per_thread_buffer_add_ptr == NULL)) return;
 
     ((__typeof__ (ha_sync_per_thread_buffer_add) *)
      ha_sync_per_thread_buffer_add_ptr)(
-         thread_index, HA_SYNC_APP_LB, event_entry, length);
+         thread_id, HA_SYNC_APP_LB, event_entry, length);
 }
 
 static_always_inline void lb_ha_sync_event_sticky_session_notify(u32 thread_id, lb_ha_event_op_e op, 
