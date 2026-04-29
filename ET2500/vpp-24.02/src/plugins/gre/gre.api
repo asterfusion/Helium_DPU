@@ -88,6 +88,20 @@ define gre_tunnel_add_del_reply
     @param context - sender context, to match reply w/ request.
     @param sw_if_index - filter for tunnel of this interface index, ~0 for all.
 */
+autoreply define gre_tunnel_update_flag
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_tunnel_encap_decap_flags_t flags;
+};
+
+/** \brief Dump details of all or just a single GRE tunnel.
+    @param client_index - opaque cookie to identify the sender.
+    @param context - sender context, to match reply w/ request.
+    @param sw_if_index - filter for tunnel of this interface index, ~0 for all.
+    @param flags - to control encap/decap behaviour
+*/
 define gre_tunnel_dump
 {
   u32 client_index;

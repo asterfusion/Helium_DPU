@@ -129,6 +129,35 @@ out:
 }
 
 static void
+vl_api_gre_tunnel_update_flag_t_handler (vl_api_gre_tunnel_update_flag_t *mp)
+{
+  gre_main_t *gm = &gre_main;
+  gre_tunnel_t *t;
+  vl_api_gre_tunnel_update_flag_reply_t * rmp;
+  tunnel_encap_decap_flags_t flags;
+  u32 sw_if_index = ~0;
+  int rv = 0;
+
+  rv = tunnel_encap_decap_flags_decode (mp->flags, &flags);
+  if (rv)
+      goto done;
+
+  sw_if_index = ntohl (mp->sw_if_index);
+
+  if ((sw_if_index >= vec_len (gm->tunnel_index_by_sw_if_index)) ||
+      (~0 == gm->tunnel_index_by_sw_if_index[sw_if_index]))
+  {
+      goto done;
+  }
+
+  t = &gm->tunnels[gm->tunnel_index_by_sw_if_index[sw_if_index]];
+  t->flags = flags;
+
+done:
+ REPLY_MACRO (VL_API_GRE_TUNNEL_UPDATE_FLAG_REPLY);
+}
+
+static void
 send_gre_tunnel_details (gre_tunnel_t *t, vl_api_gre_tunnel_dump_t *mp)
 {
   vl_api_gre_tunnel_details_t *rmp;
