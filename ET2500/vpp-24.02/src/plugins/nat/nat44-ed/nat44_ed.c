@@ -845,7 +845,7 @@ nat_ed_static_mapping_del_sessions (snat_main_t * sm,
 				    ip4_address_t l_addr,
 				    u16 l_port,
 				    u8 protocol,
-				    u32 fib_index, int addr_only,
+				    u32 fib_index, int addr_only, int keep_proto,
 				    ip4_address_t e_addr, u16 e_port)
 {
   snat_session_t *s;
@@ -863,12 +863,17 @@ nat_ed_static_mapping_del_sessions (snat_main_t * sm,
 	    s->proto != protocol)
 	  continue;
       }
+    else
+      {
+	if (keep_proto && s->proto != protocol)
+	  continue;
+      }
 
     if (nat44_ed_is_lb_session (s))
       continue;
     if (!nat44_ed_is_session_static (s))
       continue;
-    nat44_ed_free_session_data (sm, s, tsm - sm->per_thread_data, 0);
+    nat44_ed_free_session_data (sm, s, tsm - sm->per_thread_data, 1);
     vec_add1 (indexes_to_free, s - tsm->sessions);
     if (!addr_only)
       break;
@@ -1351,7 +1356,7 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
 
   nat_ed_static_mapping_del_sessions (sm, tsm, m->local_addr, m->local_port,
 				      m->proto, fib_index,
-				      is_sm_addr_only (flags), e_addr, e_port);
+				      is_sm_addr_only (flags), is_sm_keep_proto(flags), e_addr, e_port);
 #else
   if (sm->num_workers > 1)
   {
@@ -1359,7 +1364,7 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
       {
 	  nat_ed_static_mapping_del_sessions (sm, tsm, m->local_addr, m->local_port,
 		  m->proto, fib_index,
-		  is_sm_addr_only (flags), e_addr, e_port);
+		  is_sm_addr_only (flags), is_sm_keep_proto(flags), e_addr, e_port);
       }
   }
   else
@@ -1367,7 +1372,7 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
       tsm = vec_elt_at_index (sm->per_thread_data, sm->num_workers);
       nat_ed_static_mapping_del_sessions (sm, tsm, m->local_addr, m->local_port,
 	      m->proto, fib_index,
-	      is_sm_addr_only (flags), e_addr, e_port);
+	      is_sm_addr_only (flags), is_sm_keep_proto(flags), e_addr, e_port);
   }
 #endif
 

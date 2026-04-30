@@ -181,7 +181,6 @@ ha_sync_reset_runtime_state ()
 
   vlib_worker_thread_barrier_sync (vm);
   ha_sync_pool_clear_keep ();
-  hsm->snapshot_sequence = 0;
   hsm->snapshot_triggered_for_connection = 0;
 
   vec_foreach (ptd, hsm->per_thread_data)
