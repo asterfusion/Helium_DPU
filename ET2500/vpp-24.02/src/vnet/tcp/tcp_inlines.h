@@ -333,9 +333,23 @@ tcp_input_lookup_buffer (vlib_buffer_t * b, u8 thread_index, u32 * error,
 	}
     }
 
-  /* Set the sw_if_index[VLIB_RX] to the interface we received
-   * the connection on (the local interface) */
-  vnet_buffer (b)->sw_if_index[VLIB_RX] = vnet_buffer (b)->ip.rx_sw_if_index;
+  /*
+   * Set sw_if_index[VLIB_RX] to the local receive interface, but preserve
+   * the original ingress sw_if_index for punt-redirect selection.
+   */
+  {
+    u32 orig_rx_sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
+    u32 local_rx_sw_if_index = vnet_buffer (b)->ip.rx_sw_if_index;
+
+    vnet_buffer (b)->sw_if_index[VLIB_RX] = local_rx_sw_if_index;
+
+    if (PREDICT_FALSE (orig_rx_sw_if_index != local_rx_sw_if_index &&
+		       !(b->flags & VLIB_BUFFER_NOT_PHY_INTF)))
+      {
+	vnet_buffer2 (b)->l2_rx_sw_if_index = orig_rx_sw_if_index;
+	b->flags |= VNET_BUFFER_F_TCP_ORIG_RX_SAVED;
+      }
+  }
 
   if (is_nolookup)
     tc =

@@ -27,9 +27,17 @@ format_ip_punt_redirect_trace (u8 * s, va_list * args)
   ip_punt_redirect_trace_t *t = va_arg (*args, ip_punt_redirect_trace_t *);
 
   if (INDEX_INVALID == t->rrxi)
-    s = format (s, "ignore");
+    s = format (s,
+		"ignore rx-sw-if-index:%u l2-rx-sw-if-index:%u "
+		"used-l2-rx:%u non-phy-intf:%u next:%u",
+		t->rx_sw_if_index, t->l2_rx_sw_if_index,
+		t->used_l2_rx_sw_if_index, t->non_phy_intf, t->next);
   else
-    s = format (s, "via redirect:%d", t->rrxi);
+    s = format (s,
+		"via redirect:%d rx-sw-if-index:%u l2-rx-sw-if-index:%u "
+		"used-l2-rx:%u non-phy-intf:%u next:%u",
+		t->rrxi, t->rx_sw_if_index, t->l2_rx_sw_if_index,
+		t->used_l2_rx_sw_if_index, t->non_phy_intf, t->next);
 
   return s;
 }
