@@ -663,7 +663,7 @@ nat44_ed_del_address (ip4_address_t addr, u8 twice_nat)
 	  if (ses->out2in.addr.as_u32 == addr.as_u32)
 	    {
 	      nat44_ed_free_session_data (sm, ses, tsm - sm->per_thread_data,
-					  0);
+					  1);
 	      vec_add1 (ses_to_be_removed, ses - tsm->sessions);
 	    }
 	}

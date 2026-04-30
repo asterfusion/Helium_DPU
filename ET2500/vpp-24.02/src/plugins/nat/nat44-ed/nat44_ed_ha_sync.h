@@ -169,6 +169,8 @@ static_always_inline void nat44_ed_ha_sync_event_flow_notify(u32 thread_id, nat4
 
     nat44_ed_ha_sync_event_flow_t event;
 
+    clib_memset(&event, 0, sizeof(nat44_ed_ha_sync_event_flow_t));
+
     event.header.event_thread_id = thread_id;
     event.header.event_op = op;
     event.header.event_type = NAT44_ED_HA_TYPE_FLOW;
@@ -200,7 +202,8 @@ static_always_inline void nat44_ed_ha_sync_event_flow_notify(u32 thread_id, nat4
     event.data.ext_host_nat_addr = s->ext_host_nat_addr;
     event.data.ext_host_nat_port = s->ext_host_nat_port;
 
-    clib_memcpy(&event.data.tcp_flags, &s->tcp_flags, sizeof(u8) * NAT44_ED_N_DIR);
+    event.data.tcp_flags[NAT44_ED_DIR_I2O] =  s->tcp_flags[NAT44_ED_DIR_I2O];
+    event.data.tcp_flags[NAT44_ED_DIR_O2I] =  s->tcp_flags[NAT44_ED_DIR_O2I];
     event.data.tcp_state = s->tcp_state;
 
     nat44_ed_ha_sync_event_push(thread_id, (u8 *)&event, sizeof(nat44_ed_ha_sync_event_flow_t));

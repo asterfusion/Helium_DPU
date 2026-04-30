@@ -330,7 +330,8 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
 
             s->flags = data->flags;
 
-            clib_memcpy(&s->tcp_flags, &data->tcp_flags, sizeof(u8) * NAT44_ED_N_DIR);
+            s->tcp_flags[NAT44_ED_DIR_I2O] = data->tcp_flags[NAT44_ED_DIR_I2O];
+            s->tcp_flags[NAT44_ED_DIR_O2I] = data->tcp_flags[NAT44_ED_DIR_O2I];
             s->tcp_state = data->tcp_state;
             s->last_heard = now;
 
@@ -427,7 +428,8 @@ session_create:
 
     s->flags = data->flags;
 
-    clib_memcpy(&s->tcp_flags, &data->tcp_flags, sizeof(u8) * NAT44_ED_N_DIR);
+    s->tcp_flags[NAT44_ED_DIR_I2O] = data->tcp_flags[NAT44_ED_DIR_I2O];
+    s->tcp_flags[NAT44_ED_DIR_O2I] = data->tcp_flags[NAT44_ED_DIR_O2I];
     s->tcp_state = data->tcp_state;
     s->last_heard = now;
 
@@ -530,7 +532,8 @@ nat44_ed_ha_sync_flow_update(u32 thread_index, nat44_ed_ha_sync_flow_data_t *dat
     s->last_heard = now;
     s->ha_last_refreshed = now;
 
-    clib_memcpy(&s->tcp_flags, &data->tcp_flags, sizeof(u8) * NAT44_ED_N_DIR);
+    s->tcp_flags[NAT44_ED_DIR_I2O] = data->tcp_flags[NAT44_ED_DIR_I2O];
+    s->tcp_flags[NAT44_ED_DIR_O2I] = data->tcp_flags[NAT44_ED_DIR_O2I];
     s->tcp_state = data->tcp_state;
 
     nat44_session_update_lru (sm, s, thread_index);
