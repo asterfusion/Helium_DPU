@@ -65,7 +65,8 @@
   _ (16, IS_DVR, "dvr", 1)                                                    \
   _ (17, QOS_DATA_VALID, "qos-data-valid", 0)                                 \
   _ (18, GSO, "gso", 0)                                                       \
-  _ (19, AVAIL1, "avail1", 1)
+  _ (19, AVAIL1, "avail1", 1)                                                 \
+  _ (20, TCP_ORIG_RX_SAVED, "tcp-orig-rx-saved", 1)
 
 /*
  * Please allocate the FIRST available bit, redefine
