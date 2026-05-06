@@ -770,6 +770,8 @@ spi_delete_session(spi_main_t *spim,
     clib_bihash_kv_48_8_t kv;
     spi_session_type_e type;
 
+    if (session->session_is_free) return SPI_NODE_ERROR_NO_ERR;
+
     clib_memset(&kv, 0, sizeof(clib_bihash_kv_48_8_t));
 
     /* only pkt_l3l4 is valid*/

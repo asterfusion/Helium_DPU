@@ -174,6 +174,7 @@ void generate_flow_table_snapshot(vlib_main_t * vm,
         if (pool_is_free_index(tsm->sessions, i)) continue;
 
         s = pool_elt_at_index (tsm->sessions, i);
+
         nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_ADD_FORCE, s);
     }
     rt->snapshot_flow_index = i;
@@ -662,6 +663,8 @@ nat44_ed_ha_sync_session_apply_cb (u32 app_type, void *ctx, u8 *session, u16 ses
     u32 thread_index = vlib_get_thread_index();
     nat44_ed_ha_sync_header_t *header = (nat44_ed_ha_sync_header_t *)session;
 
+    if(NAT44_ED_CHECK_HA_SYNC) return;
+
     if (header->event_type >= NAT44_ED_HA_TYPE_VALID)
     {
         clib_warning("nat44-ed ha sync received undefined type %d", header->event_type);
@@ -746,7 +749,7 @@ static ha_sync_session_registration_t nat44_ed_ha_sync_registration = {
     .context = &nat44_ed_ha_sync_ctx,
     .snapshot_send_cb = nat44_ed_ha_sync_snapshot_send_cb,
     .session_apply_cb = nat44_ed_ha_sync_session_apply_cb,
-    .snapshot_mode = HA_SYNC_SNAPSHOT_MODE_PER_THREAD,
+    .snapshot_mode = HA_SYNC_SNAPSHOT_MODE_SINGLE,
 };
 
 int nat44_ed_ha_sync_set_timeout_update_interval(u32 ha_sync_timeout_update_interval)
@@ -843,8 +846,6 @@ int nat44_ed_ha_sync_register (void)
 
 void nat44_ed_ha_sync_unregister (void)
 {
-    nat44_ed_ha_sync_handoff_deinit();
-
     nat44_ed_ha_sync_unregister_session_application_ptr =
         vlib_get_plugin_symbol ("ha_sync_plugin.so", "ha_sync_unregister_session_application");
 
@@ -862,4 +863,6 @@ void nat44_ed_ha_sync_unregister (void)
         clib_warning ("nat44-ed unregister ha sync failed");
     }
     nat44_ed_ha_sync_ctx.ha_sync_register = 0;
+
+    nat44_ed_ha_sync_handoff_deinit();
 }

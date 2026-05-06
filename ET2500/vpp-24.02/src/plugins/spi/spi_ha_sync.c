@@ -722,6 +722,8 @@ spi_ha_sync_session_apply_cb (u32 app_type, void *ctx, u8 *session, u16 session_
     u32 thread_index = vlib_get_thread_index();
     spi_ha_sync_header_t *header = (spi_ha_sync_header_t *)session;
 
+    if(SPI_CHECK_HA_SYNC) return;
+
     if (header->event_type >= SPI_HA_TYPE_VALID)
     {
         clib_warning("spi ha sync received undefined type %d", header->event_type);
@@ -806,7 +808,7 @@ static ha_sync_session_registration_t spi_ha_sync_registration = {
     .context = &spi_ha_sync_ctx,
     .snapshot_send_cb = spi_ha_sync_snapshot_send_cb,
     .session_apply_cb = spi_ha_sync_session_apply_cb,
-    .snapshot_mode = HA_SYNC_SNAPSHOT_MODE_PER_THREAD,
+    .snapshot_mode = HA_SYNC_SNAPSHOT_MODE_SINGLE,
 };
 
 static_always_inline void spi_ha_sync_handoff_init()
@@ -895,8 +897,6 @@ int spi_ha_sync_register (void)
 
 void spi_ha_sync_unregister (void)
 {
-    spi_ha_sync_handoff_deinit();
-
     spi_ha_sync_unregister_session_application_ptr =
         vlib_get_plugin_symbol ("ha_sync_plugin.so", "ha_sync_unregister_session_application");
 
@@ -914,4 +914,6 @@ void spi_ha_sync_unregister (void)
         clib_warning ("spi unregister ha sync failed");
     }
     spi_ha_sync_ctx.ha_sync_register = 0;
+
+    spi_ha_sync_handoff_deinit();
 }
