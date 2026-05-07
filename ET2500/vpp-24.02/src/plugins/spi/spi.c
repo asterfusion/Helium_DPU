@@ -355,7 +355,7 @@ spi_worker_resource_deinit (spi_main_t *spim, spi_per_thread_data_t *tspi)
     //free session pool
     pool_foreach (i, tspi->sessions)
     {
-        spi_delete_session(spim, tspi, i, false);
+        spi_delete_session(spim, tspi, i, true);
     }
     pool_free (tspi->sessions);
 

@@ -503,7 +503,8 @@ nat44_ed_ha_sync_flow_update(u32 thread_index, nat44_ed_ha_sync_flow_data_t *dat
 
     if (clib_bihash_search_16_8 (&sm->flow_hash, &kv_i2o, &value_i2o))
     {
-        clib_warning("NAT44-ED ha sync update i2o flow not found");
+        clib_warning("NAT44-ED ha sync update i2o flow not found, run add");
+        nat44_ed_ha_sync_flow_add(thread_index, data, 0);
         return;
     }
 

@@ -197,7 +197,8 @@ void generate_session_table_snapshot(vlib_main_t * vm,
         if (pool_is_free_index(tspi->sessions, i)) continue;
 
         s = pool_elt_at_index (tspi->sessions, i);
-        spi_ha_sync_event_session_notify(vm->thread_index, SPI_HA_OP_ADD_FORCE, s, s->transmit_timeout);
+
+        spi_ha_sync_event_session_notify(thread_index, SPI_HA_OP_ADD_FORCE, s, s->transmit_timeout);
     }
     rt->snapshot_session_index = i;
 
@@ -548,7 +549,8 @@ spi_ha_sync_session_update(u32 thread_index, spi_ha_sync_session_data_t *data)
                                                     (clib_bihash_kv_48_8_t *)key.key,
                                                     &kv))
     {
-        clib_warning("SPI ha sync session not found!");
+        clib_warning("SPI ha sync session not found, run add");
+        spi_ha_sync_session_add(thread_index, data, 0);
         return;
     }
 
