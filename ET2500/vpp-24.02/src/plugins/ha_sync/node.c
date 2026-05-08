@@ -205,7 +205,11 @@ ha_sync_response_batch_add (u32 thread_index, f64 now, u8 owner_thread,
     }
 
   if (vec_len (batch->seqs) == 0)
-    batch->first_enqueue_time = now;
+    {
+      batch->first_enqueue_time = now;
+      vlib_node_set_interrupt_pending (vlib_get_main_by_index (thread_index),
+                                       ha_sync_timer_node.index);
+    }
 
   vec_add1 (batch->seqs, seq);
   if (vec_len (batch->seqs) >= ha_sync_response_max_acks (hsm))
@@ -525,6 +529,9 @@ VLIB_NODE_FN (ha_sync_input_worker_node)
                     {
                     case HA_SYNC_MSG_REQUEST:
                       {
+                        if (PREDICT_FALSE (!hsm->connection_established))
+                          break;
+
                         u8 session_count = h0->count;
                         u8 *packet_end =
                           (u8 *) h0 + sizeof (ha_sync_packet_header_t) +
