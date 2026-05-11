@@ -21,6 +21,8 @@
 #define NAT44_ED_HA_SYNC_HANDOFF_QUEUE_SIZE                  (16384)
 #define NAT44_ED_HA_SYNC_HANDOFF_PER_NUM                     (1024)
 
+#define NAT44_ED_HA_SYNC_FORWARD_BYPASS_SKIP                 (1)
+
 typedef enum
 {
     NAT44_ED_HA_SYNC_SNAPSHOT_PROCESS_RESTART = 1,
@@ -168,6 +170,8 @@ static_always_inline void nat44_ed_ha_sync_event_flow_notify(u32 thread_id, nat4
     if(NAT44_ED_CHECK_HA_SYNC) return;
 
     nat44_ed_ha_sync_event_flow_t event;
+
+    if(na44_ed_is_fwd_bypass_session(s) && NAT44_ED_HA_SYNC_FORWARD_BYPASS_SKIP) return;
 
     clib_memset(&event, 0, sizeof(nat44_ed_ha_sync_event_flow_t));
 

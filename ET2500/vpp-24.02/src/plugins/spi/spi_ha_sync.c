@@ -596,6 +596,100 @@ spi_ha_sync_session_update(u32 thread_index, spi_ha_sync_session_data_t *data)
     }
     return;
 }
+
+static_always_inline void
+spi_ha_sync_session_keep(u32 thread_index, spi_ha_sync_session_data_t *data)
+{
+    vlib_main_t *vm = vlib_get_main();
+    spi_main_t *spim = &spi_main;
+    f64 now = vlib_time_now (vm);
+
+    spi_per_thread_data_t *tspi = &spim->per_thread_data[thread_index];
+
+    clib_bihash_kv_48_8_t kv;
+    spi_ha_sync_key_t key;
+
+    spi_session_t *session = NULL;
+
+    clib_memset(&key, 0, sizeof(spi_ha_sync_key_t));
+
+    key.is_ip6 = data->is_ip6;
+    key.proto = data->proto;
+    if (data->exchanged_tuple)
+    {
+        key.port[0] = data->down_link_flow.sport;
+        key.port[1] = data->down_link_flow.dport;
+
+        if (data->is_ip6)
+        {
+            ip6_address_copy(&key.ip6.addr[0], &data->down_link_flow.ip6.saddr);
+            ip6_address_copy(&key.ip6.addr[0], &data->down_link_flow.ip6.daddr);
+        }
+        else
+        {
+            key.ip4.addr[0].as_u32 = data->down_link_flow.ip4.saddr.as_u32;
+            key.ip4.addr[1].as_u32 = data->down_link_flow.ip4.daddr.as_u32;
+        }
+    }
+    else
+    {
+        key.port[0] = data->up_link_flow.sport;
+        key.port[1] = data->up_link_flow.dport;
+
+        if (data->is_ip6)
+        {
+            ip6_address_copy(&key.ip6.addr[0], &data->up_link_flow.ip6.saddr);
+            ip6_address_copy(&key.ip6.addr[0], &data->up_link_flow.ip6.daddr);
+        }
+        else
+        {
+            key.ip4.addr[0].as_u32 = data->up_link_flow.ip4.saddr.as_u32;
+            key.ip4.addr[1].as_u32 = data->up_link_flow.ip4.daddr.as_u32;
+        }
+    }
+
+    if (clib_bihash_search_inline_2_with_hash_48_8 (&spim->session_table, 
+                                                    data->hash, 
+                                                    (clib_bihash_kv_48_8_t *)key.key,
+                                                    &kv))
+    {
+        clib_warning("SPI ha sync session keep not found, run add");
+        spi_ha_sync_session_add(thread_index, data, 0);
+        return;
+    }
+
+    tspi = &spim->per_thread_data[SPI_BIHASH_SESSION_VALUE_GET_THREAD(kv.value)];
+    session =  pool_elt_at_index (tspi->sessions, SPI_BIHASH_SESSION_VALUE_GET_SESSION_ID(kv.value));
+
+    session->last_pkt_timestamp = now;
+
+    //associated session proc
+    if (data->associated_session.associated_session_valid && !session->associated_session_valid)
+    {
+        clib_bihash_kv_48_8_t associated_kv;
+
+        if (!clib_bihash_search_inline_2_with_hash_48_8 (&spim->session_table, 
+                    data->associated_session.hash, 
+                    (clib_bihash_kv_48_8_t *)data->associated_session.association_key.key,
+                    &associated_kv))
+        {
+            spi_per_thread_data_t *associated_tspi = NULL;
+            spi_session_t *associated_session = NULL;
+            associated_tspi = &spim->per_thread_data[SPI_BIHASH_SESSION_VALUE_GET_THREAD(associated_kv.value)];
+            associated_session = pool_elt_at_index (associated_tspi->sessions, SPI_BIHASH_SESSION_VALUE_GET_SESSION_ID(associated_kv.value));
+
+            associated_session->associated_session_valid = data->associated_session.associated_session_valid;
+            associated_session->associated_session.session_thread = session->thread_index;
+            associated_session->associated_session.session_index = session->index;
+
+            session->associated_session_valid = data->associated_session.associated_session_valid;
+            session->associated_session.session_thread = associated_session->thread_index;
+            session->associated_session.session_index = associated_session->index;
+        }
+    }
+    return;
+}
+
 static_always_inline void
 spi_ha_sync_session_del(u32 thread_index, spi_ha_sync_session_data_t *data, int is_force)
 {
@@ -696,6 +790,11 @@ spi_ha_sync_apply_session_proc(spi_ha_sync_event_session_t *event)
     case SPI_HA_OP_UPDATE:
         {
             spi_ha_sync_session_update(header->event_thread_id, data);
+        }
+        break;
+    case SPI_HA_OP_KEEP:
+        {
+            spi_ha_sync_session_keep(header->event_thread_id, data);
         }
         break;
     case SPI_HA_OP_DEL:
@@ -893,6 +992,8 @@ int spi_ha_sync_register (void)
     }
 
     spi_ha_sync_ctx.ha_sync_register = 1;
+
+    spi_ha_sync_ctx.ha_sync_timeout_keep_interval = SPI_HA_SYNC_TIMEOUT_KEEP_INTERVAL;
 
     return 0;
 }

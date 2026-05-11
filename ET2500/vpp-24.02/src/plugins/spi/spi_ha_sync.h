@@ -12,6 +12,8 @@
 #define SPI_HA_SYNC_SNAPSHOT_PROCESS_DEFAULT_FREQUENCY   (128)
 #define SPI_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING        (9)
 
+#define SPI_HA_SYNC_TIMEOUT_KEEP_INTERVAL               (2) //2s
+
 #define SPI_HA_SYNC_FIRST_TIMEOUT             (10) //10s
 #define SPI_HA_SYNC_DEBOUNCE_TIMEOUT          (5)  //5s
 
@@ -43,6 +45,7 @@ typedef enum
     SPI_HA_OP_DEL_FORCE,
 
     SPI_HA_OP_UPDATE,
+    SPI_HA_OP_KEEP,
 
     SPI_HA_OP_REFRESH,
 
@@ -166,6 +169,8 @@ typedef struct
 
     u8 ha_sync_plugin_found;
     u8 ha_sync_register;
+
+    u32 ha_sync_timeout_keep_interval;
 
     u32 flag;
 
