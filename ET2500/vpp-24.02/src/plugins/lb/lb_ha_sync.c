@@ -135,9 +135,7 @@ void generate_lb_sticky_table_snapshot(vlib_main_t * vm, lb_ha_sync_ctx_t *ctx)
     lb_sticky_kv_t *lb_kv;
     lb_vip_t *vip;
 
-    u32 bucket_walk_end = (sticky_ht->nbuckets >> LB_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
-
-    bucket_walk_end = ctx->snapshot_sticky_index + bucket_walk_end > 0 ? bucket_walk_end : sticky_ht->nbuckets;
+    u32 bucket_walk_end = ctx->snapshot_sticky_index + (sticky_ht->nbuckets >> LB_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
     bucket_walk_end = bucket_walk_end < sticky_ht->nbuckets ? bucket_walk_end : sticky_ht->nbuckets;
                             
     for (i = ctx->snapshot_sticky_index; i < bucket_walk_end; i++)
@@ -198,8 +196,7 @@ void generate_lb_vip_snat_table_snapshot(vlib_main_t *vm, lb_ha_sync_ctx_t *ctx)
     lb_vip_t *vip;
     lb_vip_snat_mapping_t *flow;
 
-    uword pool_walk_end = (pool_max_num >> LB_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
-    pool_walk_end = ctx->snapshot_vip_snat_index + pool_walk_end > 0 ? pool_walk_end : pool_max_num;
+    uword pool_walk_end = ctx->snapshot_vip_snat_index + (pool_max_num >> LB_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
     pool_walk_end = pool_walk_end < pool_max_num ? pool_walk_end : pool_max_num;
 
     lb_get_writer_lock();

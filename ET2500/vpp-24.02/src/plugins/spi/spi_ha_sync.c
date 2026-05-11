@@ -188,8 +188,7 @@ void generate_session_table_snapshot(vlib_main_t * vm,
     }
 
     uword i;
-    uword pool_walk_end = (pool_max_num >> SPI_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
-    pool_walk_end = rt->snapshot_session_index + pool_walk_end > 0 ? pool_walk_end : pool_max_num;
+    uword pool_walk_end = rt->snapshot_session_index + (pool_max_num >> SPI_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
     pool_walk_end = pool_walk_end < pool_max_num ? pool_walk_end : pool_max_num;
 
     pool_foreach_stepping_index(i, rt->snapshot_session_index, pool_walk_end, tspi->sessions)
@@ -336,7 +335,7 @@ spi_ha_sync_session_add(u32 thread_index, spi_ha_sync_session_data_t *data, int 
         if (data->is_ip6)
         {
             ip6_address_copy(&key.ip6.addr[0], &data->down_link_flow.ip6.saddr);
-            ip6_address_copy(&key.ip6.addr[0], &data->down_link_flow.ip6.daddr);
+            ip6_address_copy(&key.ip6.addr[1], &data->down_link_flow.ip6.daddr);
         }
         else
         {
@@ -352,7 +351,7 @@ spi_ha_sync_session_add(u32 thread_index, spi_ha_sync_session_data_t *data, int 
         if (data->is_ip6)
         {
             ip6_address_copy(&key.ip6.addr[0], &data->up_link_flow.ip6.saddr);
-            ip6_address_copy(&key.ip6.addr[0], &data->up_link_flow.ip6.daddr);
+            ip6_address_copy(&key.ip6.addr[1], &data->up_link_flow.ip6.daddr);
         }
         else
         {
@@ -519,7 +518,7 @@ spi_ha_sync_session_update(u32 thread_index, spi_ha_sync_session_data_t *data)
         if (data->is_ip6)
         {
             ip6_address_copy(&key.ip6.addr[0], &data->down_link_flow.ip6.saddr);
-            ip6_address_copy(&key.ip6.addr[0], &data->down_link_flow.ip6.daddr);
+            ip6_address_copy(&key.ip6.addr[1], &data->down_link_flow.ip6.daddr);
         }
         else
         {
@@ -535,7 +534,7 @@ spi_ha_sync_session_update(u32 thread_index, spi_ha_sync_session_data_t *data)
         if (data->is_ip6)
         {
             ip6_address_copy(&key.ip6.addr[0], &data->up_link_flow.ip6.saddr);
-            ip6_address_copy(&key.ip6.addr[0], &data->up_link_flow.ip6.daddr);
+            ip6_address_copy(&key.ip6.addr[1], &data->up_link_flow.ip6.daddr);
         }
         else
         {
@@ -623,7 +622,7 @@ spi_ha_sync_session_keep(u32 thread_index, spi_ha_sync_session_data_t *data)
         if (data->is_ip6)
         {
             ip6_address_copy(&key.ip6.addr[0], &data->down_link_flow.ip6.saddr);
-            ip6_address_copy(&key.ip6.addr[0], &data->down_link_flow.ip6.daddr);
+            ip6_address_copy(&key.ip6.addr[1], &data->down_link_flow.ip6.daddr);
         }
         else
         {
@@ -639,7 +638,7 @@ spi_ha_sync_session_keep(u32 thread_index, spi_ha_sync_session_data_t *data)
         if (data->is_ip6)
         {
             ip6_address_copy(&key.ip6.addr[0], &data->up_link_flow.ip6.saddr);
-            ip6_address_copy(&key.ip6.addr[0], &data->up_link_flow.ip6.daddr);
+            ip6_address_copy(&key.ip6.addr[1], &data->up_link_flow.ip6.daddr);
         }
         else
         {
@@ -714,7 +713,7 @@ spi_ha_sync_session_del(u32 thread_index, spi_ha_sync_session_data_t *data, int 
         if (data->is_ip6)
         {
             ip6_address_copy(&key.ip6.addr[0], &data->down_link_flow.ip6.saddr);
-            ip6_address_copy(&key.ip6.addr[0], &data->down_link_flow.ip6.daddr);
+            ip6_address_copy(&key.ip6.addr[1], &data->down_link_flow.ip6.daddr);
         }
         else
         {
@@ -730,7 +729,7 @@ spi_ha_sync_session_del(u32 thread_index, spi_ha_sync_session_data_t *data, int 
         if (data->is_ip6)
         {
             ip6_address_copy(&key.ip6.addr[0], &data->up_link_flow.ip6.saddr);
-            ip6_address_copy(&key.ip6.addr[0], &data->up_link_flow.ip6.daddr);
+            ip6_address_copy(&key.ip6.addr[1], &data->up_link_flow.ip6.daddr);
         }
         else
         {

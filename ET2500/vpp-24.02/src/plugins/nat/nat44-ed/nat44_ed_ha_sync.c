@@ -165,8 +165,7 @@ void generate_flow_table_snapshot(vlib_main_t * vm,
     }
 
     uword i;
-    uword pool_walk_end = (pool_max_num >> NAT44_ED_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
-    pool_walk_end = rt->snapshot_flow_index + pool_walk_end > 0 ? pool_walk_end : pool_max_num;
+    uword pool_walk_end = rt->snapshot_flow_index + (pool_max_num >> NAT44_ED_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
     pool_walk_end = pool_walk_end < pool_max_num ? pool_walk_end : pool_max_num;
 
     pool_foreach_stepping_index(i, rt->snapshot_flow_index, pool_walk_end, tsm->sessions)
