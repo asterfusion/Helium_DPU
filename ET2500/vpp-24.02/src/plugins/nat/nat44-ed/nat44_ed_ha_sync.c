@@ -428,9 +428,11 @@ session_create:
 
     s->flags = data->flags;
 
-    s->tcp_flags[NAT44_ED_DIR_I2O] = data->tcp_flags[NAT44_ED_DIR_I2O];
-    s->tcp_flags[NAT44_ED_DIR_O2I] = data->tcp_flags[NAT44_ED_DIR_O2I];
-    s->tcp_state = data->tcp_state;
+    if (data->proto == IP_PROTOCOL_TCP)
+    {
+        nat44_set_tcp_session_state_i2o (sm, now, s, data->tcp_flags[NAT44_ED_DIR_I2O], thread_index);
+        nat44_set_tcp_session_state_o2i (sm, now, s, data->tcp_flags[NAT44_ED_DIR_O2I], thread_index);
+    }
     s->last_heard = now;
 
     if (is_force)
@@ -533,9 +535,11 @@ nat44_ed_ha_sync_flow_update(u32 thread_index, nat44_ed_ha_sync_flow_data_t *dat
     s->last_heard = now;
     s->ha_last_refreshed = now;
 
-    s->tcp_flags[NAT44_ED_DIR_I2O] = data->tcp_flags[NAT44_ED_DIR_I2O];
-    s->tcp_flags[NAT44_ED_DIR_O2I] = data->tcp_flags[NAT44_ED_DIR_O2I];
-    s->tcp_state = data->tcp_state;
+    if (data->proto == IP_PROTOCOL_TCP)
+    {
+        nat44_set_tcp_session_state_i2o (sm, now, s, data->tcp_flags[NAT44_ED_DIR_I2O], thread_index);
+        nat44_set_tcp_session_state_o2i (sm, now, s, data->tcp_flags[NAT44_ED_DIR_O2I], thread_index);
+    }
 
     nat44_session_update_lru (sm, s, thread_index);
 
