@@ -407,6 +407,7 @@ lb_ha_sync_apply_sticky_session_proc(lb_ha_sync_event_sticky_session_t *event)
             {
                 //del entry
                 clib_bihash_add_del_with_hash_8_16(sticky_ht, (clib_bihash_kv_8_16_t *)&kv, sticky_hash, 0);
+                clib_atomic_fetch_sub (&lbm->as_refcount[as_index], 1);
             }
 #if LB_HASH_SYNC_DEBUG
             else
@@ -704,10 +705,10 @@ lb_ha_sync_vip_snat_sesson_del(lb_ha_sync_vip_snat_session_data_t *data,
 
         lb_put_writer_lock();
 
-        address->flow_index[lb_proto][mapping_port] = (~0);
 
         lb_get_vip_nat_address_lock(address);
 
+        address->flow_index[lb_proto][mapping_port] = (~0);
         address->busy_port_bitmap[lb_proto] = clib_bitmap_set (address->busy_port_bitmap[lb_proto], mapping_port, 0);
         address->busy_ports[lb_proto]--;
 
@@ -916,6 +917,7 @@ lb_ha_sync_apply_vip_snat_session_proc(lb_ha_sync_event_vip_snat_session_t *even
         {
             lb_ha_sync_vip_snat_sesson_del(data, vip, snat_addresses, address, outside_vrf_id, vrf_id, 0);
         }
+        break;
     case LB_HA_OP_DEL_FORCE:
         {
             lb_ha_sync_vip_snat_sesson_del(data, vip, snat_addresses, address, outside_vrf_id, vrf_id, 1);
