@@ -264,6 +264,25 @@ ip6_glean (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
   return (ip6_discover_neighbor_inline (vm, node, frame, 1));
 }
 
+#ifdef ARP_FAIL_PUNT
+/* *INDENT-OFF* */
+VLIB_REGISTER_NODE (ip6_glean_node) =
+{
+  .function = ip6_glean,
+  .name = "ip6-glean",
+  .vector_size = sizeof (u32),
+  .format_trace = format_ip6_forward_next_trace,
+  .n_errors = IP6_NEIGHBOR_N_ERROR,
+  .error_counters = ip6_neighbor_error_counters,
+  .n_next_nodes = IP6_NBR_N_NEXT,
+  .next_nodes =
+  {
+    [IP6_NBR_NEXT_DROP] = "linux-cp-punt",
+    [IP6_NBR_NEXT_REPLY_TX] = "ip6-rewrite-mcast",
+  },
+};
+
+#else
 /* *INDENT-OFF* */
 VLIB_REGISTER_NODE (ip6_glean_node) =
 {
@@ -280,6 +299,8 @@ VLIB_REGISTER_NODE (ip6_glean_node) =
     [IP6_NBR_NEXT_REPLY_TX] = "ip6-rewrite-mcast",
   },
 };
+#endif
+
 VLIB_REGISTER_NODE (ip6_discover_neighbor_node) =
 {
   .function = ip6_discover_neighbor,
