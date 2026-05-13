@@ -27,6 +27,7 @@
 #include <vnet/fib/fib_table.h>
 #include <vnet/tunnel/tunnel_types_api.h>
 #include <vnet/ip/ip_types_api.h>
+#include <vnet/adj/adj_nbr.h>
 
 #include <gre/gre.api_enum.h>
 #include <gre/gre.api_types.h>
@@ -128,6 +129,22 @@ out:
   /* *INDENT-ON* */
 }
 
+static adj_walk_rc_t
+gre_adj_update_walk_cb (adj_index_t ai, void *ctx)
+{
+  u32 sw_if_index = *(u32 *) ctx;
+  gre_update_adj (vnet_get_main (), sw_if_index, ai);
+  return (ADJ_WALK_RC_CONTINUE);
+}
+
+static adj_walk_rc_t
+mgre_adj_update_walk_cb (adj_index_t ai, void *ctx)
+{
+  u32 sw_if_index = *(u32 *) ctx;
+  mgre_update_adj (vnet_get_main (), sw_if_index, ai);
+  return (ADJ_WALK_RC_CONTINUE);
+}
+
 static void
 vl_api_gre_tunnel_update_flag_t_handler (vl_api_gre_tunnel_update_flag_t *mp)
 {
@@ -152,6 +169,30 @@ vl_api_gre_tunnel_update_flag_t_handler (vl_api_gre_tunnel_update_flag_t *mp)
 
   t = &gm->tunnels[gm->tunnel_index_by_sw_if_index[sw_if_index]];
   t->flags = flags;
+
+  if (t->type != GRE_TUNNEL_TYPE_L3)
+    {
+      gre_update_adj (gm->vnet_main, sw_if_index, t->l2_adj_index);
+    }
+  else
+    {
+      fib_protocol_t proto;
+
+      FOR_EACH_FIB_IP_PROTOCOL (proto)
+        {
+          switch (t->mode)
+            {
+            case TUNNEL_MODE_P2P:
+              adj_nbr_walk (sw_if_index, proto, gre_adj_update_walk_cb,
+                            &t->sw_if_index);
+              break;
+            case TUNNEL_MODE_MP:
+              adj_nbr_walk (sw_if_index, proto, mgre_adj_update_walk_cb,
+                            &t->sw_if_index);
+              break;
+            }
+        }
+    }
 
 done:
  REPLY_MACRO (VL_API_GRE_TUNNEL_UPDATE_FLAG_REPLY);

@@ -24,6 +24,10 @@
 #include <vnet/mpls/mpls.h>
 #include <vnet/l2/l2_input.h>
 #include <vnet/teib/teib.h>
+#include <vnet/fib/ip4_fib.h>
+#include <vnet/mfib/ip4_mfib.h>
+#include <vnet/fib/ip6_fib.h>
+#include <vnet/mfib/ip6_mfib.h>
 
 u8 *
 format_gre_tunnel_type (u8 *s, va_list *args)
@@ -515,6 +519,15 @@ vnet_gre_tunnel_add (vnet_gre_tunnel_add_del_args_t *a, u32 outer_fib_index,
   ip4_register_protocol (IP_PROTOCOL_GRE, gre4_input_node.index);
   ip6_register_protocol (IP_PROTOCOL_GRE, gre6_input_node.index);
 
+  /* enable gre ipv4 or ipv6 enable */
+  if (t->type == GRE_TUNNEL_TYPE_L3)
+    {
+      ip4_sw_interface_enable_disable (sw_if_index, 1);
+      ip4_mfib_interface_enable_disable (sw_if_index, 1);
+      ip6_sw_interface_enable_disable (sw_if_index, 1);
+      ip6_mfib_interface_enable_disable (sw_if_index, 1);
+    }
+
   return 0;
 }
 
@@ -543,8 +556,16 @@ vnet_gre_tunnel_delete (vnet_gre_tunnel_add_del_args_t *a, u32 outer_fib_index,
 		   L2_BD_PORT_TYPE_NORMAL, 0, 0,0);
   gm->tunnel_index_by_sw_if_index[sw_if_index] = ~0;
 
+
   if (t->type == GRE_TUNNEL_TYPE_L3)
+    {
+    /* disable gre ipv4 or ipv6 */
+    ip4_sw_interface_enable_disable (sw_if_index, 0);
+    ip4_mfib_interface_enable_disable (sw_if_index, 0);
+    ip6_sw_interface_enable_disable (sw_if_index, 0);
+    ip6_mfib_interface_enable_disable (sw_if_index, 0);
     vnet_delete_hw_interface (vnm, t->hw_if_index);
+    }
   else
     ethernet_delete_interface (vnm, t->hw_if_index);
 

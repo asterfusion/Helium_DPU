@@ -325,6 +325,8 @@ extern clib_error_t *gre_interface_admin_up_down (vnet_main_t * vnm,
 extern void gre_tunnel_stack (adj_index_t ai);
 extern void gre_update_adj (vnet_main_t * vnm,
 			    u32 sw_if_index, adj_index_t ai);
+extern void mgre_update_adj (vnet_main_t * vnm,
+			     u32 sw_if_index, adj_index_t ai);
 
 typedef struct mgre_walk_ctx_t_
 {
