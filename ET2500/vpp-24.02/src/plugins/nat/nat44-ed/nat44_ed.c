@@ -3497,6 +3497,8 @@ nat44_ed_worker_db_init (snat_main_per_thread_data_t *tsm, u32 translations)
   pool_get (tsm->lru_pool, head);
   tsm->unk_proto_lru_head_index = head - tsm->lru_pool;
   clib_dlist_init (tsm->lru_pool, tsm->unk_proto_lru_head_index);
+
+  clib_spinlock_init (&tsm->self_lock);
 }
 
 static void
@@ -3530,6 +3532,7 @@ nat44_ed_worker_db_free (snat_main_per_thread_data_t *tsm)
   pool_free (tsm->lru_pool);
   pool_free (tsm->sessions);
   pool_free (tsm->per_vrf_sessions_pool);
+  clib_spinlock_free (&tsm->self_lock);
 }
 
 static void

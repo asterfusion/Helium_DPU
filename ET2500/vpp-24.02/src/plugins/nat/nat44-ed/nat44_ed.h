@@ -476,6 +476,9 @@ typedef struct
 
   per_vrf_sessions_t *per_vrf_sessions_pool;
 
+  /* lock : Useful for ha_sync in certain situations */
+  clib_spinlock_t self_lock;
+
 } snat_main_per_thread_data_t;
 
 struct snat_main_s;

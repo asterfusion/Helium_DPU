@@ -318,6 +318,8 @@ nat_ed_session_delete (snat_main_t *sm, snat_session_t *ses, u32 thread_index,
   snat_main_per_thread_data_t *tsm =
     vec_elt_at_index (sm->per_thread_data, thread_index);
 
+  clib_spinlock_lock(&tsm->self_lock);
+
   if (lru_delete)
     {
       clib_dlist_remove (tsm->lru_pool, ses->lru_index);
@@ -328,6 +330,9 @@ nat_ed_session_delete (snat_main_t *sm, snat_session_t *ses, u32 thread_index,
   if (nat_ed_ses_o2i_flow_hash_add_del (sm, thread_index, ses, 0))
     nat_elog_debug (sm, "delete flow hash del failed");
   pool_put (tsm->sessions, ses);
+
+  clib_spinlock_unlock(&tsm->self_lock);
+
   vlib_set_simple_counter (&sm->total_sessions, thread_index, 0,
 			   pool_elts (tsm->sessions));
 }
@@ -484,6 +489,9 @@ per_vrf_sessions_unregister_session (snat_session_t *s, u32 thread_index)
   ASSERT (s->per_vrf_sessions_index != ~0);
 
   tsm = vec_elt_at_index (sm->per_thread_data, thread_index);
+
+  clib_spinlock_lock(&tsm->self_lock);
+
   per_vrf_sessions =
     pool_elt_at_index (tsm->per_vrf_sessions_pool, s->per_vrf_sessions_index);
 
@@ -491,6 +499,9 @@ per_vrf_sessions_unregister_session (snat_session_t *s, u32 thread_index)
 
   per_vrf_sessions->ses_count--;
   s->per_vrf_sessions_index = ~0;
+
+  clib_spinlock_unlock(&tsm->self_lock);
+
 }
 
 // fast path
