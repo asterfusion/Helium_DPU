@@ -151,6 +151,7 @@ llc_get_protocol_info (llc_main_t * m, llc_protocol_t protocol)
 }
 
 extern llc_main_t llc_main;
+extern vlib_node_registration_t llc_input_node;
 
 /* Register given node index to take input for given llc type. */
 void
