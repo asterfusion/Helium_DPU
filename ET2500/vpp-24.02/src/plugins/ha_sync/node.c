@@ -709,7 +709,9 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
   if (thread_index >= vec_len (hsm->per_thread_data))
     return 0;
   ptd = &hsm->per_thread_data[thread_index];
+  clib_spinlock_lock (&ptd->lock);
   ha_sync_drain_ack_fifo (thread_index, ptd);
+  clib_spinlock_unlock (&ptd->lock);
   now = vlib_time_now (vm);
   request_budget = ha_sync_request_pacing_budget (hsm, ptd, now);
   
@@ -806,6 +808,8 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
 
   }
 
+  clib_spinlock_lock (&ptd->lock);
+
   if (b_idx < n_alloc && n_pending > 0 && request_budget > 0)
   {
     u32 remaining = n_alloc - b_idx;
@@ -853,6 +857,8 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
         bi_to_send[sent++] = bi[b_idx];
       b_idx++;
     }
+
+  clib_spinlock_unlock (&ptd->lock);
 
   /** 5. batch configure and submit */
   if (PREDICT_TRUE (sent > 0))
@@ -1052,6 +1058,7 @@ VLIB_NODE_FN (ha_sync_timer_node)
     u32 pool_index;
     u32 seq;
 
+    clib_spinlock_lock (&ptd->lock);
     ha_sync_drain_ack_fifo (thread_index, ptd);
 
     ptd->timer_expired_vec =
@@ -1090,6 +1097,8 @@ VLIB_NODE_FN (ha_sync_timer_node)
       num_expired++;
       continue;
     }
+
+    clib_spinlock_unlock (&ptd->lock);
 
     if (num_expired)
       vec_delete (ptd->timer_expired_vec, num_expired, 0);
