@@ -469,7 +469,7 @@ vl_api_onp_interface_stats_t_handler(vl_api_onp_interface_stats_t* mp) {
 	clib_memset (&xstats, 0, sizeof (xstats));
 	rv = cnxk_drv_pktio_xstats_get(vm, cpi, xstats, xstats_count);
 	for(int i = 0; i < xstats_count; i++)
-		reply->onp_xstats.stats[i] = htonl(xstats[i]);
+		reply->onp_xstats.stats[i] = clib_host_to_net_u64(xstats[i]);
     }));
   return;
 
