@@ -390,6 +390,7 @@ VNET_FEATURE_INIT (mssc_ip4_in_feat, static) = {
 VNET_FEATURE_INIT (mssc_ip4_out_feat, static) = {
   .arc_name = "ip4-output",
   .node_name = "tcp-mss-clamping-ip4-out",
+  .runs_before = VNET_FEATURES ("wg4-output-tun"),
 };
 
 VNET_FEATURE_INIT (mssc_ip6_in_feat, static) = {
@@ -401,6 +402,7 @@ VNET_FEATURE_INIT (mssc_ip6_in_feat, static) = {
 VNET_FEATURE_INIT (mssc_ip6_out_feat, static) = {
   .arc_name = "ip6-output",
   .node_name = "tcp-mss-clamping-ip6-out",
+  .runs_before = VNET_FEATURES ("wg6-output-tun"),
 };
 
 /*
