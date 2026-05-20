@@ -262,6 +262,10 @@ typedef struct ip4_punt_redirect_trace_t_
 {
   index_t rrxi;
   u32 next;
+  u32 rx_sw_if_index;
+  u32 l2_rx_sw_if_index;
+  u8 used_l2_rx_sw_if_index;
+  u8 non_phy_intf;
 } ip_punt_redirect_trace_t;
 
 /**
@@ -310,16 +314,19 @@ ip_punt_redirect (vlib_main_t * vm,
       vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 
       while (n_left_from > 0 && n_left_to_next > 0)
-	{
-	  u32 rx_sw_if_index0, rrxi0;
-	  ip_punt_redirect_rx_t *rrx0;
-	  vlib_buffer_t *b0;
-	  u32 next0;
-	  u32 bi0;
+		{
+		  u32 rx_sw_if_index0, l2_rx_sw_if_index0, rrxi0;
+		  u8 used_l2_rx_sw_if_index0;
+		  ip_punt_redirect_rx_t *rrx0;
+		  vlib_buffer_t *b0;
+		  u32 next0;
+		  u32 bi0;
 
-	  rrxi0 = INDEX_INVALID;
-	  next0 = 0;
-	  bi0 = to_next[0] = from[0];
+		  rrxi0 = INDEX_INVALID;
+		  l2_rx_sw_if_index0 = ~0;
+		  used_l2_rx_sw_if_index0 = 0;
+		  next0 = 0;
+		  bi0 = to_next[0] = from[0];
 
 	  from += 1;
 	  n_left_from -= 1;
@@ -334,36 +341,59 @@ ip_punt_redirect (vlib_main_t * vm,
 	  rx_sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
 
 	  /*
+	   * TCP local receive path may overwrite RX sw_if_index to local
+	   * interface. If original ingress interface is saved, prefer it
+	   * for punt redirect lookup.
+	   */
+	  if (PREDICT_FALSE ((b0->flags & VNET_BUFFER_F_TCP_ORIG_RX_SAVED) &&
+			     vnet_buffer2 (b0)->l2_rx_sw_if_index != ~0))
+	    {
+	      l2_rx_sw_if_index0 = vnet_buffer2 (b0)->l2_rx_sw_if_index;
+
+	      if (vec_len (redirects) > l2_rx_sw_if_index0)
+		{
+		  rrxi0 = redirects[l2_rx_sw_if_index0];
+		  if (INDEX_INVALID == rrxi0)
+		    rrxi0 = redirects[0];
+		  used_l2_rx_sw_if_index0 = 1;
+		}
+
+	      b0->flags &= ~VNET_BUFFER_F_TCP_ORIG_RX_SAVED;
+	      vnet_buffer2 (b0)->l2_rx_sw_if_index = ~0;
+	    }
+
+	  /*
 	   * If config exists for this particular RX interface use it,
 	   * else use the default (at RX = 0)
 	   */
-	  if (vec_len (redirects) > rx_sw_if_index0)
+	  if (INDEX_INVALID == rrxi0 && vec_len (redirects) > rx_sw_if_index0)
 	    {
 	      rrxi0 = redirects[rx_sw_if_index0];
 	      if (INDEX_INVALID == rrxi0)
 		rrxi0 = redirects[0];
 	    }
-	  else if (vec_len (redirects) >= 1)
+	  else if (INDEX_INVALID == rrxi0 && vec_len (redirects) >= 1)
 	    rrxi0 = redirects[0];
 
       /**
        * add by asterfusion for support bvi punt
        */
-      if (PREDICT_FALSE(INDEX_INVALID == rrxi0 && (b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0))
-      {
-          u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
-          vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
-          if( si0 && si0->type == VNET_SW_INTERFACE_TYPE_SUB ) {
-              l2_rx_sw_if_index0 = si0->sup_sw_if_index;
-          }
-          if (vec_len (redirects) > l2_rx_sw_if_index0)
-          {
-              rrxi0 = redirects[l2_rx_sw_if_index0];
-              if (INDEX_INVALID == rrxi0)
-                  rrxi0 = redirects[0];
-          }
-          vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
-      }
+	      if (PREDICT_FALSE(INDEX_INVALID == rrxi0 && (b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0))
+	      {
+	          l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
+	          vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
+	          if( si0 && si0->type == VNET_SW_INTERFACE_TYPE_SUB ) {
+	              l2_rx_sw_if_index0 = si0->sup_sw_if_index;
+	          }
+	          if (vec_len (redirects) > l2_rx_sw_if_index0)
+	          {
+	              rrxi0 = redirects[l2_rx_sw_if_index0];
+	              if (INDEX_INVALID == rrxi0)
+	                  rrxi0 = redirects[0];
+	              used_l2_rx_sw_if_index0 = 1;
+	          }
+	          vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
+	      }
 
 	  if (PREDICT_TRUE (INDEX_INVALID != rrxi0))
 	    {
@@ -376,11 +406,15 @@ ip_punt_redirect (vlib_main_t * vm,
 
 	  if (PREDICT_FALSE (b0->flags & VLIB_BUFFER_IS_TRACED))
 	    {
-	      ip_punt_redirect_trace_t *t =
-		vlib_add_trace (vm, node, b0, sizeof (*t));
-	      t->next = next0;
-	      t->rrxi = rrxi0;
-	    }
+		      ip_punt_redirect_trace_t *t =
+			vlib_add_trace (vm, node, b0, sizeof (*t));
+		      t->next = next0;
+		      t->rrxi = rrxi0;
+		      t->rx_sw_if_index = rx_sw_if_index0;
+		      t->l2_rx_sw_if_index = l2_rx_sw_if_index0;
+		      t->used_l2_rx_sw_if_index = used_l2_rx_sw_if_index0;
+		      t->non_phy_intf = !!(b0->flags & VLIB_BUFFER_NOT_PHY_INTF);
+		    }
 
 	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
 					   n_left_to_next, bi0, next0);
