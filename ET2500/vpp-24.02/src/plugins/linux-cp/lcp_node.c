@@ -174,7 +174,28 @@ VLIB_NODE_FN (lip_punt_node)
 	       */
 	      len0 = ((u8 *) vlib_buffer_get_current (b0) -
 		      (u8 *) ethernet_buffer_get_header (b0));
-	      vlib_buffer_advance (b0, -len0);
+	      if (PREDICT_FALSE (!(b0->flags & VNET_BUFFER_F_L2_HDR_OFFSET_VALID)))
+              {
+                 vnet_main_t *vnm = vnet_get_main ();
+                 vnet_hw_interface_t *hw =
+                   vnet_get_sup_hw_interface (vnm, lip0->lip_phy_sw_if_index);
+                 ethernet_header_t *eh;
+
+                 /* add ethernet headers */
+                 vlib_buffer_advance (b0, -sizeof (ethernet_header_t));
+                 eh = vlib_buffer_get_current (b0);
+                 clib_memcpy (eh->src_address, hw->hw_address,
+                              sizeof (eh->src_address));
+                 clib_memcpy (eh->dst_address, hw->hw_address,
+                              sizeof (eh->dst_address));
+                 eh->type = (b0->flags & VNET_BUFFER_F_IS_IP4) ?
+                          clib_host_to_net_u16 (ETHERNET_TYPE_IP4) :
+                          clib_host_to_net_u16 (ETHERNET_TYPE_IP6);
+               }
+               else
+               {
+                 vlib_buffer_advance (b0, -len0);
+               }
 	    }
 	  /* Tun packets don't need any special treatment, just need to
 	   * be escorted past the TTL decrement. If we still want to use
