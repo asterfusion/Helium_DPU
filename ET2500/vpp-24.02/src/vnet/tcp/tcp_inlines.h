@@ -344,7 +344,8 @@ tcp_input_lookup_buffer (vlib_buffer_t * b, u8 thread_index, u32 * error,
     vnet_buffer (b)->sw_if_index[VLIB_RX] = local_rx_sw_if_index;
 
     if (PREDICT_FALSE (orig_rx_sw_if_index != local_rx_sw_if_index &&
-		       !(b->flags & VLIB_BUFFER_NOT_PHY_INTF)))
+		       !(b->flags & VLIB_BUFFER_NOT_PHY_INTF) &&
+		       vnet_buffer2 (b)->l2_rx_sw_if_index == ~0))
       {
 	vnet_buffer2 (b)->l2_rx_sw_if_index = orig_rx_sw_if_index;
 	b->flags |= VNET_BUFFER_F_TCP_ORIG_RX_SAVED;
