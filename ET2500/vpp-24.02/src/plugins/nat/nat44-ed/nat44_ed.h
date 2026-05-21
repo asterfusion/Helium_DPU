@@ -169,6 +169,7 @@ format_function_t format_nat44_ed_tcp_state;
 #define SNAT_SESSION_FLAG_AFFINITY	     (1 << 6)
 #define SNAT_SESSION_FLAG_EXACT_ADDRESS	     (1 << 7)
 #define SNAT_SESSION_FLAG_HAIRPINNING	     (1 << 8)
+#define SNAT_SESSION_FLAG_HA_ORPHAN	     (1 << 9)
 
 /* NAT interface flags */
 #define NAT_INTERFACE_FLAG_IS_INSIDE 1

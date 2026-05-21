@@ -354,16 +354,34 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
                 return;
 
             s_thread_index = ed_value_get_thread_index(&value_i2o);
-            ptsm = &sm->per_thread_data[s_thread_index];
-            s = pool_elt_at_index (ptsm->sessions, ed_value_get_session_index (&value_i2o));
-            nat44_ed_free_session_data (sm, s, s_thread_index, 1);
-            nat_ed_session_delete (sm, s, s_thread_index, 1);
+            if (s_thread_index == thread_index)
+            {
+                ptsm = &sm->per_thread_data[s_thread_index];
+                s = pool_elt_at_index (ptsm->sessions, ed_value_get_session_index (&value_i2o));
+                nat44_ed_free_session_data (sm, s, s_thread_index, 1);
+                nat_ed_session_delete (sm, s, s_thread_index, 1);
+            }
+            else
+            {
+                s = pool_elt_at_index (sm->per_thread_data[s_thread_index].sessions,
+                                       ed_value_get_session_index (&value_i2o));
+                s->flags |= SNAT_SESSION_FLAG_HA_ORPHAN;
+            }
 
             s_thread_index = ed_value_get_thread_index(&value_o2i);
-            ptsm = &sm->per_thread_data[s_thread_index];
-            s = pool_elt_at_index (ptsm->sessions, ed_value_get_session_index (&value_o2i));
-            nat44_ed_free_session_data (sm, s, s_thread_index, 1);
-            nat_ed_session_delete (sm, s, s_thread_index, 1);
+            if (s_thread_index == thread_index)
+            {
+                ptsm = &sm->per_thread_data[s_thread_index];
+                s = pool_elt_at_index (ptsm->sessions, ed_value_get_session_index (&value_o2i));
+                nat44_ed_free_session_data (sm, s, s_thread_index, 1);
+                nat_ed_session_delete (sm, s, s_thread_index, 1);
+            }
+            else
+            {
+                s = pool_elt_at_index (sm->per_thread_data[s_thread_index].sessions,
+                                       ed_value_get_session_index (&value_o2i));
+                s->flags |= SNAT_SESSION_FLAG_HA_ORPHAN;
+            }
 
             goto session_create;
         }
@@ -377,10 +395,19 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
             return;
 
         s_thread_index = ed_value_get_thread_index(&value_i2o);
-        ptsm = &sm->per_thread_data[s_thread_index];
-        s = pool_elt_at_index (ptsm->sessions, ed_value_get_session_index (&value_i2o));
-        nat44_ed_free_session_data (sm, s, s_thread_index, 1);
-        nat_ed_session_delete (sm, s, s_thread_index, 1);
+        if (s_thread_index == thread_index)
+        {
+            ptsm = &sm->per_thread_data[s_thread_index];
+            s = pool_elt_at_index (ptsm->sessions, ed_value_get_session_index (&value_i2o));
+            nat44_ed_free_session_data (sm, s, s_thread_index, 1);
+            nat_ed_session_delete (sm, s, s_thread_index, 1);
+        }
+        else
+        {
+            s = pool_elt_at_index (sm->per_thread_data[s_thread_index].sessions,
+                                   ed_value_get_session_index (&value_i2o));
+            s->flags |= SNAT_SESSION_FLAG_HA_ORPHAN;
+        }
 
         goto session_create;
     }
@@ -393,10 +420,19 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
             return;
 
         s_thread_index = ed_value_get_thread_index(&value_o2i);
-        ptsm = &sm->per_thread_data[s_thread_index];
-        s = pool_elt_at_index (ptsm->sessions, ed_value_get_session_index (&value_o2i));
-        nat44_ed_free_session_data (sm, s, s_thread_index, 1);
-        nat_ed_session_delete (sm, s, s_thread_index, 1);
+        if (s_thread_index == thread_index)
+        {
+            ptsm = &sm->per_thread_data[s_thread_index];
+            s = pool_elt_at_index (ptsm->sessions, ed_value_get_session_index (&value_o2i));
+            nat44_ed_free_session_data (sm, s, s_thread_index, 1);
+            nat_ed_session_delete (sm, s, s_thread_index, 1);
+        }
+        else
+        {
+            s = pool_elt_at_index (sm->per_thread_data[s_thread_index].sessions,
+                                   ed_value_get_session_index (&value_o2i));
+            s->flags |= SNAT_SESSION_FLAG_HA_ORPHAN;
+        }
 
         goto session_create;
     }
@@ -589,25 +625,39 @@ nat44_ed_ha_sync_flow_del(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
                 return;
 
             s_thread_index = ed_value_get_thread_index(&value_o2i);
-            ptsm = &sm->per_thread_data[s_thread_index];
-
-            s = pool_elt_at_index (ptsm->sessions, ed_value_get_session_index (&value_o2i));
-            nat44_ed_free_session_data (sm, s, s_thread_index, 1);
-            nat_ed_session_delete (sm, s, s_thread_index, 1);
+            if (s_thread_index == thread_index)
+            {
+                ptsm = &sm->per_thread_data[s_thread_index];
+                s = pool_elt_at_index (ptsm->sessions, ed_value_get_session_index (&value_o2i));
+                nat44_ed_free_session_data (sm, s, s_thread_index, 1);
+                nat_ed_session_delete (sm, s, s_thread_index, 1);
+            }
+            else
+            {
+                s = pool_elt_at_index (sm->per_thread_data[s_thread_index].sessions,
+                                       ed_value_get_session_index (&value_o2i));
+                s->flags |= SNAT_SESSION_FLAG_HA_ORPHAN;
+                clib_bihash_add_del_16_8 (&sm->flow_hash, &kv_o2i, 0);
+            }
         }
     }
 
     s_thread_index = ed_value_get_thread_index(&value_i2o);
-    ptsm = &sm->per_thread_data[s_thread_index];
-
-    if (thread_index != s_thread_index)
+    if (s_thread_index == thread_index)
+    {
+        ptsm = &sm->per_thread_data[s_thread_index];
+        s = pool_elt_at_index (ptsm->sessions, ed_value_get_session_index (&value_i2o));
+        nat44_ed_free_session_data (sm, s, s_thread_index, 1);
+        nat_ed_session_delete (sm, s, s_thread_index, 1);
+    }
+    else
     {
         clib_warning("NAT44-ED ha sync delete sessions threads are different");
+        s = pool_elt_at_index (sm->per_thread_data[s_thread_index].sessions,
+                               ed_value_get_session_index (&value_i2o));
+        s->flags |= SNAT_SESSION_FLAG_HA_ORPHAN;
+        clib_bihash_add_del_16_8 (&sm->flow_hash, &kv_i2o, 0);
     }
-
-    s = pool_elt_at_index (ptsm->sessions, ed_value_get_session_index (&value_i2o));
-    nat44_ed_free_session_data (sm, s, s_thread_index, 1);
-    nat_ed_session_delete (sm, s, s_thread_index, 1);
     return;
 }
 

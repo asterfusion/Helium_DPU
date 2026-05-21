@@ -210,10 +210,10 @@ nat44_ed_free_session_data (snat_main_t *sm, snat_session_t *s,
 {
   per_vrf_sessions_unregister_session (s, thread_index);
 
-  if (nat_ed_ses_i2o_flow_hash_add_del (sm, thread_index, s, 0))
+  if (nat_ed_ses_i2o_flow_hash_add_del_safe (sm, thread_index, s, 0))
     nat_elog_debug (sm, "free flow hash del failed");
 
-  if (nat_ed_ses_o2i_flow_hash_add_del (sm, thread_index, s, 0))
+  if (nat_ed_ses_o2i_flow_hash_add_del_safe (sm, thread_index, s, 0))
     nat_elog_debug (sm, "free flow hash del failed");
 
   if (na44_ed_is_fwd_bypass_session (s))
@@ -241,7 +241,7 @@ nat44_ed_free_session_data (snat_main_t *sm, snat_session_t *s,
     }
 
   /* ha sync */
-  if (!is_ha)
+  if (!is_ha && !(s->flags & SNAT_SESSION_FLAG_HA_ORPHAN))
     {
     nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_DEL, s);
     }
