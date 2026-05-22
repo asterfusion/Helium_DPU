@@ -937,6 +937,48 @@ compute_policer_params (u64 hz,	      /* CPU speed in clocks per second */
   return 0;
 }
 
+/*
+ * PPS variant: compute tokens_per_period and scale in packet units.
+ * 1 token = 1 packet. Limits are in packets, rates in packets/period.
+ */
+static int
+compute_policer_params_pps (u64 hz, u64 cir_pps, u64 pir_pps,
+			    u32 *current_limit,	 /* packets, in/out */
+			    u32 *extended_limit, /* packets, in/out */
+			    u32 *cir_pkts_per_period,
+			    u32 *pir_pkts_per_period, u32 *scale)
+{
+  double period = ((double) hz) / ((double) POLICER_TICKS_PER_PERIOD);
+  double internal_cir = (double) cir_pps / period;
+  double internal_pir = (double) pir_pps / period;
+  u32 max, scale_shift, scale_amount;
+
+  max = MAX (*current_limit, *extended_limit);
+  max = MAX (max, (u32) internal_cir << MAX_RATE_SHIFT);
+  max = MAX (max, (u32) internal_pir << MAX_RATE_SHIFT);
+  if (max == 0)
+    max = 1; /* guard: __builtin_clz(0) is undefined */
+
+  scale_shift = __builtin_clz (max);
+  scale_amount = 1 << scale_shift;
+  *scale = scale_shift;
+
+  *current_limit = *current_limit << scale_shift;
+  *extended_limit = *extended_limit << scale_shift;
+
+  internal_cir *= (double) scale_amount;
+  internal_pir *= (double) scale_amount;
+
+  if (internal_cir < 1.0)
+    internal_cir = 1.0;
+  if (internal_pir < 1.0)
+    internal_pir = 1.0;
+
+  *cir_pkts_per_period = (u32) internal_cir;
+  *pir_pkts_per_period = (u32) internal_pir;
+  return 0;
+}
+
 
 /*
  * Input: configured parameters in 'cfg'.
@@ -1051,6 +1093,119 @@ x86_pol_compute_hw_params (qos_pol_cfg_params_st *cfg, policer_t *hw)
 }
 
 /*
+ * PPS-native hw param computation. Token unit is 1 packet.
+ * Burst is expressed in milliseconds and converted to packets.
+ */
+static int
+x86_pol_compute_hw_params_pps (qos_pol_cfg_params_st *cfg, policer_t *hw)
+{
+  u64 hz;
+  u64 rnd_value;
+  u32 cap;
+
+  if (!cfg || !hw)
+    {
+      QOS_DEBUG_ERROR ("Illegal parameters");
+      return (-1);
+    }
+
+  hz = get_tsc_hz ();
+  hw->last_update_time = 0;
+
+  /*
+   * Compute burst limits in packets and cap to 32-bits.
+   * committed burst uses CIR rate for both 1R and 2R.
+   * extended burst uses CIR rate for 1R (same token refill rate),
+   * and will be recomputed with EIR rate in the 2R branch below.
+   */
+  (void) qos_pol_round ((u64) cfg->rb.pps.cb_ms * cfg->rb.pps.cir_pps,
+			1000LL, &rnd_value, QOS_ROUND_TO_CLOSEST);
+  cap = (rnd_value > 0xFFFFFFFF) ? 0xFFFFFFFF : (u32) rnd_value;
+  hw->current_limit = cap;
+
+  (void) qos_pol_round ((u64) cfg->rb.pps.eb_ms * cfg->rb.pps.cir_pps,
+			1000LL, &rnd_value, QOS_ROUND_TO_CLOSEST);
+  cap = (rnd_value > 0xFFFFFFFF) ? 0xFFFFFFFF : (u32) rnd_value;
+  hw->extended_limit = cap;
+
+  if ((cfg->rb.pps.cir_pps == 0) && (cfg->rb.pps.cb_ms == 0)
+      && (cfg->rb.pps.eb_ms == 0))
+    {
+      /* This is a uninitialized, always-violate policer */
+      hw->single_rate = 1;
+      hw->cir_tokens_per_period = 0;
+      return 0;
+    }
+
+  if ((cfg->rfc == QOS_POLICER_TYPE_1R2C) ||
+      (cfg->rfc == QOS_POLICER_TYPE_1R3C_RFC_2697))
+    {
+      /* Single-rate policer */
+      hw->single_rate = 1;
+
+      if ((cfg->rfc == QOS_POLICER_TYPE_1R2C) && cfg->rb.pps.eb_ms)
+	{
+	  QOS_DEBUG_ERROR ("Policer parameter validation failed -- 1R2C.");
+	  return (-1);
+	}
+
+      if ((cfg->rb.pps.cir_pps == 0) ||
+	  (cfg->rb.pps.eir_pps != 0) ||
+	  ((cfg->rb.pps.cb_ms == 0) && (cfg->rb.pps.eb_ms == 0)))
+	{
+	  QOS_DEBUG_ERROR ("Policer parameter validation failed -- 1R.");
+	  return (-1);
+	}
+
+      if (compute_policer_params_pps (hz, cfg->rb.pps.cir_pps, 0,
+				      &hw->current_limit, &hw->extended_limit,
+				      &hw->cir_tokens_per_period,
+				      &hw->pir_tokens_per_period, &hw->scale))
+	{
+	  QOS_DEBUG_ERROR ("Policer parameter computation failed.");
+	  return (-1);
+	}
+    }
+  else if ((cfg->rfc == QOS_POLICER_TYPE_2R3C_RFC_2698) ||
+	   (cfg->rfc == QOS_POLICER_TYPE_2R3C_RFC_4115))
+    {
+      /* Two-rate policer */
+      if ((cfg->rb.pps.cir_pps == 0) || (cfg->rb.pps.eir_pps == 0)
+	  || (cfg->rb.pps.eir_pps < cfg->rb.pps.cir_pps)
+	  || (cfg->rb.pps.cb_ms == 0) || (cfg->rb.pps.eb_ms == 0))
+	{
+	  QOS_DEBUG_ERROR ("Config parameter validation failed.");
+	  return (-1);
+	}
+
+      /* Recompute extended burst with EIR rate for two-rate policers */
+      (void) qos_pol_round ((u64) cfg->rb.pps.eb_ms * cfg->rb.pps.eir_pps,
+			    1000LL, &rnd_value, QOS_ROUND_TO_CLOSEST);
+      cap = (rnd_value > 0xFFFFFFFF) ? 0xFFFFFFFF : (u32) rnd_value;
+      hw->extended_limit = cap;
+
+      if (compute_policer_params_pps (hz, cfg->rb.pps.cir_pps,
+				      cfg->rb.pps.eir_pps, &hw->current_limit,
+				      &hw->extended_limit,
+				      &hw->cir_tokens_per_period,
+				      &hw->pir_tokens_per_period, &hw->scale))
+	{
+	  QOS_DEBUG_ERROR ("Policer parameter computation failed.");
+	  return (-1);
+	}
+    }
+  else
+    {
+      QOS_DEBUG_ERROR ("Config parameter validation failed. RFC not supported");
+      return (-1);
+    }
+
+  hw->current_bucket = hw->current_limit;
+  hw->extended_bucket = hw->extended_limit;
+  return 0;
+}
+
+/*
  * Input: configured parameters in 'cfg'.
  * Output: physical structure is returned in 'phys',
  * Return: Status, success or failure code.
@@ -1080,14 +1235,6 @@ pol_logical_2_physical (const qos_pol_cfg_params_st *cfg, policer_t *phys)
       kbps_cfg.rb.kbps.eb_bytes = cfg->rb.kbps.eb_bytes;
       break;
     case QOS_RATE_PPS:
-      kbps_cfg.rb.kbps.cir_kbps =
-	qos_convert_pps_to_kbps (cfg->rb.pps.cir_pps);
-      kbps_cfg.rb.kbps.eir_kbps =
-	qos_convert_pps_to_kbps (cfg->rb.pps.eir_pps);
-      kbps_cfg.rb.kbps.cb_bytes = qos_convert_burst_ms_to_bytes (
-	(u32) cfg->rb.pps.cb_ms, kbps_cfg.rb.kbps.cir_kbps);
-      kbps_cfg.rb.kbps.eb_bytes = qos_convert_burst_ms_to_bytes (
-	(u32) cfg->rb.pps.eb_ms, kbps_cfg.rb.kbps.eir_kbps);
       phys->is_pps_type = 1;
       break;
     default:
@@ -1116,7 +1263,10 @@ pol_logical_2_physical (const qos_pol_cfg_params_st *cfg, policer_t *phys)
   phys->color_aware = cfg->color_aware;
 
   /* convert logical into hw params which involves qos calculations */
-  rc = x86_pol_compute_hw_params (&kbps_cfg, phys);
+  if (cfg->rate_type == QOS_RATE_PPS)
+    rc = x86_pol_compute_hw_params_pps ((qos_pol_cfg_params_st *) cfg, phys);
+  else
+    rc = x86_pol_compute_hw_params (&kbps_cfg, phys);
   if (rc == -1)
     {
       QOS_DEBUG_ERROR ("Unable to compute hw param. Error: %d", rc);
