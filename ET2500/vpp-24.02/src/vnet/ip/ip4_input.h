@@ -55,6 +55,44 @@ typedef enum
   IP4_INPUT_N_NEXT,
 } ip4_input_next_t;
 
+#ifdef ASTERFUSION_VERIFY_L3_DMAC
+static_always_inline void
+check_verify_l3_dmac_v4(vlib_buffer_t * p, ip4_header_t * ip, u8 *error)
+{
+    if (!(p->flags & VNET_BUFFER_F_L2_HDR_OFFSET_VALID))
+        return;
+
+    ethernet_header_t *e = ethernet_buffer_get_header(p);
+
+    if (ethernet_address_cast(e->dst_address))
+    {
+        if (ethernet_address_is_broadcast(e->dst_address))
+        {
+            if (!(ip4_address_is_multicast (&ip->dst_address)) &&
+                !(ip4_address_is_global_broadcast(&ip->dst_address)))
+            {
+                *error = IP4_ERROR_BAD_L3_MAC;
+                return;
+            }
+        }
+        else
+        {
+            if (e->dst_address[0] != 0x01 ||
+                e->dst_address[1] != 0x00 ||
+                e->dst_address[2] != 0x5e ||
+                e->dst_address[3] != (ip->dst_address.as_u8[1] & 0x7f) ||
+                e->dst_address[4] != ip->dst_address.as_u8[2] ||
+                e->dst_address[5] != ip->dst_address.as_u8[3])
+            {
+                *error = IP4_ERROR_BAD_L3_MAC;
+                return;
+            }
+        }
+    }
+}
+
+#endif
+
 static_always_inline void
 check_ver_opt_csum (ip4_header_t * ip, u8 * error, int verify_checksum)
 {
@@ -92,6 +130,13 @@ ip4_input_check_x4 (vlib_main_t * vm,
   i32 len_diff0, len_diff1, len_diff2, len_diff3;
 
   error0 = error1 = error2 = error3 = IP4_ERROR_NONE;
+
+#ifdef ASTERFUSION_VERIFY_L3_DMAC
+  check_verify_l3_dmac_v4 (p[0], ip[0], &error0);
+  check_verify_l3_dmac_v4 (p[1], ip[1], &error1);
+  check_verify_l3_dmac_v4 (p[2], ip[2], &error2);
+  check_verify_l3_dmac_v4 (p[3], ip[3], &error3);
+#endif
 
   check_ver_opt_csum (ip[0], &error0, verify_checksum);
   check_ver_opt_csum (ip[1], &error1, verify_checksum);
@@ -216,6 +261,11 @@ ip4_input_check_x2 (vlib_main_t * vm,
 
   error0 = error1 = IP4_ERROR_NONE;
 
+#ifdef ASTERFUSION_VERIFY_L3_DMAC
+  check_verify_l3_dmac_v4 (p0, ip0, &error0);
+  check_verify_l3_dmac_v4 (p1, ip1, &error1);
+#endif
+
   check_ver_opt_csum (ip0, &error0, verify_checksum);
   check_ver_opt_csum (ip1, &error1, verify_checksum);
 
@@ -288,6 +338,10 @@ ip4_input_check_x1 (vlib_main_t * vm,
   u8 error0;
 
   error0 = IP4_ERROR_NONE;
+
+#ifdef ASTERFUSION_VERIFY_L3_DMAC
+  check_verify_l3_dmac_v4 (p0, ip0, &error0);
+#endif
 
   check_ver_opt_csum (ip0, &error0, verify_checksum);
 

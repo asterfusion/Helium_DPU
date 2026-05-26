@@ -43,6 +43,10 @@
 #include <vnet/ip/ip.h>
 #include <vnet/ip/icmp6.h>
 
+#ifdef ASTERFUSION_VERIFY_L3_DMAC
+#include <vnet/ethernet/ethernet.h>
+#endif
+
 typedef enum
 {
   IP6_INPUT_NEXT_DROP,
@@ -51,6 +55,42 @@ typedef enum
   IP6_INPUT_NEXT_ICMP_ERROR,
   IP6_INPUT_N_NEXT,
 } ip6_input_next_t;
+
+#ifdef ASTERFUSION_VERIFY_L3_DMAC
+static_always_inline void
+check_verify_l3_dmac_v6(vlib_buffer_t * p, ip6_header_t * ip, u8 *error)
+{
+    if (!(p->flags & VNET_BUFFER_F_L2_HDR_OFFSET_VALID))
+        return;
+
+    ethernet_header_t *e = ethernet_buffer_get_header(p);
+
+    if (ethernet_address_cast(e->dst_address))
+    {
+        if (ethernet_address_is_broadcast(e->dst_address))
+        {
+            if (!(ip6_address_is_multicast (&ip->dst_address)))
+            {
+                *error = IP6_ERROR_BAD_L3_MAC;
+                return;
+            }
+        }
+        else
+        {
+            if (e->dst_address[0] != 0x33 ||
+                e->dst_address[1] != 0x33 ||
+                e->dst_address[2] != ip->dst_address.as_u8[12] ||
+                e->dst_address[3] != ip->dst_address.as_u8[13] ||
+                e->dst_address[4] != ip->dst_address.as_u8[14] ||
+                e->dst_address[5] != ip->dst_address.as_u8[15])
+            {
+                *error = IP6_ERROR_BAD_L3_MAC;
+                return;
+            }
+        }
+    }
+}
+#endif
 
 always_inline void
 ip6_input_check_x2 (vlib_main_t * vm,
@@ -72,6 +112,11 @@ ip6_input_check_x2 (vlib_main_t * vm,
     (clib_net_to_host_u32
      (ip1->ip_version_traffic_class_and_flow_label) >> 28) !=
     6 ? IP6_ERROR_VERSION : error1;
+
+#ifdef ASTERFUSION_VERIFY_L3_DMAC
+  check_verify_l3_dmac_v6 (p0, ip0, &error0);
+  check_verify_l3_dmac_v6 (p1, ip1, &error1);
+#endif
 
   /* hop limit < 1? Drop it.  for link-local broadcast packets,
    * like dhcpv6 packets from client has hop-limit 1, which should not
@@ -130,6 +175,10 @@ ip6_input_check_x1 (vlib_main_t * vm,
     (clib_net_to_host_u32
      (ip0->ip_version_traffic_class_and_flow_label) >> 28) !=
     6 ? IP6_ERROR_VERSION : error0;
+
+#ifdef ASTERFUSION_VERIFY_L3_DMAC
+  check_verify_l3_dmac_v6 (p0, ip0, &error0);
+#endif
 
   /* hop limit < 1? Drop it.  for link-local broadcast packets,
    * like dhcpv6 packets from client has hop-limit 1, which should not
