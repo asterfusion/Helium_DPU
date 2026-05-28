@@ -276,8 +276,12 @@ gre_input (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame,
 	       .combined_sw_if_counters[VNET_INTERFACE_COUNTER_RX],
 	    vm->thread_index, tun_sw_if_index[0], 1 /* packets */,
 	    len[0] /* bytes */);
-	  vnet_buffer2 (b[0])->l2_rx_sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_RX];
-	  b[0]->flags |= VLIB_BUFFER_NOT_PHY_INTF;
+
+      if (!(b[0]->flags & VLIB_BUFFER_NOT_PHY_INTF))
+      {
+          vnet_buffer2 (b[0])->l2_rx_sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_RX];
+          b[0]->flags |= VLIB_BUFFER_NOT_PHY_INTF;
+      }
 	  vnet_buffer (b[0])->sw_if_index[VLIB_RX] = tun_sw_if_index[0];
 	}
       if (PREDICT_TRUE (next[1] > GRE_INPUT_NEXT_DROP))
@@ -287,8 +291,12 @@ gre_input (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame,
 	       .combined_sw_if_counters[VNET_INTERFACE_COUNTER_RX],
 	    vm->thread_index, tun_sw_if_index[1], 1 /* packets */,
 	    len[1] /* bytes */);
-	  vnet_buffer2 (b[1])->l2_rx_sw_if_index = vnet_buffer(b[1])->sw_if_index[VLIB_RX];
-	  b[1]->flags |= VLIB_BUFFER_NOT_PHY_INTF;
+
+      if (!(b[1]->flags & VLIB_BUFFER_NOT_PHY_INTF))
+      {
+          vnet_buffer2 (b[1])->l2_rx_sw_if_index = vnet_buffer(b[1])->sw_if_index[VLIB_RX];
+          b[1]->flags |= VLIB_BUFFER_NOT_PHY_INTF;
+      }
 	  vnet_buffer (b[1])->sw_if_index[VLIB_RX] = tun_sw_if_index[1];
 	}
 
@@ -397,8 +405,12 @@ gre_input (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame,
 	       .combined_sw_if_counters[VNET_INTERFACE_COUNTER_RX],
 	    vm->thread_index, tun_sw_if_index[0], 1 /* packets */,
 	    len[0] /* bytes */);
-	  vnet_buffer2 (b[0])->l2_rx_sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_RX];
-	  b[0]->flags |= VLIB_BUFFER_NOT_PHY_INTF;
+
+      if (!(b[0]->flags & VLIB_BUFFER_NOT_PHY_INTF))
+      {
+          vnet_buffer2 (b[0])->l2_rx_sw_if_index = vnet_buffer(b[0])->sw_if_index[VLIB_RX];
+          b[0]->flags |= VLIB_BUFFER_NOT_PHY_INTF;
+      }
 	  vnet_buffer (b[0])->sw_if_index[VLIB_RX] = tun_sw_if_index[0];
 	}
 
