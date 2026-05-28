@@ -492,22 +492,10 @@ cn10k_ipsec_enqueue_inbound (vlib_main_t *vm, vlib_node_runtime_t *node,
 
   ROC_LMT_CPT_BASE_ID_GET (lmt_base, core_lmt_id);
 
-  lmt_line[0] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 0);
-  lmt_line[1] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 1);
-  lmt_line[2] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 2);
-  lmt_line[3] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 3);
-  lmt_line[4] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 4);
-  lmt_line[5] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 5);
-  lmt_line[6] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 6);
-  lmt_line[7] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 7);
-  lmt_line[8] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 8);
-  lmt_line[9] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 9);
-  lmt_line[10] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 10);
-  lmt_line[11] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 11);
-  lmt_line[12] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 12);
-  lmt_line[13] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 13);
-  lmt_line[14] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 14);
-  lmt_line[15] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 15);
+  for (int i = 0; i < CN10K_MAX_LMT_SZ; i++)
+  {
+      lmt_line[i] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, i);
+  }
 
   while (n_left > 5)
     {
@@ -648,22 +636,10 @@ cn10k_ipsec_enqueue_inbound (vlib_main_t *vm, vlib_node_runtime_t *node,
 
       lmt_arg = ROC_CN10K_CPT_LMT_ARG | (uint64_t) core_lmt_id;
 
-      roc_lmt_mov_seg ((void *) lmt_line[0], inst, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[1], inst + 1, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[2], inst + 2, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[3], inst + 3, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[4], inst + 4, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[5], inst + 5, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[6], inst + 6, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[7], inst + 7, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[8], inst + 8, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[9], inst + 9, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[10], inst + 10, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[11], inst + 11, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[12], inst + 12, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[13], inst + 13, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[14], inst + 14, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[15], inst + 15, CPT_LMT_SIZE_COPY);
+      for (int i = 0; i < CN10K_MAX_LMT_SZ; i++)
+      {
+          roc_lmt_mov_seg ((void *) lmt_line[i], inst + i, CPT_LMT_SIZE_COPY);
+      }
 
       /* Set number of LMTSTs, excluding the first */
       lmt_arg |= (CN10K_MAX_LMT_SZ - 1) << 12;
