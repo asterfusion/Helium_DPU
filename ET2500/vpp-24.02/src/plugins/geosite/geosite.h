@@ -26,7 +26,6 @@
 #include <vppinfra/error.h>
 #include "domain_trie.h"
 #include "geoip_trie.h"
-
 typedef struct {
     /* API message ID base */
     u16 msg_id_base;
@@ -43,6 +42,7 @@ typedef struct {
 
     domain_trie_t * domain_trie;
     geoip_db_t *geoip_trie;
+    u32 *enable_refcnt_by_sw_if_index;
 } geosite_main_t;
 
 extern geosite_main_t geosite_main;
@@ -98,4 +98,3 @@ u32 *geoip_get_country_code_by_ip6(ip6_address_t ip6);
  * eval: (c-set-style "gnu")
  * End:
  */
-
