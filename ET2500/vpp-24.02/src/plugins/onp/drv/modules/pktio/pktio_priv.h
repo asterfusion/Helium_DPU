@@ -306,6 +306,7 @@ extern cnxk_pktio_ops_t eth_9k_ops;
 extern cnxk_pktio_ops_t cn10k_inl_dev_pktio_ops;
 extern cnxk_pktio_main_t cnxk_pktio_main;
 extern const u8 cnxk_pktio_default_rss_key[CNXK_PKTIO_RSS_KEY_LEN];
+extern const u8 cnxk_pktio_symmetric_rss_key[CNXK_PKTIO_RSS_KEY_LEN];
 
 static_always_inline cnxk_pktio_main_t *
 cnxk_pktio_get_main (void)

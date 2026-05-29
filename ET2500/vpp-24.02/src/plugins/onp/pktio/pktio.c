@@ -134,6 +134,34 @@ unformat_onp_pktio_rq_poll_algo (unformat_input_t *sub_input, va_list *args)
   return 1;
 }
 
+static u32
+unformat_onp_pktio_rss (unformat_input_t *sub_input, va_list *args)
+{
+  u32 flow_key = 0;
+  u32 *algo = 0;
+
+  algo = va_arg (*args, u32 *);
+
+  /* clang-format off */
+  while (unformat_check_input (sub_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (sub_input, "src_ip"))
+        flow_key |= FLOW_KEY_TYPE_L3_SRC;
+      else if (unformat (sub_input, "dst_ip"))
+        flow_key |= FLOW_KEY_TYPE_L3_DST;
+      else if (unformat (sub_input, "src_port"))
+        flow_key |= FLOW_KEY_TYPE_L4_SRC;
+      else if (unformat (sub_input, "dst_port"))
+        flow_key |= FLOW_KEY_TYPE_L4_DST;
+      else
+        return 0;
+    }
+  /* clang-format on */
+
+  *algo = flow_key;
+  return 1;
+}
+
 static void
 onp_pktio_set_default_config (onp_config_main_t *conf,
 			      onp_pktio_config_t *pktioconf,
@@ -203,6 +231,9 @@ onp_pktio_set_default_config (onp_config_main_t *conf,
       foreach_onp_pktio_config_item;
 #undef _
       /* clang-format on */
+
+      if (!pktioconf->is_rss_flow_key_configured)
+	pktioconf->is_rss_flow_key_configured = 1;
     }
   else
     {
@@ -229,6 +260,13 @@ onp_pktio_set_default_config (onp_config_main_t *conf,
       foreach_onp_pktio_config_item;
 #undef _
       /* clang-format on */
+
+      if (!pktioconf->is_rss_flow_key_configured)
+	{
+	  if (conf->onp_pktioconf_default.is_rss_flow_key_configured)
+	    pktioconf->rss_flow_key = conf->onp_pktioconf_default.rss_flow_key;
+	  pktioconf->is_rss_flow_key_configured = 1;
+	}
     }
 }
 
@@ -313,6 +351,12 @@ onp_pktio_config_parse (onp_config_main_t *conf, vlib_pci_addr_t pci_addr,
 			     &pktioconf->rxq_poll_algo))
 	    {
 	      pktioconf->is_rxq_poll_algo_configured = 1;
+	    }
+	  else if (unformat (sub_input, "rss %U",
+			     unformat_onp_pktio_rss,
+			     &pktioconf->rss_flow_key))
+	    {
+	      pktioconf->is_rss_flow_key_configured = 1;
 	    }
 	    /* clang-format off */
 #define _(name, variable, default_val, min_val, max_val, p)                   \
@@ -412,6 +456,7 @@ onp_pktio_early_setup (vlib_main_t *vm, onp_main_t *om,
       eth_config.n_rx_queues = pconf->n_rx_q;
       eth_config.n_tx_queues = pconf->n_tx_q;
       eth_config.n_tx_ipsec_queues = pconf->n_tx_ipsec_q;
+      eth_config.rss_flow_key = pconf->rss_flow_key;
 
       if (!pktio_capa.is_pktio_inl_outbound)
 	{
@@ -433,6 +478,8 @@ onp_pktio_early_setup (vlib_main_t *vm, onp_main_t *om,
       foreach_onp_pktio_config_item;
 #undef _
       /* clang-format on */
+
+      pktio->rss_flow_key = pconf->rss_flow_key;
     }
   pktio->pktio_pci_addr.as_u32 = pconf->pktio_pci_addr.as_u32;
   pktio->cnxk_pktio_index = drv_pktio_index;

@@ -239,6 +239,8 @@ typedef struct
   u8 numa_node;
   u8 name[ONP_INTF_NAME_MAX_SIZE];
 
+  u32 rss_flow_key;
+
   u32 init_done_magic_num;
 } onp_pktio_t;
 
@@ -257,6 +259,8 @@ typedef struct
 
   u32 is_pci_addr_configured : 1;
   u32 is_name_configured : 1;
+  u32 is_rss_flow_key_configured : 1;
+  u32 rss_flow_key;
   u8 *name;
 } onp_pktio_config_t;
 

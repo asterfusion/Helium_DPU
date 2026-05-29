@@ -119,7 +119,8 @@ static i32
 cn10k_pktio_config (vlib_main_t *vm, cnxk_pktio_t *dev,
 		    cnxk_pktio_config_t *config)
 {
-  u32 flow_key_cfg = CNXK_DEFAULT_RSS_FLOW_KEY;
+  u32 flow_key_cfg = config->rss_flow_key ?
+    config->rss_flow_key : CNXK_DEFAULT_RSS_FLOW_KEY;
   u64 rx_cfg = CNXK_PKTIO_DEFAULT_RX_CFG;
   u32 rx_queues, rx_max_len, tx_queues;
   struct roc_nix *nix = &dev->nix;
@@ -182,8 +183,11 @@ cn10k_pktio_config (vlib_main_t *vm, cnxk_pktio_t *dev,
       return -1;
     }
 
-  /* Update RSS key */
-  roc_nix_rss_key_set (nix, cnxk_pktio_default_rss_key);
+  /* Update RSS key: use symmetric key when custom flow key is configured */
+  if (config->rss_flow_key)
+    roc_nix_rss_key_set (nix, cnxk_pktio_symmetric_rss_key);
+  else
+    roc_nix_rss_key_set (nix, cnxk_pktio_default_rss_key);
 
   /*
    * The default RSS setup adds all queues to the RSS RETA table.
