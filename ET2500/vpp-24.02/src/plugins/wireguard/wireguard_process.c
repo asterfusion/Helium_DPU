@@ -40,10 +40,23 @@ static uword sf_wireguard_thread_fn(vlib_main_t *vm,
     wg_if_t *wgi = NULL;
     index_t perri = 0;
     fib_protocol_t proto;
+    uword event_type, *event_data = 0;
 
     while(1)
     {
         vlib_process_wait_for_event_or_clock(vm, 5);
+        event_type = vlib_process_get_events (vm, &event_data);
+        vec_reset_length (event_data);
+
+        switch (event_type)
+        {
+            case ~0:
+                /* no events => timeout */
+                break;
+            default:
+                clib_warning ("BUG: event type 0x%wx", event_type);
+                break;
+        }
 
         pool_foreach (peer, wg_peer_pool)
         {
