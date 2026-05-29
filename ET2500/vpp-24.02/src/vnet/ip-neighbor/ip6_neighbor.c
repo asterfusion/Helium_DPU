@@ -226,6 +226,29 @@ ip6_discover_neighbor_inline (vlib_main_t * vm,
 	    }
 	  ip6_address_copy (&src, ll);
 
+
+#ifdef ARP_FAIL_PUNT
+          if (!is_glean)
+          {
+            b0 = ip6_neighbor_probe (vm, vnm, sw_if_index0, thread_index, &src,
+                &ip0->dst_address);
+
+            if (PREDICT_TRUE (NULL != b0))
+            {
+                clib_memcpy_fast (b0->opaque2, p0->opaque2,
+                    sizeof (p0->opaque2));
+                b0->flags |= p0->flags & VLIB_BUFFER_IS_TRACED;
+                b0->trace_handle = p0->trace_handle;
+                p0->error = node->errors[IP6_NEIGHBOR_ERROR_REQUEST_SENT];
+            }
+            else
+            {
+                /* There is no address on the interface */
+                p0->error = node->errors[IP6_NEIGHBOR_ERROR_NO_BUFFERS];
+                continue;
+            }
+          }
+#else
 	  b0 = ip6_neighbor_probe (vm, vnm, sw_if_index0, thread_index, &src,
 				   &ip0->dst_address);
 
@@ -243,6 +266,7 @@ ip6_discover_neighbor_inline (vlib_main_t * vm,
 	      p0->error = node->errors[IP6_NEIGHBOR_ERROR_NO_BUFFERS];
 	      continue;
 	    }
+#endif
 	}
 
       vlib_put_next_frame (vm, node, IP6_NBR_NEXT_DROP, n_left_to_next_drop);
