@@ -139,6 +139,8 @@ unformat_onp_pktio_rss (unformat_input_t *sub_input, va_list *args)
 {
   u32 flow_key = 0;
   u32 *algo = 0;
+  int has_l3 = 0;
+  int has_l4 = 0;
 
   algo = va_arg (*args, u32 *);
 
@@ -146,20 +148,43 @@ unformat_onp_pktio_rss (unformat_input_t *sub_input, va_list *args)
   while (unformat_check_input (sub_input) != UNFORMAT_END_OF_INPUT)
     {
       if (unformat (sub_input, "src_ip"))
+      {
         flow_key |= FLOW_KEY_TYPE_L3_SRC;
+        has_l3 = 1;
+      }
       else if (unformat (sub_input, "dst_ip"))
+      {
         flow_key |= FLOW_KEY_TYPE_L3_DST;
+        has_l3 = 1;
+      }
       else if (unformat (sub_input, "src_port"))
+      {
         flow_key |= FLOW_KEY_TYPE_L4_SRC;
+        has_l4 = 1;
+      }
       else if (unformat (sub_input, "dst_port"))
+      {
         flow_key |= FLOW_KEY_TYPE_L4_DST;
+        has_l4 = 1;
+      }
       else
+      {
         return 0;
+      }
     }
   /* clang-format on */
 
-  *algo = flow_key;
-  return 1;
+    if (has_l3)
+    {
+        flow_key |= FLOW_KEY_TYPE_IPV4 | FLOW_KEY_TYPE_IPV6;
+    }
+    if (has_l4)
+    {
+        flow_key |= FLOW_KEY_TYPE_TCP | FLOW_KEY_TYPE_UDP | FLOW_KEY_TYPE_SCTP;
+    }
+
+    *algo = flow_key;
+    return 1;
 }
 
 static void
