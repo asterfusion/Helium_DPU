@@ -226,6 +226,29 @@ ip6_discover_neighbor_inline (vlib_main_t * vm,
 	    }
 	  ip6_address_copy (&src, ll);
 
+
+#ifdef ARP_FAIL_PUNT
+          if (!is_glean)
+          {
+            b0 = ip6_neighbor_probe (vm, vnm, sw_if_index0, thread_index, &src,
+                &ip0->dst_address);
+
+            if (PREDICT_TRUE (NULL != b0))
+            {
+                clib_memcpy_fast (b0->opaque2, p0->opaque2,
+                    sizeof (p0->opaque2));
+                b0->flags |= p0->flags & VLIB_BUFFER_IS_TRACED;
+                b0->trace_handle = p0->trace_handle;
+                p0->error = node->errors[IP6_NEIGHBOR_ERROR_REQUEST_SENT];
+            }
+            else
+            {
+                /* There is no address on the interface */
+                p0->error = node->errors[IP6_NEIGHBOR_ERROR_NO_BUFFERS];
+                continue;
+            }
+          }
+#else
 	  b0 = ip6_neighbor_probe (vm, vnm, sw_if_index0, thread_index, &src,
 				   &ip0->dst_address);
 
@@ -243,6 +266,7 @@ ip6_discover_neighbor_inline (vlib_main_t * vm,
 	      p0->error = node->errors[IP6_NEIGHBOR_ERROR_NO_BUFFERS];
 	      continue;
 	    }
+#endif
 	}
 
       vlib_put_next_frame (vm, node, IP6_NBR_NEXT_DROP, n_left_to_next_drop);
@@ -265,6 +289,25 @@ ip6_glean (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 }
 
 /* *INDENT-OFF* */
+#ifdef ARP_FAIL_PUNT
+/* *INDENT-OFF* */
+VLIB_REGISTER_NODE (ip6_glean_node) =
+{
+  .function = ip6_glean,
+  .name = "ip6-glean",
+  .vector_size = sizeof (u32),
+  .format_trace = format_ip6_forward_next_trace,
+  .n_errors = IP6_NEIGHBOR_N_ERROR,
+  .error_counters = ip6_neighbor_error_counters,
+  .n_next_nodes = IP6_NBR_N_NEXT,
+  .next_nodes =
+  {
+    [IP6_NBR_NEXT_DROP] = "linux-cp-punt",
+    [IP6_NBR_NEXT_REPLY_TX] = "ip6-rewrite-mcast",
+  },
+};
+
+#else
 VLIB_REGISTER_NODE (ip6_glean_node) =
 {
   .function = ip6_glean,
@@ -280,6 +323,7 @@ VLIB_REGISTER_NODE (ip6_glean_node) =
     [IP6_NBR_NEXT_REPLY_TX] = "ip6-rewrite-mcast",
   },
 };
+#endif
 VLIB_REGISTER_NODE (ip6_discover_neighbor_node) =
 {
   .function = ip6_discover_neighbor,
