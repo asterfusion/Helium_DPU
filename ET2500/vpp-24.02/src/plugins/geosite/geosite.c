@@ -143,7 +143,7 @@ int geosite_enable_disable (geosite_main_t * gmp, u32 sw_if_index,
     vlib_process_signal_event (gmp->vlib_main,
                                gmp->periodic_node_index,
                                GEOSITE_EVENT_PERIODIC_ENABLE_DISABLE,
-			       (uword) geosite_has_enabled_port (gmp));
+			                   (uword) geosite_has_enabled_port (gmp));
   return rv;
 }
 
