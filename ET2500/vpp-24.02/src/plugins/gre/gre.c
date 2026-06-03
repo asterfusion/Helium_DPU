@@ -232,7 +232,11 @@ gre_build_rewrite (vnet_main_t *vnm, u32 sw_if_index, vnet_link_t link_type,
 
   if (!is_ipv6)
     {
-      vec_validate (rewrite, sizeof (*h4) - 1);
+      /* Allocate space for maximum header size including key */
+      if (gre_key_is_valid (t->gre_key))
+	vec_validate (rewrite, sizeof (*h4) + sizeof (gre_key_t) - 1);
+      else
+	vec_validate (rewrite, sizeof (*h4) - 1);
       h4 = (ip4_and_gre_header_t *) rewrite;
       gre = &h4->gre;
       h4->ip4.ip_version_and_header_length = 0x45;
@@ -245,7 +249,11 @@ gre_build_rewrite (vnet_main_t *vnm, u32 sw_if_index, vnet_link_t link_type,
     }
   else
     {
-      vec_validate (rewrite, sizeof (*h6) - 1);
+      /* Allocate space for maximum header size including key */
+      if (gre_key_is_valid (t->gre_key))
+	vec_validate (rewrite, sizeof (*h6) + sizeof (gre_key_t) - 1);
+      else
+	vec_validate (rewrite, sizeof (*h6) - 1);
       h6 = (ip6_and_gre_header_t *) rewrite;
       gre = &h6->gre;
       h6->ip6.ip_version_traffic_class_and_flow_label =
@@ -265,9 +273,18 @@ gre_build_rewrite (vnet_main_t *vnm, u32 sw_if_index, vnet_link_t link_type,
       gre->flags_and_version = clib_host_to_net_u16 (GRE_FLAGS_SEQUENCE);
     }
   else
-    gre->protocol =
-      clib_host_to_net_u16 (gre_proto_from_vnet_link (link_type));
-
+    {
+      gre->protocol =
+	clib_host_to_net_u16 (gre_proto_from_vnet_link (link_type));
+      gre->flags_and_version = 0; // Clear flags first
+      /* Add key only for non-ERSPAN tunnels */
+      if (gre_key_is_valid (t->gre_key))
+	{
+	  gre_header_with_key_t *grek = (gre_header_with_key_t *) gre;
+	  grek->flags_and_version = clib_host_to_net_u16 (GRE_FLAGS_KEY);
+	  grek->key = clib_host_to_net_u32 (t->gre_key);
+	}
+    }
   return (rewrite);
 }
 
@@ -492,6 +509,22 @@ mgre_update_adj (vnet_main_t *vnm, u32 sw_if_index, adj_index_t ai)
   mgre_walk_ctx_t ctx = { .t = t, .ne = ne };
   adj_nbr_walk_nh (sw_if_index, adj->ia_nh_proto, &adj->sub_type.nbr.next_hop,
 		   mgre_mk_complete_walk, &ctx);
+}
+
+adj_walk_rc_t
+gre_adj_update_walk_cb (adj_index_t ai, void *ctx)
+{
+  u32 sw_if_index = *(u32 *) ctx;
+  gre_update_adj (vnet_get_main (), sw_if_index, ai);
+  return (ADJ_WALK_RC_CONTINUE);
+}
+
+adj_walk_rc_t
+mgre_adj_update_walk_cb (adj_index_t ai, void *ctx)
+{
+  u32 sw_if_index = *(u32 *) ctx;
+  mgre_update_adj (vnet_get_main (), sw_if_index, ai);
+  return (ADJ_WALK_RC_CONTINUE);
 }
 #endif /* CLIB_MARCH_VARIANT */
 

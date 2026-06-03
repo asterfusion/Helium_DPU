@@ -47,6 +47,20 @@ format_gre_tunnel_type (u8 *s, va_list *args)
   return (s);
 }
 
+/**
+ * @brief Format a GRE key for display
+ */
+u8 *
+format_gre_key (u8 *s, va_list *args)
+{
+  gre_key_t key = va_arg (*args, gre_key_t);
+
+  if (!gre_key_is_valid (key))
+    return format (s, "INVALID");
+  else
+    return format (s, "%u", key);
+}
+
 static u8 *
 format_gre_tunnel (u8 *s, va_list *args)
 {
@@ -60,6 +74,9 @@ format_gre_tunnel (u8 *s, va_list *args)
 
   s = format (s, "payload %U ", format_gre_tunnel_type, t->type);
   s = format (s, "%U ", format_tunnel_mode, t->mode);
+
+  if (gre_key_is_valid (t->gre_key))
+    s = format (s, "key %U ", format_gre_key, t->gre_key);
 
   if (t->type == GRE_TUNNEL_TYPE_ERSPAN)
     s = format (s, "session %d ", t->session_id);
@@ -80,13 +97,13 @@ gre_tunnel_db_find (const vnet_gre_tunnel_add_del_args_t *a,
   if (!a->is_ipv6)
     {
       gre_mk_key4 (a->src.ip4, a->dst.ip4, outer_fib_index, a->type, a->mode,
-		   a->session_id, &key->gtk_v4);
+		   a->session_id, a->gre_key, &key->gtk_v4);
       p = hash_get_mem (gm->tunnel_by_key4, &key->gtk_v4);
     }
   else
     {
       gre_mk_key6 (&a->src.ip6, &a->dst.ip6, outer_fib_index, a->type, a->mode,
-		   a->session_id, &key->gtk_v6);
+		   a->session_id, a->gre_key, &key->gtk_v6);
       p = hash_get_mem (gm->tunnel_by_key6, &key->gtk_v6);
     }
 
@@ -251,11 +268,11 @@ gre_teib_mk_key (const gre_tunnel_t *t, const teib_entry_t *ne,
   if (FIB_PROTOCOL_IP4 == nh->fp_proto)
     gre_mk_key4 (t->tunnel_src.ip4, nh->fp_addr.ip4,
 		 teib_entry_get_fib_index (ne), t->type, TUNNEL_MODE_P2P, 0,
-		 &key->gtk_v4);
+		 t->gre_key, &key->gtk_v4);
   else
     gre_mk_key6 (&t->tunnel_src.ip6, &nh->fp_addr.ip6,
 		 teib_entry_get_fib_index (ne), t->type, TUNNEL_MODE_P2P, 0,
-		 &key->gtk_v6);
+		 t->gre_key, &key->gtk_v6);
 }
 
 /**
@@ -377,6 +394,8 @@ vnet_gre_tunnel_add (vnet_gre_tunnel_add_del_args_t *a, u32 outer_fib_index,
 
   pool_get_aligned (gm->tunnels, t, CLIB_CACHE_LINE_BYTES);
   clib_memset (t, 0, sizeof (*t));
+  // added for GRE Key - only mark as present if key is non-zero
+  t->gre_key = a->gre_key;
 
   /* Reconcile the real dev_instance and a possible requested instance */
   u32 t_idx = t - gm->tunnels; /* tunnel index (or instance) */
@@ -618,6 +637,86 @@ vnet_gre_tunnel_add_del (vnet_gre_tunnel_add_del_args_t *a, u32 *sw_if_indexp, u
     return (vnet_gre_tunnel_delete (a, outer_fib_index, sw_if_indexp));
 }
 
+int
+vnet_gre_tunnel_update_key (u32 sw_if_index, gre_key_t gre_key)
+{
+  gre_main_t *gm = &gre_main;
+  gre_tunnel_t *t;
+  gre_tunnel_key_t key;
+  u32 ti;
+
+  if ((sw_if_index >= vec_len (gm->tunnel_index_by_sw_if_index)) ||
+      (~0 == gm->tunnel_index_by_sw_if_index[sw_if_index]))
+    return VNET_API_ERROR_INVALID_SW_IF_INDEX;
+
+  ti = gm->tunnel_index_by_sw_if_index[sw_if_index];
+  t = pool_elt_at_index (gm->tunnels, ti);
+
+  if (t->mode == TUNNEL_MODE_MP)
+    teib_walk_itf (t->sw_if_index, gre_tunnel_delete_teib_walk, t);
+
+  if (t->tunnel_dst.fp_proto == FIB_PROTOCOL_IP6)
+    {
+      gre_mk_key6 (&t->tunnel_src.ip6, &t->tunnel_dst.fp_addr.ip6,
+		   t->outer_fib_index, t->type, t->mode, t->session_id,
+		   t->gre_key, &key.gtk_v6);
+      hash_unset_mem_free (&gm->tunnel_by_key6, &key.gtk_v6);
+    }
+  else
+    {
+      gre_mk_key4 (t->tunnel_src.ip4, t->tunnel_dst.fp_addr.ip4,
+		   t->outer_fib_index, t->type, t->mode, t->session_id,
+		   t->gre_key, &key.gtk_v4);
+      hash_unset_mem_free (&gm->tunnel_by_key4, &key.gtk_v4);
+    }
+
+  t->gre_key = gre_key;
+
+  if (t->tunnel_dst.fp_proto == FIB_PROTOCOL_IP6)
+    {
+      gre_mk_key6 (&t->tunnel_src.ip6, &t->tunnel_dst.fp_addr.ip6,
+		   t->outer_fib_index, t->type, t->mode, t->session_id,
+		   t->gre_key, &key.gtk_v6);
+      hash_set_mem_alloc (&gm->tunnel_by_key6, &key.gtk_v6, t->dev_instance);
+    }
+  else
+    {
+      gre_mk_key4 (t->tunnel_src.ip4, t->tunnel_dst.fp_addr.ip4,
+		   t->outer_fib_index, t->type, t->mode, t->session_id,
+		   t->gre_key, &key.gtk_v4);
+      hash_set_mem_alloc (&gm->tunnel_by_key4, &key.gtk_v4, t->dev_instance);
+    }
+
+  if (t->mode == TUNNEL_MODE_MP)
+    teib_walk_itf (t->sw_if_index, gre_tunnel_add_teib_walk, t);
+
+  if (t->type != GRE_TUNNEL_TYPE_L3)
+    {
+      gre_update_adj (gm->vnet_main, sw_if_index, t->l2_adj_index);
+    }
+  else
+    {
+      fib_protocol_t proto;
+
+      FOR_EACH_FIB_IP_PROTOCOL (proto)
+	{
+	  switch (t->mode)
+	    {
+	    case TUNNEL_MODE_P2P:
+	      adj_nbr_walk (sw_if_index, proto, gre_adj_update_walk_cb,
+			    &t->sw_if_index);
+	      break;
+	    case TUNNEL_MODE_MP:
+	      adj_nbr_walk (sw_if_index, proto, mgre_adj_update_walk_cb,
+			    &t->sw_if_index);
+	      break;
+	    }
+	}
+    }
+
+  return 0;
+}
+
 clib_error_t *
 gre_interface_admin_up_down (vnet_main_t *vnm, u32 hw_if_index, u32 flags)
 {
@@ -669,7 +768,7 @@ create_gre_tunnel_command_fn (vlib_main_t *vm, unformat_input_t *input,
   u8 is_add = 1;
   u32 sw_if_index;
   clib_error_t *error = NULL;
-
+  u32 key = 0; // added GRE key
   /* Get a line of input. */
   if (!unformat_user (input, unformat_line_input, line_input))
     return 0;
@@ -694,6 +793,8 @@ create_gre_tunnel_command_fn (vlib_main_t *vm, unformat_input_t *input,
 	t_type = GRE_TUNNEL_TYPE_ERSPAN;
       else if (unformat (line_input, "flags %U",
 			 unformat_tunnel_encap_decap_flags, &flags))
+	;
+      else if (unformat (line_input, "key %u", &key))
 	;
       else
 	{
@@ -736,6 +837,7 @@ create_gre_tunnel_command_fn (vlib_main_t *vm, unformat_input_t *input,
   a->is_ipv6 = !ip46_address_is_ip4 (&src);
   a->instance = instance;
   a->flags = flags;
+  a->gre_key = key;
   clib_memcpy (&a->src, &src, sizeof (a->src));
   clib_memcpy (&a->dst, &dst, sizeof (a->dst));
 
@@ -780,7 +882,8 @@ VLIB_CLI_COMMAND (create_gre_tunnel_command, static) = {
   .path = "create gre tunnel",
   .short_help = "create gre tunnel src <addr> dst <addr> [instance <n>] "
 		"[outer-fib-id <fib>] [teb | erspan <session-id>] [del] "
-		"[multipoint]",
+		"[multipoint]"
+		"[key <value>]",
   .function = create_gre_tunnel_command_fn,
 };
 /* *INDENT-ON* */
@@ -827,6 +930,67 @@ show_gre_tunnel_command_fn (vlib_main_t *vm, unformat_input_t *input,
 VLIB_CLI_COMMAND (show_gre_tunnel_command, static) = {
   .path = "show gre tunnel",
   .function = show_gre_tunnel_command_fn,
+};
+/* *INDENT-ON* */
+
+static clib_error_t *
+gre_tunnel_update_key_command_fn (vlib_main_t *vm, unformat_input_t *input,
+				  vlib_cli_command_t *cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  u32 sw_if_index = ~0;
+  u32 key = 0;
+  int rv;
+  clib_error_t *error = NULL;
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (line_input, "%U", unformat_vnet_sw_interface,
+		    vnet_get_main (), &sw_if_index))
+	;
+      else if (unformat (line_input, "key %u", &key))
+	;
+      else
+	{
+	  error = clib_error_return (0, "unknown input `%U'",
+				     format_unformat_error, line_input);
+	  goto done;
+	}
+    }
+
+  if (~0 == sw_if_index)
+    {
+      error = clib_error_return (0, "interface not specified");
+      goto done;
+    }
+
+  rv = vnet_gre_tunnel_update_key (sw_if_index, key);
+
+  switch (rv)
+    {
+    case 0:
+      break;
+    case VNET_API_ERROR_INVALID_SW_IF_INDEX:
+      error = clib_error_return (0, "invalid interface");
+      break;
+    default:
+      error = clib_error_return (0, "vnet_gre_tunnel_update_key returned %d", rv);
+      break;
+    }
+
+done:
+  unformat_free (line_input);
+  return error;
+}
+
+/* *INDENT-OFF* */
+VLIB_CLI_COMMAND (gre_tunnel_update_key_command, static) = {
+  .path = "set gre tunnel key",
+  .short_help = "set gre tunnel key <interface> key <value>",
+  .function = gre_tunnel_update_key_command_fn,
 };
 /* *INDENT-ON* */
 
