@@ -34,7 +34,7 @@ the "rss src_ip" is a new addition, supporting any combination of src_ip, dst_ip
 
 ### 2.1 networking
 
-![image-20260529234302717](.\rss_image\2_1_1)
+![image-20260529234302717](./rss_image/2_1_1)
 
 
 
