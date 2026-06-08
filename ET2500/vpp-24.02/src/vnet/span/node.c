@@ -61,7 +61,7 @@ static char *span_error_strings[] = {
 static_always_inline void
 span_mirror (vlib_main_t * vm, vlib_node_runtime_t * node, u32 sw_if_index0,
 	     vlib_buffer_t * b0, vlib_frame_t ** mirror_frames,
-	     vlib_rx_or_tx_t rxtx, span_feat_t sf)
+	     vlib_rx_or_tx_t rxtx, span_feat_t sf, uword ** mirrored_ports)
 {
   vlib_buffer_t *c0;
   span_main_t *sm = &span_main;
@@ -87,6 +87,8 @@ span_mirror (vlib_main_t * vm, vlib_node_runtime_t * node, u32 sw_if_index0,
   /* *INDENT-OFF* */
   clib_bitmap_foreach (i, sm0->mirror_ports)
     {
+      if (mirrored_ports && clib_bitmap_get (*mirrored_ports, i))
+        continue;
       if (mirror_frames[i] == 0)
         {
           if (sf == SPAN_FEAT_L2)
@@ -106,6 +108,8 @@ span_mirror (vlib_main_t * vm, vlib_node_runtime_t * node, u32 sw_if_index0,
 	    vnet_buffer (c0)->l2.feature_bitmap = L2OUTPUT_FEAT_OUTPUT;
           to_mirror_next[0] = vlib_get_buffer_index (vm, c0);
           mirror_frames[i]->n_vectors++;
+          if (mirrored_ports)
+            *mirrored_ports = clib_bitmap_set (*mirrored_ports, i, 1);
           if (PREDICT_FALSE (b0->flags & VLIB_BUFFER_IS_TRACED))
             {
               span_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
@@ -123,6 +127,31 @@ span_mirror (vlib_main_t * vm, vlib_node_runtime_t * node, u32 sw_if_index0,
 	}
     }
   /* *INDENT-ON* */
+}
+
+static_always_inline void
+span_mirror_rx (vlib_main_t * vm, vlib_node_runtime_t * node, u32 sw_if_index0,
+		vlib_buffer_t * b0, vlib_frame_t ** mirror_frames,
+		span_feat_t sf)
+{
+  uword *mirrored_ports = 0;
+
+  if (PREDICT_TRUE (!(b0->flags & VLIB_BUFFER_NOT_PHY_INTF)))
+    {
+      span_mirror (vm, node, sw_if_index0, b0, mirror_frames, VLIB_RX, sf, 0);
+      return;
+    }
+
+  span_mirror (vm, node, sw_if_index0, b0, mirror_frames, VLIB_RX, sf,
+	       &mirrored_ports);
+
+  u32 phy_sw_if_index0 = vnet_buffer2 (b0)->l2_rx_sw_if_index;
+
+  if (phy_sw_if_index0 != ~0 && phy_sw_if_index0 != sw_if_index0)
+    span_mirror (vm, node, phy_sw_if_index0, b0, mirror_frames, VLIB_RX, sf,
+		 &mirrored_ports);
+
+  clib_bitmap_free (mirrored_ports);
 }
 
 static_always_inline uword
@@ -174,8 +203,18 @@ span_node_inline_fn (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  sw_if_index0 = vnet_buffer (b0)->sw_if_index[rxtx];
 	  sw_if_index1 = vnet_buffer (b1)->sw_if_index[rxtx];
 
-	  span_mirror (vm, node, sw_if_index0, b0, mirror_frames, rxtx, sf);
-	  span_mirror (vm, node, sw_if_index1, b1, mirror_frames, rxtx, sf);
+	  if (rxtx == VLIB_RX)
+	    {
+	      span_mirror_rx (vm, node, sw_if_index0, b0, mirror_frames, sf);
+	      span_mirror_rx (vm, node, sw_if_index1, b1, mirror_frames, sf);
+	    }
+	  else
+	    {
+	      span_mirror (vm, node, sw_if_index0, b0, mirror_frames, rxtx,
+			   sf, 0);
+	      span_mirror (vm, node, sw_if_index1, b1, mirror_frames, rxtx,
+			   sf, 0);
+	    }
 
 	  switch (sf)
 	    {
@@ -224,7 +263,11 @@ span_node_inline_fn (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  b0 = vlib_get_buffer (vm, bi0);
 	  sw_if_index0 = vnet_buffer (b0)->sw_if_index[rxtx];
 
-	  span_mirror (vm, node, sw_if_index0, b0, mirror_frames, rxtx, sf);
+	  if (rxtx == VLIB_RX)
+	    span_mirror_rx (vm, node, sw_if_index0, b0, mirror_frames, sf);
+	  else
+	    span_mirror (vm, node, sw_if_index0, b0, mirror_frames, rxtx, sf,
+			 0);
 
 	  switch (sf)
 	    {
@@ -360,3 +403,4 @@ VLIB_INIT_FUNCTION (span_init);
  * eval: (c-set-style "gnu")
  * End:
  */
+
