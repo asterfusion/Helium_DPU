@@ -102,6 +102,9 @@ wg_create_buffer (vlib_main_t *vm, const u8 *rewrite, const u8 *packet,
   b0->current_length = packet_len;
 
   wg_buffer_prepend_rewrite (vm, b0, rewrite, is_ip4);
+  b0->flags = 0;
+  b0->no_nat = 0;
+  b0->acl_index = 0;
 
   return true;
 }

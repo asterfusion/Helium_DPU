@@ -115,7 +115,7 @@ format_onp_pktio (u8 *s, va_list *args)
 
 	/* clang-format off */
 #define _(str, val)                                                           \
-      s = format (s, "%U%-40s%16u\n", format_white_space, indent + 1, #str,   \
+      s = format (s, "%U%-40s%16Lu\n", format_white_space, indent + 1, #str, \
 		  stats.val);
       foreach_onp_pktio_counter;
 #undef _
@@ -132,7 +132,7 @@ format_onp_pktio (u8 *s, va_list *args)
 	    /* clang-format off */
 #define _(str, val)                                                           \
 	  snprintf (q_name, sizeof (q_name), "rxq_%d_%s", i, #str);           \
-	  s = format (s, "%U%-40s%16u\n", format_white_space, indent + 1,     \
+	  s = format (s, "%U%-40s%16Lu\n", format_white_space, indent + 1,    \
 		      q_name, qstats.val);
 	  foreach_onp_pktio_rxq_counter;
 #undef _
@@ -148,7 +148,7 @@ format_onp_pktio (u8 *s, va_list *args)
 	    /* clang-format off */
 #define _(str, val)                                                           \
 	  snprintf (q_name, sizeof (q_name), "ff_rxq_%d_%s", i, #str);        \
-	  s = format (s, "%U%-40s%16u\n", format_white_space, indent + 1,     \
+	  s = format (s, "%U%-40s%16Lu\n", format_white_space, indent + 1,    \
 		      q_name, qstats.val);
 	  foreach_onp_pktio_rxq_counter;
 #undef _
@@ -164,7 +164,7 @@ format_onp_pktio (u8 *s, va_list *args)
 	    /* clang-format off */
 #define _(str, val)                                                           \
 	  snprintf (q_name, sizeof (q_name), "txq_%d_%s", i, #str);           \
-	  s = format (s, "%U%-40s%16u\n", format_white_space, indent + 1,     \
+	  s = format (s, "%U%-40s%16Lu\n", format_white_space, indent + 1,    \
 		      q_name,  qstats.val);
          foreach_onp_pktio_txq_counter;
 #undef _
@@ -180,7 +180,7 @@ format_onp_pktio (u8 *s, va_list *args)
 	    /* clang-format off */
 #define _(str, val)                                                           \
 	  snprintf (q_name, sizeof (q_name), "ff_txq_%d_%s", i, #str);        \
-	  s = format (s, "%U%-40s%16u\n", format_white_space, indent + 1,     \
+	  s = format (s, "%U%-40s%16Lu\n", format_white_space, indent + 1,    \
 		      q_name,  qstats.val);
 	  foreach_onp_pktio_txq_counter;
 #undef _
@@ -196,7 +196,7 @@ format_onp_pktio (u8 *s, va_list *args)
 	{
 	  /* Print non-zero extended stats */
 	  if (xstats[i] != 0)
-	    s = format (s, "%U%-40s%16u\n", format_white_space, indent + 1,
+	    s = format (s, "%U%-40s%16Lu\n", format_white_space, indent + 1,
 			xstats_name[i], xstats[i]);
 	}
     }

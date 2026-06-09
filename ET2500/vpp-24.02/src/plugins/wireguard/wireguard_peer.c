@@ -456,7 +456,7 @@ wg_peer_fill (vlib_main_t *vm, wg_peer_t *peer, u32 table_id,
   peer->last_sent_handshake = vlib_time_now (vm) - (REKEY_TIMEOUT + 1);
   wg_peer_update_flags (perri, WG_PEER_STATUS_DEAD, false);
 
-  const wg_if_t *wgi = wg_if_get (wg_if_find_by_sw_if_index (wg_sw_if_index));
+  wg_if_t *wgi = wg_if_get (wg_if_find_by_sw_if_index (wg_sw_if_index));
 
   if (NULL == wgi)
     return (VNET_API_ERROR_INVALID_INTERFACE);
@@ -468,6 +468,18 @@ wg_peer_fill (vlib_main_t *vm, wg_peer_t *peer, u32 table_id,
   peer->src.port = wgi->port;
 
   u8 is_ip4 = ip46_address_is_ip4 (&peer->dst.addr);
+
+  if (is_ip4)
+  {
+      wgi->src_ip.ip.ip4.data_u32 = peer->src.addr.ip4.data_u32;
+  }
+
+  else
+  {
+     wgi->src_ip.ip.ip6.as_u64[0] = peer->src.addr.ip6.as_u64[0];
+     wgi->src_ip.ip.ip6.as_u64[1] = peer->src.addr.ip6.as_u64[1];
+  }
+
   peer->rewrite = wg_build_rewrite (&peer->src.addr, peer->src.port,
 				    &peer->dst.addr, peer->dst.port, is_ip4);
 
@@ -682,6 +694,8 @@ format_wg_peer (u8 * s, va_list * va)
   adj_index_t *adj_index;
   u8 key[NOISE_KEY_LEN_BASE64];
   wg_peer_t *peer;
+  vlib_main_t * vm = vlib_get_main();
+  f64 time_now = vlib_time_now (vm);
 
   peer = wg_peer_get (peeri);
   key_to_base64 (peer->remote.r_public, NOISE_PUBLIC_KEY_LEN, key);
@@ -704,6 +718,15 @@ format_wg_peer (u8 * s, va_list * va)
   vec_foreach (allowed_ip, peer->allowed_ips)
   {
     s = format (s, " %U", format_fib_prefix, allowed_ip);
+  }
+
+  if (peer->last_handshark && time_now > peer->last_handshark)
+  {
+      s = format(s, "\n  last handshark: %f (s)", time_now - peer->last_handshark);
+  }
+  else
+  {
+      s = format(s, "\n  last handshark: 0 (s)");
   }
 
   return s;

@@ -109,6 +109,7 @@ typedef struct wg_peer
   f64 last_received_packet;
   f64 session_derived;
   f64 rehandshake_started;
+  f64 last_handshark;
 
   /* Variable intervals */
   u32 new_handshake_interval_tick;
