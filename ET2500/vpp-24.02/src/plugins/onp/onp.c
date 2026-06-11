@@ -44,6 +44,9 @@ onp_platform_from_value (const char *value)
   if (strstr (value, "arm64-asterfusion_et2500-r0"))
     return ONP_PLATFORM_ET2500;
 
+  if (strstr (value, "arm64-sera_sbr_00408ebp-r0"))
+    return ONP_PLATFORM_ET2500;
+
   if (strstr (value, "arm64-asterfusion_et3600-r0"))
     return ONP_PLATFORM_ET3600;
 
