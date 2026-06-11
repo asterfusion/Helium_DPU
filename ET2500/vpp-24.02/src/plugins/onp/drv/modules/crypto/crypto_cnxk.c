@@ -346,7 +346,7 @@ cnxk_crypto_burst_submit (cnxk_crypto_dev_t *cryptodev,
 
   for (int i = 0; i < CN10K_MAX_LMT_SZ; i++)
   {
-      lmt_line[i] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 0);
+      lmt_line[i] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, i);
   }
 
   while (n_left > CN10K_MAX_LMT_SZ)
