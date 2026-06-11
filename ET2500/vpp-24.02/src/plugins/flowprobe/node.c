@@ -562,6 +562,8 @@ flowprobe_export_send (vlib_main_t * vm, vlib_buffer_t * b0,
   udp_header_t *udp;
   flowprobe_record_t flags = fm->context[which].flags;
   u32 my_cpu_number = vm->thread_index;
+  u32 sequence_number;
+  u16 stream_src_port;
 
   /* Fill in header */
   flow_report_stream_t *stream;
@@ -570,6 +572,8 @@ flowprobe_export_send (vlib_main_t * vm, vlib_buffer_t * b0,
   if (fm->context[which].next_record_offset_per_worker[my_cpu_number] <=
       flowprobe_get_headersize ())
     return;
+
+  clib_spinlock_lock (&fm->stream_lock);
 
   u32 i, index = vec_len (exp->streams);
   for (i = 0; i < index; i++)
@@ -585,6 +589,10 @@ flowprobe_export_send (vlib_main_t * vm, vlib_buffer_t * b0,
       exp->streams[index].src_port = UDP_DST_PORT_ipfix;
     }
   stream = &exp->streams[index];
+  stream_src_port = stream->src_port;
+  sequence_number = stream->sequence_number++;
+
+  clib_spinlock_unlock (&fm->stream_lock);
 
   tp = vlib_buffer_get_current (b0);
   ip = (ip4_header_t *) & tp->ip4;
@@ -598,7 +606,7 @@ flowprobe_export_send (vlib_main_t * vm, vlib_buffer_t * b0,
   ip->flags_and_fragment_offset = 0;
   ip->src_address.as_u32 = exp->src_address.ip.ip4.as_u32;
   ip->dst_address.as_u32 = exp->ipfix_collector.ip.ip4.as_u32;
-  udp->src_port = clib_host_to_net_u16 (stream->src_port);
+  udp->src_port = clib_host_to_net_u16 (stream_src_port);
   udp->dst_port = clib_host_to_net_u16 (exp->collector_port);
   udp->checksum = 0;
 
@@ -612,10 +620,10 @@ flowprobe_export_send (vlib_main_t * vm, vlib_buffer_t * b0,
   udp->src_port = clib_host_to_net_u16 (exp->src_port);
   #else
   h->domain_id = clib_host_to_net_u32 (stream->domain_id);
-  udp->src_port = clib_host_to_net_u16 (stream->src_port);
+  udp->src_port = clib_host_to_net_u16 (stream_src_port);
   #endif
   /* FIXUP: message header sequence_number */
-  h->sequence_number = stream->sequence_number++;
+  h->sequence_number = sequence_number;
   h->sequence_number = clib_host_to_net_u32 (h->sequence_number);
 
   s->set_id_length = ipfix_set_id_length (fm->template_reports[flags],
@@ -1237,3 +1245,4 @@ VLIB_REGISTER_NODE (flowprobe_flush_l2_node) = {
  * eval: (c-set-style "gnu")
  * End:
  */
+
