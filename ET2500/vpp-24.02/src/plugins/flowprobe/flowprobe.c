@@ -441,7 +441,9 @@ flowprobe_template_add_del (u32 domain_id, u16 src_port,
 			    vnet_flow_rewrite_callback_t * rewrite_callback,
 			    bool is_add, u16 * template_id)
 {
+  flowprobe_main_t *fm = &flowprobe_main;
   ipfix_exporter_t *exp = &flow_report_main.exporters[0];
+  int rv;
   vnet_flow_report_add_del_args_t a = {
     .rewrite_callback = rewrite_callback,
     .flow_data_callback = flow_data_callback,
@@ -450,7 +452,12 @@ flowprobe_template_add_del (u32 domain_id, u16 src_port,
     .src_port = src_port,
     .opaque.as_uword = flags,
   };
-  return vnet_flow_report_add_del (exp, &a, template_id);
+
+  clib_spinlock_lock (&fm->stream_lock);
+  rv = vnet_flow_report_add_del (exp, &a, template_id);
+  clib_spinlock_unlock (&fm->stream_lock);
+
+  return rv;
 }
 
 static void
@@ -1462,6 +1469,7 @@ flowprobe_init (vlib_main_t * vm)
   clib_memset (fm->template_reports, 0, sizeof (fm->template_reports));
   clib_memset (fm->template_size, 0, sizeof (fm->template_size));
   clib_memset (fm->template_per_flow, 0, sizeof (fm->template_per_flow));
+  clib_spinlock_init (&fm->stream_lock);
 
   /* Decide how many worker threads we have */
   num_threads = 1 /* main thread */  + tm->n_threads;
@@ -1490,3 +1498,4 @@ VLIB_INIT_FUNCTION (flowprobe_init);
  * eval: (c-set-style "gnu")
  * End:
  */
+
