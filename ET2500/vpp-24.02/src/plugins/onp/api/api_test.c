@@ -184,7 +184,7 @@ static void
 vl_api_onp_interface_stats_reply_t_handler(vl_api_onp_interface_stats_reply_t* mp) {
   vat_main_t* vam = onp_test_main.vat_main;
   for (int i = 0;i < sizeof(mp->onp_xstats.stats) / sizeof(mp->onp_xstats.stats[0]);++i) {
-    print(vam->ofp, "%u ", clib_net_to_host_u32(mp->onp_xstats.stats[i]));
+    print(vam->ofp, "%lu ", clib_net_to_host_u64(mp->onp_xstats.stats[i]));
   }
   vam->result_ready = 1;
 }
@@ -444,10 +444,10 @@ api_onp_pktio_tx_queue_stat_dump (vat_main_t *vam)
 static void
 vl_api_onp_pktio_tx_queue_stat_details_t_handler(vl_api_onp_pktio_tx_queue_stat_details_t* mp) {
   vat_main_t* vam = onp_test_main.vat_main;
-  print(vam->ofp, "tx_pkts:      %lu ", clib_net_to_host_u32(mp->tx_pkts));
-  print(vam->ofp, "tx_octs:      %lu ", clib_net_to_host_u32(mp->tx_octs));
-  print(vam->ofp, "tx_drop_pkts: %lu ", clib_net_to_host_u32(mp->tx_drop_pkts));
-  print(vam->ofp, "tx_drop_octs: %lu ", clib_net_to_host_u32(mp->tx_drop_octs));
+  print(vam->ofp, "tx_pkts:      %lu ", clib_net_to_host_u64(mp->tx_pkts));
+  print(vam->ofp, "tx_octs:      %lu ", clib_net_to_host_u64(mp->tx_octs));
+  print(vam->ofp, "tx_drop_pkts: %lu ", clib_net_to_host_u64(mp->tx_drop_pkts));
+  print(vam->ofp, "tx_drop_octs: %lu ", clib_net_to_host_u64(mp->tx_drop_octs));
   vam->result_ready = 1;
 }
 
@@ -474,11 +474,11 @@ api_onp_pktio_rx_queue_stat_dump (vat_main_t *vam)
 static void
 vl_api_onp_pktio_rx_queue_stat_details_t_handler(vl_api_onp_pktio_rx_queue_stat_details_t* mp) {
   vat_main_t* vam = onp_test_main.vat_main;
-  print(vam->ofp, "rx_pkts:       %lu ", clib_net_to_host_u32(mp->rx_pkts));
-  print(vam->ofp, "rx_octs:       %lu ", clib_net_to_host_u32(mp->rx_octs));
-  print(vam->ofp, "rx_drop_pkts:  %lu ", clib_net_to_host_u32(mp->rx_drop_pkts));
-  print(vam->ofp, "rx_drop_octs:  %lu ", clib_net_to_host_u32(mp->rx_drop_octs));
-  print(vam->ofp, "rx_error_pkts: %lu ", clib_net_to_host_u32(mp->rx_error_pkts));
+  print(vam->ofp, "rx_pkts:       %lu ", clib_net_to_host_u64(mp->rx_pkts));
+  print(vam->ofp, "rx_octs:       %lu ", clib_net_to_host_u64(mp->rx_octs));
+  print(vam->ofp, "rx_drop_pkts:  %lu ", clib_net_to_host_u64(mp->rx_drop_pkts));
+  print(vam->ofp, "rx_drop_octs:  %lu ", clib_net_to_host_u64(mp->rx_drop_octs));
+  print(vam->ofp, "rx_error_pkts: %lu ", clib_net_to_host_u64(mp->rx_error_pkts));
   vam->result_ready = 1;
 }
 

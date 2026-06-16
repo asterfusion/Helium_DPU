@@ -27,6 +27,8 @@ ha_sync_per_thread_buffer_add (u32 thread_index, u8 app_type, u8 *session_data,
         return;
     }
 
+    clib_spinlock_lock (&ptd->lock);
+
     if (vec_len (ptd->data) + entry_len > hsm->packet_size)
         ha_sync_per_thread_buffer_flush (thread_index);
 
@@ -38,6 +40,8 @@ ha_sync_per_thread_buffer_add (u32 thread_index, u8 app_type, u8 *session_data,
     vec_add (ptd->data, (u8 *) &hdr, sizeof (hdr));
     vec_add (ptd->data, session_data, data_len);
     ptd->session_count++;
+
+    clib_spinlock_unlock (&ptd->lock);
 }
 
 void

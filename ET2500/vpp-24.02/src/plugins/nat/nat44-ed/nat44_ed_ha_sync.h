@@ -7,6 +7,8 @@
 #include <ha_sync/ha_sync.h>
 #include <vppinfra/lffifo.h>
 
+//#define NAT44_ED_HASH_SYNC_DEBUG 1
+
 #define NAT44_ED_HA_SYNC_SNAPSHOT_PROCESS_DEFAULT_FREQUENCY   (128)
 #define NAT44_ED_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING        (9)
 
@@ -18,6 +20,8 @@
 
 #define NAT44_ED_HA_SYNC_HANDOFF_QUEUE_SIZE                  (16384)
 #define NAT44_ED_HA_SYNC_HANDOFF_PER_NUM                     (1024)
+
+#define NAT44_ED_HA_SYNC_FORWARD_BYPASS_SKIP                 (1)
 
 typedef enum
 {
@@ -154,13 +158,11 @@ extern void *nat44_ed_ha_sync_per_thread_buffer_add_ptr;
 
 static_always_inline void nat44_ed_ha_sync_event_push (u32 thread_id, u8 *event_entry, u32 length)
 {
-    u32 thread_index = vlib_get_thread_index ();
-
     if (PREDICT_FALSE(nat44_ed_ha_sync_per_thread_buffer_add_ptr == NULL)) return;
 
     ((__typeof__ (ha_sync_per_thread_buffer_add) *)
      nat44_ed_ha_sync_per_thread_buffer_add_ptr)(
-         thread_index, HA_SYNC_APP_NAT, event_entry, length);
+         thread_id, HA_SYNC_APP_NAT, event_entry, length);
 }
 
 static_always_inline void nat44_ed_ha_sync_event_flow_notify(u32 thread_id, nat44_ed_ha_event_op_e op, snat_session_t *s)
@@ -168,6 +170,10 @@ static_always_inline void nat44_ed_ha_sync_event_flow_notify(u32 thread_id, nat4
     if(NAT44_ED_CHECK_HA_SYNC) return;
 
     nat44_ed_ha_sync_event_flow_t event;
+
+    if(na44_ed_is_fwd_bypass_session(s) && NAT44_ED_HA_SYNC_FORWARD_BYPASS_SKIP) return;
+
+    clib_memset(&event, 0, sizeof(nat44_ed_ha_sync_event_flow_t));
 
     event.header.event_thread_id = thread_id;
     event.header.event_op = op;
@@ -200,7 +206,8 @@ static_always_inline void nat44_ed_ha_sync_event_flow_notify(u32 thread_id, nat4
     event.data.ext_host_nat_addr = s->ext_host_nat_addr;
     event.data.ext_host_nat_port = s->ext_host_nat_port;
 
-    clib_memcpy(&event.data.tcp_flags, &s->tcp_flags, sizeof(u8) * NAT44_ED_N_DIR);
+    event.data.tcp_flags[NAT44_ED_DIR_I2O] =  s->tcp_flags[NAT44_ED_DIR_I2O];
+    event.data.tcp_flags[NAT44_ED_DIR_O2I] =  s->tcp_flags[NAT44_ED_DIR_O2I];
     event.data.tcp_state = s->tcp_state;
 
     nat44_ed_ha_sync_event_push(thread_id, (u8 *)&event, sizeof(nat44_ed_ha_sync_event_flow_t));

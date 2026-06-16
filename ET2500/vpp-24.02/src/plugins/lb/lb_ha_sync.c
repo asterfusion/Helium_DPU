@@ -135,9 +135,7 @@ void generate_lb_sticky_table_snapshot(vlib_main_t * vm, lb_ha_sync_ctx_t *ctx)
     lb_sticky_kv_t *lb_kv;
     lb_vip_t *vip;
 
-    u32 bucket_walk_end = (sticky_ht->nbuckets >> LB_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
-
-    bucket_walk_end = ctx->snapshot_sticky_index + bucket_walk_end > 0 ? bucket_walk_end : sticky_ht->nbuckets;
+    u32 bucket_walk_end = ctx->snapshot_sticky_index + (sticky_ht->nbuckets >> LB_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
     bucket_walk_end = bucket_walk_end < sticky_ht->nbuckets ? bucket_walk_end : sticky_ht->nbuckets;
                             
     for (i = ctx->snapshot_sticky_index; i < bucket_walk_end; i++)
@@ -198,8 +196,7 @@ void generate_lb_vip_snat_table_snapshot(vlib_main_t *vm, lb_ha_sync_ctx_t *ctx)
     lb_vip_t *vip;
     lb_vip_snat_mapping_t *flow;
 
-    uword pool_walk_end = (pool_max_num >> LB_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
-    pool_walk_end = ctx->snapshot_vip_snat_index + pool_walk_end > 0 ? pool_walk_end : pool_max_num;
+    uword pool_walk_end = ctx->snapshot_vip_snat_index + (pool_max_num >> LB_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING);
     pool_walk_end = pool_walk_end < pool_max_num ? pool_walk_end : pool_max_num;
 
     lb_get_writer_lock();
@@ -410,6 +407,7 @@ lb_ha_sync_apply_sticky_session_proc(lb_ha_sync_event_sticky_session_t *event)
             {
                 //del entry
                 clib_bihash_add_del_with_hash_8_16(sticky_ht, (clib_bihash_kv_8_16_t *)&kv, sticky_hash, 0);
+                clib_atomic_fetch_sub (&lbm->as_refcount[as_index], 1);
             }
 #if LB_HASH_SYNC_DEBUG
             else
@@ -707,10 +705,10 @@ lb_ha_sync_vip_snat_sesson_del(lb_ha_sync_vip_snat_session_data_t *data,
 
         lb_put_writer_lock();
 
-        address->flow_index[lb_proto][mapping_port] = (~0);
 
         lb_get_vip_nat_address_lock(address);
 
+        address->flow_index[lb_proto][mapping_port] = (~0);
         address->busy_port_bitmap[lb_proto] = clib_bitmap_set (address->busy_port_bitmap[lb_proto], mapping_port, 0);
         address->busy_ports[lb_proto]--;
 
@@ -919,6 +917,7 @@ lb_ha_sync_apply_vip_snat_session_proc(lb_ha_sync_event_vip_snat_session_t *even
         {
             lb_ha_sync_vip_snat_sesson_del(data, vip, snat_addresses, address, outside_vrf_id, vrf_id, 0);
         }
+        break;
     case LB_HA_OP_DEL_FORCE:
         {
             lb_ha_sync_vip_snat_sesson_del(data, vip, snat_addresses, address, outside_vrf_id, vrf_id, 1);
@@ -1036,10 +1035,11 @@ void lb_ha_sync_unregister (void)
     ha_sync_unregister_session_application_ptr =
         vlib_get_plugin_symbol ("ha_sync_plugin.so", "ha_sync_unregister_session_application");
 
-    if(ha_sync_register_session_application_ptr == NULL)
+    if(ha_sync_unregister_session_application_ptr == NULL)
     {
         clib_warning ("ha_sync_plugin.so ha_sync_unregister_session_application is not found");
         lb_ha_sync_ctx.ha_sync_plugin_found = 0;
+        return;
     }
 
     lb_ha_sync_ctx.ha_sync_plugin_found = 1;

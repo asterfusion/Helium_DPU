@@ -557,7 +557,7 @@ cn10k_ipsec_outbound_inst_submit (vlib_main_t *vm, vlib_node_runtime_t *node,
   if (PREDICT_FALSE (cnxk_ipsec_sched_frame_alloc (
 		       vm, crypto_dev, crypto_queue, &vec_header) < 0))
     {
-      goto free_all_pkts;
+      return n_enc;
     }
 
   vlib_get_buffer_indices (vm, b, vec_header->buffer_indices, n_enc);
@@ -594,16 +594,6 @@ cn10k_ipsec_outbound_inst_submit (vlib_main_t *vm, vlib_node_runtime_t *node,
 
   return n_noop;
 
-free_all_pkts:
-  for (n_noop = 0; n_noop < n_enc; n_noop++)
-    {
-      /* Drop node will be decided in plugin based on IP4 or IP6 */
-      b[n_noop]->error = node->errors[ONP_ESP_ENCRYPT_ERROR_FRAME_ALLOC];
-      ptd->second_buffer_indices[n_noop] =
-	vlib_get_buffer_index (vm, b[n_noop]);
-    }
-
-  return n_noop;
 }
 
 static_always_inline u32
@@ -632,22 +622,10 @@ cn10k_ipsec_enqueue_outbound (vlib_main_t *vm, vlib_node_runtime_t *node,
 
   ROC_LMT_CPT_BASE_ID_GET (lmt_base, core_lmt_id);
 
-  lmt_line[0] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 0);
-  lmt_line[1] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 1);
-  lmt_line[2] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 2);
-  lmt_line[3] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 3);
-  lmt_line[4] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 4);
-  lmt_line[5] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 5);
-  lmt_line[6] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 6);
-  lmt_line[7] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 7);
-  lmt_line[8] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 8);
-  lmt_line[9] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 9);
-  lmt_line[10] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 10);
-  lmt_line[11] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 11);
-  lmt_line[12] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 12);
-  lmt_line[13] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 13);
-  lmt_line[14] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 14);
-  lmt_line[15] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 15);
+  for (int i = 0; i < CN10K_MAX_LMT_SZ; i++)
+  {
+      lmt_line[i] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, i);
+  }
 
   while (n_left > 5)
     {
@@ -735,11 +713,11 @@ cn10k_ipsec_enqueue_outbound (vlib_main_t *vm, vlib_node_runtime_t *node,
 
   while (n_enc > CN10K_MAX_LMT_SZ)
     {
-      n_noop = cn10k_ipsec_outbound_inst_submit (
+      u32 n_drop = cn10k_ipsec_outbound_inst_submit (
 	vm, node, frame, ptd, crypto_queue, b, inst, lmt_line, ioaddr,
 	core_lmt_id, CN10K_MAX_LMT_SZ);
 
-      if (PREDICT_FALSE (n_noop))
+      if (PREDICT_FALSE (n_drop))
 	goto submit_fail;
 
       n_enc -= CN10K_MAX_LMT_SZ;
@@ -748,15 +726,29 @@ cn10k_ipsec_enqueue_outbound (vlib_main_t *vm, vlib_node_runtime_t *node,
     }
 
   if (n_enc > 0)
-    n_noop = cn10k_ipsec_outbound_inst_submit (vm, node, frame, ptd,
+  {
+    u32 n_drop = cn10k_ipsec_outbound_inst_submit (vm, node, frame, ptd,
 					       crypto_queue, b, inst, lmt_line,
 					       ioaddr, core_lmt_id, n_enc);
-  if (PREDICT_FALSE (n_noop))
-    goto submit_fail;
+    if (PREDICT_FALSE (n_drop))
+      goto submit_fail;
+  }
 
   n_enc = 0;
 
 submit_fail:
+  if (PREDICT_FALSE (n_enc > 0))
+    {
+      u32 i;
+      for (i = 0; i < n_enc; i++)
+       {
+         b[i]->error = node->errors[ONP_ESP_ENCRYPT_ERROR_FRAME_ALLOC];
+         ptd->second_buffer_indices[n_noop + i] = vlib_get_buffer_index (vm, b[i]);
+         ptd->next2[n_noop + i] = onp_ptd_ipsec (ptd)->post_drop_next_node;
+       }
+      n_noop += n_enc;
+      n_enc = 0;
+    }
   ptd->out_npkts = n_prep - n_enc;
   return n_noop;
 }

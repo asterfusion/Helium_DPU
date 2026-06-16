@@ -125,6 +125,11 @@ ha_sync_tx_pool_del_by_seq (u32 thread_index, u32 seq)
         return;
 
     index = p[0];
+
+    /* Defensive check: avoid double-free if already deleted */
+    if (pool_is_free_index (ptd->tx_pool, index))
+        return;
+
     req = pool_elt_at_index (ptd->tx_pool, index);
     if (req->timer_handle != ~0)
     {

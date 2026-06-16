@@ -182,6 +182,8 @@ typedef struct
     uword *seq_to_pool_index;
     TWT (tw_timer_wheel) timer_wheel;
     u32 *timer_expired_vec;
+
+    clib_spinlock_t lock;
 } ha_sync_per_thread_data_t;
 
 

@@ -341,10 +341,21 @@ spi_tcp_session_state_proc(spi_session_t *session,
 static_always_inline int
 spi_tcp_session_timeout_proc(spi_main_t *spim,
                              spi_per_thread_data_t *tspi,
-                             spi_session_t *session)
+                             spi_session_t *session,
+			     f64 now)
 {
     int err = SPI_NODE_ERROR_NO_ERR;
     u32 timeout = (u32)(~0);
+
+    if (session->state_tcp == SPI_TCP_STATE_ESTABLISHED && 
+        session->need_change_timeout == 0)
+    {
+        if (now - session->last_ha_sync_keep_timestamp > spi_ha_sync_ctx.ha_sync_timeout_keep_interval)
+        {
+            spi_ha_sync_event_session_notify(session->thread_index, SPI_HA_OP_KEEP, session, session->transmit_timeout);
+            session->last_ha_sync_keep_timestamp = now;
+        }
+    }
 
     if (PREDICT_TRUE(session->need_change_timeout == 0))
         return err;
@@ -364,7 +375,6 @@ spi_tcp_session_timeout_proc(spi_main_t *spim,
             {
                 timeout = spim->spi_timeout_config.tcp_established;
             }
-            session->transmit_timeout = timeout;
         }
         break;
     case SPI_TCP_STATE_CLOSING:
@@ -381,6 +391,7 @@ spi_tcp_session_timeout_proc(spi_main_t *spim,
         break;
     }
 
+    session->transmit_timeout = timeout;
     spi_submit_or_update_session_timer(tspi, session, timeout, false);
     session->need_change_timeout = 0;
 
@@ -426,10 +437,21 @@ spi_icmp_session_state_proc(spi_session_t *session,
 static_always_inline int
 spi_icmp_session_timeout_proc(spi_main_t *spim,
                               spi_per_thread_data_t *tspi,
-                           spi_session_t *session)
+                              spi_session_t *session, 
+			      f64 now)
 {
     int err = SPI_NODE_ERROR_NO_ERR;
     u32 timeout = (u32)(~0);
+
+    if (session->state_icmp == SPI_GENERAL_STATE_TRANSMIT &&
+        session->need_change_timeout == 0)
+    {
+        if (now - session->last_ha_sync_keep_timestamp > spi_ha_sync_ctx.ha_sync_timeout_keep_interval)
+        {
+            spi_ha_sync_event_session_notify(session->thread_index, SPI_HA_OP_KEEP, session, 0);
+            session->last_ha_sync_keep_timestamp = now;
+        }
+    }
 
     if (PREDICT_TRUE(session->need_change_timeout == 0))
         return err;
@@ -444,7 +466,6 @@ spi_icmp_session_timeout_proc(spi_main_t *spim,
             {
                 timeout = spim->spi_timeout_config.icmp;
             }
-            session->transmit_timeout = timeout;
         }
         break;
     case SPI_GENERAL_STATE_IDLE:
@@ -455,6 +476,7 @@ spi_icmp_session_timeout_proc(spi_main_t *spim,
         break;
     }
 
+    session->transmit_timeout = timeout;
     spi_submit_or_update_session_timer(tspi, session, timeout, false);
     session->need_change_timeout = 0;
 
@@ -500,10 +522,21 @@ spi_udp_session_state_proc(spi_session_t *session,
 static_always_inline int
 spi_udp_session_timeout_proc(spi_main_t *spim,
                              spi_per_thread_data_t *tspi,
-                             spi_session_t *session)
+                             spi_session_t *session,
+			     f64 now)
 {
     int err = SPI_NODE_ERROR_NO_ERR;
     u32 timeout = (u32)(~0);
+
+    if (session->state_udp == SPI_GENERAL_STATE_TRANSMIT &&
+        session->need_change_timeout == 0)
+    {
+        if (now - session->last_ha_sync_keep_timestamp > spi_ha_sync_ctx.ha_sync_timeout_keep_interval)
+        {
+            spi_ha_sync_event_session_notify(session->thread_index, SPI_HA_OP_KEEP, session, 0);
+            session->last_ha_sync_keep_timestamp = now;
+        }
+    }
 
     if (PREDICT_TRUE(session->need_change_timeout == 0))
         return err;
@@ -518,7 +551,6 @@ spi_udp_session_timeout_proc(spi_main_t *spim,
             {
                 timeout = spim->spi_timeout_config.udp;
             }
-            session->transmit_timeout = timeout;
         }
         break;
     case SPI_GENERAL_STATE_IDLE:
@@ -529,6 +561,7 @@ spi_udp_session_timeout_proc(spi_main_t *spim,
         break;
     }
 
+    session->transmit_timeout = timeout;
     spi_submit_or_update_session_timer(tspi, session, timeout, false);
     session->need_change_timeout = 0;
 
@@ -574,10 +607,21 @@ spi_other_session_state_proc(spi_session_t *session,
 static_always_inline int
 spi_other_session_timeout_proc(spi_main_t *spim,
                                spi_per_thread_data_t *tspi,
-                               spi_session_t *session)
+                               spi_session_t *session,
+			       f64 now)
 {
     int err = SPI_NODE_ERROR_NO_ERR;
     u32 timeout = (u32)(~0);
+
+    if (session->state_other == SPI_GENERAL_STATE_TRANSMIT && 
+        session->need_change_timeout == 0)
+    {
+        if (now - session->last_ha_sync_keep_timestamp > spi_ha_sync_ctx.ha_sync_timeout_keep_interval)
+        {
+            spi_ha_sync_event_session_notify(session->thread_index, SPI_HA_OP_KEEP, session, 0);
+            session->last_ha_sync_keep_timestamp = now;
+        }
+    }
 
     if (PREDICT_TRUE(session->need_change_timeout == 0))
         return err;
@@ -603,6 +647,7 @@ spi_other_session_timeout_proc(spi_main_t *spim,
         break;
     }
 
+    session->transmit_timeout = timeout;
     spi_submit_or_update_session_timer(tspi, session, timeout, false);
     session->need_change_timeout = 0;
 
@@ -770,6 +815,8 @@ spi_delete_session(spi_main_t *spim,
     clib_bihash_kv_48_8_t kv;
     spi_session_type_e type;
 
+    if (session->session_is_free) return SPI_NODE_ERROR_NO_ERR;
+
     clib_memset(&kv, 0, sizeof(clib_bihash_kv_48_8_t));
 
     /* only pkt_l3l4 is valid*/
@@ -821,7 +868,8 @@ spi_delete_session(spi_main_t *spim,
     session->session_is_free = 1;
 
     //ha sync
-    spi_ha_sync_event_session_notify(session->thread_index, SPI_HA_OP_DEL_FORCE, session, 0);
+    if (!is_ha)
+        spi_ha_sync_event_session_notify(session->thread_index, SPI_HA_OP_DEL_FORCE, session, 0);
 
     pool_put_index (tspi->sessions, session->index);
 
@@ -881,7 +929,7 @@ spi_check_update_spi_session(f64 now,
     {
     case IP_PROTOCOL_TCP:
         err = spi_tcp_session_state_proc(session, pkt, dir, now);
-        spi_tcp_session_timeout_proc(spim, tspi, session);
+        spi_tcp_session_timeout_proc(spim, tspi, session, now);
         if (!err)
         {
             session->flow[dir].tcp_ack_number = pkt->pkt_info.tcp_ack_number;
@@ -891,15 +939,15 @@ spi_check_update_spi_session(f64 now,
     case IP_PROTOCOL_ICMP:
     case IP_PROTOCOL_ICMP6:
         err = spi_icmp_session_state_proc(session, pkt, dir, now);
-        spi_icmp_session_timeout_proc(spim, tspi, session);
+        spi_icmp_session_timeout_proc(spim, tspi, session, now);
         break;
     case IP_PROTOCOL_UDP:
         err = spi_udp_session_state_proc(session, pkt, dir, now);
-        spi_udp_session_timeout_proc(spim, tspi, session);
+        spi_udp_session_timeout_proc(spim, tspi, session, now);
         break;
     default:
         err = spi_other_session_state_proc(session, pkt, dir, now);
-        spi_other_session_timeout_proc(spim, tspi, session);
+        spi_other_session_timeout_proc(spim, tspi, session, now);
         break;
     }
 

@@ -7,10 +7,12 @@
 #include <ha_sync/ha_sync.h>
 #include <vppinfra/lffifo.h>
 
-#define SPI_HASH_SYNC_DEBUG 1
+//#define SPI_HASH_SYNC_DEBUG 1
 
 #define SPI_HA_SYNC_SNAPSHOT_PROCESS_DEFAULT_FREQUENCY   (128)
 #define SPI_HA_SYNC_SNAPSHOT_BUCKET_WALK_SCALING        (9)
+
+#define SPI_HA_SYNC_TIMEOUT_KEEP_INTERVAL               (2) //2s
 
 #define SPI_HA_SYNC_FIRST_TIMEOUT             (10) //10s
 #define SPI_HA_SYNC_DEBOUNCE_TIMEOUT          (5)  //5s
@@ -43,6 +45,7 @@ typedef enum
     SPI_HA_OP_DEL_FORCE,
 
     SPI_HA_OP_UPDATE,
+    SPI_HA_OP_KEEP,
 
     SPI_HA_OP_REFRESH,
 
@@ -167,6 +170,8 @@ typedef struct
     u8 ha_sync_plugin_found;
     u8 ha_sync_register;
 
+    u32 ha_sync_timeout_keep_interval;
+
     u32 flag;
 
     u32 current_snapshot_version;
@@ -189,13 +194,11 @@ extern void *spi_ha_sync_per_thread_buffer_add_ptr;
 
 static_always_inline void spi_ha_sync_event_push (u32 thread_id, u8 *event_entry, u32 length)
 {
-    u32 thread_index = vlib_get_thread_index ();
-
     if (PREDICT_FALSE(spi_ha_sync_per_thread_buffer_add_ptr == NULL)) return;
 
     ((__typeof__ (ha_sync_per_thread_buffer_add) *)
      spi_ha_sync_per_thread_buffer_add_ptr)(
-         thread_index, HA_SYNC_APP_SPI, event_entry, length);
+         thread_id, HA_SYNC_APP_SPI, event_entry, length);
 }
 
 static_always_inline void spi_ha_sync_event_session_notify(u32 thread_id, spi_ha_event_op_e op, spi_session_t *s, u32 timeout)
@@ -203,6 +206,8 @@ static_always_inline void spi_ha_sync_event_session_notify(u32 thread_id, spi_ha
     if(SPI_CHECK_HA_SYNC) return;
 
     spi_ha_sync_event_session_t event;
+
+    clib_memset(&event, 0, sizeof(spi_ha_sync_event_session_t));
 
     event.header.event_thread_id = thread_id;
     event.header.event_op = op;
@@ -254,7 +259,6 @@ static_always_inline void spi_ha_sync_event_session_notify(u32 thread_id, spi_ha
     {
         spi_main_t *spim = &spi_main;
 
-        event.data.associated_session.associated_session_valid = s->associated_session_valid;
         spi_session_t *associated_session = NULL;
         spi_per_thread_data_t *tspi = NULL;
 
@@ -310,7 +314,7 @@ static_always_inline void spi_ha_sync_event_session_notify(u32 thread_id, spi_ha
         }
     }
 
-    clib_warning("timeout %u", event.data.timeout);
+    //clib_warning("timeout %u", event.data.timeout);
     spi_ha_sync_event_push(thread_id, (u8 *)&event, sizeof(spi_ha_sync_event_session_t));
 }
 

@@ -331,6 +331,11 @@ wg_if_create (u32 user_instance,
   vnet_set_interface_l3_output_node (vnm->vlib_main, hi->sw_if_index,
 				     (u8 *) "tunnel-output");
 
+  if (crypto_main.crypto_async_flag)
+  {
+      wg_op_mode_set_ASYNC ();
+  }
+
   return 0;
 }
 

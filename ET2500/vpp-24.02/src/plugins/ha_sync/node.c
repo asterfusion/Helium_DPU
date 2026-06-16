@@ -205,7 +205,11 @@ ha_sync_response_batch_add (u32 thread_index, f64 now, u8 owner_thread,
     }
 
   if (vec_len (batch->seqs) == 0)
-    batch->first_enqueue_time = now;
+    {
+      batch->first_enqueue_time = now;
+      vlib_node_set_interrupt_pending (vlib_get_main_by_index (thread_index),
+                                       ha_sync_timer_node.index);
+    }
 
   vec_add1 (batch->seqs, seq);
   if (vec_len (batch->seqs) >= ha_sync_response_max_acks (hsm))
@@ -525,6 +529,9 @@ VLIB_NODE_FN (ha_sync_input_worker_node)
                     {
                     case HA_SYNC_MSG_REQUEST:
                       {
+                        if (PREDICT_FALSE (!hsm->connection_established))
+                          break;
+
                         u8 session_count = h0->count;
                         u8 *packet_end =
                           (u8 *) h0 + sizeof (ha_sync_packet_header_t) +
@@ -679,7 +686,7 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
 {
   ha_sync_main_t *hsm = &ha_sync_main;
   u32 thread_index = vm->thread_index;
-  ha_sync_per_thread_data_t *ptb;
+  ha_sync_per_thread_data_t *ptd;
   CLIB_UNUSED (vlib_frame_t * _frame) = frame;
   u32 n_tx_request_new = 0;
   u32 n_tx_request_retx = 0;
@@ -701,15 +708,17 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
 
   if (thread_index >= vec_len (hsm->per_thread_data))
     return 0;
-  ptb = &hsm->per_thread_data[thread_index];
-  ha_sync_drain_ack_fifo (thread_index, ptb);
+  ptd = &hsm->per_thread_data[thread_index];
+  clib_spinlock_lock (&ptd->lock);
+  ha_sync_drain_ack_fifo (thread_index, ptd);
+  clib_spinlock_unlock (&ptd->lock);
   now = vlib_time_now (vm);
-  request_budget = ha_sync_request_pacing_budget (hsm, ptb, now);
+  request_budget = ha_sync_request_pacing_budget (hsm, ptd, now);
   
   /** calculate total number of packets to send */
-  u32 n_fast = clib_fifo_elts (ptb->fast_msg_queue);
-  u32 n_pending = clib_fifo_elts (ptb->pending_fifo);
-  u32 n_retry = clib_fifo_elts (ptb->retry_fifo);
+  u32 n_fast = clib_fifo_elts (ptd->fast_msg_queue);
+  u32 n_pending = clib_fifo_elts (ptd->pending_fifo);
+  u32 n_retry = clib_fifo_elts (ptd->retry_fifo);
   u32 n_total = n_fast + n_pending + n_retry;
 
   if (n_total == 0)
@@ -735,10 +744,10 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
   u32 sent = 0;
   u32 b_idx = 0;
 
-  while (b_idx < n_alloc && clib_fifo_elts (ptb->fast_msg_queue) > 0)
+  while (b_idx < n_alloc && clib_fifo_elts (ptd->fast_msg_queue) > 0)
   {
     ha_sync_fast_msg_t fmsg;
-    clib_fifo_sub1 (ptb->fast_msg_queue, fmsg);
+    clib_fifo_sub1 (ptd->fast_msg_queue, fmsg);
     vlib_buffer_t *b = vlib_get_buffer (vm, bi[b_idx]);
 
     /** init buffer */
@@ -799,6 +808,8 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
 
   }
 
+  clib_spinlock_lock (&ptd->lock);
+
   if (b_idx < n_alloc && n_pending > 0 && request_budget > 0)
   {
     u32 remaining = n_alloc - b_idx;
@@ -809,11 +820,11 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
       retry_reserve = clib_min (n_retry, clib_max (1u, remaining >> 3));
 
     while (b_idx < n_alloc && request_budget > 0 &&
-           clib_fifo_elts (ptb->pending_fifo) > 0 &&
+           clib_fifo_elts (ptd->pending_fifo) > 0 &&
            (n_alloc - b_idx) > retry_reserve)
       {
         u32 seq;
-        clib_fifo_sub1 (ptb->pending_fifo, seq);
+        clib_fifo_sub1 (ptd->pending_fifo, seq);
         request_budget--;
         if (ha_sync_output_build_request_buffer (
               vm, node, hsm, thread_index, seq, bi[b_idx], &n_pool_miss,
@@ -823,10 +834,10 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
       }
   }
 
-  while (b_idx < n_alloc && clib_fifo_elts (ptb->retry_fifo) > 0)
+  while (b_idx < n_alloc && clib_fifo_elts (ptd->retry_fifo) > 0)
     {
       u32 seq;
-      clib_fifo_sub1 (ptb->retry_fifo, seq);
+      clib_fifo_sub1 (ptd->retry_fifo, seq);
       if (ha_sync_output_build_request_buffer (
             vm, node, hsm, thread_index, seq, bi[b_idx], &n_pool_miss,
             &n_tx_request_new, &n_tx_request_retx))
@@ -835,10 +846,10 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
     }
 
   while (b_idx < n_alloc && request_budget > 0 &&
-         clib_fifo_elts (ptb->pending_fifo) > 0)
+         clib_fifo_elts (ptd->pending_fifo) > 0)
     {
       u32 seq;
-      clib_fifo_sub1 (ptb->pending_fifo, seq);
+      clib_fifo_sub1 (ptd->pending_fifo, seq);
       request_budget--;
       if (ha_sync_output_build_request_buffer (
             vm, node, hsm, thread_index, seq, bi[b_idx], &n_pool_miss,
@@ -846,6 +857,8 @@ VLIB_NODE_FN (ha_sync_output_worker_node)
         bi_to_send[sent++] = bi[b_idx];
       b_idx++;
     }
+
+  clib_spinlock_unlock (&ptd->lock);
 
   /** 5. batch configure and submit */
   if (PREDICT_TRUE (sent > 0))
@@ -954,14 +967,14 @@ VLIB_NODE_FN (ha_sync_process_node)
         if (now >= (hsm->last_heartbeat_send_time + hsm->heartbeat_interval_sec))
         {
           u32 thread_index = vlib_get_thread_index ();
-          ha_sync_per_thread_data_t *ptb = &hsm->per_thread_data[thread_index];
+          ha_sync_per_thread_data_t *ptd = &hsm->per_thread_data[thread_index];
 
           ha_sync_fast_msg_t fmsg = { 0 };
           fmsg.msg_type = HA_SYNC_MSG_HEARTBEAT;
           fmsg.seq_number = ha_sync_next_seq_number ();
           fmsg.owner_thread = (u8) thread_index;
           
-          clib_fifo_add1(ptb->fast_msg_queue, fmsg);
+          clib_fifo_add1(ptd->fast_msg_queue, fmsg);
           ha_sync_wake_output_thread (thread_index);
           hsm->last_heartbeat_send_time = now;
           // clib_warning ("ha_sync: send heartbeat seq_number %d", fmsg.seq_number);
@@ -1016,14 +1029,16 @@ VLIB_NODE_FN (ha_sync_timer_node)
 { 
   u32 thread_index = vm->thread_index;
   ha_sync_main_t *hsm = &ha_sync_main;
-  ha_sync_per_thread_data_t *ptb = &hsm->per_thread_data[thread_index];
+  ha_sync_per_thread_data_t *ptd = &hsm->per_thread_data[thread_index];
 
   f64 now = vlib_time_now (vm);
 
-  if (ptb->session_count > 0 && (now - ptb->last_flush_time) >= HA_SYNC_THREAD_BUFFER_FLUSH_INTERVAL_SEC)
+  if (ptd->session_count > 0 && (now - ptd->last_flush_time) >= HA_SYNC_THREAD_BUFFER_FLUSH_INTERVAL_SEC)
   {
+    clib_spinlock_lock (&ptd->lock);
     // clib_warning ("ha_sync in timer node : flush thread buffer %d", thread_index);
     ha_sync_per_thread_buffer_flush (thread_index);
+    clib_spinlock_unlock (&ptd->lock);
   }
 
   ha_sync_response_batches_flush_due (thread_index, now);
@@ -1031,9 +1046,9 @@ VLIB_NODE_FN (ha_sync_timer_node)
   if (hsm->enabled && hsm->connection_established &&
       hsm->request_pacing_interval_sec > 0 &&
       hsm->request_pacing_pkts_per_interval > 0 &&
-      clib_fifo_elts (ptb->pending_fifo) > 0 &&
-      (ptb->next_request_send_time <= 0 ||
-       now >= ptb->next_request_send_time))
+      clib_fifo_elts (ptd->pending_fifo) > 0 &&
+      (ptd->next_request_send_time <= 0 ||
+       now >= ptd->next_request_send_time))
     ha_sync_wake_output_thread (thread_index);
 
   if (hsm->enabled && hsm->connection_established)
@@ -1043,25 +1058,26 @@ VLIB_NODE_FN (ha_sync_timer_node)
     u32 pool_index;
     u32 seq;
 
-    ha_sync_drain_ack_fifo (thread_index, ptb);
+    clib_spinlock_lock (&ptd->lock);
+    ha_sync_drain_ack_fifo (thread_index, ptd);
 
-    ptb->timer_expired_vec =
-      tw_timer_expire_timers_vec_16t_2w_512sl (&ptb->timer_wheel, now,
-                                               ptb->timer_expired_vec);
+    ptd->timer_expired_vec =
+      tw_timer_expire_timers_vec_16t_2w_512sl (&ptd->timer_wheel, now,
+                                               ptd->timer_expired_vec);
     // clib_warning ("ha_sync in timer node : expire %d timers",
-    //               vec_len (ptb->timer_expired_vec));
-    vec_foreach (i, ptb->timer_expired_vec)
+    //               vec_len (ptd->timer_expired_vec));
+    vec_foreach (i, ptd->timer_expired_vec)
     {
       // clib_warning ("ha_sync in timer node : expired timer %d", *i);
       pool_index = (*i) & ((1 << (32 - LOG2_TW_TIMERS_PER_OBJECT)) - 1);
 
-      if (pool_is_free_index (ptb->tx_pool, pool_index))
+      if (pool_is_free_index (ptd->tx_pool, pool_index))
       {
         num_expired++;
         continue;
       }
 
-      ha_sync_tx_packet_t *req = pool_elt_at_index (ptb->tx_pool, pool_index);
+      ha_sync_tx_packet_t *req = pool_elt_at_index (ptd->tx_pool, pool_index);
       req->timer_handle = ~0;
       seq = req->seq_number;
 
@@ -1076,14 +1092,16 @@ VLIB_NODE_FN (ha_sync_timer_node)
       }
 
       req->retry_count++;
-      clib_fifo_add1 (ptb->retry_fifo, seq);
+      clib_fifo_add1 (ptd->retry_fifo, seq);
       ha_sync_wake_output_thread (thread_index);
       num_expired++;
       continue;
     }
 
+    clib_spinlock_unlock (&ptd->lock);
+
     if (num_expired)
-      vec_delete (ptb->timer_expired_vec, num_expired, 0);
+      vec_delete (ptd->timer_expired_vec, num_expired, 0);
   }
 
   return 0;

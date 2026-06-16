@@ -333,7 +333,9 @@ vl_api_onp_set_port_link_info_t_handler(vl_api_onp_set_port_link_info_t* mp) {
   link_info.is_autoneg = mp->is_autoneg;
   link_info.speed = ntohl(mp->speed);
 
-  cnxk_drv_pktio_link_advertise_set(vm, pktio->cnxk_pktio_index, &link_info);
+  cnxk_drv_pktio_link_advertise_set (
+    vm, pktio->cnxk_pktio_index, &link_info,
+    onp_platform_to_drv_pktio_platform (om->platform_type));
 
   BAD_SW_IF_INDEX_LABEL;
 
@@ -467,7 +469,7 @@ vl_api_onp_interface_stats_t_handler(vl_api_onp_interface_stats_t* mp) {
 	clib_memset (&xstats, 0, sizeof (xstats));
 	rv = cnxk_drv_pktio_xstats_get(vm, cpi, xstats, xstats_count);
 	for(int i = 0; i < xstats_count; i++)
-		reply->onp_xstats.stats[i] = htonl(xstats[i]);
+		reply->onp_xstats.stats[i] = clib_host_to_net_u64(xstats[i]);
     }));
   return;
 

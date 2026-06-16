@@ -752,3 +752,4 @@ vnet_dev_port_clear_counters (vlib_main_t *vm, vnet_dev_port_t *port)
 
   log_notice (port->dev, "counters cleared on port %u", port->port_id);
 }
+

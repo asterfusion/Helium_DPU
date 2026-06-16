@@ -210,10 +210,10 @@ nat44_ed_free_session_data (snat_main_t *sm, snat_session_t *s,
 {
   per_vrf_sessions_unregister_session (s, thread_index);
 
-  if (nat_ed_ses_i2o_flow_hash_add_del (sm, thread_index, s, 0))
+  if (nat_ed_ses_i2o_flow_hash_add_del_safe (sm, thread_index, s, 0))
     nat_elog_debug (sm, "free flow hash del failed");
 
-  if (nat_ed_ses_o2i_flow_hash_add_del (sm, thread_index, s, 0))
+  if (nat_ed_ses_o2i_flow_hash_add_del_safe (sm, thread_index, s, 0))
     nat_elog_debug (sm, "free flow hash del failed");
 
   if (na44_ed_is_fwd_bypass_session (s))
@@ -241,19 +241,19 @@ nat44_ed_free_session_data (snat_main_t *sm, snat_session_t *s,
     }
 
   /* ha sync */
-  if (!is_ha)
+  if (!is_ha && !(s->flags & SNAT_SESSION_FLAG_HA_ORPHAN))
     {
     nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_DEL, s);
     }
 }
 
 static ip_interface_address_t *
-nat44_ed_get_ip_interface_address (u32 sw_if_index, ip4_address_t addr)
+nat44_ed_get_ip_interface_address (u32 sw_if_index, ip4_address_t addr, u8 exact)
 {
   snat_main_t *sm = &snat_main;
 
   ip_lookup_main_t *lm = &sm->ip4_main->lookup_main;
-  ip_interface_address_t *ia;
+  ip_interface_address_t *ia, *best_ia = NULL;
   ip4_address_t *ip4a;
 
   foreach_ip_interface_address (
@@ -261,20 +261,34 @@ nat44_ed_get_ip_interface_address (u32 sw_if_index, ip4_address_t addr)
       ip4a = ip_interface_address_get_address (lm, ia);
       nat_log_debug ("sw_if_idx: %u addr: %U ? %U", sw_if_index,
 		     format_ip4_address, ip4a, format_ip4_address, &addr);
-      if (ip4a->as_u32 == addr.as_u32)
-	{
-	  return ia;
-	}
+      if (exact)
+      {
+        if (ip4a->as_u32 == addr.as_u32)
+          {
+            return ia;
+          }
+      }
+      else
+      {
+        u32 mask = ip4_main.fib_masks[ia->address_length];
+        if ((ip4a->as_u32 & mask) == (addr.as_u32 & mask))
+        {
+          if (!best_ia || ia->address_length > best_ia->address_length)
+          {
+            best_ia = ia;
+          }
+        }
+      }
     }));
-  return NULL;
+  return best_ia;
 }
 
 static int
 nat44_ed_resolve_nat_addr_len (snat_address_t *ap,
 			       snat_interface_t *interfaces)
 {
-  ip_interface_address_t *ia;
-  snat_interface_t *i;
+  ip_interface_address_t *ia, *best_ia = NULL;
+  snat_interface_t *i, *best_interface = NULL;
   u32 fib_index;
 
   pool_foreach (i, interfaces)
@@ -290,19 +304,49 @@ nat44_ed_resolve_nat_addr_len (snat_address_t *ap,
 	  continue;
 	}
 
-      if ((ia = nat44_ed_get_ip_interface_address (i->sw_if_index, ap->addr)))
+      if ((ia = nat44_ed_get_ip_interface_address (i->sw_if_index, ap->addr, 1)))
 	{
-	  ap->addr_len = ia->address_length;
-	  ap->sw_if_index = i->sw_if_index;
-	  ap->net.as_u32 = ap->addr.as_u32 & ip4_main.fib_masks[ap->addr_len];
-
-	  nat_log_debug ("pool addr %U binds to -> sw_if_idx: %u net: %U/%u",
-			 format_ip4_address, &ap->addr, ap->sw_if_index,
-			 format_ip4_address, &ap->net, ap->addr_len);
-	  return 0;
+	  best_ia = ia;
+	  best_interface = i;
+	  goto found;
 	}
     }
-  return 1;
+
+  pool_foreach (i, interfaces)
+    {
+      if (!nat44_ed_is_interface_outside (i))
+	{
+	  continue;
+	}
+
+      fib_index = ip4_fib_table_get_index_for_sw_if_index (i->sw_if_index);
+      if (fib_index != ap->fib_index)
+	{
+	  continue;
+	}
+
+      if ((ia = nat44_ed_get_ip_interface_address (i->sw_if_index, ap->addr, 0)))
+	{
+	  if (!best_ia || ia->address_length > best_ia->address_length)
+	    {
+	      best_ia = ia;
+	      best_interface = i;
+	    }
+	}
+    }
+
+  if (!best_ia)
+    return 1;
+
+found:
+  ap->addr_len = best_ia->address_length;
+  ap->sw_if_index = best_interface->sw_if_index;
+  ap->net.as_u32 = ap->addr.as_u32 & ip4_main.fib_masks[ap->addr_len];
+
+  nat_log_debug ("pool addr %U binds to -> sw_if_idx: %u net: %U/%u",
+		 format_ip4_address, &ap->addr, ap->sw_if_index,
+		 format_ip4_address, &ap->net, ap->addr_len);
+  return 0;
 }
 
 void
@@ -337,7 +381,27 @@ nat44_ed_bind_if_addr_to_nat_addr (u32 sw_if_index)
 	  continue;
 	}
 
-      if ((ia = nat44_ed_get_ip_interface_address (sw_if_index, ap->addr)))
+      if ((ia = nat44_ed_get_ip_interface_address (sw_if_index, ap->addr, 1)))
+	{
+	  ap->addr_len = ia->address_length;
+	  ap->sw_if_index = sw_if_index;
+	  ap->net.as_u32 = ap->addr.as_u32 & ip4_main.fib_masks[ap->addr_len];
+
+	  nat_log_debug ("pool addr %U binds to -> sw_if_idx: %u net: %U/%u",
+			 format_ip4_address, &ap->addr, ap->sw_if_index,
+			 format_ip4_address, &ap->net, ap->addr_len);
+	  return;
+	}
+    }
+
+  vec_foreach (ap, sm->addresses)
+    {
+      if (fib_index != ap->fib_index)
+	{
+	  continue;
+	}
+
+      if ((ia = nat44_ed_get_ip_interface_address (sw_if_index, ap->addr, 0)))
 	{
 	  ap->addr_len = ia->address_length;
 	  ap->sw_if_index = sw_if_index;
@@ -599,7 +663,7 @@ nat44_ed_del_address (ip4_address_t addr, u8 twice_nat)
 	  if (ses->out2in.addr.as_u32 == addr.as_u32)
 	    {
 	      nat44_ed_free_session_data (sm, ses, tsm - sm->per_thread_data,
-					  0);
+					  1);
 	      vec_add1 (ses_to_be_removed, ses - tsm->sessions);
 	    }
 	}
@@ -781,7 +845,7 @@ nat_ed_static_mapping_del_sessions (snat_main_t * sm,
 				    ip4_address_t l_addr,
 				    u16 l_port,
 				    u8 protocol,
-				    u32 fib_index, int addr_only,
+				    u32 fib_index, int addr_only, int keep_proto,
 				    ip4_address_t e_addr, u16 e_port)
 {
   snat_session_t *s;
@@ -799,12 +863,17 @@ nat_ed_static_mapping_del_sessions (snat_main_t * sm,
 	    s->proto != protocol)
 	  continue;
       }
+    else
+      {
+	if (keep_proto && s->proto != protocol)
+	  continue;
+      }
 
     if (nat44_ed_is_lb_session (s))
       continue;
     if (!nat44_ed_is_session_static (s))
       continue;
-    nat44_ed_free_session_data (sm, s, tsm - sm->per_thread_data, 0);
+    nat44_ed_free_session_data (sm, s, tsm - sm->per_thread_data, 1);
     vec_add1 (indexes_to_free, s - tsm->sessions);
     if (!addr_only)
       break;
@@ -1287,7 +1356,7 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
 
   nat_ed_static_mapping_del_sessions (sm, tsm, m->local_addr, m->local_port,
 				      m->proto, fib_index,
-				      is_sm_addr_only (flags), e_addr, e_port);
+				      is_sm_addr_only (flags), is_sm_keep_proto(flags), e_addr, e_port);
 #else
   if (sm->num_workers > 1)
   {
@@ -1295,7 +1364,7 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
       {
 	  nat_ed_static_mapping_del_sessions (sm, tsm, m->local_addr, m->local_port,
 		  m->proto, fib_index,
-		  is_sm_addr_only (flags), e_addr, e_port);
+		  is_sm_addr_only (flags), is_sm_keep_proto(flags), e_addr, e_port);
       }
   }
   else
@@ -1303,7 +1372,7 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
       tsm = vec_elt_at_index (sm->per_thread_data, sm->num_workers);
       nat_ed_static_mapping_del_sessions (sm, tsm, m->local_addr, m->local_port,
 	      m->proto, fib_index,
-	      is_sm_addr_only (flags), e_addr, e_port);
+	      is_sm_addr_only (flags), is_sm_keep_proto(flags), e_addr, e_port);
   }
 #endif
 
@@ -2658,6 +2727,7 @@ nat44_ed_sw_interface_add_del (vnet_main_t *vnm, u32 sw_if_index, u32 is_add)
   snat_main_t *sm = &snat_main;
   snat_interface_t *i;
   int error = 0;
+  int j;
 
   if (is_add)
     return 0;
@@ -2695,6 +2765,35 @@ nat44_ed_sw_interface_add_del (vnet_main_t *vnm, u32 sw_if_index, u32 is_add)
 	  nat_log_err ("error occurred while removing output interface");
 	}
     }
+
+  for (j = 0; j < vec_len (sm->addr_to_resolve); j++)
+    {
+      snat_address_resolve_t *rp = sm->addr_to_resolve + j;
+
+      if (rp->sw_if_index == sw_if_index)
+	    {
+            vec_del1(sm->addr_to_resolve, j);
+            j--;
+	    }
+    }
+
+#if 0
+  /*
+   * Static NAT will not be cleared temporarily
+   */
+  for (j = 0; j < vec_len (sm->sm_to_resolve); j++)
+    {
+      snat_static_mapping_resolve_t *rp = sm->sm_to_resolve + j;
+
+      if (rp->sw_if_index == sw_if_index)
+	    {
+            vec_free(rp->tag);
+            vec_del1(sm->addr_to_resolve, j);
+            j--;
+	    }
+    }
+#endif
+
 
   return 0;
 }
@@ -3398,6 +3497,8 @@ nat44_ed_worker_db_init (snat_main_per_thread_data_t *tsm, u32 translations)
   pool_get (tsm->lru_pool, head);
   tsm->unk_proto_lru_head_index = head - tsm->lru_pool;
   clib_dlist_init (tsm->lru_pool, tsm->unk_proto_lru_head_index);
+
+  clib_spinlock_init (&tsm->self_lock);
 }
 
 static void
@@ -3431,6 +3532,7 @@ nat44_ed_worker_db_free (snat_main_per_thread_data_t *tsm)
   pool_free (tsm->lru_pool);
   pool_free (tsm->sessions);
   pool_free (tsm->per_vrf_sessions_pool);
+  clib_spinlock_free (&tsm->self_lock);
 }
 
 static void
@@ -3569,6 +3671,8 @@ nat44_ed_add_del_interface_address_cb (ip4_main_t *im, uword opaque,
   u8 twice_nat = 0;
   int i, rv;
 
+  u32 fib_index = ip4_fib_table_get_index_for_sw_if_index (sw_if_index);
+
   if (!sm->enabled)
     {
       return;
@@ -3579,8 +3683,6 @@ nat44_ed_add_del_interface_address_cb (ip4_main_t *im, uword opaque,
       twice_nat = 1;
       if (nat44_ed_get_addr_resolve_record (sw_if_index, twice_nat, &i))
 	{
-	  u32 fib_index =
-	    ip4_fib_table_get_index_for_sw_if_index (sw_if_index);
 	  vec_foreach (ap, sm->addresses)
 	    {
 	      if ((fib_index == ap->fib_index) &&
@@ -3618,7 +3720,8 @@ nat44_ed_add_del_interface_address_cb (ip4_main_t *im, uword opaque,
 	  return;
 	}
 
-      rv = nat44_ed_add_address (address, ~0, arp->is_twice_nat, ~0);
+      ip4_fib_t *fib = ip4_fib_get (fib_index);
+      rv = nat44_ed_add_address (address, fib->hash.table_id, arp->is_twice_nat, ~0);
       if (0 == rv)
 	{
 	  arp->is_resolved = 1;

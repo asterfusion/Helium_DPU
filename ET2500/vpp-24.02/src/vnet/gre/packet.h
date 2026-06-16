@@ -55,6 +55,13 @@ typedef struct
   u16 protocol;
 } gre_header_t;
 
+typedef struct
+{
+  u16 flags_and_version;
+  u16 protocol;
+  u32 key;
+} gre_header_with_key_t;
+
 /* From draft-foschiano-erspan-03.txt
 
    Different frame variants known as "ERSPAN Types" can be
