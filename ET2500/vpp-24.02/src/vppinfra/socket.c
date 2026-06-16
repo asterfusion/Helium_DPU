@@ -635,6 +635,14 @@ clib_socket_init (clib_socket_t *s)
       goto done;
     }
 
+      if (setsockopt (s->fd, SOL_SOCKET, SO_SNDBUF, &((int){ 1 << 24 }),
+		      sizeof (int)) < 0)
+	clib_unix_warning ("setsockopt SO_SNDBUF fails");
+
+      if (setsockopt (s->fd, SOL_SOCKET, SO_RCVBUF, &((int){ 1 << 24 }),
+		      sizeof (int)) < 0)
+	clib_unix_warning ("setsockopt SO_RCVBUF fails");
+
   if (s->is_server)
     {
       uword need_bind = 1;
