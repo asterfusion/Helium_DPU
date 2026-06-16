@@ -214,6 +214,7 @@ bier_lookup (vlib_main_t * vm,
              */
             u16 num_cloned, clone;
             u32 n_clones;
+            u8 domain_original_enqueued = 0;
 
             n_clones = vec_len(blm->blm_fmasks[thread_index]);
 
@@ -248,20 +249,10 @@ bier_lookup (vlib_main_t * vm,
                     to_next += 1;
                     n_left_to_next -= 1;
 
-                    if(b0->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL && ci0 != bi0)
-                    {
-                        char *src = vnet_buffer2(b0)->geosite_domain_ptr;
-                        char *dst;
-
-                        dst = clib_mem_alloc(256);
-                        clib_memset(dst, 0, 256);
-                        clib_strncpy(dst, src, 255);
-
-                        vnet_buffer2(c0)->geosite_domain_ptr = dst;
-                       
-                        c0->flags |= VLIB_BUFFER_DOMAIN_VALID;
-                
-                    }
+                    if(ci0 == bi0)
+                        domain_original_enqueued = 1;
+                    else
+                        vnet_buffer_geosite_domain_clone(b0, c0);
 
                     if (PREDICT_FALSE(b0->flags & VLIB_BUFFER_IS_TRACED))
                     {
@@ -293,6 +284,9 @@ bier_lookup (vlib_main_t * vm,
                                              to_next, n_left_to_next);
                     }
                 }
+
+                if (num_cloned > 0 && !domain_original_enqueued)
+                    vnet_buffer_geosite_domain_free(b0);
             }
             else
             {

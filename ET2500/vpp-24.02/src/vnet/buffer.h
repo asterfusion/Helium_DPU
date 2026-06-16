@@ -525,6 +525,78 @@ typedef struct
 
 #define vnet_buffer2(b) ((vnet_buffer_opaque2_t *) (b)->opaque2)
 
+#define VNET_BUFFER_GEOSITE_DOMAIN_LEN 256
+
+always_inline char *
+vnet_buffer_geosite_domain_get (vlib_buffer_t *b)
+{
+  if (!(b->flags & VLIB_BUFFER_DOMAIN_VALID))
+    return 0;
+
+  return vnet_buffer2 (b)->geosite_domain_ptr;
+}
+
+always_inline void
+vnet_buffer_geosite_domain_free (vlib_buffer_t *b)
+{
+  char *domain = 0;
+
+  if (b->flags & VLIB_BUFFER_DOMAIN_VALID)
+    domain = vnet_buffer2 (b)->geosite_domain_ptr;
+
+  b->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
+  vnet_buffer2 (b)->geosite_domain_ptr = 0;
+
+  if (!domain)
+    return;
+
+  clib_mem_free (domain);
+}
+
+always_inline int
+vnet_buffer_geosite_domain_set (vlib_buffer_t *b, const char *domain,
+				u16 len)
+{
+  char *copy;
+  u16 copy_len;
+
+  vnet_buffer_geosite_domain_free (b);
+
+  if (!domain)
+    return -1;
+
+  copy = clib_mem_alloc (VNET_BUFFER_GEOSITE_DOMAIN_LEN);
+  if (!copy)
+    return -1;
+
+  copy_len = clib_min (len, (u16) (VNET_BUFFER_GEOSITE_DOMAIN_LEN - 1));
+  clib_memset (copy, 0, VNET_BUFFER_GEOSITE_DOMAIN_LEN);
+  clib_memcpy (copy, domain, copy_len);
+
+  vnet_buffer2 (b)->geosite_domain_ptr = copy;
+  b->flags |= VLIB_BUFFER_DOMAIN_VALID;
+
+  return 0;
+}
+
+always_inline int
+vnet_buffer_geosite_domain_clone (vlib_buffer_t *src, vlib_buffer_t *dst)
+{
+  char *domain = vnet_buffer_geosite_domain_get (src);
+
+  if (src == dst)
+    return 0;
+
+  dst->flags &= ~VLIB_BUFFER_DOMAIN_VALID;
+  vnet_buffer2 (dst)->geosite_domain_ptr = 0;
+
+  if (!domain)
+    return 0;
+
+  return vnet_buffer_geosite_domain_set (
+    dst, domain, clib_strnlen (domain, VNET_BUFFER_GEOSITE_DOMAIN_LEN));
+}
+
 /*
  * The opaque2 field of the vlib_buffer_t is interpreted as a
  * vnet_buffer_opaque2_t. Hence it should be big enough to accommodate one.

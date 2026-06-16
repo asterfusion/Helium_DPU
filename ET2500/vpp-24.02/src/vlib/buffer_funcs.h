@@ -1104,7 +1104,8 @@ int vlib_buffer_add_data (vlib_main_t * vm, u32 * buffer_index, void *data,
 			  u32 n_data_bytes);
 
 /* Define vlib_buffer and vnet_buffer flags bits preserved for copy/clone */
-#define VLIB_BUFFER_COPY_CLONE_FLAGS_MASK      (~VLIB_BUFFER_EXT_HDR_VALID)
+#define VLIB_BUFFER_COPY_CLONE_FLAGS_MASK                                    \
+  (~(VLIB_BUFFER_EXT_HDR_VALID | VLIB_BUFFER_DOMAIN_VALID))
 
 /* duplicate all buffers in chain */
 always_inline vlib_buffer_t *

@@ -699,7 +699,7 @@ VLIB_NODE_FN (geosite_node) (vlib_main_t * vm,
           u8 ip_proto;
           u16 dport;
           u8 *payload;
-          char *domain;
+          char domain[DNS_MAX_DOMAIN_LEN];
           u16 payload_length;
           u16 domain_length =0;
         bool get_domain =false;
@@ -710,8 +710,7 @@ VLIB_NODE_FN (geosite_node) (vlib_main_t * vm,
         to_next += 1;
         n_left_from -= 1;
         n_left_to_next -= 1;
-        domain = clib_mem_alloc(DNS_MAX_DOMAIN_LEN * sizeof(char));
-        clib_memset(domain, 0, DNS_MAX_DOMAIN_LEN);
+        clib_memset(domain, 0, sizeof(domain));
         domain[0] ='\0';
         b0 = vlib_get_buffer (vm, bi0);
         sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
@@ -780,17 +779,8 @@ end_process:        vnet_feature_next (&next0, b0);
        
         {
 
-          b0->flags|=VLIB_BUFFER_DOMAIN_VALID ; 
-          
-        if( vnet_buffer2(b0)->geosite_domain_ptr != NULL)
-            clib_mem_free(vnet_buffer2(b0)->geosite_domain_ptr);
-
-
-           vnet_buffer2(b0)->geosite_domain_ptr = domain;
+          vnet_buffer_geosite_domain_set (b0, domain, domain_length);
      
-        }
-        else{
-            clib_mem_free(domain);
         }
 
           if (PREDICT_FALSE((node->flags & VLIB_NODE_FLAG_TRACE) 
