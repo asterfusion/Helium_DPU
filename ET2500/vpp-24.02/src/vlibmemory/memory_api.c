@@ -17,6 +17,7 @@
 #include <signal.h>
 
 #include <vlib/vlib.h>
+#include <vlib/stats/stats.h>
 #include <vlibapi/api.h>
 #include <vlibmemory/api.h>
 #include <vlibmemory/memory_api.h>
@@ -560,6 +561,7 @@ map_api_segment_init (vlib_main_t * vm)
       return clib_error_return (0, "vl_mem_api_init (%s) failed",
 				am->region_name);
     }
+  vlib_stats_register_mem_heap_named (am->vlib_rp->data_heap, "api segment");
   return 0;
 }
 
