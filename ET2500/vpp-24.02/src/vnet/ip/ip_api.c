@@ -808,6 +808,100 @@ vl_api_ip_route_add_del_v2_t_handler (vl_api_ip_route_add_del_v2_t *mp)
   /* clang-format on */
 }
 
+static int
+ip_route_batch_entry_handler (bool is_add,
+                              vl_api_ip_route_batch_entry_t *entry,
+                              u32 *stats_index)
+{
+  fib_route_path_t *rpaths = NULL, *rpath;
+  fib_entry_flag_t entry_flags;
+  vl_api_fib_path_t *apath;
+  fib_source_t src;
+  fib_prefix_t pfx;
+  u32 fib_index;
+  int rv, ii;
+
+  entry_flags = FIB_ENTRY_FLAG_NONE;
+  ip_prefix_decode (&entry->prefix, &pfx);
+
+  rv = fib_api_table_id_decode (pfx.fp_proto, ntohl (entry->table_id),
+				&fib_index);
+  if (0 != rv)
+    goto out;
+
+  if (0 != entry->n_paths)
+    vec_validate (rpaths, entry->n_paths - 1);
+
+  for (ii = 0; ii < entry->n_paths; ii++)
+    {
+      apath = &entry->paths[ii];
+      rpath = &rpaths[ii];
+
+      rv = fib_api_path_decode (apath, rpath);
+
+      if ((rpath->frp_flags & FIB_ROUTE_PATH_LOCAL) &&
+	  (~0 == rpath->frp_sw_if_index))
+	entry_flags |= (FIB_ENTRY_FLAG_CONNECTED | FIB_ENTRY_FLAG_LOCAL);
+
+      if (0 != rv)
+	goto out;
+    }
+
+  src = (0 == entry->src ? FIB_SOURCE_API : entry->src);
+
+  rv = fib_api_route_add_del (is_add, entry->is_multipath, fib_index, &pfx,
+			      src, entry_flags, rpaths);
+
+  if (is_add && 0 == rv)
+    *stats_index = fib_table_entry_get_stats_index (fib_index, &pfx);
+
+out:
+  vec_free (rpaths);
+
+  return (rv);
+}
+
+void
+vl_api_ip_route_add_del_batch_t_handler (vl_api_ip_route_add_del_batch_t *mp)
+{
+  vl_api_ip_route_add_del_batch_reply_t *rmp;
+  vl_api_ip_route_batch_result_t *results = NULL;
+  u32 stats_index;
+  int rv = 0;
+  u32 i;
+
+  u32 n_routes = ntohl(mp->n_routes);
+
+  if (n_routes)
+    vec_validate (results, n_routes - 1);
+
+  for (i = 0; i < n_routes; i++)
+    {
+      stats_index = ~0;
+      int route_rv;
+
+      route_rv = ip_route_batch_entry_handler (mp->is_add, &mp->routes[i], &stats_index);
+      if (route_rv != 0 && 0 == rv)
+	rv = route_rv;
+
+      results[i].retval = htonl (route_rv);
+      results[i].stats_index = htonl (stats_index);
+    }
+
+  /* clang-format off */
+  REPLY_MACRO3 (VL_API_IP_ROUTE_ADD_DEL_BATCH_REPLY,
+		sizeof (vl_api_ip_route_batch_result_t) * n_routes,
+  ({
+    rmp->n_results = htonl (n_routes);
+    if (n_routes)
+      clib_memcpy (&rmp->results[0], results,
+		   sizeof (vl_api_ip_route_batch_result_t) * n_routes);
+  }))
+  /* clang-format on */
+
+  vec_free (results);
+}
+
 void
 vl_api_ip_route_lookup_t_handler (vl_api_ip_route_lookup_t * mp)
 {
