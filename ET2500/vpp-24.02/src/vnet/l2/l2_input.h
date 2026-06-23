@@ -140,6 +140,8 @@ l2input_bd_config (u32 bd_index)
  _(UU_FLOOD,      "l2-flood")                   \
  _(UU_FWD,        "l2-uu-fwd")                  \
  _(MULTICAST,     "l2-multicast")               \
+ _(BCAST_POLICER, "l2-bcast-policer")           \
+ _(MCAST_POLICER, "l2-mcast-policer")           \
  _(UU_POLICER,    "l2-uu-policer")              \
  _(FWD,           "l2-fwd")                     \
  _(RW,            "l2-rw")                      \
