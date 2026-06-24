@@ -867,6 +867,9 @@ nat_ed_static_mapping_del_sessions (snat_main_t * sm,
       {
 	if (keep_proto && s->proto != protocol)
 	  continue;
+
+  if (s->out2in.addr.as_u32 != e_addr.as_u32)
+    continue;
       }
 
     if (nat44_ed_is_lb_session (s))
