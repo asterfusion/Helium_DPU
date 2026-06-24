@@ -155,13 +155,14 @@ VLIB_NODE_FN (l2flood_node) (vlib_main_t * vm,
 
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
-	  u16 n_clones, n_cloned, clone0;
+	  u16 n_clones, n_cloned = 0, clone0;
 	  l2_bridge_domain_t *bd_config;
 	  u32 sw_if_index0, bi0, ci0;
 	  l2_flood_member_t *member;
 	  vlib_buffer_t *b0, *c0;
 	  u16 next0;
 	  u8 in_shg;
+	  u8 domain_original_enqueued = 0;
 	  i32 mi;
 	  bool rx_is_tunnel =false;
 	  /* speculatively enqueue b0 to the current next frame */
@@ -261,23 +262,10 @@ VLIB_NODE_FN (l2flood_node) (vlib_main_t * vm,
 		  to_next[0] = ci0;
 		  to_next += 1;
 		  n_left_to_next -= 1;
-		  if(b0->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL)
-          {
-			char *src = vnet_buffer2(b0)->geosite_domain_ptr;
-			char *dst;
-
-			dst = clib_mem_alloc(256);
-			clib_memset(dst, 0, 256);
-			clib_strncpy(dst, src, 255);
-
-			vnet_buffer2(c0)->geosite_domain_ptr = dst;
-		
-
-			
-			c0->flags |= VLIB_BUFFER_DOMAIN_VALID;
-      
-
-          }
+		  if (ci0 == bi0)
+		    domain_original_enqueued = 1;
+		  else
+		    vnet_buffer_geosite_domain_clone(b0, c0);
 		  if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
 				     (b0->flags & VLIB_BUFFER_IS_TRACED)))
 		    {
@@ -328,8 +316,10 @@ VLIB_NODE_FN (l2flood_node) (vlib_main_t * vm,
 	  to_next[0] = ci0;
 	  to_next += 1;
 	  n_left_to_next -= 1;
-	  if(b0->flags & VLIB_BUFFER_DOMAIN_VALID)
-               c0->flags |= VLIB_BUFFER_DOMAIN_VALID;
+	  if (ci0 == bi0)
+	    domain_original_enqueued = 1;
+	  else
+	    vnet_buffer_geosite_domain_clone(b0, c0);
 
 	  if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
 			     (b0->flags & VLIB_BUFFER_IS_TRACED)))
@@ -375,6 +365,8 @@ VLIB_NODE_FN (l2flood_node) (vlib_main_t * vm,
 	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
 					   to_next, n_left_to_next,
 					   ci0, next0);
+	  if (n_clones > 1 && n_cloned > 0 && !domain_original_enqueued)
+	    vnet_buffer_geosite_domain_free(b0);
 	  if (PREDICT_FALSE (0 == n_left_to_next))
 	    {
 	      vlib_put_next_frame (vm, node, next_index, n_left_to_next);

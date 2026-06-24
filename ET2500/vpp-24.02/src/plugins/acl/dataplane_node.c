@@ -373,13 +373,14 @@ acl_get_country_index_by_domain(vlib_buffer_t **b, u32 **cc_indices, u32 **dns_c
 
 
 
-    if(vnet_buffer2(b[0])->geosite_domain_ptr == NULL){
+  char *domain_name;
+
+    domain_name = vnet_buffer_geosite_domain_get (b[0]);
+    if(domain_name == NULL){
     return result;
  
   }
 
-  char *domain_name;
-  domain_name =  vnet_buffer2(b[0])->geosite_domain_ptr;
   *cc_indices = ((__typeof__(geosite_get_country_index_by_domain) *)geosite_get_country_index_by_domain_ptr)(domain_name);
   if (*cc_indices)
   {
@@ -1374,4 +1375,3 @@ VNET_FEATURE_INIT (acl_out_l2_sai_nonip_fa_feature, static) =
  * eval: (c-set-style "gnu")
  * End:
  */
-

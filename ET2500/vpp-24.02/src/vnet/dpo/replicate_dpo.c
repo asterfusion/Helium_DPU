@@ -762,6 +762,7 @@ replicate_inline (vlib_main_t * vm,
             vlib_buffer_t * b0, *c0;
             const dpo_id_t *dpo0;
 	    u8 num_cloned;
+            u8 domain_original_enqueued = 0;
 
             bi0 = from[0];
             from += 1;
@@ -793,20 +794,10 @@ replicate_inline (vlib_main_t * vm,
                 ci0 = rm->clones[thread_index][bucket];
                 c0 = vlib_get_buffer(vm, ci0);
 
-                if(b0->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL && ci0 != bi0)
-                    {
-                        char *src = vnet_buffer2(b0)->geosite_domain_ptr;
-                        char *dst;
-
-                        dst = clib_mem_alloc(256);
-                        clib_memset(dst, 0, 256);
-                        clib_strncpy(dst, src, 255);
-
-                        vnet_buffer2(c0)->geosite_domain_ptr = dst;
-                       
-                        c0->flags |= VLIB_BUFFER_DOMAIN_VALID;
-                
-                    }
+                if(ci0 == bi0)
+                    domain_original_enqueued = 1;
+                else
+                    vnet_buffer_geosite_domain_clone(b0, c0);
 
                 to_next[0] = ci0;
                 to_next += 1;
@@ -836,6 +827,8 @@ replicate_inline (vlib_main_t * vm,
 		    vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 		  }
             }
+	    if (num_cloned > 0 && !domain_original_enqueued)
+	      vnet_buffer_geosite_domain_free(b0);
 	    vec_reset_length (rm->clones[thread_index]);
         }
 
