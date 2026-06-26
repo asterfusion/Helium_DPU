@@ -1071,6 +1071,14 @@ cn10k_pkts_send_ipsec (vlib_main_t *vm, vlib_node_runtime_t *node, u32 txq,
 	  cnxk_wmb ();
 	}
 
+      else
+      {
+          failed_buff[n_nix_fc_drop++] = vlib_get_buffer_index (vm, b[0]);
+          failed_buff[n_nix_fc_drop++] = vlib_get_buffer_index (vm, b[1]);
+          failed_buff[n_nix_fc_drop++] = vlib_get_buffer_index (vm, b[2]);
+          failed_buff[n_nix_fc_drop++] = vlib_get_buffer_index (vm, b[3]);
+      }
+
       b += 4;
       n_packets -= 4;
     }
