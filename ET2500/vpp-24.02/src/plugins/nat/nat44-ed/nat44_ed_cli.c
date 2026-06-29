@@ -399,7 +399,7 @@ add_address_command_fn (vlib_main_t * vm,
 	}
       else
 	{
-	  rv = nat44_ed_del_address (this_addr, twice_nat);
+	  rv = nat44_ed_del_address (this_addr, vrf_id, twice_nat);
 	}
 
       switch (rv)

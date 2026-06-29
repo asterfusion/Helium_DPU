@@ -185,6 +185,7 @@ format_function_t format_nat44_ed_tcp_state;
 #define NAT_SM_FLAG_LB		   (1 << 7)
 #define NAT_SM_FLAG_SWITCH_ADDRESS (1 << 8)
 #define NAT_SM_FLAG_KEEP_PROTO     (1 << 9)
+#define NAT_SM_FLAG_DNAT           (1 << 10)
 
 typedef CLIB_PACKED(struct
 {
@@ -798,6 +799,12 @@ is_sm_out2in_only (u32 f)
 }
 
 always_inline bool
+is_sm_dnat (u32 f)
+{
+  return (f & NAT_SM_FLAG_DNAT);
+}
+
+always_inline bool
 is_sm_identity_nat (u32 f)
 {
   return (f & NAT_SM_FLAG_IDENTITY_NAT);
@@ -855,7 +862,7 @@ int nat44_ed_add_output_interface (u32 sw_if_index);
 int nat44_ed_del_output_interface (u32 sw_if_index);
 
 int nat44_ed_add_address (ip4_address_t *addr, u32 vrf_id, u8 twice_nat, u32 acl_index);
-int nat44_ed_del_address (ip4_address_t addr, u8 twice_nat);
+int nat44_ed_del_address (ip4_address_t addr, u32 vrf_id, u8 twice_nat);
 int nat44_ed_add_interface_address (u32 sw_if_index, u8 twice_nat);
 int nat44_ed_del_interface_address (u32 sw_if_index, u8 twice_nat);
 
