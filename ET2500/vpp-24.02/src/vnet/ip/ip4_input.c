@@ -69,6 +69,10 @@ ip4_input_set_next (u32 sw_if_index, vlib_buffer_t * b, int arc_enabled)
   ip_lookup_main_t *lm = &im->lookup_main;
   u32 next;
   u8 arc;
+  vlib_main_t *vm_tmp = vlib_get_first_main();
+  u32 wg_sw_if_index = 0;
+  u32 ai = 0;
+  u32 peeri = INDEX_INVALID;
 
   ip4_header_t *ip = vlib_buffer_get_current (b);
 
@@ -83,7 +87,12 @@ ip4_input_set_next (u32 sw_if_index, vlib_buffer_t * b, int arc_enabled)
       arc = lm->ucast_feature_arc_index;
     }
 
-  if (arc_enabled)
+  if (vm_tmp->get_wg4_callback && (b->flags & VLIB_BUFFER_RECV_FROM_TAP))
+  {
+      peeri = vm_tmp->get_wg4_callback((u8 *)(&ip->dst_address), &ai, &wg_sw_if_index);
+  }
+
+  if (arc_enabled && (peeri == INDEX_INVALID))
     vnet_feature_arc_start (arc, sw_if_index, &next, b);
 
   return next;

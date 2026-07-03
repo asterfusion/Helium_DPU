@@ -32,6 +32,57 @@ wg_peer_t *wg_peer_pool;
 
 index_t *wg_peer_by_adj_index;
 
+u32 wg_peer_dst_ip4_match (u8 *dst_ip, u32 *ai, u32 *wg_sw_if_index)
+{
+    wg_peer_t *peer;
+    fib_prefix_t *allowed_ip;
+    ip4_address_t *dst = (ip4_address_t *)dst_ip;
+
+    pool_foreach (peer, wg_peer_pool)
+    {
+        vec_foreach (allowed_ip, peer->allowed_ips)
+        {
+            if (allowed_ip->fp_proto == FIB_PROTOCOL_IP4 &&
+                ip4_destination_matches_route (&ip4_main, &allowed_ip->fp_addr.ip4,
+                        dst, allowed_ip->fp_len))
+            {
+                *wg_sw_if_index = peer->wg_sw_if_index;
+                return (peer - wg_peer_pool);
+            }
+      }
+  }
+  return INDEX_INVALID;
+}
+
+u32 wg_peer_dst_ip6_match (u8 *dst_ip, u32 *ai, u32 *wg_sw_if_index)
+{
+    wg_peer_t *peer;
+    fib_prefix_t *allowed_ip;
+    ip6_address_t *dst = (ip6_address_t *)dst_ip;
+
+    pool_foreach (peer, wg_peer_pool)
+    {
+        vec_foreach (allowed_ip, peer->allowed_ips)
+        {
+            if (allowed_ip->fp_proto == FIB_PROTOCOL_IP6 &&
+                ip6_destination_matches_route (&ip6_main, &allowed_ip->fp_addr.ip6,
+                        dst, allowed_ip->fp_len))
+            {
+                if (vec_len (peer->adj_indices) > 0)
+                {
+                    *ai = peer->adj_indices[0];
+                    *wg_sw_if_index = peer->wg_sw_if_index;
+
+                    return (peer - wg_peer_pool);
+                }
+
+                return INDEX_INVALID;
+            }
+      }
+  }
+  return INDEX_INVALID;
+}
+
 static void
 wg_peer_endpoint_reset (wg_peer_endpoint_t * ep)
 {
@@ -39,6 +90,19 @@ wg_peer_endpoint_reset (wg_peer_endpoint_t * ep)
   ep->port = 0;
 }
 
+static void
+wg_peer_set_callback (vlib_main_t * vm)
+{
+    if (NULL == vm->get_wg4_callback)
+    {
+        vm->get_wg4_callback = wg_peer_dst_ip4_match;
+    }
+
+    if (NULL == vm->get_wg6_callback)
+    {
+        vm->get_wg6_callback = wg_peer_dst_ip6_match;
+    }
+}
 static void
 wg_peer_endpoint_init (wg_peer_endpoint_t *ep, const ip46_address_t *addr,
 		       u16 port)
@@ -141,6 +205,14 @@ wg_peer_adj_stack (wg_peer_t *peer, adj_index_t ai)
       fib_index = fib_table_find (fib_proto, peer->table_id);
 
       adj_midchain_delegate_stack (ai, fib_index, &dst);
+
+      adj = adj_get (ai);
+      if (adj->lookup_next_index == IP_LOOKUP_NEXT_MIDCHAIN && adj->sub_type.midchain.next_dpo.dpoi_type == DPO_DROP)
+      {
+          adj_midchain_delegate_remove (ai);
+          adj_midchain_delegate_stack (ai, fib_index, &dst);
+      }
+
     }
 }
 
@@ -585,6 +657,8 @@ wg_peer_add (u32 tun_sw_if_index, const u8 public_key[NOISE_PUBLIC_KEY_LEN],
 
   if (tun_sw_if_index == ~0)
     return (VNET_API_ERROR_INVALID_SW_IF_INDEX);
+
+  wg_peer_set_callback(vm);
 
   wg_if = wg_if_get (wg_if_find_by_sw_if_index (tun_sw_if_index));
   if (!wg_if)

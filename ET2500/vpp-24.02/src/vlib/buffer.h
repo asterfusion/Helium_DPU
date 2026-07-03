@@ -82,7 +82,10 @@
   _ (9, DOMAIN_VALID, "domain-valid")                                         \
   _ (10, ACL_SET_TC_VALID, "acl-set-tc-valid")                                \
   _ (11, ACL_SET_USER_VALID, "acl-set-user-valid")                            \
-  _ (12, ACL_SET_GUSER_IP_RANGE_VALID, "acl-set-guser-ip-range-valid")
+  _ (12, ACL_SET_GUSER_IP_RANGE_VALID, "acl-set-guser-ip-range-valid")        \
+  _ (13, IS_WG_INTF, "is-wg-intf")                                            \
+  _ (14, PUNT_FROM_WG, "punt-from-wg")                                        \
+  _ (15, RECV_FROM_TAP, "recv-from-tap")
 
 /* NOTE: only buffer generic flags should be defined here, please consider
    using user flags. i.e. src/vnet/buffer.h */
