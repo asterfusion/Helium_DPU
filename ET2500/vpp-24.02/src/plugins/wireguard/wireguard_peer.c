@@ -205,14 +205,6 @@ wg_peer_adj_stack (wg_peer_t *peer, adj_index_t ai)
       fib_index = fib_table_find (fib_proto, peer->table_id);
 
       adj_midchain_delegate_stack (ai, fib_index, &dst);
-
-      adj = adj_get (ai);
-      if (adj->lookup_next_index == IP_LOOKUP_NEXT_MIDCHAIN && adj->sub_type.midchain.next_dpo.dpoi_type == DPO_DROP)
-      {
-          adj_midchain_delegate_remove (ai);
-          adj_midchain_delegate_stack (ai, fib_index, &dst);
-      }
-
     }
 }
 
