@@ -168,6 +168,10 @@ wg_peer_is_dead (wg_peer_t *peer)
 extern index_t *wg_peer_by_adj_index;
 extern wg_peer_t *wg_peer_pool;
 
+/* Exported functions for other plugins */
+extern  u32 wg_peer_dst_ip4_match(u8 *dst_ip, u32 *ai, u32 *wg_sw_if_index);
+extern  u32 wg_peer_dst_ip6_match(u8 *dst_ip, u32 *ai, u32 *wg_sw_if_index);
+
 static inline wg_peer_t *
 wg_peer_get (index_t peeri)
 {

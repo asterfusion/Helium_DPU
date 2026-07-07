@@ -24,9 +24,10 @@ typedef enum
   CNXK_IPSEC_FLAG_DECRYPT_OP = (1 << 1),
 } cnxk_ipsec_flag_op_t;
 
+/*The uploading of TCP packets and the sending of IPsec packets have no overlap, so they share a common flag bit*/
 typedef enum
 {
-  CNXK_VNET_BUFFER_OFFLOAD_F_IPSEC_OUTBOUND_INLINE = VNET_BUFFER_F_AVAIL1,
+  CNXK_VNET_BUFFER_OFFLOAD_F_IPSEC_OUTBOUND_INLINE = VNET_BUFFER_F_TCP_ORIG_RX_SAVED,
 } cnxk_vnet_buffer_offload_flag_t;
 
 #endif /* included_onp_drv_inc_ipsec_defs_h */

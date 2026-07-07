@@ -101,6 +101,12 @@ VLIB_NODE_FN (ip6_input_node) (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  u32 pi0, sw_if_index0, next0 = 0;
 	  u32 pi1, sw_if_index1, next1 = 0;
 	  u8 arc0, arc1;
+          u32 wg_sw_if_index0 = 0;
+          u32 wg_sw_if_index1 = 0;
+          u32 ai0 = 0;
+          u32 ai1 = 0;
+          u32 peeri0 = INDEX_INVALID;
+          u32 peeri1 = INDEX_INVALID;
 
 	  /* Prefetch next iteration. */
 	  {
@@ -160,8 +166,29 @@ VLIB_NODE_FN (ip6_input_node) (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  vnet_buffer (p0)->ip.adj_index[VLIB_RX] = ~0;
 	  vnet_buffer (p1)->ip.adj_index[VLIB_RX] = ~0;
 
-	  vnet_feature_arc_start (arc0, sw_if_index0, &next0, p0);
-	  vnet_feature_arc_start (arc1, sw_if_index1, &next1, p1);
+          if (PREDICT_FALSE(NULL != im->get_wg6_callback))
+          {
+              if (PREDICT_FALSE(p0->flags & VLIB_BUFFER_RECV_FROM_TAP))
+              {
+                  peeri0 = im->get_wg6_callback((u8 *)(&ip0->dst_address), &ai0, &wg_sw_if_index0);
+              }
+
+              if (PREDICT_FALSE(p1->flags & VLIB_BUFFER_RECV_FROM_TAP))
+              {
+                  peeri1 = im->get_wg6_callback((u8 *)(&ip1->dst_address), &ai1, &wg_sw_if_index1);
+              }
+          }
+
+          if (PREDICT_TRUE(peeri0 == INDEX_INVALID))
+          {
+              vnet_feature_arc_start (arc0, sw_if_index0, &next0, p0);
+          }
+
+          if (PREDICT_TRUE(peeri1 == INDEX_INVALID))
+          {
+              vnet_feature_arc_start (arc1, sw_if_index1, &next1, p1);
+          }
+
 
 	  vlib_increment_simple_counter (cm, thread_index, sw_if_index0, 1);
 	  vlib_increment_simple_counter (cm, thread_index, sw_if_index1, 1);
@@ -179,6 +206,10 @@ VLIB_NODE_FN (ip6_input_node) (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  ip6_header_t *ip0;
 	  u32 pi0, sw_if_index0, next0 = 0;
 	  u8 arc0;
+          ip6_main_t *im = &ip6_main;
+          u32 wg_sw_if_index0 = 0;
+          u32 ai0 = 0;
+          u32 peeri0 = INDEX_INVALID;
 
 	  pi0 = from[0];
 	  to_next[0] = pi0;
@@ -203,7 +234,16 @@ VLIB_NODE_FN (ip6_input_node) (vlib_main_t * vm, vlib_node_runtime_t * node,
 	    }
 
 	  vnet_buffer (p0)->ip.adj_index[VLIB_RX] = ~0;
-	  vnet_feature_arc_start (arc0, sw_if_index0, &next0, p0);
+
+          if (PREDICT_FALSE(im->get_wg6_callback && (p0->flags & VLIB_BUFFER_RECV_FROM_TAP)))
+          {
+              peeri0 = im->get_wg6_callback((u8 *)(&ip0->dst_address), &ai0, &wg_sw_if_index0);
+          }
+
+          if (PREDICT_TRUE(peeri0 == INDEX_INVALID))
+          {
+              vnet_feature_arc_start (arc0, sw_if_index0, &next0, p0);
+          }
 
 	  vlib_increment_simple_counter (cm, thread_index, sw_if_index0, 1);
 	  ip6_input_check_x1 (vm, error_node, p0, ip0, &next0);
