@@ -406,7 +406,7 @@ wg_input_post_process (vlib_main_t *vm, vlib_buffer_t *b, u16 *next,
     {
       if (0 == vnet_buffer2 (b)->l2_rx_sw_if_index || ~0 == vnet_buffer2 (b)->l2_rx_sw_if_index)
       {
-          b->flags |= VLIB_BUFFER_IS_WG_INTF;
+          b->flags |= VLIB_BUFFER_PUNT_FROM_WG;
           vnet_buffer2 (b)->l2_rx_sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
       }
       vnet_buffer (b)->sw_if_index[VLIB_RX] = peer->wg_sw_if_index;

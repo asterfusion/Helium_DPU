@@ -65,8 +65,7 @@
   _ (16, IS_DVR, "dvr", 1)                                                    \
   _ (17, QOS_DATA_VALID, "qos-data-valid", 0)                                 \
   _ (18, GSO, "gso", 0)                                                       \
-  _ (19, AVAIL1, "avail1", 1)                                                 \
-  _ (20, TCP_ORIG_RX_SAVED, "tcp-orig-rx-saved", 1)
+  _ (19, AVAIL1, "avail1", 1)
 
 /*
  * Please allocate the FIRST available bit, redefine
@@ -76,6 +75,9 @@
 
 #define VNET_BUFFER_FLAGS_ALL_AVAIL                                           \
   (VNET_BUFFER_F_AVAIL1)
+
+/*The uploading of TCP packets and the sending of IPsec packets have no overlap, so they share a common flag bit*/
+#define VNET_BUFFER_F_TCP_ORIG_RX_SAVED  VNET_BUFFER_F_AVAIL1
 
 #define VNET_BUFFER_FLAGS_VLAN_BITS \
   (VNET_BUFFER_F_VLAN_1_DEEP | VNET_BUFFER_F_VLAN_2_DEEP)

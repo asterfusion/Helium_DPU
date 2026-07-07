@@ -82,10 +82,7 @@
   _ (9, DOMAIN_VALID, "domain-valid")                                         \
   _ (10, ACL_SET_TC_VALID, "acl-set-tc-valid")                                \
   _ (11, ACL_SET_USER_VALID, "acl-set-user-valid")                            \
-  _ (12, ACL_SET_GUSER_IP_RANGE_VALID, "acl-set-guser-ip-range-valid")        \
-  _ (13, IS_WG_INTF, "is-wg-intf")                                            \
-  _ (14, PUNT_FROM_WG, "punt-from-wg")                                        \
-  _ (15, RECV_FROM_TAP, "recv-from-tap")
+  _ (12, ACL_SET_GUSER_IP_RANGE_VALID, "acl-set-guser-ip-range-valid")
 
 /* NOTE: only buffer generic flags should be defined here, please consider
    using user flags. i.e. src/vnet/buffer.h */
@@ -104,10 +101,17 @@ enum
 #undef _
 };
 
+/*punt-from-wg and dpu-to-host-hdr-valid use the same vlue for dpu-to-host-hdr-valid is currently not being used*/
+#define VLIB_BUFFER_PUNT_FROM_WG      VLIB_BUFFER_DPU_TO_HOST_HDR_VALID
+
+/*recv-from-tap and domain-valid use the same vlue for domain-valid is currently not being used*/
+#define VLIB_BUFFER_RECV_FROM_TAP     VLIB_BUFFER_DOMAIN_VALID
+
+
   /* User defined buffer flags. */
 #define LOG2_VLIB_BUFFER_FLAG_USER(n) (32 - (n))
 #define VLIB_BUFFER_FLAG_USER(n) (1 << LOG2_VLIB_BUFFER_FLAG_USER(n))
-#define VLIB_BUFFER_FLAGS_ALL (0xfff)
+#define VLIB_BUFFER_FLAGS_ALL (0x1fff)
 
 /** \brief Compile time buffer trajectory tracing option
     Turn this on if you run into "bad monkey" contexts,

@@ -163,6 +163,8 @@ typedef struct ip4_main_t
   } host_config;
 
   u16 msg_id_base;
+
+  u32 (*get_wg4_callback) (u8 *, u32 *, u32 *);
 } ip4_main_t;
 
 #define ARP_THROTTLE_BITS	(512)
@@ -181,6 +183,7 @@ extern vlib_node_registration_t ip4_arp_node;
 extern vlib_node_registration_t ip4_glean_node;
 extern vlib_node_registration_t ip4_midchain_node;
 extern vlib_node_registration_t ip4_punt_node;
+
 
 always_inline uword
 ip4_destination_matches_route (const ip4_main_t * im,

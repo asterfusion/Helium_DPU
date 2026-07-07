@@ -91,16 +91,19 @@ wg_peer_endpoint_reset (wg_peer_endpoint_t * ep)
 }
 
 static void
-wg_peer_set_callback (vlib_main_t * vm)
+wg_peer_set_callback ()
 {
-    if (NULL == vm->get_wg4_callback)
+    ip4_main_t *im4 = &ip4_main;
+    ip6_main_t *im6 = &ip6_main;
+
+    if (NULL == im4->get_wg4_callback)
     {
-        vm->get_wg4_callback = wg_peer_dst_ip4_match;
+        im4->get_wg4_callback = wg_peer_dst_ip4_match;
     }
 
-    if (NULL == vm->get_wg6_callback)
+    if (NULL == im6->get_wg6_callback)
     {
-        vm->get_wg6_callback = wg_peer_dst_ip6_match;
+        im6->get_wg6_callback = wg_peer_dst_ip6_match;
     }
 }
 static void
@@ -650,7 +653,7 @@ wg_peer_add (u32 tun_sw_if_index, const u8 public_key[NOISE_PUBLIC_KEY_LEN],
   if (tun_sw_if_index == ~0)
     return (VNET_API_ERROR_INVALID_SW_IF_INDEX);
 
-  wg_peer_set_callback(vm);
+  wg_peer_set_callback();
 
   wg_if = wg_if_get (wg_if_find_by_sw_if_index (tun_sw_if_index));
   if (!wg_if)

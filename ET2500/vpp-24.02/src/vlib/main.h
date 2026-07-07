@@ -266,9 +266,6 @@ typedef struct vlib_main_t
   u32 buffer_alloc_success_seed;
   f64 buffer_alloc_success_rate;
 
-  u32 (*get_wg4_callback) (u8 *, u32 *, u32 *);
-  u32 (*get_wg6_callback) (u8 *, u32 *, u32 *);
-
 #ifdef CLIB_SANITIZE_ADDR
   /* address sanitizer stack save */
   void *asan_stack_save;

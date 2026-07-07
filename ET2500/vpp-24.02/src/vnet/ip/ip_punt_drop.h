@@ -365,7 +365,7 @@ ip_punt_redirect (vlib_main_t * vm,
        * add by asterfusion for support bvi punt
        */
 	      if (PREDICT_FALSE(INDEX_INVALID == rrxi0 &&
-                  ((b0->flags & VLIB_BUFFER_NOT_PHY_INTF) || (b0->flags & VLIB_BUFFER_IS_WG_INTF)) &&
+                  ((b0->flags & VLIB_BUFFER_NOT_PHY_INTF) || (b0->flags & VLIB_BUFFER_PUNT_FROM_WG)) &&
                     vnet_buffer2(b0)->l2_rx_sw_if_index != ~0))
 	      {
 	          l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
@@ -380,14 +380,7 @@ ip_punt_redirect (vlib_main_t * vm,
 	                  rrxi0 = redirects[0];
 	              used_l2_rx_sw_if_index0 = 1;
 	          }
-                  if (b0->flags & VLIB_BUFFER_IS_WG_INTF)
-                  {
-                      b0->flags |= VLIB_BUFFER_PUNT_FROM_WG;
-                  }
-                  else
-                  {
-                       vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
-                  }
+                  vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
 	      }
 	  /*
 	   * If config exists for this particular RX interface use it,
