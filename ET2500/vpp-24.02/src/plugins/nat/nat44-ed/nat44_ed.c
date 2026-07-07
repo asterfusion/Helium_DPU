@@ -3978,6 +3978,7 @@ VLIB_REGISTER_NODE (nat_default_node) = {
     [NAT_NEXT_OUT2IN_ED_SLOW_PATH] = "nat44-ed-out2in-slowpath",
     [NAT_NEXT_IN2OUT_CLASSIFY] = "nat44-in2out-worker-handoff",
     [NAT_NEXT_OUT2IN_CLASSIFY] = "nat44-out2in-worker-handoff",
+    [NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY] = "nat44-in2out-output-worker-handoff",
   },
 };
 
