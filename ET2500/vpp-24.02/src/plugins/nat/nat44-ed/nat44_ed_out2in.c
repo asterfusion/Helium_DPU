@@ -137,9 +137,9 @@ next_src_nat (snat_main_t *sm, ip4_header_t *ip, u16 src_port, u16 dst_port,
   return 0;
 }
 
-static void create_bypass_for_fwd (snat_main_t *sm, vlib_buffer_t *b,
-				   snat_session_t *s, ip4_header_t *ip,
-				   u32 rx_fib_index, u32 thread_index);
+static int create_bypass_for_fwd (snat_main_t *sm, vlib_buffer_t *b,
+				  snat_session_t *s, ip4_header_t *ip,
+				  u32 rx_fib_index, u32 thread_index);
 
 static snat_session_t *create_session_for_static_mapping_ed (
   snat_main_t *sm, vlib_buffer_t *b, ip4_address_t i2o_addr, u16 i2o_port,
@@ -206,7 +206,9 @@ icmp_out2in_ed_slow_path (snat_main_t *sm, vlib_buffer_t *b, ip4_header_t *ip,
 	    }
 	  else
 	    {
-	      create_bypass_for_fwd (sm, b, s, ip, rx_fib_index, thread_index);
+	      if (create_bypass_for_fwd (sm, b, s, ip, rx_fib_index,
+					 thread_index) < 0)
+		next = NAT_NEXT_OUT2IN_CLASSIFY;
 	    }
 	}
       goto out;
@@ -560,7 +562,7 @@ create_session_for_static_mapping_ed (
   return s;
 }
 
-static void
+static int
 create_bypass_for_fwd (snat_main_t *sm, vlib_buffer_t *b, snat_session_t *s,
 		       ip4_header_t *ip, u32 rx_fib_index, u32 thread_index)
 {
@@ -577,7 +579,7 @@ create_bypass_for_fwd (snat_main_t *sm, vlib_buffer_t *b, snat_session_t *s,
       if (nat_get_icmp_session_lookup_values (b, ip, &lookup_daddr,
 					      &lookup_sport, &lookup_saddr,
 					      &lookup_dport, &lookup_protocol))
-	return;
+	return 0;
     }
   else
     {
@@ -601,52 +603,38 @@ create_bypass_for_fwd (snat_main_t *sm, vlib_buffer_t *b, snat_session_t *s,
 
   if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv, &value))
     {
-      ASSERT (thread_index == ed_value_get_thread_index (&value));
-      /*
-       * Attack and error checking
-       * This is a fault-tolerant mechanism, which may conceal some issues.
-       * But we have to do this, otherwise if we receive errors pkts, the system will crash.
-       * In the debugging:
-       *    By asserting whether the thread is correct and
-       *    whether the session flag contains "bypass_fwd",
-       *    issues can be identified in advance.
-       * In the release:
-       *    Direct return and output warning message
-       */
-      if (thread_index != ed_value_get_thread_index (&value))
-      {
-          clib_warning("NAT bypass fwd thread error: Maybe received illegal or abnormal Packet!!");
-          return;
-      }
+      if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
+			   &value, thread_index)))
+	return -1;
       s =
 	pool_elt_at_index (tsm->sessions,
 			   ed_value_get_session_index (&value));
 
       ASSERT(na44_ed_is_fwd_bypass_session(s));
       if (!na44_ed_is_fwd_bypass_session(s))
-      {
-          clib_warning("NAT bypass fwd session flag error: Maybe received illegal or abnormal Packet!!");
-          return;
-      }
+	{
+	  clib_warning("NAT bypass fwd session flag error: Maybe received illegal or abnormal Packet!!");
+	  return 0;
+	}
     }
   else if (ip->protocol == IP_PROTOCOL_ICMP &&
 	   icmp_type_is_error_message
 	   (vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags))
     {
-      return;
+      return 0;
     }
   else
     {
       if (PREDICT_FALSE
 	  (nat44_ed_maximum_sessions_exceeded
 	   (sm, rx_fib_index, thread_index)))
-	return;
+	return 0;
 
       s = nat_ed_session_alloc (sm, thread_index, now, ip->protocol);
       if (!s)
 	{
 	  nat_elog_warn (sm, "create NAT session failed");
-	  return;
+	  return 0;
 	}
 
       s->ext_host_addr = ip->src_address;
@@ -668,7 +656,7 @@ create_bypass_for_fwd (snat_main_t *sm, vlib_buffer_t *b, snat_session_t *s,
 	{
 	  nat_elog_notice (sm, "in2out flow add failed");
 	  nat_ed_session_delete (sm, s, thread_index, 1);
-	  return;
+	  return 0;
 	}
 
       /* ha sync */
@@ -688,6 +676,7 @@ create_bypass_for_fwd (snat_main_t *sm, vlib_buffer_t *b, snat_session_t *s,
   nat44_session_update_counters (s, now, 0, thread_index);
   /* Per-user LRU list maintenance */
   nat44_session_update_lru (sm, s, thread_index);
+  return 0;
 }
 
 static snat_session_t *
@@ -911,7 +900,14 @@ nat44_ed_out2in_fast_path_node_fn_inline (vlib_main_t * vm,
 	  next[0] = NAT_NEXT_OUT2IN_ED_SLOW_PATH;
 	  goto trace0;
 	}
-      ASSERT (thread_index == ed_value_get_thread_index (&value0));
+
+      if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
+			   &value0, thread_index)))
+	{
+	  next[0] = NAT_NEXT_OUT2IN_CLASSIFY;
+	  goto trace0;
+	}
+
       s0 =
 	pool_elt_at_index (tsm->sessions,
 			   ed_value_get_session_index (&value0));
@@ -1209,7 +1205,12 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
       s0 = NULL;
       if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv0, &value0))
 	{
-	  ASSERT (thread_index == ed_value_get_thread_index (&value0));
+	  if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
+			     &value0, thread_index)))
+	    {
+	      next[0] = NAT_NEXT_OUT2IN_CLASSIFY;
+	      goto trace0;
+	    }
 	  s0 =
 	    pool_elt_at_index (tsm->sessions,
 			       ed_value_get_session_index (&value0));
@@ -1253,8 +1254,11 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
 		    }
 		  else
 		    {
-		      create_bypass_for_fwd (sm, b0, s0, ip0, rx_fib_index0,
-					     thread_index);
+		      if (create_bypass_for_fwd (sm, b0, s0, ip0, rx_fib_index0,
+						   thread_index) < 0)
+			{
+			  next[0] = NAT_NEXT_OUT2IN_CLASSIFY;
+			}
 		    }
 		}
 	      goto trace0;

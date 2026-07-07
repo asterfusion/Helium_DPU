@@ -933,6 +933,13 @@ nat44_ed_is_unk_proto (u8 proto)
   return 1 - lookup_table[proto];
 }
 
+static_always_inline int
+nat44_ed_session_belongs_to_other_thread (clib_bihash_kv_16_8_t *value,
+					  u32 thread_index)
+{
+  return thread_index != ed_value_get_thread_index (value);
+}
+
 #endif /* __included_nat44_ed_inlines_h__ */
 
 /*

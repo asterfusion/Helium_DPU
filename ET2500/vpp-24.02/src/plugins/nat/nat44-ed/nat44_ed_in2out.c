@@ -903,7 +903,9 @@ nat_not_translate_output_feature_fwd (snat_main_t * sm, ip4_header_t * ip,
 
   if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv, &value))
     {
-      ASSERT (thread_index == ed_value_get_thread_index (&value));
+      if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
+			   &value, thread_index)))
+	return -1;
       s =
 	pool_elt_at_index (tsm->sessions,
 			   ed_value_get_session_index (&value));
@@ -950,7 +952,9 @@ nat44_ed_not_translate_output_feature (snat_main_t *sm, vlib_buffer_t *b,
 	     dst_port, tx_fib_index, ip->protocol);
   if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv, &value))
     {
-      ASSERT (thread_index == ed_value_get_thread_index (&value));
+      if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
+			   &value, thread_index)))
+	return -1;
       s =
 	pool_elt_at_index (tsm->sessions,
 			   ed_value_get_session_index (&value));
@@ -982,7 +986,9 @@ nat44_ed_not_translate_output_feature (snat_main_t *sm, vlib_buffer_t *b,
 	     src_port, rx_fib_index, ip->protocol);
   if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv, &value))
     {
-      ASSERT (thread_index == ed_value_get_thread_index (&value));
+      if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
+			   &value, thread_index)))
+	return -1;
       s =
 	pool_elt_at_index (tsm->sessions,
 			   ed_value_get_session_index (&value));
@@ -1031,10 +1037,14 @@ icmp_in2out_ed_slow_path (snat_main_t *sm, vlib_buffer_t *b, ip4_header_t *ip,
 
   if (tx_sw_if_index != ~0)
     {
-      if (PREDICT_FALSE (nat44_ed_not_translate_output_feature (
-	    sm, b, ip, lookup_sport, lookup_dport, thread_index, sw_if_index,
-	    tx_sw_if_index, is_multi_worker)))
+      int not_translate;
+      if (PREDICT_FALSE (
+	    (not_translate = nat44_ed_not_translate_output_feature (
+	       sm, b, ip, lookup_sport, lookup_dport, thread_index, sw_if_index,
+	       tx_sw_if_index, is_multi_worker))))
 	{
+	  if (PREDICT_FALSE (not_translate < 0))
+	    return NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY;
 	  return next;
 	}
     }
@@ -1314,10 +1324,16 @@ nat44_ed_in2out_fast_path_node_fn_inline (vlib_main_t *vm,
 
       if (is_output_feature)
 	{
+	  int not_translate;
 	  if (PREDICT_FALSE
-	      (nat_not_translate_output_feature_fwd
-	       (sm, ip0, thread_index, now, vm, b0)))
-	    goto trace0;
+	      ((not_translate =
+		nat_not_translate_output_feature_fwd (sm, ip0, thread_index, now,
+						      vm, b0))))
+	    {
+	      if (PREDICT_FALSE (not_translate < 0))
+		next[0] = NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY;
+	      goto trace0;
+	    }
 	}
 
       if (PREDICT_FALSE (proto0 == IP_PROTOCOL_ICMP))
@@ -1385,7 +1401,14 @@ nat44_ed_in2out_fast_path_node_fn_inline (vlib_main_t *vm,
 	  goto trace0;
 	}
 
-      ASSERT (thread_index == ed_value_get_thread_index (&value0));
+      if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
+			   &value0, thread_index)))
+	{
+	  next[0] = is_output_feature ? NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY
+				      : NAT_NEXT_IN2OUT_CLASSIFY;
+	  goto trace0;
+	}
+
       s0 =
 	pool_elt_at_index (tsm->sessions,
 			   ed_value_get_session_index (&value0));
@@ -1659,7 +1682,13 @@ nat44_ed_in2out_slow_path_node_fn_inline (vlib_main_t *vm,
 	rx_fib_index0, ip0->protocol);
       if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv0, &value0))
 	{
-	  ASSERT (thread_index == ed_value_get_thread_index (&value0));
+	  if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
+			     &value0, thread_index)))
+	    {
+	      next[0] = is_output_feature ? NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY
+					  : NAT_NEXT_IN2OUT_CLASSIFY;
+	      goto trace0;
+	    }
 	  s0 =
 	    pool_elt_at_index (tsm->sessions,
 			       ed_value_get_session_index (&value0));
@@ -1667,13 +1696,19 @@ nat44_ed_in2out_slow_path_node_fn_inline (vlib_main_t *vm,
 
       if (!s0)
 	{
+	  int not_translate;
 	  if (is_output_feature)
 	    {
-	      if (PREDICT_FALSE (nat44_ed_not_translate_output_feature (
-		    sm, b0, ip0, vnet_buffer (b0)->ip.reass.l4_src_port,
-		    vnet_buffer (b0)->ip.reass.l4_dst_port, thread_index,
-		    rx_sw_if_index0, tx_sw_if_index0, is_multi_worker)))
-		goto trace0;
+	      if (PREDICT_FALSE (
+		    (not_translate = nat44_ed_not_translate_output_feature (
+		       sm, b0, ip0, vnet_buffer (b0)->ip.reass.l4_src_port,
+		       vnet_buffer (b0)->ip.reass.l4_dst_port, thread_index,
+		       rx_sw_if_index0, tx_sw_if_index0, is_multi_worker))))
+		{
+		  if (PREDICT_FALSE (not_translate < 0))
+		    next[0] = NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY;
+		  goto trace0;
+		}
 
 	      /*
 	       * Send DHCP packets to the ipv4 stack, or we won't
