@@ -49,6 +49,24 @@
 
 l2fib_main_t l2fib_main;
 
+typedef struct
+{
+  u8 overwritten;
+  u8 overwritten_age_not;
+} l2fib_overwrite_ctx_t;
+
+static void
+l2fib_overwrite_cb (BVT (clib_bihash_kv) * old_kv, void *arg)
+{
+  l2fib_overwrite_ctx_t *ctx = arg;
+  l2fib_entry_result_t old_result = {
+    .raw = old_kv->value,
+  };
+
+  ctx->overwritten = 1;
+  ctx->overwritten_age_not = l2fib_entry_result_is_set_AGE_NOT (&old_result);
+}
+
 u8 *
 format_l2fib_entry_result_flags (u8 * s, va_list * args)
 {
@@ -443,9 +461,12 @@ l2fib_add_entry (const u8 * mac, u32 bd_index,
 {
   l2fib_entry_key_t key;
   l2fib_entry_result_t result;
+  l2fib_overwrite_ctx_t overwrite_ctx = { 0 };
   __attribute__ ((unused)) u32 bucket_contents;
   l2fib_main_t *fm = &l2fib_main;
   l2learn_main_t *lm = &l2learn_main;
+  l2_bridge_domain_t *bd_config =
+    vec_elt_at_index (l2input_main.bd_configs, bd_index);
   BVT (clib_bihash_kv) kv;
 
   if (fm->mac_table_initialized == 0)
@@ -454,28 +475,6 @@ l2fib_add_entry (const u8 * mac, u32 bd_index,
   /* set up key */
   key.raw = l2fib_make_key (mac, bd_index);
   kv.key = key.raw;
-
-  /* check if entry already exist */
-  if (BV (clib_bihash_search) (&fm->mac_table, &kv, &kv))
-    {
-      /* decrement counter if overwriting a learned mac  */
-      result.raw = kv.value;
-      if (!l2fib_entry_result_is_set_AGE_NOT (&result))
-	{
-	  l2_bridge_domain_t *bd_config =
-	    vec_elt_at_index (l2input_main.bd_configs, bd_index);
-
-	  /* check if learn_count == 0 in case of race condition between 2
-	   * workers adding an entry simultaneously */
-	  /* learn_count variable may have little inaccuracy because they are
-	   * not incremented/decremented with atomic operations */
-	  /* l2fib_scan is call every 2sec fixing potential inaccuracy */
-	  if (lm->global_learn_count)
-	    lm->global_learn_count--;
-	  if (bd_config->learn_count)
-	    bd_config->learn_count--;
-	}
-    }
 
   /* set up result */
   result.raw = 0;		/* clear all fields */
@@ -487,7 +486,14 @@ l2fib_add_entry (const u8 * mac, u32 bd_index,
 
   kv.value = result.raw;
 
-  BV (clib_bihash_add_del) (&fm->mac_table, &kv, 1 /* is_add */ );
+  BV (clib_bihash_add_with_overwrite_cb)
+    (&fm->mac_table, &kv, l2fib_overwrite_cb, &overwrite_ctx);
+
+  if (overwrite_ctx.overwritten && !overwrite_ctx.overwritten_age_not)
+    {
+      l2learn_count_release (&bd_config->learn_count);
+      l2learn_count_release (&lm->global_learn_count);
+    }
 }
 
 /**
@@ -743,6 +749,7 @@ l2fib_del_entry (const u8 * mac, u32 bd_index, u32 sw_if_index)
 {
   l2fib_entry_result_t result;
   l2fib_main_t *mp = &l2fib_main;
+  l2_bridge_domain_t *bd_config;
   BVT (clib_bihash_kv) kv;
 
   if (mp->mac_table_initialized == 0)
@@ -760,19 +767,18 @@ l2fib_del_entry (const u8 * mac, u32 bd_index, u32 sw_if_index)
   if ((sw_if_index != 0) && (sw_if_index != result.fields.sw_if_index))
     return 1;
 
+  /* Remove entry from hash table */
+  if (BV (clib_bihash_add_del) (&mp->mac_table, &kv, 0 /* is_add */ ))
+    return 1;
+
   /* decrement counter if dynamically learned mac */
   if (!l2fib_entry_result_is_set_AGE_NOT (&result))
     {
-      l2_bridge_domain_t *bd_config =
-	vec_elt_at_index (l2input_main.bd_configs, bd_index);
-      if (l2learn_main.global_learn_count)
-	l2learn_main.global_learn_count--;
-      if (bd_config->learn_count)
-	bd_config->learn_count--;
+      bd_config = vec_elt_at_index (l2input_main.bd_configs, bd_index);
+      l2learn_count_release (&bd_config->learn_count);
+      l2learn_count_release (&l2learn_main.global_learn_count);
     }
 
-  /* Remove entry from hash table */
-  BV (clib_bihash_add_del) (&mp->mac_table, &kv, 0 /* is_add */ );
   return 0;
 }
 
@@ -1092,20 +1098,14 @@ l2fib_scan (vlib_main_t * vm, f64 start_time, u8 event_only)
   f64 accum_t = 0;
   f64 delta_t = 0;
   u32 evt_idx = 0;
-  u32 learn_count = 0;
   u32 client = lm->client_pid;
   u32 cl_idx = lm->client_index;
   vl_api_l2_macs_event_t *mp = 0;
   vl_api_registration_t *reg = 0;
-  u32 bd_index;
-  static u32 *bd_learn_counts = 0;
 
   /* Don't scan the l2 fib if it hasn't been instantiated yet */
   if (alloc_arena (h) == 0)
     return 0.0;
-
-  vec_reset_length (bd_learn_counts);
-  vec_validate (bd_learn_counts, vec_len (l2input_main.bd_configs) - 1);
 
   if (client)
     {
@@ -1120,9 +1120,6 @@ l2fib_scan (vlib_main_t * vm, f64 start_time, u8 event_only)
       if (delta_t > 20e-6)
 	{
 	  vlib_process_suspend (vm, 100e-6);	/* suspend for 100 us */
-	  /* in case a new bd was created while sleeping */
-	  vec_validate (bd_learn_counts,
-			vec_len (l2input_main.bd_configs) - 1);
 	  last_start = vlib_time_now (vm);
 	  accum_t += delta_t;
 	}
@@ -1154,12 +1151,6 @@ l2fib_scan (vlib_main_t * vm, f64 start_time, u8 event_only)
 
 	      l2fib_entry_key_t key = {.raw = v->kvp[k].key };
 	      l2fib_entry_result_t result = {.raw = v->kvp[k].value };
-
-	      if (!l2fib_entry_result_is_set_AGE_NOT (&result))
-		{
-		  learn_count++;
-		  vec_elt (bd_learn_counts, key.fields.bd_index)++;
-		}
 
 	      if (client)
 		{
@@ -1213,12 +1204,11 @@ l2fib_scan (vlib_main_t * vm, f64 start_time, u8 event_only)
 	      /* start aging processing */
 	      u32 bd_index = key.fields.bd_index;
 	      u32 sw_if_index = result.fields.sw_if_index;
+	      l2_bridge_domain_t *bd_config =
+		vec_elt_at_index (l2input_main.bd_configs, bd_index);
 	      u16 sn = l2fib_cur_seq_num (bd_index, sw_if_index);
 	      if (result.fields.sn != sn)
 		goto age_out;	/* stale mac */
-
-	      l2_bridge_domain_t *bd_config =
-		vec_elt_at_index (l2input_main.bd_configs, bd_index);
 
 	      if (bd_config->mac_age == 0)
 		continue;	/* skip aging */
@@ -1246,8 +1236,8 @@ l2fib_scan (vlib_main_t * vm, f64 start_time, u8 event_only)
 	      BVT (clib_bihash_kv) kv;
 	      kv.key = key.raw;
 	      BV (clib_bihash_add_del) (&fm->mac_table, &kv, 0);
-	      learn_count--;
-	      vec_elt (bd_learn_counts, key.fields.bd_index)--;
+	      l2learn_count_release (&bd_config->learn_count);
+	      l2learn_count_release (&lm->global_learn_count);
 	      /*
 	       * Note: we may have just freed the bucket's backing
 	       * storage, so check right here...
@@ -1259,14 +1249,6 @@ l2fib_scan (vlib_main_t * vm, f64 start_time, u8 event_only)
 	}
     doublebreak:
       ;
-    }
-
-  /* keep learn count consistent */
-  l2learn_main.global_learn_count = learn_count;
-  vec_foreach_index (bd_index, l2input_main.bd_configs)
-    {
-      vec_elt (l2input_main.bd_configs, bd_index).learn_count =
-	vec_elt (bd_learn_counts, bd_index);
     }
 
   if (mp)

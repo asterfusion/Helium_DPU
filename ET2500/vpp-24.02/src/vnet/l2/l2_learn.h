@@ -52,6 +52,36 @@ typedef struct
 
 #define L2LEARN_DEFAULT_LIMIT (L2FIB_NUM_BUCKETS * 64)
 
+static_always_inline int
+l2learn_count_reserve (u32 *count, u32 limit)
+{
+  u32 current;
+
+  while (1)
+    {
+      current = clib_atomic_load_relax_n (count);
+      if (current >= limit)
+	return 0;
+      if (clib_atomic_bool_cmp_and_swap (count, current, current + 1))
+	return 1;
+    }
+}
+
+static_always_inline void
+l2learn_count_release (u32 *count)
+{
+  u32 current;
+
+  while (1)
+    {
+      current = clib_atomic_load_relax_n (count);
+      if (current == 0)
+	return;
+      if (clib_atomic_bool_cmp_and_swap (count, current, current - 1))
+	return;
+    }
+}
+
 extern l2learn_main_t l2learn_main;
 
 extern vlib_node_registration_t l2fib_mac_age_scanner_process_node;
