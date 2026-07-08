@@ -447,7 +447,7 @@ VNET_DEVICE_CLASS_TX_FN (onp_pktio_device_class) (vlib_main_t *vm,
   u32 n_left, n_sent, *from, queue, CLIB_UNUSED(is_queue_shared);
   onp_main_t *om = onp_get_main ();
   cnxk_per_thread_data_t *ptd;
-#ifndef VPP_PLATFORM_OCTEON10
+#ifndef VPP_PLATFORM_ET2500
 	vlib_buffer_t **b;
 #endif
 
@@ -459,7 +459,7 @@ VNET_DEVICE_CLASS_TX_FN (onp_pktio_device_class) (vlib_main_t *vm,
   ptd = vec_elt_at_index (om->onp_per_thread_data, vm->thread_index);
   vlib_get_buffers (vm, from, ptd->buffers, n_left);
   ptd->pktio_index = od->cnxk_pktio_index;
-#ifndef VPP_PLATFORM_OCTEON10
+#ifndef VPP_PLATFORM_ET2500
 	b = ptd->buffers;
 
 	if(b[0]->flags & VLIB_BUFFER_DPU_TO_HOST_HDR_VALID)
