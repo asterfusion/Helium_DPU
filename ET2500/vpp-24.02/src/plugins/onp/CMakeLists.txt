@@ -213,6 +213,7 @@ add_vpp_library(cnxk-roc
 )
 endif()
 
+if (${ASROUTER_NAME} MATCHES "octeon10")
 add_vpp_plugin(onp
   SOURCES
   onp.c
@@ -223,6 +224,53 @@ add_vpp_plugin(onp
   pool/buffer.c
   pool/cli.c
 
+  pktio/cli.c
+  pktio/pktio.c
+  pktio/format.c
+  pktio/input.c
+  pktio/output.c
+  pktio/flow.c
+  pktio/tm.c
+
+  sched/input.c
+  sched/sched.c
+  sched/format.c
+  sched/cli.c
+
+  crypto/crypto.c
+  ipsec/esp_encrypt.c
+  ipsec/esp_decrypt.c
+  ipsec/ipsec.c
+  dpu/dpu.c
+
+  MULTIARCH_SOURCES
+  pktio/input.c
+  sched/input.c
+  ipsec/esp_encrypt.c
+  ipsec/esp_decrypt.c
+
+  LINK_LIBRARIES
+  cnxk-roc
+
+  API_FILES
+  api/types.api
+  api/onp.api
+
+  API_TEST_SOURCES
+  api/api_test.c
+)
+
+else()
+add_vpp_plugin(onp
+  SOURCES
+  onp.c
+  format.c
+  cli.c
+  api/api.c
+  
+  pool/buffer.c
+  pool/cli.c
+  
   pktio/cli.c
   pktio/pktio.c
   pktio/format.c
@@ -259,6 +307,8 @@ add_vpp_plugin(onp
   API_TEST_SOURCES
   api/api_test.c
 )
+
+endif()
 
 set(VPP_DIR ${CMAKE_SOURCE_DIR}/..)
 install(DIRECTORY ${VPP_DIR}/test/ DESTINATION test/ COMPONENT vpp-plugin-onp)
