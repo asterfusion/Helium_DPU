@@ -44,13 +44,23 @@ vl_api_lcp_pppoe_add_del_session_t_handler (
   }
   clib_memcpy (server_mac, mp->server_mac, 6);
 
+  u32 lcp_magic = ntohl (mp->lcp_magic);
+  /* vl_api_ip4_address_t carries the 4 octets in network byte order; copy
+   * them straight into a u32 so it matches ip4_address_t.as_u32. */
+  u32 client_ip4 = 0;
+  u32 client_table_id = ntohl (mp->client_table_id);
+  clib_memcpy (&client_ip4, mp->client_ip, 4);
+
   if(mp->is_add)
   {
-      rv = lcp_pppoe_session_add(server_mac, ppp_session_id, encap_sw_if_index, &sw_if_index, sw_if_name, 1);
+      rv = lcp_pppoe_session_add (server_mac, ppp_session_id, encap_sw_if_index,
+				  &sw_if_index, sw_if_name, 1, lcp_magic,
+				  client_ip4, client_table_id);
   }
   else
   {
-      rv = lcp_pppoe_session_add(server_mac, ppp_session_id, encap_sw_if_index, &sw_if_index, sw_if_name, 0);
+      rv = lcp_pppoe_session_add (server_mac, ppp_session_id, encap_sw_if_index,
+				  &sw_if_index, sw_if_name, 0, 0, 0, 0);
   }
 
   BAD_SW_IF_INDEX_LABEL;
@@ -58,6 +68,93 @@ vl_api_lcp_pppoe_add_del_session_t_handler (
 			  rmp->sw_if_index = htonl(sw_if_index);
 			  clib_memcpy(rmp->sw_if_name, sw_if_name, 16);
 			  }));
+}
+
+static void
+vl_api_lcp_pppoe_bulk_add_del_sessions_t_handler (
+  vl_api_lcp_pppoe_bulk_add_del_sessions_t *mp)
+{
+  vl_api_lcp_pppoe_bulk_add_del_sessions_reply_t *rmp;
+  u32 count = ntohl (mp->count);
+  u32 *sw_if_indices = NULL;
+  u8 (*sw_if_names)[16] = NULL;
+  /* Collect sw_if_indices of brand-new (not reused) interfaces so we can
+   * apply the 12 feature calls in a single batch after all sessions are
+   * created, rather than interleaving them with each session add. */
+  u32 *new_if_sw_indices = NULL;
+  int rv = 0, i;
+
+  if (count > 0)
+    {
+      vec_validate_init_empty (sw_if_indices, count - 1, (u32) ~0);
+      sw_if_names = clib_mem_alloc (count * 16);
+      clib_memset (sw_if_names, 0, count * 16);
+    }
+
+  for (i = 0; i < (int) count; i++)
+    {
+      vl_api_lcp_pppoe_session_entry_t *e = &mp->entries[i];
+      u32 encap_sw_if_index = ntohl (e->encap_sw_if_index);
+      u16 ppp_session_id = ntohs (e->session_id);
+      u8 server_mac[6];
+      u32 sw_if_index = ~0;
+      u8 is_new_if = 0;
+      int err;
+
+      if (!vnet_sw_if_index_is_api_valid (encap_sw_if_index))
+	{
+	  sw_if_indices[i] = ~0;
+	  if (rv == 0)
+	    rv = VNET_API_ERROR_INVALID_SW_IF_INDEX;
+	  continue;
+	}
+
+      clib_memcpy (server_mac, e->server_mac, 6);
+      /* network-byte-order octets -> as_u32 (see single-add handler). */
+      u32 client_ip4 = 0;
+      u32 client_table_id = ntohl (e->client_table_id);
+      clib_memcpy (&client_ip4, e->client_ip, 4);
+      err = lcp_pppoe_session_add_bulk (server_mac, ppp_session_id,
+					encap_sw_if_index, &sw_if_index,
+					sw_if_names[i], e->is_add,
+					&is_new_if, ntohl (e->lcp_magic),
+					client_ip4, client_table_id);
+      sw_if_indices[i] = (err == 0) ? sw_if_index : (u32) ~0;
+      if (err != 0 && rv == 0)
+	rv = err;
+
+      /* Collect new interfaces that need feature setup. */
+      if (err == 0 && is_new_if && e->is_add)
+	vec_add1 (new_if_sw_indices, sw_if_index);
+    }
+
+  /* Apply the 12 vnet_feature_enable_disable() calls once per new interface,
+   * after all sessions have been created.  This batching removes N-1 rounds
+   * of feature-arc locking compared to the per-session path. */
+  {
+    u32 j;
+    vec_foreach_index (j, new_if_sw_indices)
+      lcp_pppoe_setup_new_if_features (new_if_sw_indices[j]);
+    vec_free (new_if_sw_indices);
+  }
+
+  /* *INDENT-OFF* */
+  REPLY_MACRO3 (VL_API_LCP_PPPOE_BULK_ADD_DEL_SESSIONS_REPLY,
+		count * sizeof (vl_api_lcp_pppoe_session_result_t),
+  ({
+    rmp->count = htonl (count);
+    for (i = 0; i < (int) count; i++)
+      {
+	rmp->results[i].sw_if_index = htonl (sw_if_indices[i]);
+	clib_memcpy (rmp->results[i].sw_if_name,
+		     sw_if_names[i], 16);
+      }
+  }));
+  /* *INDENT-ON* */
+
+  if (sw_if_names)
+    clib_mem_free (sw_if_names);
+  vec_free (sw_if_indices);
 }
 
 static int

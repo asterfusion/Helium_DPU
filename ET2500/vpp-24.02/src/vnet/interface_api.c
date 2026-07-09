@@ -833,6 +833,33 @@ static clib_error_t *sw_interface_add_del_function (vnet_main_t * vm,
 						    u32 sw_if_index,
 						    u32 flags);
 
+/*
+ * PPPoE subscriber interfaces (device class "PPPoE") scale to tens of
+ * thousands of sessions. Reporting their per-session link/admin/add-del
+ * transitions over want_interface_events would flood subscribers (e.g.
+ * saivpp) during mass dial-up / teardown, while PPPoE session state is
+ * already tracked out-of-band. Suppress these events at the source so that
+ * notifications for physical and other interfaces keep working.
+ */
+static inline int
+vnet_hw_if_is_pppoe (vnet_main_t * vnm, vnet_hw_interface_t * hi)
+{
+  vnet_device_class_t *dc;
+
+  if (hi == 0)
+    return 0;
+  dc = vnet_get_device_class (vnm, hi->dev_class_index);
+  return (dc != 0 && dc->name != 0 && strcmp (dc->name, "PPPoE") == 0);
+}
+
+static inline int
+vnet_sw_if_is_pppoe (vnet_main_t * vnm, u32 sw_if_index)
+{
+  if (pool_is_free_index (vnm->interface_main.sw_interfaces, sw_if_index))
+    return 0;
+  return vnet_hw_if_is_pppoe (vnm, vnet_get_sup_hw_interface (vnm, sw_if_index));
+}
+
 /* *INDENT-OFF* */
 VLIB_REGISTER_NODE (link_state_process_node,static) = {
   .function = link_state_process,
@@ -850,6 +877,9 @@ link_up_down_function (vnet_main_t * vm, u32 hw_if_index, u32 flags)
 {
   vpe_api_main_t *vam = &vpe_api_main;
   vnet_hw_interface_t *hi = vnet_get_hw_interface (vm, hw_if_index);
+
+  if (vnet_hw_if_is_pppoe (vm, hi))
+    return 0;
 
   if (vam->link_state_process_up)
     {
@@ -873,6 +903,9 @@ admin_up_down_function (vnet_main_t * vm, u32 sw_if_index, u32 flags)
    * Note the subtle distinction between this routine and the previous
    * routine.
    */
+  if (vnet_sw_if_is_pppoe (vm, sw_if_index))
+    return 0;
+
   if (vam->link_state_process_up)
     {
       enum api_events event = ((flags & VNET_SW_INTERFACE_FLAG_ADMIN_UP) ?
@@ -888,6 +921,9 @@ static clib_error_t *
 sw_interface_add_del_function (vnet_main_t * vm, u32 sw_if_index, u32 flags)
 {
   vpe_api_main_t *vam = &vpe_api_main;
+
+  if (vnet_sw_if_is_pppoe (vm, sw_if_index))
+    return 0;
 
   if (vam->link_state_process_up)
     {

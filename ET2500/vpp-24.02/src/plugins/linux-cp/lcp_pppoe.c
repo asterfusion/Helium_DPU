@@ -32,6 +32,57 @@ pppoe_main_t pppoe_main;
 
 fib_source_t pppoe_fib_src;
 
+static_always_inline void
+pppoe_session_set_lcp_magic (pppoe_session_t *t, u32 lcp_magic)
+{
+  if (lcp_magic != 0)
+    {
+      t->lcp_magic = lcp_magic;
+      t->lcp_magic_valid = 1;
+    }
+}
+
+/* Scheme A: install (is_add=1) or remove (is_add=0) a subscriber /32 host
+ * route via the PPPoE session interface.  Reuses the existing client_ip and
+ * decap_fib_index fields from pppoe_session_t — no extra storage needed.
+ *
+ * The via address is left as all-zeros (zero_addr) so VPP creates an
+ * "attached" FIB path (type NORMAL, nh=0.0.0.0, sw_if_index=session),
+ * matching the semantics of connectRouteAddRemove in sairedis which also
+ * sends via=0.0.0.0 through the binary API.  Both produce identical
+ * forwarding: packets to client_ip/32 are sent out the PPPoE session
+ * interface without any ARP resolution. */
+static void
+lcp_pppoe_client_route_add_del (u32 fib_index, ip4_address_t *client_ip4,
+				u32 sw_if_index, u8 is_add)
+{
+  if (fib_index == ~0 || client_ip4 == NULL || client_ip4->as_u32 == 0
+      || sw_if_index == ~0)
+    return;
+
+  fib_prefix_t pfx;
+  clib_memset (&pfx, 0, sizeof (pfx));
+  pfx.fp_proto = FIB_PROTOCOL_IP4;
+  pfx.fp_len = 32;
+  pfx.fp_addr.ip4.as_u32 = client_ip4->as_u32;
+
+  /* via = 0.0.0.0 (zero_addr): attached path, equivalent to the
+   * via=0.0.0.0 + hwif_name produced by connectRouteAddRemove. */
+  const ip46_address_t zero_addr = { };
+
+  if (is_add)
+    fib_table_entry_path_add (fib_index, &pfx, pppoe_fib_src,
+			      FIB_ENTRY_FLAG_NONE,
+			      fib_proto_to_dpo (pfx.fp_proto), &zero_addr,
+			      sw_if_index, ~0, 1, NULL,
+			      FIB_ROUTE_PATH_FLAG_NONE);
+  else
+    fib_table_entry_path_remove (fib_index, &pfx, pppoe_fib_src,
+				 fib_proto_to_dpo (pfx.fp_proto), &zero_addr,
+				 sw_if_index, ~0, 1,
+				 FIB_ROUTE_PATH_FLAG_NONE);
+}
+
 static u8 *
 format_pppoe_name (u8 * s, va_list * args)
 {
@@ -259,7 +310,45 @@ pppoe_decap_next_is_valid (pppoe_main_t * pem, u32 is_ip6,
 }
 #endif
 
-int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_index, u32 *p_sw_if_index, u8 *sw_if_name, u8 is_add)
+/* Enable all feature arcs that every new PPPoE hw-interface needs.
+ * Extracted so the bulk-add path can call this once per new interface
+ * after the entire session batch is created, instead of inside the loop. */
+void
+lcp_pppoe_setup_new_if_features (u32 sw_if_index)
+{
+  vnet_feature_enable_disable ("ip4-multicast", "linux-cp-ospfv2-phy",
+			       sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable ("ip6-multicast", "linux-cp-ospfv3-phy",
+			       sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable ("ip4-unicast", "linux-cp-bfd-phy",
+			       sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable ("ip4-multicast", "linux-cp-bfd-phy",
+			       sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable ("ip6-unicast", "linux-cp-bfdv6-phy",
+			       sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable ("ip6-multicast", "linux-cp-bfdv6-phy",
+			       sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable ("ip4-multicast", "linux-cp-pim",
+			       sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable ("ip6-multicast", "linux-cp-pim6",
+			       sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable ("ip4-multicast", "linux-cp-igmp",
+			       sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable ("ip6-multicast", "linux-cp-igmp6",
+			       sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable ("ip4-unicast", "ip4-not-enabled",
+			       sw_if_index, 0, NULL, 0);
+  vnet_feature_enable_disable ("ip4-multicast", "ip4-not-enabled",
+			       sw_if_index, 0, NULL, 0);
+  vnet_feature_enable_disable ("ip6-unicast", "ip6-not-enabled",
+			       sw_if_index, 0, NULL, 0);
+  vnet_feature_enable_disable ("ip6-multicast", "ip6-not-enabled",
+			       sw_if_index, 0, NULL, 0);
+}
+
+int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_index,
+			  u32 *p_sw_if_index, u8 *sw_if_name, u8 is_add,
+			  u32 lcp_magic, u32 client_ip4, u32 client_table_id)
 {
   pppoe_main_t *pem = &pppoe_main;
   pppoe_session_t *t = 0;
@@ -296,14 +385,14 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       /* adding a session: session must not already exist */
       if (result.fields.session_index != ~0)
       {
-          //return current ppp interface
+          t = pool_elt_at_index (pem->sessions, result.fields.session_index);
+          pppoe_session_set_lcp_magic (t, lcp_magic);
           if(p_sw_if_index)
           {
               *p_sw_if_index = result.fields.sw_if_index;
           }
           if(sw_if_name)
           {
-              t = pool_elt_at_index (pem->sessions, result.fields.session_index);
               if (t)
               {
                   hi = vnet_get_hw_interface (vnm, t->hw_if_index);
@@ -320,6 +409,7 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       t->encap_if_index = encap_sw_if_index;
       //t->decap_fib_index; //vrf others to do
       clib_memcpy (t->server_mac, server_mac, 6);
+      pppoe_session_set_lcp_magic (t, lcp_magic);
 
       if (vec_len (pem->free_pppoe_session_hw_if_indices) > 0)
 	{
@@ -354,39 +444,7 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
 	  hi = vnet_get_hw_interface (vnm, hw_if_index);
 
       sw_if_index = hi->sw_if_index;
-      /* add default punt feature */
-      vnet_feature_enable_disable("ip4-multicast", "linux-cp-ospfv2-phy",
-              sw_if_index, 1, NULL, 0);
-      vnet_feature_enable_disable("ip6-multicast", "linux-cp-ospfv3-phy",
-              sw_if_index, 1, NULL, 0);
-      /* enable bfd/bfdv6 punt for interfaces */
-      vnet_feature_enable_disable("ip4-unicast", "linux-cp-bfd-phy",
-              sw_if_index, 1, NULL, 0);
-      vnet_feature_enable_disable("ip4-multicast", "linux-cp-bfd-phy",
-              sw_if_index, 1, NULL, 0);
-      vnet_feature_enable_disable("ip6-unicast", "linux-cp-bfdv6-phy",
-              sw_if_index, 1, NULL, 0);
-      vnet_feature_enable_disable("ip6-multicast", "linux-cp-bfdv6-phy",
-              sw_if_index, 1, NULL, 0);
-      /* enable pim and igmp punt for interface */
-      vnet_feature_enable_disable("ip4-multicast", "linux-cp-pim",
-              sw_if_index, 1, NULL, 0);
-      vnet_feature_enable_disable("ip6-multicast", "linux-cp-pim6",
-              sw_if_index, 1, NULL, 0);
-      vnet_feature_enable_disable("ip4-multicast", "linux-cp-igmp",
-              sw_if_index, 1, NULL, 0);
-      vnet_feature_enable_disable("ip6-multicast", "linux-cp-igmp6",
-              sw_if_index, 1, NULL, 0);
-      /* disable ip-not-enable */
-      vnet_feature_enable_disable("ip4-unicast", "ip4-not-enabled",
-              sw_if_index, 0, NULL, 0);
-      vnet_feature_enable_disable("ip4-multicast", "ip4-not-enabled",
-              sw_if_index, 0, NULL, 0);
-      vnet_feature_enable_disable("ip6-unicast", "ip6-not-enabled",
-              sw_if_index, 0, NULL, 0);
-      vnet_feature_enable_disable("ip6-multicast", "ip6-not-enabled",
-              sw_if_index, 0, NULL, 0);
-
+      lcp_pppoe_setup_new_if_features (sw_if_index);
 	}
 
       t->hw_if_index = hw_if_index;
@@ -415,6 +473,17 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       vnet_set_interface_l3_output_node (vnm->vlib_main, sw_if_index,
 					 (u8 *) "tunnel-output-no-count");
 
+      /* Scheme A: store client_ip and decap_fib_index in the session struct
+       * (fields that already exist) so the route can be cleaned up on del. */
+      if (client_ip4 != 0)
+	{
+	  t->client_ip.ip4.as_u32 = client_ip4;
+	  t->decap_fib_index = fib_table_find (FIB_PROTOCOL_IP4, client_table_id);
+	  lcp_pppoe_client_route_add_del (t->decap_fib_index, &t->client_ip.ip4,
+					  sw_if_index, 1 /* add */);
+	  t->client_route_valid = (t->decap_fib_index != ~0);
+	}
+
   }
   else
   {
@@ -431,8 +500,12 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
 	  clib_memcpy(sw_if_name, hi->name, 16);
       }
 
+      if (t->client_route_valid)
+	lcp_pppoe_client_route_add_del (t->decap_fib_index, &t->client_ip.ip4,
+					t->sw_if_index, 0 /* del */);
+
       vnet_reset_interface_l3_output_node (vnm->vlib_main, sw_if_index);
-      vnet_sw_interface_set_flags (vnm, t->sw_if_index, 0 /* down */ );
+      //vnet_sw_interface_set_flags (vnm, t->sw_if_index, 0 /* down */ );
       vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, t->sw_if_index);
       si->flags |= VNET_SW_INTERFACE_FLAG_HIDDEN;
 
@@ -457,13 +530,190 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
   return 0;
 }
 
+/* Like lcp_pppoe_session_add() but adds an 'is_new_if' output so the bulk
+ * handler can defer lcp_pppoe_setup_new_if_features() to after the loop,
+ * eliminating per-session feature-arc lock acquisitions. */
+int
+lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
+			    u32 encap_sw_if_index, u32 *p_sw_if_index,
+			    u8 *sw_if_name, u8 is_add, u8 *is_new_if,
+			    u32 lcp_magic, u32 client_ip4, u32 client_table_id)
+{
+  pppoe_main_t *pem = &pppoe_main;
+  pppoe_session_t *t = 0;
+  vnet_main_t *vnm = pem->vnet_main;
+  u32 hw_if_index = ~0;
+  u32 sw_if_index = ~0;
+  vnet_hw_interface_t *hi;
+  pppoe_entry_key_t cached_key;
+  pppoe_entry_result_t cached_result;
+  u32 bucket;
+  pppoe_entry_key_t key;
+  pppoe_entry_result_t result;
+
+  if (is_new_if)
+    *is_new_if = 0;
+
+  cached_key.raw[0] = ~0;
+  cached_key.raw[1] = ~0;
+  cached_result.raw = ~0;
+
+  u32 encap_sup_sw_if_index = encap_sw_if_index;
+  u16 encap_vlan_id = 0;
+  vnet_sw_interface_t *encap_si = vnet_get_sw_interface (vnm, encap_sw_if_index);
+  if (encap_si && encap_si->type == VNET_SW_INTERFACE_TYPE_SUB)
+    {
+      encap_sup_sw_if_index = encap_si->sup_sw_if_index;
+      encap_vlan_id = encap_si->sub.eth.outer_vlan_id;
+    }
+
+  pppoe_lookup_1 (&pem->session_table, &cached_key, &cached_result,
+		  server_mac, clib_host_to_net_u16 (ppp_session_id),
+		  encap_sup_sw_if_index, encap_vlan_id,
+		  &key, &bucket, &result);
+
+  if (is_add)
+    {
+      if (result.fields.session_index != ~0)
+	{
+	  t = pool_elt_at_index (pem->sessions, result.fields.session_index);
+	  pppoe_session_set_lcp_magic (t, lcp_magic);
+	  if (p_sw_if_index)
+	    *p_sw_if_index = result.fields.sw_if_index;
+	  if (sw_if_name)
+	    {
+	      if (t)
+		{
+		  hi = vnet_get_hw_interface (vnm, t->hw_if_index);
+		  clib_memcpy (sw_if_name, hi->name, 16);
+		}
+	    }
+	  return VNET_API_ERROR_TUNNEL_EXIST;
+	}
+
+      pool_get_aligned (pem->sessions, t, CLIB_CACHE_LINE_BYTES);
+      clib_memset (t, 0, sizeof (*t));
+      t->session_id = ppp_session_id;
+      t->encap_if_index = encap_sw_if_index;
+      clib_memcpy (t->server_mac, server_mac, 6);
+      pppoe_session_set_lcp_magic (t, lcp_magic);
+
+      if (vec_len (pem->free_pppoe_session_hw_if_indices) > 0)
+	{
+	  vnet_interface_main_t *im = &vnm->interface_main;
+	  hw_if_index = pem->free_pppoe_session_hw_if_indices
+	    [vec_len (pem->free_pppoe_session_hw_if_indices) - 1];
+	  vec_dec_len (pem->free_pppoe_session_hw_if_indices, 1);
+
+	  hi = vnet_get_hw_interface (vnm, hw_if_index);
+	  hi->dev_instance = t - pem->sessions;
+	  hi->hw_instance = hi->dev_instance;
+
+	  sw_if_index = hi->sw_if_index;
+	  vnet_interface_main_t *im2 = im;
+	  (void) im2;
+	  vnet_interface_counter_lock (im);
+	  vlib_zero_combined_counter (
+	    &im->combined_sw_if_counters[VNET_INTERFACE_COUNTER_TX],
+	    sw_if_index);
+	  vlib_zero_combined_counter (
+	    &im->combined_sw_if_counters[VNET_INTERFACE_COUNTER_RX],
+	    sw_if_index);
+	  vlib_zero_simple_counter (
+	    &im->sw_if_counters[VNET_INTERFACE_COUNTER_DROP], sw_if_index);
+	  vnet_interface_counter_unlock (im);
+	  /* recycled interface — feature arcs already set up */
+	}
+      else
+	{
+	  hw_if_index = vnet_register_interface (
+	    vnm, pppoe_device_class.index, t - pem->sessions,
+	    pppoe_hw_class.index, t - pem->sessions);
+	  hi = vnet_get_hw_interface (vnm, hw_if_index);
+	  sw_if_index = hi->sw_if_index;
+	  /* Signal to caller: feature setup is needed for this index. */
+	  if (is_new_if)
+	    *is_new_if = 1;
+	}
+
+      t->hw_if_index = hw_if_index;
+      t->sw_if_index = sw_if_index = hi->sw_if_index;
+      if (sw_if_name)
+	clib_memcpy (sw_if_name, hi->name, 16);
+
+      vec_validate_init_empty (pem->session_index_by_sw_if_index, sw_if_index,
+			       ~0);
+      pem->session_index_by_sw_if_index[sw_if_index] = t - pem->sessions;
+
+      result.fields.session_index = t - pem->sessions;
+      result.fields.sw_if_index = sw_if_index;
+      pppoe_update_1 (&pem->session_table,
+		      server_mac, clib_host_to_net_u16 (ppp_session_id),
+		      encap_sup_sw_if_index, encap_vlan_id,
+		      &key, &bucket, &result, 1);
+
+      vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, sw_if_index);
+      si->flags &= ~VNET_SW_INTERFACE_FLAG_HIDDEN;
+      vnet_sw_interface_set_flags (vnm, sw_if_index,
+				   VNET_SW_INTERFACE_FLAG_ADMIN_UP);
+      vnet_set_interface_l3_output_node (vnm->vlib_main, sw_if_index,
+					 (u8 *) "tunnel-output-no-count");
+
+      if (client_ip4 != 0)
+	{
+	  t->client_ip.ip4.as_u32 = client_ip4;
+	  t->decap_fib_index = fib_table_find (FIB_PROTOCOL_IP4, client_table_id);
+	  lcp_pppoe_client_route_add_del (t->decap_fib_index, &t->client_ip.ip4,
+					  sw_if_index, 1 /* add */);
+	  t->client_route_valid = (t->decap_fib_index != ~0);
+	}
+    }
+  else
+    {
+      if (result.fields.session_index == ~0)
+	return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+      t = pool_elt_at_index (pem->sessions, result.fields.session_index);
+      sw_if_index = t->sw_if_index;
+
+      hi = vnet_get_hw_interface (vnm, t->hw_if_index);
+      if (sw_if_name && hi)
+	clib_memcpy (sw_if_name, hi->name, 16);
+
+      if (t->client_route_valid)
+	lcp_pppoe_client_route_add_del (t->decap_fib_index, &t->client_ip.ip4,
+					t->sw_if_index, 0 /* del */);
+
+      vnet_reset_interface_l3_output_node (vnm->vlib_main, sw_if_index);
+      vnet_sw_interface_set_flags (vnm, t->sw_if_index, 0 /* down */);
+      vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, t->sw_if_index);
+      si->flags |= VNET_SW_INTERFACE_FLAG_HIDDEN;
+
+      vec_add1 (pem->free_pppoe_session_hw_if_indices, t->hw_if_index);
+      pem->session_index_by_sw_if_index[t->sw_if_index] = ~0;
+
+      result.fields.session_index = ~0;
+      pppoe_update_1 (&pem->session_table,
+		      server_mac, clib_host_to_net_u16 (ppp_session_id),
+		      encap_sup_sw_if_index, encap_vlan_id,
+		      &key, &bucket, &result, 0);
+      pool_put (pem->sessions, t);
+    }
+
+  if (p_sw_if_index)
+    *p_sw_if_index = sw_if_index;
+  return 0;
+}
+
 int vnet_pppoe_add_del_session
   (vnet_pppoe_add_del_session_args_t * a, u32 * sw_if_indexp)
 #if 1
 {
   int ret = 0;
 
-  ret = lcp_pppoe_session_add(a->server_mac, a->session_id, a->encap_if_index, sw_if_indexp, NULL, a->is_add);
+  ret = lcp_pppoe_session_add (a->server_mac, a->session_id, a->encap_if_index,
+			       sw_if_indexp, NULL, a->is_add, 0,
+			       0 /* client_ip4 */, 0 /* client_table_id */);
   if(ret!=0)
   {
      return ret;
@@ -1178,6 +1428,44 @@ VLIB_CLI_COMMAND (show_pppoe_fib_command, static) = {
 };
 /* *INDENT-ON* */
 
+static clib_error_t *
+pppoe_set_echo_proxy_command_fn (vlib_main_t * vm,
+                                 unformat_input_t * input,
+                                 vlib_cli_command_t * cmd)
+{
+  clib_error_t *error = NULL;
+  unformat_input_t _line_input, *line_input = &_line_input;
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  if (unformat (line_input, "enable"))
+    pppoe_main.echo_proxy_enable = 1;
+  else if (unformat (line_input, "disable"))
+    pppoe_main.echo_proxy_enable = 0;
+  else
+    error = clib_error_return (0, "usage: pppoe set echo-proxy [enable|disable]");
+
+  unformat_free (line_input);
+  return error;
+}
+
+/*?
+ * Enable or disable stateless LCP Echo proxy replies.
+ *
+ * @cliexpar
+ * Example:
+ * @cliexcmd{pppoe set echo-proxy enable}
+ * @cliexcmd{pppoe set echo-proxy disable}
+?*/
+/* *INDENT-OFF* */
+VLIB_CLI_COMMAND (pppoe_set_echo_proxy_command, static) = {
+  .path = "pppoe set echo-proxy",
+  .short_help = "pppoe set echo-proxy [enable|disable]",
+  .function = pppoe_set_echo_proxy_command_fn,
+};
+/* *INDENT-ON* */
+
 
 #define foreach_lcp_pppoe                                                       \
   _ (DROP, "error-drop")                                                      \
@@ -1537,6 +1825,9 @@ char * pppoe_error_strings[] = {
     pppoe_error (CONTROL_PLANE, "control plane packet")
     pppoe_error (NO_SUCH_SESSION, "no such sessions")
     pppoe_error (BAD_VER_TYPE, "bad version and type in pppoe header")
+    pppoe_error (ECHO_REPLIED, "LCP echo-request answered locally")
+    pppoe_error (ECHO_PROXY_NO_SESSION, "LCP echo-proxy: no session")
+    pppoe_error (ECHO_PROXY_NO_MAGIC, "LCP echo-proxy: magic not set")
 #undef pppoe_error
 #undef _
 };
@@ -1654,7 +1945,94 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
           if ((ppp_proto0 != PPP_PROTOCOL_ip4)
              && (ppp_proto0 != PPP_PROTOCOL_ip6))
           {
-              //control packets
+              if (PREDICT_FALSE (pem->echo_proxy_enable
+                                 && ppp_proto0 == PPP_PROTOCOL_lcp))
+                {
+                  u8 *lcp0 = (u8 *) (pppoe0 + 1);
+                  if (lcp0[0] == 9 /* echo_request */)
+                    {
+                      u32 lookup_sw_if_index;
+                      u16 lcp_len;
+                      pppoe_session_t *echo_sess = 0;
+
+                      if ((b0->flags & VLIB_BUFFER_NOT_PHY_INTF)
+                          && (vnet_buffer2 (b0)->l2_rx_sw_if_index != ~0))
+                        lookup_sw_if_index =
+                          vnet_buffer2 (b0)->l2_rx_sw_if_index;
+                      else
+                        lookup_sw_if_index =
+                          vnet_buffer (b0)->sw_if_index[VLIB_RX];
+
+                      pppoe_lookup_1 (&pem->session_table, &cached_key,
+                                      &cached_result, h0->src_address,
+                                      pppoe0->session_id, lookup_sw_if_index,
+                                      vlan0 == 0 ?
+                                        0 :
+                                        (clib_net_to_host_u16 (
+                                           vlan0->priority_cfi_and_id)
+                                         & 0x0fff),
+                                      &key0, &bucket0, &result0);
+
+                      if (PREDICT_FALSE (result0.fields.session_index == ~0))
+                        {
+                          error0 = PPPOE_ERROR_ECHO_PROXY_NO_SESSION;
+                        }
+                      else
+                        {
+                          echo_sess = pool_elt_at_index (
+                            pem->sessions, result0.fields.session_index);
+                          if (PREDICT_FALSE (!echo_sess->lcp_magic_valid))
+                            error0 = PPPOE_ERROR_ECHO_PROXY_NO_MAGIC;
+                          else
+                            {
+                              lcp_len = clib_net_to_host_u16 (
+                                *((u16 *) (lcp0 + 2)));
+                              if (PREDICT_FALSE (lcp_len < 8))
+                                error0 = PPPOE_ERROR_ECHO_PROXY_NO_MAGIC;
+                              else
+                                {
+                                  u8 mac_tmp[6];
+                                  u32 tx_sw_if_index;
+                                  vnet_sw_interface_t *tx_si;
+
+                                  clib_memcpy_fast (mac_tmp, h0->dst_address,
+                                                    6);
+                                  clib_memcpy_fast (h0->dst_address,
+                                                    h0->src_address, 6);
+                                  clib_memcpy_fast (h0->src_address,
+                                                    mac_tmp, 6);
+                                  lcp0[0] = 10; /* echo_reply */
+                                  *((u32 *) (lcp0 + 4)) =
+                                    clib_host_to_net_u32 (
+                                      echo_sess->lcp_magic);
+
+                                  if ((b0->flags & VLIB_BUFFER_NOT_PHY_INTF)
+                                      && (vnet_buffer2 (b0)->l2_rx_sw_if_index
+                                          != ~0))
+                                    tx_sw_if_index =
+                                      vnet_buffer2 (b0)->l2_rx_sw_if_index;
+                                  else
+                                    tx_sw_if_index =
+                                      vnet_buffer (b0)->sw_if_index[VLIB_RX];
+
+                                  tx_si = vnet_get_sw_interface (vnm,
+                                                                 tx_sw_if_index);
+                                  if (PREDICT_FALSE (tx_si
+                                                      && tx_si->type ==
+                                                         VNET_SW_INTERFACE_TYPE_SUB))
+                                    tx_sw_if_index = tx_si->sup_sw_if_index;
+
+                                  vnet_buffer (b0)->sw_if_index[VLIB_TX] =
+                                    tx_sw_if_index;
+                                  next0 = PPPOE_INPUT_NEXT_ECHO_REPLY;
+                                  error0 = PPPOE_ERROR_ECHO_REPLIED;
+                                  goto trace00;
+                                }
+                            }
+                        }
+                    }
+                }
+              /* control packets */
               error0 = PPPOE_ERROR_CONTROL_PLANE;
               next0 = PPPOE_INPUT_NEXT_CP_INPUT;
               goto trace00;
@@ -1803,6 +2181,7 @@ lcp_pppoe_init (vlib_main_t *vm)
   pem->vnet_main = vnet_get_main ();
   pem->vlib_main = vm;
   pem->policer_id = UINT32_MAX;
+  pem->echo_proxy_enable = 1;
 
   BV (clib_bihash_init) (&pem->session_table, "pppoe session table",
 			 PPPOE_NUM_BUCKETS, PPPOE_MEMORY_SIZE);
@@ -1828,14 +2207,14 @@ lcp_pppoe_init (vlib_main_t *vm)
   c.conform_action.action_type = QOS_ACTION_TRANSMIT;
   c.exceed_action.dscp = IP_DSCP_INVALID;
   c.exceed_action.pcp = UINT8_MAX;
-  c.exceed_action.action_type = QOS_ACTION_DROP;
+  c.exceed_action.action_type = QOS_ACTION_TRANSMIT;
   c.violate_action.dscp = IP_DSCP_INVALID;
   c.violate_action.pcp = UINT8_MAX;
-  c.violate_action.action_type = QOS_ACTION_DROP;
+  c.violate_action.action_type = QOS_ACTION_TRANSMIT;
   c.rate_type = QOS_RATE_PPS;
   c.rfc = QOS_POLICER_TYPE_1R3C_RFC_2697;
-  c.rb.pps.cir_pps = 33;
-  c.rb.pps.cb_ms = 33;
+  c.rb.pps.cir_pps = 300;
+  c.rb.pps.cb_ms = 300;
   rv = policer_add (pem->vlib_main, (const u8*)"pppoe_policer", &c, &pi);
   if ( rv == 0)
   {
