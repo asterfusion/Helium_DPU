@@ -161,8 +161,9 @@ reply:
    * Pick a sensible default cache entry expiration time.
    * We don't play the 10-second timeout game.
    */
-  ep->expiration_time = now + 600.0;
-
+  if (!(ep->flags & (DNS_CACHE_ENTRY_FLAG_VALID |
+                   DNS_CACHE_ENTRY_FLAG_V6_VALID)))
+  	ep->expiration_time = now + 600.0;
   if (0)
     clib_warning ("resolving '%s', was %s valid",
 		  ep->name, (ep->flags & DNS_CACHE_ENTRY_FLAG_VALID) ?
