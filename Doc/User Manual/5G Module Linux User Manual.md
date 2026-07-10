@@ -1,4 +1,4 @@
-#5G Module Linux User Manual
+# 5G Module Linux User Manual
 
 This document guides customers through driver verification, dial-up tool compilation, dial-up networking, AT command checks, and common troubleshooting for the RM520N series 5G module on Linux.
 
