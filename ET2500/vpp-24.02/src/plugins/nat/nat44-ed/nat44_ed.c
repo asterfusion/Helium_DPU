@@ -2901,9 +2901,14 @@ int
 nat44_plugin_disable ()
 {
   snat_main_t *sm = &snat_main;
+  vlib_main_t *vm = vlib_get_main ();
   int rc, error = 0;
 
   fail_if_disabled ();
+
+  /* Make sure no worker is concurrently walking NAT state while we free
+   * it (e.g. sm->max_translations_per_fib). */
+  vlib_worker_thread_barrier_sync (vm);
 
   rc = nat44_ed_del_static_mappings ();
   if (rc)
@@ -2934,6 +2939,8 @@ nat44_plugin_disable ()
 
   sm->forwarding_enabled = 0;
   sm->enabled = 0;
+
+  vlib_worker_thread_barrier_release (vm);
 
   //nat44-ed ha sync unregister
   nat44_ed_ha_sync_unregister();
@@ -3979,6 +3986,9 @@ VLIB_REGISTER_NODE (nat_default_node) = {
     [NAT_NEXT_IN2OUT_CLASSIFY] = "nat44-in2out-worker-handoff",
     [NAT_NEXT_OUT2IN_CLASSIFY] = "nat44-out2in-worker-handoff",
     [NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY] = "nat44-in2out-output-worker-handoff",
+    [NAT_NEXT_IN2OUT_RECLASSIFY] = "nat44-in2out-worker-rehandoff",
+    [NAT_NEXT_OUT2IN_RECLASSIFY] = "nat44-out2in-worker-rehandoff",
+    [NAT_NEXT_IN2OUT_OUTPUT_RECLASSIFY] = "nat44-in2out-output-worker-rehandoff",
   },
 };
 

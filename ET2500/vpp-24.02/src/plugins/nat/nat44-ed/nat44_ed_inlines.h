@@ -206,6 +206,27 @@ nat44_session_get_timeout (snat_main_t *sm, snat_session_t *s)
 }
 
 static_always_inline u8
+nat44_ed_is_disabled_and_drop_frame (vlib_main_t *vm,
+				     vlib_node_runtime_t *node,
+				     vlib_frame_t *frame)
+{
+  snat_main_t *sm = &snat_main;
+  u32 i;
+  u16 nexts[VLIB_FRAME_SIZE];
+  u32 *from;
+
+  if (PREDICT_TRUE (sm->enabled))
+    return 0;
+
+  from = vlib_frame_vector_args (frame);
+  for (i = 0; i < frame->n_vectors; i++)
+    nexts[i] = NAT_NEXT_DROP;
+
+  vlib_buffer_enqueue_to_next (vm, node, from, nexts, frame->n_vectors);
+  return 1;
+}
+
+static_always_inline u8
 nat44_ed_maximum_sessions_exceeded (snat_main_t *sm, u32 fib_index,
 				    u32 thread_index)
 {
@@ -631,6 +652,9 @@ nat_pre_node_fn_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 {
   u32 n_left_from, *from;
 
+  if (PREDICT_FALSE (nat44_ed_is_disabled_and_drop_frame (vm, node, frame)))
+    return frame->n_vectors;
+
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
 
@@ -934,10 +958,22 @@ nat44_ed_is_unk_proto (u8 proto)
 }
 
 static_always_inline int
-nat44_ed_session_belongs_to_other_thread (clib_bihash_kv_16_8_t *value,
+nat44_ed_session_belongs_to_other_thread (vlib_buffer_t *b,
+					  clib_bihash_kv_16_8_t *value,
 					  u32 thread_index)
 {
-  return thread_index != ed_value_get_thread_index (value);
+  u32 target_thread_index = ed_value_get_thread_index (value);
+
+  if (PREDICT_TRUE (thread_index == target_thread_index))
+    return 0;
+
+  /* Capture the owner thread and session index in the buffer so that
+   * the rehandoff node can forward the packet to the correct worker
+   * without doing another (possibly wrong) flow_hash lookup. */
+  vnet_buffer (b)->snat.required_thread_index = target_thread_index;
+  vnet_buffer2 (b)->nat.cached_session_index =
+    ed_value_get_session_index (value);
+  return 1;
 }
 
 #endif /* __included_nat44_ed_inlines_h__ */
