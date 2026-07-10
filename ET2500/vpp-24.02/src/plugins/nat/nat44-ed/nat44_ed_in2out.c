@@ -904,7 +904,7 @@ nat_not_translate_output_feature_fwd (snat_main_t * sm, ip4_header_t * ip,
   if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv, &value))
     {
       if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
-			   &value, thread_index)))
+			   b, &value, thread_index)))
 	return -1;
       s =
 	pool_elt_at_index (tsm->sessions,
@@ -953,7 +953,7 @@ nat44_ed_not_translate_output_feature (snat_main_t *sm, vlib_buffer_t *b,
   if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv, &value))
     {
       if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
-			   &value, thread_index)))
+			   b, &value, thread_index)))
 	return -1;
       s =
 	pool_elt_at_index (tsm->sessions,
@@ -987,7 +987,7 @@ nat44_ed_not_translate_output_feature (snat_main_t *sm, vlib_buffer_t *b,
   if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv, &value))
     {
       if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
-			   &value, thread_index)))
+			   b, &value, thread_index)))
 	return -1;
       s =
 	pool_elt_at_index (tsm->sessions,
@@ -1044,7 +1044,7 @@ icmp_in2out_ed_slow_path (snat_main_t *sm, vlib_buffer_t *b, ip4_header_t *ip,
 	       tx_sw_if_index, is_multi_worker))))
 	{
 	  if (PREDICT_FALSE (not_translate < 0))
-	    return NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY;
+	    return NAT_NEXT_IN2OUT_OUTPUT_RECLASSIFY;
 	  return next;
 	}
     }
@@ -1250,6 +1250,9 @@ nat44_ed_in2out_fast_path_node_fn_inline (vlib_main_t *vm,
   u32 def_slow = is_output_feature ? NAT_NEXT_IN2OUT_ED_OUTPUT_SLOW_PATH
     : NAT_NEXT_IN2OUT_ED_SLOW_PATH;
 
+  if (PREDICT_FALSE (nat44_ed_is_disabled_and_drop_frame (vm, node, frame)))
+    return frame->n_vectors;
+
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
 
@@ -1331,7 +1334,7 @@ nat44_ed_in2out_fast_path_node_fn_inline (vlib_main_t *vm,
 						      vm, b0))))
 	    {
 	      if (PREDICT_FALSE (not_translate < 0))
-		next[0] = NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY;
+		next[0] = NAT_NEXT_IN2OUT_OUTPUT_RECLASSIFY;
 	      goto trace0;
 	    }
 	}
@@ -1402,10 +1405,10 @@ nat44_ed_in2out_fast_path_node_fn_inline (vlib_main_t *vm,
 	}
 
       if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
-			   &value0, thread_index)))
+			   b0, &value0, thread_index)))
 	{
-	  next[0] = is_output_feature ? NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY
-				      : NAT_NEXT_IN2OUT_CLASSIFY;
+	  next[0] = is_output_feature ? NAT_NEXT_IN2OUT_OUTPUT_RECLASSIFY
+				      : NAT_NEXT_IN2OUT_RECLASSIFY;
 	  goto trace0;
 	}
 
@@ -1566,6 +1569,9 @@ nat44_ed_in2out_slow_path_node_fn_inline (vlib_main_t *vm,
   u32 thread_index = vm->thread_index;
   snat_main_per_thread_data_t *tsm = &sm->per_thread_data[thread_index];
 
+  if (PREDICT_FALSE (nat44_ed_is_disabled_and_drop_frame (vm, node, frame)))
+    return frame->n_vectors;
+
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
 
@@ -1683,10 +1689,10 @@ nat44_ed_in2out_slow_path_node_fn_inline (vlib_main_t *vm,
       if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv0, &value0))
 	{
 	  if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
-			     &value0, thread_index)))
+			     b0, &value0, thread_index)))
 	    {
-	      next[0] = is_output_feature ? NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY
-					  : NAT_NEXT_IN2OUT_CLASSIFY;
+	      next[0] = is_output_feature ? NAT_NEXT_IN2OUT_OUTPUT_RECLASSIFY
+					  : NAT_NEXT_IN2OUT_RECLASSIFY;
 	      goto trace0;
 	    }
 	  s0 =
@@ -1706,7 +1712,7 @@ nat44_ed_in2out_slow_path_node_fn_inline (vlib_main_t *vm,
 		       rx_sw_if_index0, tx_sw_if_index0, is_multi_worker))))
 		{
 		  if (PREDICT_FALSE (not_translate < 0))
-		    next[0] = NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY;
+		    next[0] = NAT_NEXT_IN2OUT_OUTPUT_RECLASSIFY;
 		  goto trace0;
 		}
 

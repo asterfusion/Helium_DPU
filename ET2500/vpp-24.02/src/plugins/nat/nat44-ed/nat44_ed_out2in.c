@@ -208,7 +208,7 @@ icmp_out2in_ed_slow_path (snat_main_t *sm, vlib_buffer_t *b, ip4_header_t *ip,
 	    {
 	      if (create_bypass_for_fwd (sm, b, s, ip, rx_fib_index,
 					 thread_index) < 0)
-		next = NAT_NEXT_OUT2IN_CLASSIFY;
+		next = NAT_NEXT_OUT2IN_RECLASSIFY;
 	    }
 	}
       goto out;
@@ -604,7 +604,7 @@ create_bypass_for_fwd (snat_main_t *sm, vlib_buffer_t *b, snat_session_t *s,
   if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv, &value))
     {
       if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
-			   &value, thread_index)))
+			   b, &value, thread_index)))
 	return -1;
       s =
 	pool_elt_at_index (tsm->sessions,
@@ -768,6 +768,9 @@ nat44_ed_out2in_fast_path_node_fn_inline (vlib_main_t * vm,
   u32 thread_index = vm->thread_index;
   snat_main_per_thread_data_t *tsm = &sm->per_thread_data[thread_index];
 
+  if (PREDICT_FALSE (nat44_ed_is_disabled_and_drop_frame (vm, node, frame)))
+    return frame->n_vectors;
+
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
 
@@ -902,9 +905,9 @@ nat44_ed_out2in_fast_path_node_fn_inline (vlib_main_t * vm,
 	}
 
       if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
-			   &value0, thread_index)))
+			   b0, &value0, thread_index)))
 	{
-	  next[0] = NAT_NEXT_OUT2IN_CLASSIFY;
+	  next[0] = NAT_NEXT_OUT2IN_RECLASSIFY;
 	  goto trace0;
 	}
 
@@ -1087,6 +1090,9 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
   snat_main_per_thread_data_t *tsm = &sm->per_thread_data[thread_index];
   snat_static_mapping_t *m;
 
+  if (PREDICT_FALSE (nat44_ed_is_disabled_and_drop_frame (vm, node, frame)))
+    return frame->n_vectors;
+
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
 
@@ -1206,9 +1212,9 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
       if (!clib_bihash_search_16_8 (&sm->flow_hash, &kv0, &value0))
 	{
 	  if (PREDICT_FALSE (nat44_ed_session_belongs_to_other_thread (
-			     &value0, thread_index)))
+			     b0, &value0, thread_index)))
 	    {
-	      next[0] = NAT_NEXT_OUT2IN_CLASSIFY;
+	      next[0] = NAT_NEXT_OUT2IN_RECLASSIFY;
 	      goto trace0;
 	    }
 	  s0 =
@@ -1257,7 +1263,7 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
 		      if (create_bypass_for_fwd (sm, b0, s0, ip0, rx_fib_index0,
 						   thread_index) < 0)
 			{
-			  next[0] = NAT_NEXT_OUT2IN_CLASSIFY;
+			  next[0] = NAT_NEXT_OUT2IN_RECLASSIFY;
 			}
 		    }
 		}
