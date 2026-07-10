@@ -44,6 +44,9 @@ resolve_event (vlib_main_t * vm, dns_main_t * dm, f64 now, u8 * reply)
   u32 pool_index;
   dns_cache_entry_t *ep;
   u32 min_ttl;
+  u32 response_min_ttl = ~0;
+  dns_resolve_name_t *ttl_rn = NULL;
+  f64 response_expiration;
   u16 flags;
   u16 rcode;
   int i;
@@ -160,10 +163,26 @@ reply:
   /*
    * Pick a sensible default cache entry expiration time.
    * We don't play the 10-second timeout game.
+   * Do not overwrite a TTL derived from an earlier complete response
+   * when a duplicate or delayed response arrives.
    */
   if (!(ep->flags & (DNS_CACHE_ENTRY_FLAG_VALID |
-                   DNS_CACHE_ENTRY_FLAG_V6_VALID)))
-  	ep->expiration_time = now + 600.0;
+		     DNS_CACHE_ENTRY_FLAG_V6_VALID)))
+    ep->expiration_time = now + 600.0;
+
+  /*
+   * A single query may receive multiple A/AAAA responses. Keep the cache
+   * lifetime bounded by the earliest expiration of every accepted response.
+   */
+  vnet_dns_response_to_reply (reply, &ttl_rn, &response_min_ttl);
+  vec_free (ttl_rn);
+  if (response_min_ttl != ~0)
+    {
+      response_expiration = now + response_min_ttl;
+      if (response_expiration < ep->expiration_time)
+	ep->expiration_time = response_expiration;
+    }
+
   if (0)
     clib_warning ("resolving '%s', was %s valid",
 		  ep->name, (ep->flags & DNS_CACHE_ENTRY_FLAG_VALID) ?
@@ -214,7 +233,11 @@ reply:
 	    min_ttl = ~0;
 	    rv = vnet_dns_response_to_reply (ep->dns_response, &rn, &min_ttl);
 	    if (min_ttl != ~0)
-	      ep->expiration_time = now + min_ttl;
+	      {
+		response_expiration = now + min_ttl;
+		if (response_expiration < ep->expiration_time)
+		  ep->expiration_time = response_expiration;
+	      }
 
       int alloc_size = sizeof(*rmp) + vec_len(rn) * sizeof(vl_api_address_t);
       rmp = vl_msg_api_alloc (alloc_size);
@@ -404,3 +427,4 @@ vnet_dns_create_resolver_process (vlib_main_t * vm, dns_main_t * dm)
  * eval: (c-set-style "gnu")
  * End:
  */
+
