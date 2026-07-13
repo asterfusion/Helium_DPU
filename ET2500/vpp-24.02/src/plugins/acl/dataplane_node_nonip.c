@@ -33,20 +33,6 @@
 #include <vppinfra/bihash_64_8.h>
 #include <vppinfra/bihash_template.h>
 
-#if 0
-typedef struct
-{
-  u32 next_index;
-  u32 sw_if_index;
-  u32 lc_index;
-  u32 match_acl_in_index;
-  u32 match_rule_index;
-  u64 packet_info[6];
-  u32 trace_bitmap;
-  u8 action;
-} acl_fa_trace_t;
-#endif
-
 /* *INDENT-OFF* */
 #define foreach_acl_fa_error \
 _(ACL_DROP, "ACL deny packets")  \

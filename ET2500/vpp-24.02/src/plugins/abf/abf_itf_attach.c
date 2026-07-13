@@ -75,15 +75,14 @@ void *geoip_country_index_get_code_ptr;
 
 void *geosite_get_country_index_by_domain_ptr;
 
-void *dns_query_domain_ptr;
-void *get_domain_by_index_ptr;
 void *geoip_get_country_code_by_ip4_ptr;
 void *geoip_get_country_code_by_ip6_ptr;
+void *geosite_get_resolved_country_code_by_ip4_ptr;
+void *geosite_get_resolved_country_code_by_ip6_ptr;
 
-#define GEOSITE_FIND_CC_CODE (1 << 0)
-#define GEOSITE_DNS_FIND_CC_CODE (1 << 1)
-#define GEOIP_FIND_CC_CODE (1 << 2)
-#define GEO_CFG 0XFFFF
+#define ABF_DNS_PORT 53
+#define ABF_DNS_MAX_DOMAIN_LEN 256
+#define ABF_DNS_MAX_JUMPS 8
 
 static u64
 abf_itf_attach_mk_key (u32 abf_index, u32 sw_if_index)
@@ -533,87 +532,425 @@ typedef enum
 
 
 
-always_inline u8
-acl_get_country_index_by_domain(vlib_buffer_t **b, u32 **cc_indices, u32 **dns_cc_indices, int is_ipv6)
+always_inline void
+abf_vec_add_unique_u32 (u32 **dst, u32 value)
 {
-  u8 result = 0;
+  u32 *p;
 
-
-    if(vnet_buffer2(b[0])->geosite_domain_ptr == NULL){
-
-    return result;
-  }
-
-
-  char *domain_name;
-  domain_name =  vnet_buffer2(b[0])->geosite_domain_ptr;
-  *cc_indices = ((__typeof__(geosite_get_country_index_by_domain) *)geosite_get_country_index_by_domain_ptr)(domain_name);
-  if (*cc_indices)
-  {
-    result |= GEOSITE_FIND_CC_CODE;
-  }
-  
- 
- dns_resolve_name_t *rn=NULL;
-
-  u8 rv = ((__typeof__(dns_query_domain_name) *)dns_query_domain_ptr)((u8 *)domain_name, &rn);
-  if (rv)
-  {
-    for (int i = 0; i < vec_len(rn); i++)
+  vec_foreach (p, *dst)
     {
-      dns_resolve_name_t *_rn = &rn[i];
-      u32 *cc_indices_tmp;
-      if (is_ipv6)
-      {
-        cc_indices_tmp = ((__typeof__(geoip_get_country_code_by_ip6) *)geoip_get_country_code_by_ip6_ptr)(_rn->address.ip.ip6);
-      }
-      else
-      {
-        cc_indices_tmp = ((__typeof__(geoip_get_country_code_by_ip4) *)geoip_get_country_code_by_ip4_ptr)(_rn->address.ip.ip4);
-      }
-      if (cc_indices_tmp)
-      {
-        u32 *tmp_ptr;
-        vec_foreach(tmp_ptr, cc_indices_tmp)
-        {
-          vec_add1(*dns_cc_indices, *tmp_ptr);
-        }
-        vec_free(cc_indices_tmp); 
-      }
+      if (*p == value)
+	return;
     }
-    vec_free(rn);
-    if (*dns_cc_indices)
-    {
-      result |= GEOSITE_DNS_FIND_CC_CODE;
-    }
-  }
 
-  return result;
+  vec_add1 (*dst, value);
+}
+
+always_inline void
+abf_vec_append_unique_u32 (u32 **dst, u32 *src)
+{
+  u32 *p;
+
+  vec_foreach (p, src)
+    abf_vec_add_unique_u32 (dst, *p);
+}
+
+always_inline int
+abf_dns_read_name (const u8 *dns, const u8 *end, const u8 *pos,
+		   char *domain, u16 *domain_length, const u8 **next)
+{
+  const u8 *p = pos;
+  u16 domain_len = 0;
+  int jumps = 0;
+  int jumped = 0;
+
+  if (pos >= end)
+    return -1;
+
+  while (p < end)
+    {
+      u8 label_len = *p;
+
+      if (label_len == 0)
+	{
+	  if (!jumped)
+	    *next = p + 1;
+	  if (domain_len > 0)
+	    domain[domain_len - 1] = '\0';
+	  else
+	    domain[0] = '\0';
+	  *domain_length = domain_len;
+	  return domain_len > 0 ? 0 : -1;
+	}
+
+      if ((label_len & 0xC0) == 0xC0)
+	{
+	  u16 offset;
+
+	  if (p + 1 >= end)
+	    return -1;
+
+	  offset = clib_net_to_host_u16 (*(u16 *) p) & 0x3FFF;
+	  if (offset >= (u16) (end - dns))
+	    return -1;
+
+	  if (!jumped)
+	    *next = p + 2;
+
+	  if (jumps++ >= ABF_DNS_MAX_JUMPS)
+	    return -1;
+
+	  p = dns + offset;
+	  jumped = 1;
+	  continue;
+	}
+
+      if ((label_len & 0xC0) != 0)
+	return -1;
+
+      p++;
+      if (p + label_len > end)
+	return -1;
+
+      if (domain_len + label_len + 1 >= ABF_DNS_MAX_DOMAIN_LEN)
+	return -1;
+
+      clib_memcpy (domain + domain_len, p, label_len);
+      domain_len += label_len;
+      domain[domain_len++] = '.';
+      p += label_len;
+    }
+
+  return -1;
 }
 
 always_inline u8
-acl_get_country_index_by_dip4(vlib_buffer_t **b, u32 **cc_indices, ip4_address_t ip4)
+abf_get_udp_payload (vlib_buffer_t *b0, int is_ip6, u8 **payload,
+		     u16 *payload_length)
 {
-  u8 result = 0;
-  *cc_indices = ((__typeof__(geoip_get_country_code_by_ip4) *)geoip_get_country_code_by_ip4_ptr)(ip4);
-  if (*cc_indices)
-  {
-    result |= GEOIP_FIND_CC_CODE;
-  }
-  return result;
+  i16 l3_hdr_offset = 0;
+
+  if (b0->flags & VNET_BUFFER_F_L3_HDR_OFFSET_VALID)
+    l3_hdr_offset = vnet_buffer (b0)->l3_hdr_offset;
+
+  if (is_ip6)
+    {
+      ip6_header_t *ip6 = (ip6_header_t *) (b0->data + l3_hdr_offset);
+      udp_header_t *udp;
+
+      if (ip6->protocol != IP_PROTOCOL_UDP)
+	return 0;
+
+      udp = (udp_header_t *) (ip6 + 1);
+      if (clib_net_to_host_u16 (udp->length) < sizeof (*udp))
+	return 0;
+
+      *payload = (u8 *) (udp + 1);
+      *payload_length = clib_net_to_host_u16 (udp->length) - sizeof (*udp);
+      return 1;
+    }
+  else
+    {
+      ip4_header_t *ip4 = (ip4_header_t *) (b0->data + l3_hdr_offset);
+      u8 ip4_hdr_len = ip4_header_bytes (ip4);
+      udp_header_t *udp;
+
+      if (ip4->protocol != IP_PROTOCOL_UDP)
+	return 0;
+
+      udp = (udp_header_t *) (((u8 *) ip4) + ip4_hdr_len);
+      if (clib_net_to_host_u16 (udp->length) < sizeof (*udp))
+	return 0;
+
+      *payload = (u8 *) (udp + 1);
+      *payload_length = clib_net_to_host_u16 (udp->length) - sizeof (*udp);
+      return 1;
+    }
 }
 
+always_inline u8
+abf_get_dns_request_geosite_indices (vlib_buffer_t *b0, fa_5tuple_t *tuple,
+				     int is_ip6, u32 **indices)
+{
+  u8 *payload = 0;
+  const u8 *pos;
+  const u8 *end;
+  dns_header_t_ *dns;
+  char qname[ABF_DNS_MAX_DOMAIN_LEN];
+  u16 qname_len = 0;
+  u16 flags;
+  u16 qdcount;
+  u16 payload_length = 0;
+  u32 *tmp = 0;
+
+  if (tuple->l4.proto != IP_PROTOCOL_UDP || tuple->l4.port[1] != ABF_DNS_PORT)
+    return 0;
+
+  if (!abf_get_udp_payload (b0, is_ip6, &payload, &payload_length))
+    return 0;
+
+  if (payload_length < sizeof (*dns))
+    {
+      return 0;
+    }
+
+  dns = (dns_header_t_ *) payload;
+  flags = clib_net_to_host_u16 (dns->flags);
+  qdcount = clib_net_to_host_u16 (dns->qdcount);
+  if ((flags & 0x8000) || qdcount == 0)
+    return 0;
+
+  pos = payload + sizeof (*dns);
+  end = payload + payload_length;
+  if (abf_dns_read_name (payload, end, pos, qname, &qname_len, &pos))
+    {
+      return 0;
+    }
+
+  if (pos + 4 > end)
+    {
+      return 0;
+    }
+
+  tmp = ((__typeof__ (geosite_get_country_index_by_domain) *)
+	 geosite_get_country_index_by_domain_ptr) (qname);
+  if (tmp)
+    {
+      abf_vec_append_unique_u32 (indices, tmp);
+      vec_free (tmp);
+      // clib_warning ("abf dns req: qname=%s geosite-count=%u", qname,
+      // 	    vec_len (*indices));
+      return 1;
+    }
+
+  return 0;
+}
 
 always_inline u8
-acl_get_country_index_by_dip6(vlib_buffer_t **b, u32 **cc_indices, ip6_address_t ip6)
+abf_get_resolved_geosite_indices (fa_5tuple_t *tuple, int is_ip6,
+				  u32 **indices)
 {
-  u8 result = 0;
-  *cc_indices = ((__typeof__(geoip_get_country_code_by_ip6) *)geoip_get_country_code_by_ip6_ptr)(ip6);
-  if (*cc_indices)
-  {
-    result |= GEOIP_FIND_CC_CODE;
-  }
-  return result;
+  u32 *tmp = 0;
+
+  if (is_ip6)
+    {
+      tmp = ((__typeof__ (geosite_get_resolved_country_code_by_ip6) *)
+	     geosite_get_resolved_country_code_by_ip6_ptr) (tuple->ip6_addr[1]);
+      abf_vec_append_unique_u32 (indices, tmp);
+      vec_free (tmp);
+    }
+  else
+    {
+      tmp = ((__typeof__ (geosite_get_resolved_country_code_by_ip4) *)
+	     geosite_get_resolved_country_code_by_ip4_ptr) (tuple->ip4_addr[1]);
+      abf_vec_append_unique_u32 (indices, tmp);
+      vec_free (tmp);
+    }
+
+  if (vec_len (*indices))
+    {
+      // clib_warning ("abf resolved geosite: count=%u", vec_len (*indices));
+      return 1;
+    }
+
+  return 0;
+}
+
+always_inline u8
+abf_get_geoip_indices (fa_5tuple_t *tuple, int is_ip6, u32 **indices)
+{
+  u32 *tmp = 0;
+
+  if (is_ip6)
+    tmp = ((__typeof__ (geoip_get_country_code_by_ip6) *)
+	   geoip_get_country_code_by_ip6_ptr) (tuple->ip6_addr[1]);
+  else
+    tmp = ((__typeof__ (geoip_get_country_code_by_ip4) *)
+	   geoip_get_country_code_by_ip4_ptr) (tuple->ip4_addr[1]);
+
+  abf_vec_append_unique_u32 (indices, tmp);
+  vec_free (tmp);
+
+  if (vec_len (*indices))
+    {
+      return 1;
+    }
+
+  return 0;
+}
+
+always_inline void
+abf_keep_best_acl_match (u8 matched, u8 cand_action, u32 cand_acl_pos,
+			 u32 cand_acl_index, u32 cand_rule_index,
+			 u8 *best_action, u32 *best_acl_pos,
+			 u32 *best_acl_index, u32 *best_rule_index,
+			 u32 branch)
+{
+  if (!matched || cand_action == 0)
+    return;
+
+  if (cand_acl_pos < *best_acl_pos)
+    {
+      *best_action = cand_action;
+      *best_acl_pos = cand_acl_pos;
+      *best_acl_index = cand_acl_index;
+      *best_rule_index = cand_rule_index;
+    }
+}
+
+always_inline void
+abf_match_one_geo_index (u32 lc_index, fa_5tuple_opaque_t *tuple,
+			 int is_ip6, u32 cc_index, u8 branch,
+			 u8 *best_action, u32 *best_acl_pos,
+			 u32 *best_acl_index, u32 *best_rule_index,
+			 u32 *trace_bitmap)
+{
+  acl_main_t *am = acl_plugin.p_acl_main;
+  fa_5tuple_opaque_t tuple_copy;
+  fa_5tuple_t *tuple_internal;
+  u32 *cc_indices = 0;
+  u8 action = 0;
+  u32 acl_pos = ~0;
+  u32 acl_index = ~0;
+  u32 rule_index = ~0;
+  u8 get_cc_code;
+  int hash_path;
+  int matched;
+
+  clib_memcpy_fast (&tuple_copy, tuple, sizeof (tuple_copy));
+  tuple_internal = (fa_5tuple_t *) &tuple_copy;
+
+  if (branch == ACL_PKT_GET_GEOIP_INDEX)
+    {
+      tuple_internal->geosite_cc_index = GEO_CFG;
+      tuple_internal->geoip_cc_index = (u16) cc_index;
+      get_cc_code = ACL_PKT_GET_GEOIP_INDEX;
+    }
+  else
+    {
+      tuple_internal->geosite_cc_index = (u16) cc_index;
+      tuple_internal->geoip_cc_index = GEO_CFG;
+      get_cc_code = branch;
+    }
+
+  vec_add1 (cc_indices, cc_index);
+  hash_path = am->use_hash_acl_matching &&
+	      !tuple_internal->pkt.is_nonfirst_fragment;
+
+  matched = acl_plugin_match_5tuple_inline (
+    acl_plugin.p_acl_main, lc_index, &tuple_copy, is_ip6, &action, &acl_pos,
+    &acl_index, &rule_index, trace_bitmap, get_cc_code, cc_indices);
+
+  if (!hash_path)
+    vec_free (cc_indices);
+
+  abf_keep_best_acl_match (matched, action, acl_pos, acl_index, rule_index,
+			   best_action, best_acl_pos, best_acl_index,
+			   best_rule_index, branch);
+}
+
+always_inline void
+abf_match_geo_index_vec (u32 lc_index, fa_5tuple_opaque_t *tuple, int is_ip6,
+			 u32 *indices, u8 branch, u8 *best_action,
+			 u32 *best_acl_pos, u32 *best_acl_index,
+			 u32 *best_rule_index, u32 *trace_bitmap)
+{
+  u32 *cc;
+
+  vec_foreach (cc, indices)
+    abf_match_one_geo_index (lc_index, tuple, is_ip6, *cc, branch,
+			     best_action, best_acl_pos, best_acl_index,
+			     best_rule_index, trace_bitmap);
+}
+
+always_inline void
+abf_match_normal_5tuple (u32 lc_index, fa_5tuple_opaque_t *tuple, int is_ip6,
+			 u8 *best_action, u32 *best_acl_pos,
+			 u32 *best_acl_index, u32 *best_rule_index,
+			 u32 *trace_bitmap)
+{
+  fa_5tuple_opaque_t tuple_copy;
+  u8 action = 0;
+  u32 acl_pos = ~0;
+  u32 acl_index = ~0;
+  u32 rule_index = ~0;
+  int matched;
+
+  clib_memcpy_fast (&tuple_copy, tuple, sizeof (tuple_copy));
+  matched = acl_plugin_match_5tuple_inline (
+    acl_plugin.p_acl_main, lc_index, &tuple_copy, is_ip6, &action, &acl_pos,
+    &acl_index, &rule_index, trace_bitmap, 0, NULL);
+
+  abf_keep_best_acl_match (matched, action, acl_pos, acl_index, rule_index,
+			   best_action, best_acl_pos, best_acl_index,
+			   best_rule_index, 0);
+}
+
+always_inline int
+abf_match_5tuple_with_geo (u32 lc_index, vlib_buffer_t *b0,
+			   fa_5tuple_opaque_t *tuple, int is_ip6,
+			   u8 *best_action, u32 *best_acl_pos,
+			   u32 *best_acl_index, u32 *best_rule_index,
+			   u32 *trace_bitmap)
+{
+  acl_main_t *am = acl_plugin.p_acl_main;
+  acl_lookup_context_t *lc;
+  fa_5tuple_t *tuple_internal = (fa_5tuple_t *) tuple;
+  u32 *dns_req_geosite_indices = 0;
+  u32 *resolved_geosite_indices = 0;
+  u32 *geoip_indices = 0;
+  u8 get_cc_code = 0;
+
+  *best_action = 0;
+  *best_acl_pos = ~0;
+  *best_acl_index = ~0;
+  *best_rule_index = ~0;
+
+  lc = pool_elt_at_index (am->acl_lookup_contexts, lc_index);
+
+  if (lc->geosite_required)
+    {
+      if (abf_get_dns_request_geosite_indices (b0, tuple_internal, is_ip6,
+					       &dns_req_geosite_indices))
+	get_cc_code |= ACL_PKT_GET_DNS_REQ;
+      else if (abf_get_resolved_geosite_indices (tuple_internal, is_ip6,
+						 &resolved_geosite_indices))
+	get_cc_code |= ACL_PKT_GET_GEOSITE_INDEX;
+    }
+
+  if (lc->geoip_required &&
+      abf_get_geoip_indices (tuple_internal, is_ip6, &geoip_indices))
+    get_cc_code |= ACL_PKT_GET_GEOIP_INDEX;
+
+  if (get_cc_code & ACL_PKT_GET_DNS_REQ)
+    abf_match_geo_index_vec (lc_index, tuple, is_ip6, dns_req_geosite_indices,
+			     ACL_PKT_GET_DNS_REQ, best_action, best_acl_pos,
+			     best_acl_index, best_rule_index, trace_bitmap);
+  else if (get_cc_code & ACL_PKT_GET_GEOSITE_INDEX)
+    abf_match_geo_index_vec (lc_index, tuple, is_ip6, resolved_geosite_indices,
+			     ACL_PKT_GET_GEOSITE_INDEX, best_action,
+			     best_acl_pos, best_acl_index, best_rule_index,
+			     trace_bitmap);
+
+  if (get_cc_code & ACL_PKT_GET_GEOIP_INDEX)
+    abf_match_geo_index_vec (lc_index, tuple, is_ip6, geoip_indices,
+			     ACL_PKT_GET_GEOIP_INDEX, best_action,
+			     best_acl_pos, best_acl_index, best_rule_index,
+			     trace_bitmap);
+
+  abf_match_normal_5tuple (lc_index, tuple, is_ip6, best_action,
+			   best_acl_pos, best_acl_index, best_rule_index,
+			   trace_bitmap);
+
+  // clib_warning ("abf geo match: final get_cc=0x%x best_pos=%u acl=%u rule=%u action=%u",
+  // 	get_cc_code, *best_acl_pos, *best_acl_index, *best_rule_index,
+  // 	*best_action);
+
+  vec_free (dns_req_geosite_indices);
+  vec_free (resolved_geosite_indices);
+  vec_free (geoip_indices);
+
+  return *best_acl_pos != ~0;
 }
 
 
@@ -652,9 +989,6 @@ abf_input_inline (vlib_main_t * vm,
 	  u32 trace_bitmap = 0;
 	  u32 lc_index;
 	  u8 action;
-    u32 *cc_indices = NULL;
-    u32 *dns_cc_indices = NULL;
-    u8 get_cc_code =0;
 
 	  bi0 = from[0];
 	  to_next[0] = bi0;
@@ -736,27 +1070,10 @@ fa_5tuple_t fa_5tuple_decoded0;
 
 
 
-      if(b0->flags & VLIB_BUFFER_DOMAIN_VALID )
-      {
-
-      get_cc_code =acl_get_country_index_by_domain(&b0,&cc_indices,&dns_cc_indices,(FIB_PROTOCOL_IP6 == fproto));
-
-      }else{
-       if((FIB_PROTOCOL_IP6 == fproto)){
-        fa_5tuple_t *fa_5tuple_p_V4 = (fa_5tuple_t*)&fa_5tuple0;
-        get_cc_code =acl_get_country_index_by_dip6(&b0,&cc_indices, fa_5tuple_p_V4->ip6_addr[1]);
-       }
-      else{
-         fa_5tuple_t *fa_5tuple_p_V6 = (fa_5tuple_t*)&fa_5tuple0;
-        get_cc_code =acl_get_country_index_by_dip4(&b0,&cc_indices,  fa_5tuple_p_V6->ip4_addr[1]);
-      }
-      }
-      
-
-	  if (acl_plugin_match_5tuple_inline (
-		acl_plugin.p_acl_main, lc_index, &fa_5tuple0,
-		(FIB_PROTOCOL_IP6 == fproto), &action, &match_acl_pos,
-		&match_acl_index, &match_rule_index, &trace_bitmap,get_cc_code,cc_indices,dns_cc_indices) &&
+	  if (abf_match_5tuple_with_geo (
+		lc_index, b0, &fa_5tuple0, (FIB_PROTOCOL_IP6 == fproto),
+		&action, &match_acl_pos, &match_acl_index, &match_rule_index,
+		&trace_bitmap) &&
 	      action > 0)
 	    {
 	      /*
@@ -1014,13 +1331,6 @@ abf_itf_bond_init (vlib_main_t * vm)
   }
 
 
-    dns_query_domain_ptr = 
-   vlib_get_plugin_symbol ("dns_plugin.so", "dns_query_domain_name");
-  if(dns_query_domain_ptr == NULL)
-  {
-      return clib_error_return (0, "dns_plugin8.so is not loaded");
-  }
-
   geoip_get_country_code_by_ip4_ptr = 
    vlib_get_plugin_symbol ("geosite_plugin.so", "geoip_get_country_code_by_ip4");
   if(geoip_get_country_code_by_ip4_ptr == NULL)
@@ -1035,6 +1345,21 @@ abf_itf_bond_init (vlib_main_t * vm)
       return clib_error_return (0, "geosite_plugin6.so is not loaded");
   }
 
+  geosite_get_resolved_country_code_by_ip4_ptr =
+    vlib_get_plugin_symbol ("geosite_plugin.so",
+			    "geosite_get_resolved_country_code_by_ip4");
+  if (geosite_get_resolved_country_code_by_ip4_ptr == NULL)
+    {
+      return clib_error_return (0, "geosite resolved ip4 symbol is not loaded");
+    }
+
+  geosite_get_resolved_country_code_by_ip6_ptr =
+    vlib_get_plugin_symbol ("geosite_plugin.so",
+			    "geosite_get_resolved_country_code_by_ip6");
+  if (geosite_get_resolved_country_code_by_ip6_ptr == NULL)
+    {
+      return clib_error_return (0, "geosite resolved ip6 symbol is not loaded");
+    }
 
   return (NULL);
 }

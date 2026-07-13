@@ -78,13 +78,55 @@ void *geoip_country_index_get_code_ptr;
 
  void *geosite_get_country_index_by_domain_ptr;
 
- void *dns_query_domain_ptr;
- void *get_domain_by_index_ptr;
  void *geoip_get_country_code_by_ip4_ptr;
  void *geoip_get_country_code_by_ip6_ptr;
+ void *geosite_get_resolved_country_code_by_ip4_ptr;
+ void *geosite_get_resolved_country_code_by_ip6_ptr;
+ void *geosite_active_refcnt_add_ptr;
+ void *geosite_active_refcnt_del_ptr;
  void *hqos_user_group_check_ip4_range_ptr;
  void *hqos_user_group_check_ip6_range_ptr;
 //  void *cc_get_ptr;
+
+static void
+acl_geosite_refcnt_add (u16 geosite_index)
+{
+  if (geosite_index == GEO_CFG)
+    {
+      return;
+    }
+
+  ((__typeof__ (geosite_active_refcnt_add) *) geosite_active_refcnt_add_ptr)
+    (geosite_index);
+}
+
+static void
+acl_geosite_refcnt_del (u16 geosite_index)
+{
+  if (geosite_index == GEO_CFG)
+    {
+      return;
+    }
+
+  ((__typeof__ (geosite_active_refcnt_del) *) geosite_active_refcnt_del_ptr)
+    (geosite_index);
+}
+
+static void
+acl_geosite_refcnt_update (acl_rule_t *old_rules, acl_rule_t *new_rules)
+{
+  acl_rule_t *r;
+
+  vec_foreach (r, old_rules)
+    {
+      acl_geosite_refcnt_del (r->geosite_cc_index);
+    }
+
+  vec_foreach (r, new_rules)
+    {
+      acl_geosite_refcnt_add (r->geosite_cc_index);
+    }
+}
 
 /* Format vec16. */
 u8 *
@@ -678,6 +720,11 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
   }
   validate_and_reset_acl_counters(am, *acl_list_index, vec_len(acl_old_rules), vec_len(acl_new_rules), 
                                      add_replace_del_flag, replace_del_place);
+  clib_warning ("acl geosite refcnt update from acl_add_list: acl=%u old_rules=%u new_rules=%u flag=%u place=%u",
+                *acl_list_index, vec_len (acl_old_rules),
+                vec_len (acl_new_rules), add_replace_del_flag,
+                replace_del_place);
+  acl_geosite_refcnt_update (acl_old_rules, acl_new_rules);
   if (acl_old_rules)
   {
       vec_free (acl_old_rules);
@@ -719,6 +766,9 @@ acl_del_list (u32 acl_list_index)
 
   /* now we can delete the ACL itself */
   a = pool_elt_at_index (am->acls, acl_list_index);
+  // clib_warning ("acl geosite refcnt update from acl_del_list: acl=%u old_rules=%u new_rules=0",
+  //               acl_list_index, vec_len (a->rules));
+  acl_geosite_refcnt_update (a->rules, 0);
   if (a->rules)
     vec_free (a->rules);
   pool_put (am->acls, a);
@@ -4553,15 +4603,6 @@ acl_init (vlib_main_t * vm)
       return clib_error_return (0, "geosite_plugins2.so is not loaded");
   }
 
-
-
-    dns_query_domain_ptr = 
-   vlib_get_plugin_symbol ("dns_plugin.so", "dns_query_domain_name");
-  if(dns_query_domain_ptr == NULL)
-  {
-      return clib_error_return (0, "dns_plugin8.so is not loaded");
-  }
-
   geoip_get_country_code_by_ip4_ptr = 
    vlib_get_plugin_symbol ("geosite_plugin.so", "geoip_get_country_code_by_ip4");
   if(geoip_get_country_code_by_ip4_ptr == NULL)
@@ -4574,6 +4615,38 @@ acl_init (vlib_main_t * vm)
   if(geoip_get_country_code_by_ip6_ptr == NULL)
   {
       return clib_error_return (0, "geosite_plugin6.so is not loaded");
+  }
+
+  geosite_get_resolved_country_code_by_ip4_ptr =
+   vlib_get_plugin_symbol ("geosite_plugin.so", "geosite_get_resolved_country_code_by_ip4");
+  if(geosite_get_resolved_country_code_by_ip4_ptr == NULL)
+  {
+      return clib_error_return (0, "geosite resolved ip4 symbol is not loaded");
+  }
+
+  geosite_get_resolved_country_code_by_ip6_ptr =
+   vlib_get_plugin_symbol ("geosite_plugin.so", "geosite_get_resolved_country_code_by_ip6");
+  if(geosite_get_resolved_country_code_by_ip6_ptr == NULL)
+  {
+      return clib_error_return (0, "geosite resolved ip6 symbol is not loaded");
+  }
+
+  geosite_active_refcnt_add_ptr =
+   vlib_get_plugin_symbol ("geosite_plugin.so", "geosite_active_refcnt_add");
+  // clib_warning ("acl geosite symbol lookup: geosite_active_refcnt_add ptr=%p",
+  //               geosite_active_refcnt_add_ptr);
+  if(geosite_active_refcnt_add_ptr == NULL)
+  {
+      return clib_error_return (0, "geosite refcnt add symbol is not loaded");
+  }
+
+  geosite_active_refcnt_del_ptr =
+   vlib_get_plugin_symbol ("geosite_plugin.so", "geosite_active_refcnt_del");
+  // clib_warning ("acl geosite symbol lookup: geosite_active_refcnt_del ptr=%p",
+  //               geosite_active_refcnt_del_ptr);
+  if(geosite_active_refcnt_del_ptr == NULL)
+  {
+      return clib_error_return (0, "geosite refcnt del symbol is not loaded");
   }
 
   hqos_user_group_check_ip4_range_ptr =
@@ -4610,4 +4683,3 @@ VLIB_INIT_FUNCTION (acl_init);
  * eval: (c-set-style "gnu")
  * End:
  */
-

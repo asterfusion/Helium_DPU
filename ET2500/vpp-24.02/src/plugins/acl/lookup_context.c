@@ -69,6 +69,88 @@ static int acl_lc_index_valid(acl_main_t *am, u32 lc_index)
   return 1;
 }
 
+static u8
+acl_list_needs_geosite (acl_main_t *am, u32 acl_index)
+{
+  acl_list_t *a;
+  acl_rule_t *r;
+
+  if (pool_is_free_index (am->acls, acl_index))
+    return 0;
+
+  a = pool_elt_at_index (am->acls, acl_index);
+  vec_foreach (r, a->rules)
+    {
+      if (r->geosite_cc_index != GEO_CFG)
+	return 1;
+    }
+
+  return 0;
+}
+
+static u8
+acl_list_needs_geoip (acl_main_t *am, u32 acl_index)
+{
+  acl_list_t *a;
+  acl_rule_t *r;
+
+  if (pool_is_free_index (am->acls, acl_index))
+    return 0;
+
+  a = pool_elt_at_index (am->acls, acl_index);
+  vec_foreach (r, a->rules)
+    {
+      if (r->geoip_cc_index != GEO_CFG)
+	return 1;
+    }
+
+  return 0;
+}
+
+static u8
+acl_vec_needs_geosite (acl_main_t *am, u32 *acls)
+{
+  u32 *acl_index;
+
+  vec_foreach (acl_index, acls)
+    {
+      if (acl_list_needs_geosite (am, *acl_index))
+	return 1;
+    }
+
+  return 0;
+}
+
+static u8
+acl_vec_needs_geoip (acl_main_t *am, u32 *acls)
+{
+  u32 *acl_index;
+
+  vec_foreach (acl_index, acls)
+    {
+      if (acl_list_needs_geoip (am, *acl_index))
+	return 1;
+    }
+
+  return 0;
+}
+
+static void
+acl_lookup_context_recalc_geo (acl_main_t *am, u32 lc_index)
+{
+  acl_lookup_context_t *acontext;
+
+  if (!acl_lc_index_valid (am, lc_index))
+    return;
+
+  acontext = pool_elt_at_index (am->acl_lookup_contexts, lc_index);
+  acontext->geosite_required =
+    acl_vec_needs_geosite (am, acontext->acl_indices);
+  acontext->geoip_required =
+    acl_vec_needs_geoip (am, acontext->acl_indices);
+
+}
+
 /*
  * If you are using ACL plugin, get this unique ID first,
  * so you can identify yourself when creating the lookup contexts.
@@ -111,6 +193,8 @@ static int acl_plugin_get_lookup_context_index (u32 acl_user_id, u32 val1, u32 v
 
   pool_get(am->acl_lookup_contexts, acontext);
   acontext->acl_indices = 0;
+  acontext->geosite_required = 0;
+  acontext->geoip_required = 0;
   acontext->context_user_id = acl_user_id;
   acontext->user_val1 = val1;
   acontext->user_val2 = val2;
@@ -258,6 +342,7 @@ static int acl_plugin_set_acl_vec_for_context (u32 lc_index, u32 *acl_list)
   unlock_acl_vec(lc_index, old_acl_vector);
   lock_acl_vec(lc_index, acontext->acl_indices);
   apply_acl_vec(lc_index, acontext->acl_indices);
+  acl_lookup_context_recalc_geo (am, lc_index);
 
   vec_free(old_acl_vector);
 
@@ -270,6 +355,8 @@ done:
 void acl_plugin_lookup_context_notify_acl_change(u32 acl_num)
 {
   acl_main_t *am = &acl_main;
+  u32 *lc_index;
+
   if (acl_plugin_acl_exists(acl_num)) {
     if (hash_acl_exists(am, acl_num)) {
         /* this is a modification, clean up the older entries */
@@ -280,6 +367,12 @@ void acl_plugin_lookup_context_notify_acl_change(u32 acl_num)
     /* this is a deletion notification */
     hash_acl_delete(am, acl_num);
   }
+
+  if (acl_num < vec_len (am->lc_index_vec_by_acl))
+    {
+      vec_foreach (lc_index, am->lc_index_vec_by_acl[acl_num])
+	acl_lookup_context_recalc_geo (am, *lc_index);
+    }
 }
 
 
@@ -299,7 +392,10 @@ static int acl_plugin_match_5tuple (u32 lc_index,
                                            u32 * r_rule_match_p,
                                            u32 * trace_bitmap)
 {
-  return acl_plugin_match_5tuple_inline (&acl_main, lc_index, pkt_5tuple, is_ip6, r_action, r_acl_pos_p, r_acl_match_p, r_rule_match_p, trace_bitmap,0,NULL,NULL);
+  return acl_plugin_match_5tuple_inline (&acl_main, lc_index, pkt_5tuple,
+					 is_ip6, r_action, r_acl_pos_p,
+					 r_acl_match_p, r_rule_match_p,
+					 trace_bitmap, 0, NULL);
 }
 
 
@@ -339,14 +435,16 @@ acl_plugin_show_lookup_context (u32 lc_index)
     if ((lc_index == ~0) || (curr_lc_index == lc_index)) {
       if (acl_user_id_valid(am, acontext->context_user_id)) {
         acl_lookup_context_user_t *auser = pool_elt_at_index(am->acl_users, acontext->context_user_id);
-        vlib_cli_output (vm, "index %d:%s %s: %d %s: %d, acl_indices: %U",
+        vlib_cli_output (vm, "index %d:%s %s: %d %s: %d, geosite_required: %u geoip_required: %u, acl_indices: %U",
                        curr_lc_index, auser->user_module_name, auser->val1_label,
                        acontext->user_val1, auser->val2_label, acontext->user_val2,
+                       acontext->geosite_required, acontext->geoip_required,
                        format_vec32, acontext->acl_indices, "%d");
       } else {
-        vlib_cli_output (vm, "index %d: user_id: %d user_val1: %d user_val2: %d, acl_indices: %U",
+        vlib_cli_output (vm, "index %d: user_id: %d user_val1: %d user_val2: %d, geosite_required: %u geoip_required: %u, acl_indices: %U",
                        curr_lc_index, acontext->context_user_id,
                        acontext->user_val1, acontext->user_val2,
+                       acontext->geosite_required, acontext->geoip_required,
                        format_vec32, acontext->acl_indices, "%d");
       }
     }

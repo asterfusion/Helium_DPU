@@ -26,6 +26,11 @@
 #define DNS_MAX_DOMAIN_LEN 256
 #define DNS_MAX_LABELS 128
 #define DNS_MAX_JUMPS 5
+#define DNS_TYPE_A 1
+#define DNS_TYPE_CNAME 5
+#define DNS_TYPE_AAAA 28
+#define DNS_CLASS_IN 1
+#define DNS_RESPONSE_DELAY_DELETE_SEC 30
 
 #define QUIC_LONG_HEADER_FORM 0x80
 #define QUIC_INITIAL_PACKET 0x00
@@ -87,7 +92,9 @@ typedef enum
 
 
 static_always_inline u16
-get_ip6_tcp_udp_payload_offset(vlib_buffer_t *b, ip6_header_t *ip6, u16 *dport ,u16 *payload_length,u16 ip6_payload_length)
+get_ip6_tcp_udp_payload_offset(vlib_buffer_t *b, ip6_header_t *ip6, u16 *sport,
+                               u16 *dport, u16 *payload_length,
+                               u16 ip6_payload_length)
 {
   ip6_ext_hdr_chain_t hdr_chain;
   //u16 payload_offset = 0;
@@ -114,6 +121,7 @@ get_ip6_tcp_udp_payload_offset(vlib_buffer_t *b, ip6_header_t *ip6, u16 *dport ,
        tcp_header_t *tcp = (tcp_header_t *)transport_header;
       
       u8 tcp_header_len = (tcp->data_offset_and_reserved >> 4) * 4;
+      *sport =  clib_net_to_host_u16(tcp->src_port);
       *dport =  clib_net_to_host_u16(tcp->dst_port);
       *payload_length = ip6_payload_length - tcp_header_len-transport_offset;
       return tcp_header_len + transport_offset;
@@ -123,6 +131,7 @@ get_ip6_tcp_udp_payload_offset(vlib_buffer_t *b, ip6_header_t *ip6, u16 *dport ,
     else if (transport_proto == IP_PROTOCOL_UDP)
       {
         udp_header_t *udp = (udp_header_t *)transport_header;
+        *sport =  clib_net_to_host_u16(udp->src_port);
         *dport =  clib_net_to_host_u16(udp->dst_port);
         *payload_length = ip6_payload_length - sizeof(udp_header_t)-transport_offset;
         return  transport_offset+ sizeof(udp_header_t);
@@ -135,7 +144,8 @@ get_ip6_tcp_udp_payload_offset(vlib_buffer_t *b, ip6_header_t *ip6, u16 *dport ,
 }
 
 static_always_inline void
-get_l4_payload_offset(vlib_buffer_t *b, u8 *payload_offset, u8 *ip_proto_, u16 *dport,u16 *payload_length)
+get_l4_payload_offset(vlib_buffer_t *b, u8 *payload_offset, u8 *ip_proto_,
+                      u16 *sport, u16 *dport,u16 *payload_length)
 {
   ethernet_header_t *eh;
   ip4_header_t *ip4h;
@@ -180,6 +190,7 @@ get_l4_payload_offset(vlib_buffer_t *b, u8 *payload_offset, u8 *ip_proto_, u16 *
 
       u8 tcp_header_len = (tcp->data_offset_and_reserved >> 4) * 4;
       *payload_offset = l4_hdr_offset + tcp_header_len;
+       *sport =  clib_net_to_host_u16(tcp->src_port);
        *dport =  clib_net_to_host_u16(tcp->dst_port);
         *payload_length = clib_net_to_host_u16(ip4h->length) - ip_header_len - tcp_header_len;
     }
@@ -187,6 +198,7 @@ get_l4_payload_offset(vlib_buffer_t *b, u8 *payload_offset, u8 *ip_proto_, u16 *
     {
       udp_header_t *udp = (udp_header_t *)(b->data + l4_hdr_offset);
       *payload_offset = l4_hdr_offset + sizeof(udp_header_t);
+      *sport =  clib_net_to_host_u16(udp->src_port);
       *dport =  clib_net_to_host_u16(udp->dst_port);
       *payload_length = clib_net_to_host_u16(udp->length) - sizeof(udp_header_t);
     }
@@ -212,6 +224,7 @@ get_l4_payload_offset(vlib_buffer_t *b, u8 *payload_offset, u8 *ip_proto_, u16 *
 
       u8 tcp_header_len = (tcp->data_offset_and_reserved >> 4) * 4;
       *payload_offset = current_offset + tcp_header_len;
+       *sport =  clib_net_to_host_u16(tcp->src_port);
        *dport =  clib_net_to_host_u16(tcp->dst_port);
        *payload_length = clib_net_to_host_u16(ip6h->payload_length) - tcp_header_len;
     }
@@ -219,12 +232,16 @@ get_l4_payload_offset(vlib_buffer_t *b, u8 *payload_offset, u8 *ip_proto_, u16 *
     {
       udp_header_t *udp = (udp_header_t *)(b->data + current_offset);
       *payload_offset = current_offset + sizeof(udp_header_t);
+      *sport =  clib_net_to_host_u16(udp->src_port);
       *dport =  clib_net_to_host_u16(udp->dst_port);
        *payload_length = clib_net_to_host_u16(ip6h->payload_length) - sizeof(udp_header_t);
     }
     else
       {   
-          payload_offset_from_ip6 = get_ip6_tcp_udp_payload_offset(b, ip6h,dport,payload_length,ip6h->payload_length);
+          payload_offset_from_ip6 =
+            get_ip6_tcp_udp_payload_offset(b, ip6h, sport, dport,
+                                           payload_length,
+                                           ip6h->payload_length);
           if (payload_offset_from_ip6 > 0) {
             *payload_offset = payload_offset_from_ip6 + l3_hdr_offset+ sizeof(ip6_header_t);
           } else {
@@ -243,425 +260,395 @@ get_l4_payload_offset(vlib_buffer_t *b, u8 *payload_offset, u8 *ip_proto_, u16 *
 }
 
 
+
 static int
-get_dns_domain(u8 *payload, char *domain , u16 payload_length,u16 *domain_length)
+geosite_dns_read_name (u8 *dns, u8 *end, u8 *pos, char *domain,
+		       u16 *domain_length, u8 **next)
 {
-    u8 *qname_ptr = payload + sizeof(dns_header_t_);
-    u8 *end = payload + payload_length;
+    u8 *p = pos;
     int domain_len = 0;
     int jumps = 0;
-    while (qname_ptr < end && *qname_ptr != 0)
+    int jumped = 0;
+
+    if (pos >= end)
+        return -1;
+
+    while (p < end)
     {
-        if ((*qname_ptr & 0xC0) == 0xC0)
+        u8 label_len = *p;
+
+        if (label_len == 0)
         {
-            if (qname_ptr + 1 >= end) return -1; 
-            
-            u16 offset = clib_net_to_host_u16(*(u16 *)qname_ptr) & 0x3FFF;
-            if (offset >= (end - payload)) return -1; 
-            
-            if (jumps++ >= DNS_MAX_JUMPS) return -1;
-            
-            qname_ptr = payload + offset;
+            if (!jumped)
+                *next = p + 1;
+            if (domain_len > 0)
+                domain[domain_len - 1] = '\0';
+            else
+                domain[0] = '\0';
+            *domain_length = domain_len;
+            return domain_len > 0 ? 0 : -1;
+        }
+
+        if ((label_len & 0xC0) == 0xC0)
+        {
+            u16 offset;
+
+            if (p + 1 >= end)
+                return -1;
+
+            offset = clib_net_to_host_u16 (*(u16 *) p) & 0x3FFF;
+            if (offset >= (u16) (end - dns))
+                return -1;
+
+            if (!jumped)
+                *next = p + 2;
+
+            if (jumps++ >= DNS_MAX_JUMPS)
+                return -1;
+
+            p = dns + offset;
+            jumped = 1;
             continue;
         }
-        
-        u8 label_len = *qname_ptr++;
-        if (qname_ptr + label_len >= end) return -1; 
-        
-        if (domain_len + label_len + 1 >= DNS_MAX_DOMAIN_LEN) 
+
+        if ((label_len & 0xC0) != 0)
             return -1;
-        
-      
-        memcpy(domain + domain_len, qname_ptr, label_len);
+
+        p++;
+        if (p + label_len > end)
+            return -1;
+
+        if (domain_len + label_len + 1 >= DNS_MAX_DOMAIN_LEN)
+            return -1;
+
+        clib_memcpy (domain + domain_len, p, label_len);
         domain_len += label_len;
         domain[domain_len++] = '.';
-        
-        qname_ptr += label_len;
-    }
-    
-    if (domain_len > 0) domain[domain_len-1] = '\0';
-    else domain[0] = '\0';
-    *domain_length =domain_len;
-    return (domain_len > 0) ? 0 : -1;
-}
-
-static int
-get_http_domain(u8 *payload, char *domain, u16 payload_length, u16 *domain_length)
-{
-    int i = 0;
-    uint8_t *current_ptr = payload;
-    uint8_t *ptr = payload;
-    uint8_t *end = NULL;
-    while (*current_ptr != 0x20) // == space
-    {
-        i++;
-        current_ptr++;
-        if (i > 17) // 17 bytes is max len
-        {
-            return -1;
-        }
-    }
-    // Support the command prefix that identifies the presence of a "mandatory" header.
-    if (i >= 2 && strncmp((const char *)ptr, "M-", 2) == 0)
-    {
-        ptr += 2;
-        i -= 2;
-    }
-    if ((i >= 5 && strncmp((const char *)ptr, "HTTP/", 5) == 0) ||
-        (i >= 3 && strncmp((const char *)ptr, "ICY", 3) == 0))
-    {
-        goto is_http;
-    }
-    else
-    {
-        if (i < 3)
-        {
-            return -1;
-        }
-        switch (i)
-        {
-        case 3:
-            if (strncmp((const char *)ptr, "GET", i) == 0 ||
-                strncmp((const char *)ptr, "PUT", i) == 0)
-                goto is_http;
-            break;
-        case 4:
-            if (strncmp((const char *)ptr, "POST", i) == 0 ||
-                strncmp((const char *)ptr, "HEAD", i) == 0 ||
-                strncmp((const char *)ptr, "LOCK", i) == 0 ||
-                strncmp((const char *)ptr, "MOVE", i) == 0 ||
-                strncmp((const char *)ptr, "COPY", i) == 0 ||
-                strncmp((const char *)ptr, "POLL", i) == 0)
-                goto is_http;
-            break;
-        case 5:
-            if (strncmp((const char *)ptr, "PATCH", i) == 0 ||
-                strncmp((const char *)ptr, "BCOPY", i) == 0 ||
-                strncmp((const char *)ptr, "MKCOL", i) == 0 ||
-                strncmp((const char *)ptr, "TRACE", i) == 0 ||
-                strncmp((const char *)ptr, "LABEL", i) == 0 ||
-                strncmp((const char *)ptr, "MERGE", i) == 0)
-                goto is_http;
-            break;
-        case 6:
-            if (strncmp((const char *)ptr, "DELETE", i) == 0 ||
-                strncmp((const char *)ptr, "SEARCH", i) == 0 ||
-                strncmp((const char *)ptr, "UNLOCK", i) == 0 ||
-                strncmp((const char *)ptr, "REPORT", i) == 0 ||
-                strncmp((const char *)ptr, "UPDATE", i) == 0 ||
-                strncmp((const char *)ptr, "NOTIFY", i) == 0)
-                goto is_http;
-            break;
-        case 7:
-            if (strncmp((const char *)ptr, "BDELETE", i) == 0 ||
-                strncmp((const char *)ptr, "CONNECT", i) == 0 ||
-                strncmp((const char *)ptr, "OPTIONS", i) == 0 ||
-                strncmp((const char *)ptr, "CHECKIN", i) == 0)
-                goto is_http;
-            break;
-        case 8:
-            if (strncmp((const char *)ptr, "PROPFIND", i) == 0 ||
-                strncmp((const char *)ptr, "CHECKOUT", i) == 0 ||
-                strncmp((const char *)ptr, "CCM_POST", i) == 0)
-                goto is_http;
-            break;
-        case 9:
-            if (strncmp((const char *)ptr, "SUBSCRIBE", i) == 0 ||
-                strncmp((const char *)ptr, "PROPPATCH", i) == 0 ||
-                strncmp((const char *)ptr, "BPROPFIND", i) == 0)
-                goto is_http;
-            break;
-        case 10:
-            if (strncmp((const char *)ptr, "BPROPPATCH", i) == 0 ||
-                strncmp((const char *)ptr, "UNCHECKOUT", i) == 0 ||
-                strncmp((const char *)ptr, "MKACTIVITY", i) == 0)
-                goto is_http;
-            break;
-        case 11:
-            if (strncmp((const char *)ptr, "MKWORKSPACE", i) == 0 ||
-                strncmp((const char *)ptr, "RPC_CONNECT", i) == 0 ||
-                strncmp((const char *)ptr, "UNSUBSCRIBE", i) == 0 ||
-                strncmp((const char *)ptr, "RPC_IN_DATA", i) == 0)
-                goto is_http;
-            break;
-        case 12:
-            if (strncmp((const char *)ptr, "RPC_OUT_DATA", i) == 0)
-                goto is_http;
-            break;
-        case 15:
-            if (strncmp((const char *)ptr, "VERSION-CONTROL", i) == 0)
-                goto is_http;
-            break;
-
-        case 16:
-            if (strncmp((const char *)ptr, "BASELINE-CONTROL", i) == 0 ||
-                strncmp((const char *)ptr, "SSTP_DUPLEX_POST", i) == 0)
-                goto is_http;
-            break;
-        default:
-            return -1;
-        }
-    }
-
-is_http:
-
-    end = payload + payload_length; //declarations are not allowed immediately after a label in gcc 12
-    uint8_t *line_start = current_ptr + 1;
-
-    // find the last str of the request line
-    while (line_start < end && !(*line_start == '\r' && *(line_start + 1) == '\n'))
-    {
-        line_start++;
-    }
-
-    if (line_start >= end)
-    {
-        return -1;
-    }
-
-    // another line start
-    uint8_t *header_start = line_start + 2; // skip 0x0d 0x0a
-
-    // find host
-    while (header_start < end)
-    {
-
-        if (*header_start == '\r' && *(header_start + 1) == '\n')
-        {
-            break;
-        }
-
-        if (header_start + 5 < end &&
-            (header_start[0] == 'H' || header_start[0] == 'h') &&
-            (header_start[1] == 'O' || header_start[1] == 'o') &&
-            (header_start[2] == 'S' || header_start[2] == 's') &&
-            (header_start[3] == 'T' || header_start[3] == 't') &&
-            header_start[4] == ':')
-        {
-
-            uint8_t *host_value_start = header_start + 5; 
-
-            while (host_value_start < end &&
-                   (*host_value_start == ' ' || *host_value_start == '\t'))
-            {
-                host_value_start++;
-            }
-
-            uint8_t *host_value_end = host_value_start;
-            while (host_value_end < end &&
-                   !(*host_value_end == '\r' && *(host_value_end + 1) == '\n'))
-            {
-                host_value_end++;
-            }
-
-            if (host_value_end > host_value_start)
-            {
-                int host_len = host_value_end - host_value_start;
-
-                int colon_pos = -1;
-                for (int j = 0; j < host_len; j++)
-                {
-                    if (host_value_start[j] == ':')
-                    {
-                        colon_pos = j;
-                        break;
-                    }
-                }
-
-                int copy_len = (colon_pos >= 0) ? colon_pos : host_len;
-                if (copy_len > DNS_MAX_DOMAIN_LEN - 1)
-                {
-                    copy_len = DNS_MAX_DOMAIN_LEN - 1;
-                }
-
-                memcpy(domain, host_value_start, copy_len);
-                domain[copy_len] = '\0';
-                *domain_length = copy_len;
-                return 0; 
-            }
-
-            break;
-        }
-
-     
-        while (header_start < end &&
-               !(*header_start == '\r' && *(header_start + 1) == '\n'))
-        {
-            header_start++;
-        }
-
-        if (header_start >= end)
-        {
-            break;
-        }
-
-        header_start += 2; 
+        p += label_len;
     }
 
     return -1;
 }
 
 static int
-get_tls_domain(u8 *payload, char *domain, u16 payload_length,u16 *domain_length)
+geosite_resolved_entry_is_stale (clib_bihash_kv_16_8_t *kv, void *arg)
 {
-    if (payload_length < 9) {
-        return -1;
-    }
-    
-    if (payload[0] != 0x16) {
-        return -1;
-    }
-    
-    uint16_t version = clib_net_to_host_u16(*(uint16_t*)(payload + 1));
-    if (version != 0x0301 && version != 0x0302 && version != 0x0303 && version != 0x0304) { // SSL 3.0 或更低
-        return -1;
-    }
-    
-    uint16_t record_len = clib_net_to_host_u16(*(uint16_t*)(payload + 3));
-    if (record_len > payload_length - 5) {
-        return -1;
-    }
-    
-    if (payload[5] != 0x01) {
-        return -1;
-    }
-    
-    uint32_t handshake_len = (payload[6] << 16) | (payload[7] << 8) | payload[8];
-    if (handshake_len > record_len - 4) {
-        return -1;
-    }
-    
-    // tls header(5) + handshake header(4) + version(2) + random(32) 
-    uint8_t *ptr = payload + 5 + 4 +2+ 32;
-    uint8_t *end = payload + 5 + record_len;
-    
-    if (ptr >= end) return -1;
-    uint8_t session_id_len = *ptr++;
-    if (ptr + session_id_len > end) return -1;
-    ptr += session_id_len;
-    
-    if (ptr + 2 > end) return -1;
-    uint16_t cipher_suites_len = clib_net_to_host_u16(*(uint16_t*)ptr);
-    ptr += 2;
-    if (ptr + cipher_suites_len > end) return -1;
-    ptr += cipher_suites_len;
-    
-    if (ptr >= end) return -1;
-    uint8_t compression_methods_len = *ptr++;
-    if (ptr + compression_methods_len > end) return -1;
-    ptr += compression_methods_len;
-    
-    if (ptr + 2 > end) return -1;
-    uint16_t extensions_len = clib_net_to_host_u16(*(uint16_t*)ptr);
-    ptr += 2;
-    
-    if (ptr + extensions_len > end) return -1;
-    uint8_t *extensions_end = ptr + extensions_len;
-    
-    while (ptr + 4 <= extensions_end) {
-        uint16_t ext_type = clib_net_to_host_u16(*(uint16_t*)ptr);
-        uint16_t ext_len = clib_net_to_host_u16(*(uint16_t*)(ptr + 2));
-        ptr += 4;
-        
-        if (ptr + ext_len > extensions_end) {
-            break;
-        }
-        
-        if (ext_type == 0x0000) { 
-            if (ext_len < 2) break;
-            uint16_t server_name_list_len = clib_net_to_host_u16(*(uint16_t*)ptr);
-            uint8_t *sni_ptr = ptr + 2;
-            uint8_t *sni_end = ptr + ext_len;
-            
-            if (sni_ptr + server_name_list_len > sni_end) {
-                break;
-            }
-            
-            while (sni_ptr + 3 <= sni_end) {
-                uint8_t name_type = *sni_ptr++;
-                
-                uint16_t name_len = clib_net_to_host_u16(*(uint16_t*)sni_ptr);
-                sni_ptr += 2;
-                
-                if (sni_ptr + name_len > sni_end) {
-                    break;
-                }
-                
-                if (name_type == 0x00) { 
-                    
-                    if (name_len > DNS_MAX_DOMAIN_LEN - 1) {
-                        name_len = DNS_MAX_DOMAIN_LEN - 1;
-                    }
-                    
-                    memcpy(domain, sni_ptr, name_len);
-                    domain[name_len] = '\0';
-                    *domain_length =name_len;
-                    return 0; 
-                }
-                
-                sni_ptr += name_len;
-            }
-            
-            break;
-        }
-        
-        ptr += ext_len;
-    }
-    
-    return -1;
-}
+    geosite_main_t *gmp = &geosite_main;
+    u32 now_sec = pointer_to_uword (arg);
+    u32 pool_index = (u32) kv->value;
+    geosite_resolved_entry_t *entry;
+    u32 i;
 
+    if (pool_is_free_index (gmp->resolved_pool, pool_index))
+    {
+        return 1;
+    }
+
+    entry = pool_elt_at_index (gmp->resolved_pool, pool_index);
+    for (i = 0; i < GEOSITE_RESOLVED_MAX_REFS; i++)
+    {
+        if ((entry->ref_bitmap & (1u << i)) == 0)
+            continue;
+
+        if (now_sec < entry->refs[i].expire_time_sec +
+                      DNS_RESPONSE_DELAY_DELETE_SEC)
+            return 0;
+    }
+
+    pool_put_index (gmp->resolved_pool, pool_index);
+    return 1;
+}
 
 static int
-get_socks5_domain(u8 *payload, char *domain, u16 payload_length,u16 *domain_length)
+geosite_resolved_entry_update (geosite_resolved_entry_t *entry,
+			       u32 geosite_index, u32 expire_time_sec,
+			       u32 now_sec)
 {
-    if (payload_length < 10) {
+    i32 free_slot = -1;
+    u32 i;
+
+    for (i = 0; i < GEOSITE_RESOLVED_MAX_REFS; i++)
+    {
+        if ((entry->ref_bitmap & (1u << i)) == 0)
+        {
+            if (free_slot < 0)
+                free_slot = i;
+            continue;
+        }
+
+        if (now_sec >= entry->refs[i].expire_time_sec)
+        {
+            entry->ref_bitmap &= ~(1u << i);
+            if (free_slot < 0)
+                free_slot = i;
+            continue;
+        }
+
+        if (entry->refs[i].geosite_index == geosite_index)
+        {
+            entry->refs[i].expire_time_sec = expire_time_sec;
+            return 0;
+        }
+    }
+
+    if (free_slot < 0)
+    {
         return -1;
     }
-    
-    if (payload[0] != 0x05) {
-        return -1;
-    }
-    
-    uint8_t cmd = payload[1];
-    if (cmd != 0x01 && cmd != 0x02 && cmd != 0x03) {
-        return -1;
-    }
-    
-    if (payload[2] != 0x00) {
-        return -1;
-    }
-    
-    uint8_t atyp = payload[3];
-    uint8_t *addr_ptr = payload + 4;
-    uint8_t *end = payload + payload_length;
-    
-    if (addr_ptr >= end) {
-        return -1;
-    }
-    
- if (atyp == 0x03) { 
-        uint8_t domain_len = *addr_ptr++;
-        
-        if (addr_ptr + domain_len + 2 > end) { 
+
+    entry->refs[free_slot].geosite_index = geosite_index;
+    entry->refs[free_slot].expire_time_sec = expire_time_sec;
+    entry->ref_bitmap |= (1u << free_slot);
+    return 0;
+}
+
+static int
+geosite_resolved_ip_add (clib_bihash_kv_16_8_t *key, u32 geosite_index,
+			 u32 expire_time_sec, u32 now_sec)
+{
+    geosite_main_t *gmp = &geosite_main;
+    clib_bihash_kv_16_8_t result;
+    geosite_resolved_entry_t *entry;
+    u32 pool_index;
+    int rv;
+
+    if (clib_bihash_search_16_8 (&gmp->resolved_ip_hash, key, &result) == 0)
+    {
+        pool_index = (u32) result.value;
+        if (pool_is_free_index (gmp->resolved_pool, pool_index))
+        {
             return -1;
         }
-        
-        if (domain_len > DNS_MAX_DOMAIN_LEN - 1) {
-            domain_len = DNS_MAX_DOMAIN_LEN - 1;
-        }
-        
-        memcpy(domain, addr_ptr, domain_len);
-        domain[domain_len] = '\0';
-        *domain_length =domain_len;
-        
-        return 0;
+
+        entry = pool_elt_at_index (gmp->resolved_pool, pool_index);
+        rv = geosite_resolved_entry_update (entry, geosite_index,
+                                            expire_time_sec, now_sec);
+        return rv;
     }
-   
-    else {
+
+    clib_spinlock_lock (&gmp->resolved_pool_lock);
+
+    if (clib_bihash_search_16_8 (&gmp->resolved_ip_hash, key, &result) == 0)
+    {
+        pool_index = (u32) result.value;
+        clib_spinlock_unlock (&gmp->resolved_pool_lock);
+
+        if (pool_is_free_index (gmp->resolved_pool, pool_index))
+        {
+            return -1;
+        }
+
+        entry = pool_elt_at_index (gmp->resolved_pool, pool_index);
+        return geosite_resolved_entry_update (entry, geosite_index,
+                                              expire_time_sec, now_sec);
+    }
+
+    if (pool_elts (gmp->resolved_pool) >= gmp->resolved_pool_max_entries)
+    {
+        clib_spinlock_unlock (&gmp->resolved_pool_lock);
         return -1;
     }
+
+    pool_get (gmp->resolved_pool, entry);
+    clib_memset (entry, 0, sizeof (*entry));
+    pool_index = entry - gmp->resolved_pool;
+
+    rv = geosite_resolved_entry_update (entry, geosite_index,
+                                        expire_time_sec, now_sec);
+    if (rv != 0)
+    {
+        pool_put (gmp->resolved_pool, entry);
+        clib_spinlock_unlock (&gmp->resolved_pool_lock);
+        return rv;
+    }
+
+    key->value = pool_index;
+    rv = clib_bihash_add_or_overwrite_stale_16_8 (
+        &gmp->resolved_ip_hash, key, geosite_resolved_entry_is_stale,
+        uword_to_pointer ((uword) now_sec, void *));
+    if (rv != 0)
+    {
+        pool_put (gmp->resolved_pool, entry);
+        clib_spinlock_unlock (&gmp->resolved_pool_lock);
+        return -1;
+    }
+
+    clib_spinlock_unlock (&gmp->resolved_pool_lock);
+    return 0;
 }
+
+static void
+geosite_dns_response_learn (vlib_main_t *vm, u8 *payload, u16 payload_length)
+{
+    dns_header_t_ *dns;
+    u8 *end = payload + payload_length;
+    u8 *pos;
+    char qname[DNS_MAX_DOMAIN_LEN];
+    u16 qname_len = 0;
+    u16 flags;
+    u16 qdcount;
+    u16 ancount;
+    u32 *cc_indices;
+    u32 *cc;
+    u32 now_sec = (u32) vlib_time_now (vm);
+    u16 i;
+
+    if (payload_length < sizeof (*dns))
+    {
+        return;
+    }
+
+    dns = (dns_header_t_ *) payload;
+    flags = clib_net_to_host_u16 (dns->flags);
+    qdcount = clib_net_to_host_u16 (dns->qdcount);
+    ancount = clib_net_to_host_u16 (dns->ancount);
+
+    if ((flags & 0x8000) == 0)
+        return;
+
+    if ((flags & 0x000f) != 0)
+    {
+        return;
+    }
+
+    if (qdcount == 0 || ancount == 0)
+    {
+        return;
+    }
+
+    pos = payload + sizeof (*dns);
+    if (geosite_dns_read_name (payload, end, pos, qname, &qname_len, &pos))
+    {
+        return;
+    }
+
+    if (pos + 4 > end)
+    {
+        return;
+    }
+
+    pos += 4;
+    for (i = 1; i < qdcount; i++)
+    {
+        char skip_name[DNS_MAX_DOMAIN_LEN];
+        u16 skip_len = 0;
+
+        if (geosite_dns_read_name (payload, end, pos, skip_name, &skip_len,
+                                   &pos) || pos + 4 > end)
+        {
+            return;
+        }
+        pos += 4;
+    }
+
+    // clib_warning ("geosite dns response: qname=%s qd=%u an=%u",
+    //               qname, qdcount, ancount);
+
+    cc_indices = geosite_get_country_index_by_domain (qname);
+    if (vec_len (cc_indices) == 0)
+    {
+        // clib_warning ("geosite dns response: qname=%s no geosite match",
+        //               qname);
+    }
+
+    for (i = 0; i < ancount && pos < end; i++)
+    {
+        char answer_name[DNS_MAX_DOMAIN_LEN];
+        u16 answer_len = 0;
+        u16 rr_type;
+        u16 rr_class;
+        u32 ttl;
+        u16 rdlen;
+        u8 *rdata;
+
+        if (geosite_dns_read_name (payload, end, pos, answer_name,
+                                   &answer_len, &pos))
+        {
+            break;
+        }
+
+        if (pos + 10 > end)
+        {
+            break;
+        }
+
+        rr_type = clib_net_to_host_u16 (*(u16 *) pos);
+        pos += 2;
+        rr_class = clib_net_to_host_u16 (*(u16 *) pos);
+        pos += 2;
+        ttl = clib_net_to_host_u32 (*(u32 *) pos);
+        pos += 4;
+        rdlen = clib_net_to_host_u16 (*(u16 *) pos);
+        pos += 2;
+
+        if (pos + rdlen > end)
+        {
+            break;
+        }
+
+        rdata = pos;
+        pos += rdlen;
+
+        if (rr_class != DNS_CLASS_IN)
+        {
+            continue;
+        }
+
+        if (rr_type == DNS_TYPE_A && rdlen == 4)
+        {
+            ip4_address_t ip4;
+            clib_bihash_kv_16_8_t key;
+
+            clib_memcpy (ip4.as_u8, rdata, 4);
+            geosite_resolved_make_ip4_key (&key, &ip4);
+            // clib_warning ("geosite dns A: qname=%s answer=%s ip=%U ttl=%u",
+            //               qname, answer_name, format_ip4_address, &ip4, ttl);
+
+            vec_foreach (cc, cc_indices)
+            {
+                u32 refcnt;
+
+                refcnt = geosite_active_refcnt_get (*cc);
+                if (refcnt == 0)
+                {
+                    continue;
+                }
+
+                // clib_warning ("geosite dns A: active geosite=%u refcnt=%u qname=%s answer=%s",
+                //               *cc, refcnt, qname, answer_name);
+                geosite_resolved_ip_add (&key, *cc, now_sec + ttl, now_sec);
+            }
+        }
+        else if (rr_type == DNS_TYPE_AAAA && rdlen == 16)
+        {
+            ip6_address_t ip6;
+            clib_bihash_kv_16_8_t key;
+
+            clib_memcpy (ip6.as_u8, rdata, 16);
+            geosite_resolved_make_ip6_key (&key, &ip6);
+            // clib_warning ("geosite dns AAAA: qname=%s answer=%s ip=%U ttl=%u",
+            //               qname, answer_name, format_ip6_address, &ip6, ttl);
+
+            vec_foreach (cc, cc_indices)
+            {
+                u32 refcnt;
+
+                refcnt = geosite_active_refcnt_get (*cc);
+                if (refcnt == 0)
+                {
+                    continue;
+                }
+
+                // clib_warning ("geosite dns AAAA: active geosite=%u refcnt=%u qname=%s answer=%s",
+                //               *cc, refcnt, qname, answer_name);
+                geosite_resolved_ip_add (&key, *cc, now_sec + ttl, now_sec);
+            }
+        }
+    }
+
+    vec_free (cc_indices);
+}
+
 
 
 
@@ -692,17 +679,14 @@ VLIB_NODE_FN (geosite_node) (vlib_main_t * vm,
 	    u32 bi0;
 	    vlib_buffer_t * b0;
           u32 next0 = GEOSITE_NEXT_DROP;
-          u32 sw_if_index0;
-          //u8 tmp0[6];
           
           u8 l4_payload_offset = 0;
           u8 ip_proto;
+          u16 sport = 0;
           u16 dport;
           u8 *payload;
-          char *domain;
-          u16 payload_length;
-          u16 domain_length =0;
-        bool get_domain =false;
+          u16 payload_length = 0;
+          u32 sw_if_index0;
           /* speculatively enqueue b0 to the current next frame */
         bi0 = from[0];
         to_next[0] = bi0;
@@ -710,88 +694,44 @@ VLIB_NODE_FN (geosite_node) (vlib_main_t * vm,
         to_next += 1;
         n_left_from -= 1;
         n_left_to_next -= 1;
-        domain = clib_mem_alloc(DNS_MAX_DOMAIN_LEN * sizeof(char));
-        clib_memset(domain, 0, DNS_MAX_DOMAIN_LEN);
-        domain[0] ='\0';
         b0 = vlib_get_buffer (vm, bi0);
         sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
 
-        get_l4_payload_offset(b0,&l4_payload_offset,&ip_proto,&dport,&payload_length);
+        get_l4_payload_offset(b0,&l4_payload_offset,&ip_proto,&sport,&dport,
+                              &payload_length);
 
         if(l4_payload_offset != 0)
         {
           payload = (u8 *)b0->data + l4_payload_offset;
-          //dns
-          if (dport == DNS_DPORT && ip_proto == IP_PROTOCOL_UDP)
+          if (ip_proto == IP_PROTOCOL_UDP)
           {
-            if(get_dns_domain(payload,domain,payload_length,&domain_length)== 0){
-             get_domain = true;
-             goto end_process;
+            if (sport == DNS_DPORT)
+            {
+              geosite_dns_response_learn (vm, payload, payload_length);
             }
+          }
+          else if (ip_proto == IP_PROTOCOL_TCP)
+          {
+            if (sport == DNS_DPORT)
+            {
+              if (payload_length >= 2)
+              {
+                u16 dns_length = clib_net_to_host_u16 (*(u16 *) payload);
+
+                if (dns_length <= payload_length - 2)
+                {
+                  // clib_warning ("geosite-input tcp dns response candidate: payload_len=%u dns_len=%u sport=%u dport=%u",
+                  //               payload_length, dns_length, sport, dport);
+                  geosite_dns_response_learn (vm, payload + 2, dns_length);
+                }
+              }
             }
-          else if (dport == DNS_DPORT && ip_proto == IP_PROTOCOL_TCP)
-             {
-            if(get_dns_domain(payload+2,domain,payload_length-2,&domain_length)== 0){
-              get_domain = true;
-              goto end_process;
-             }
-            }
-
-          //http
-
-          if(get_http_domain(payload,domain,payload_length,&domain_length)== 0)
-          {
-              get_domain = true;
-              goto end_process;
           }
-
-
-          //tls
-          if(get_tls_domain(payload,domain,payload_length,&domain_length)== 0)
-          {
-              get_domain = true;
-              goto end_process;
-          }
-
-          //SOCKS5
-          if(get_socks5_domain(payload,domain,payload_length,&domain_length)== 0)
-          {
-              get_domain = true;
-              goto end_process;
-          }
-
-
-        //   if ( ip_proto == IP_PROTOCOL_UDP)
-        //   {
-        //     if(get_quic_domain(payload,domain,payload_length,&domain_length)== 0);
-        //   {
-        //     //clib_warning("quic domain = %s,,domain_length %d",domain,domain_length);
-        //       get_domain = true;
-        //       goto end_process;
-        //   }
-        //     }            
-
-          }
+        }
 
         
-end_process:        vnet_feature_next (&next0, b0);
+        vnet_feature_next (&next0, b0);
 
-       if(get_domain && domain_length < DNS_MAX_DOMAIN_LEN)
-       
-        {
-
-          b0->flags|=VLIB_BUFFER_DOMAIN_VALID ; 
-          
-        if( vnet_buffer2(b0)->geosite_domain_ptr != NULL)
-            clib_mem_free(vnet_buffer2(b0)->geosite_domain_ptr);
-
-
-           vnet_buffer2(b0)->geosite_domain_ptr = domain;
-     
-        }
-        else{
-            clib_mem_free(domain);
-        }
 
           if (PREDICT_FALSE((node->flags & VLIB_NODE_FLAG_TRACE) 
                             && (b0->flags & VLIB_BUFFER_IS_TRACED))) {
@@ -799,11 +739,6 @@ end_process:        vnet_feature_next (&next0, b0);
                vlib_add_trace (vm, node, b0, sizeof (*t));
             t->sw_if_index = sw_if_index0;
             t->next_index = next0;
-            if(get_domain && domain_length < DNS_MAX_DOMAIN_LEN){
-                clib_memcpy (t->domain, domain,domain_length);
-            }else{
-                t->domain[0]='\0';
-            }
                          
             
             }
