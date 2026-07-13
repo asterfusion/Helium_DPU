@@ -793,21 +793,6 @@ replicate_inline (vlib_main_t * vm,
                 ci0 = rm->clones[thread_index][bucket];
                 c0 = vlib_get_buffer(vm, ci0);
 
-                if(b0->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL && ci0 != bi0)
-                    {
-                        char *src = vnet_buffer2(b0)->geosite_domain_ptr;
-                        char *dst;
-
-                        dst = clib_mem_alloc(256);
-                        clib_memset(dst, 0, 256);
-                        clib_strncpy(dst, src, 255);
-
-                        vnet_buffer2(c0)->geosite_domain_ptr = dst;
-                       
-                        c0->flags |= VLIB_BUFFER_DOMAIN_VALID;
-                
-                    }
-
                 to_next[0] = ci0;
                 to_next += 1;
                 n_left_to_next -= 1;

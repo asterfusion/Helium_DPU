@@ -50,6 +50,7 @@ bool geosite_load_default = false;
 bool geoip_load_default = false;
 /* Action function shared between message handler and debug CLI */
 
+
 static int
 geosite_feature_enable_disable (geosite_main_t *gmp, u32 sw_if_index,
                                 int enable_disable)
@@ -140,11 +141,105 @@ int geosite_enable_disable (geosite_main_t * gmp, u32 sw_if_index,
     }
 
   if (gmp->periodic_node_index > 0)
-    vlib_process_signal_event (gmp->vlib_main,
-                               gmp->periodic_node_index,
-                               GEOSITE_EVENT_PERIODIC_ENABLE_DISABLE,
-			                   (uword) geosite_has_enabled_port (gmp));
+    {
+      uword has_enabled_port = (uword) geosite_has_enabled_port (gmp);
+
+      vlib_process_signal_event (gmp->vlib_main,
+                                 gmp->periodic_node_index,
+                                 GEOSITE_EVENT_PERIODIC_ENABLE_DISABLE,
+                                 has_enabled_port);
+    }
+
+  clib_warning ("geosite enable request done: sw_if_index=%u enable=%d source=%s rv=%d",
+                sw_if_index, enable_disable, is_single ? "single" : "all",
+                rv);
   return rv;
+}
+
+static int
+geosite_enable_disable_all_interfaces (geosite_main_t *gmp, int enable_disable)
+{
+  vnet_interface_main_t *im = &gmp->vnet_main->interface_main;
+  vnet_sw_interface_t *si;
+  int rv = 0;
+
+  pool_foreach (si, im->sw_interfaces)
+    {
+      rv = geosite_enable_disable (gmp, si->sw_if_index, enable_disable,
+				   false);
+    }
+
+  return rv;
+}
+
+__clib_export void
+geosite_active_refcnt_add (u32 geosite_index)
+{
+  geosite_main_t *gmp = &geosite_main;
+  int enable_all = 0;
+
+  if (geosite_index == GEO_CFG)
+    return;
+
+  clib_spinlock_lock (&gmp->active_refcnt_lock);
+  vec_validate_init_empty (gmp->active_geosite_refcnt, geosite_index, 0);
+  gmp->active_geosite_refcnt[geosite_index]++;
+
+  if (gmp->global_geosite_rule_refcnt++ == 0)
+    {
+      gmp->global_feature_enabled = 1;
+      enable_all = 1;
+    }
+  clib_spinlock_unlock (&gmp->active_refcnt_lock);
+
+  if (enable_all)
+    geosite_enable_disable_all_interfaces (gmp, 1);
+}
+
+__clib_export void
+geosite_active_refcnt_del (u32 geosite_index)
+{
+  geosite_main_t *gmp = &geosite_main;
+  int disable_all = 0;
+
+  if (geosite_index == GEO_CFG)
+    return;
+
+  clib_spinlock_lock (&gmp->active_refcnt_lock);
+  if (geosite_index >= vec_len (gmp->active_geosite_refcnt) ||
+      gmp->active_geosite_refcnt[geosite_index] == 0)
+    {
+      clib_spinlock_unlock (&gmp->active_refcnt_lock);
+      return;
+    }
+
+  gmp->active_geosite_refcnt[geosite_index]--;
+  if (gmp->global_geosite_rule_refcnt > 0)
+    gmp->global_geosite_rule_refcnt--;
+
+  if (gmp->global_geosite_rule_refcnt == 0 && gmp->global_feature_enabled)
+    {
+      gmp->global_feature_enabled = 0;
+      disable_all = 1;
+    }
+  clib_spinlock_unlock (&gmp->active_refcnt_lock);
+
+  if (disable_all)
+    geosite_enable_disable_all_interfaces (gmp, 0);
+}
+
+__clib_export u32
+geosite_active_refcnt_get (u32 geosite_index)
+{
+  geosite_main_t *gmp = &geosite_main;
+  u32 refcnt = 0;
+
+  clib_spinlock_lock (&gmp->active_refcnt_lock);
+  if (geosite_index < vec_len (gmp->active_geosite_refcnt))
+    refcnt = gmp->active_geosite_refcnt[geosite_index];
+  clib_spinlock_unlock (&gmp->active_refcnt_lock);
+
+  return refcnt;
 }
 
 static clib_error_t *
@@ -481,6 +576,97 @@ VLIB_CLI_COMMAND(show_geosite_stats_command, static) = {
     .path = "show geosite stats",
     .short_help = "show geosite stats [details]",
     .function = show_geosite_stats_command_fn,
+};
+/* *INDENT-ON* */
+
+static clib_error_t *
+show_geosite_resolved_ip_command_fn (vlib_main_t *vm,
+                                     unformat_input_t *input,
+                                     vlib_cli_command_t *cmd)
+{
+    geosite_main_t *gmp = &geosite_main;
+    clib_bihash_kv_16_8_t kv;
+    clib_bihash_kv_16_8_t result;
+    ip4_address_t ip4;
+    ip6_address_t ip6;
+    u8 is_ip4 = 0;
+    u8 is_ip6 = 0;
+    u32 pool_index;
+    u32 now_sec = (u32) vlib_time_now (vm);
+    geosite_resolved_entry_t *entry;
+    u32 i;
+
+    if (unformat (input, "%U", unformat_ip4_address, &ip4))
+    {
+        is_ip4 = 1;
+        geosite_resolved_make_ip4_key (&kv, &ip4);
+    }
+    else if (unformat (input, "%U", unformat_ip6_address, &ip6))
+    {
+        is_ip6 = 1;
+        geosite_resolved_make_ip6_key (&kv, &ip6);
+    }
+    else
+    {
+        return clib_error_return (0, "expected ip4 or ip6 address");
+    }
+
+    if (clib_bihash_search_16_8 (&gmp->resolved_ip_hash, &kv, &result))
+    {
+        if (is_ip4)
+            vlib_cli_output (vm, "%U not found", format_ip4_address, &ip4);
+        else
+            vlib_cli_output (vm, "%U not found", format_ip6_address, &ip6);
+        return 0;
+    }
+
+    pool_index = (u32) result.value;
+    if (pool_is_free_index (gmp->resolved_pool, pool_index))
+    {
+        vlib_cli_output (vm, "invalid resolved pool index %u", pool_index);
+        return 0;
+    }
+
+    entry = pool_elt_at_index (gmp->resolved_pool, pool_index);
+    if (is_ip4)
+        vlib_cli_output (vm, "ip %U", format_ip4_address, &ip4);
+    else if (is_ip6)
+        vlib_cli_output (vm, "ip %U", format_ip6_address, &ip6);
+
+    vlib_cli_output (vm, "pool-index %u ref-bitmap 0x%08x",
+                     pool_index, entry->ref_bitmap);
+    vlib_cli_output (vm, "slot geosite-index geosite-code expire-time remain-sec state");
+
+    for (i = 0; i < GEOSITE_RESOLVED_MAX_REFS; i++)
+    {
+        geosite_resolved_ref_t *ref;
+        char *code;
+        u32 remain_sec;
+
+        if ((entry->ref_bitmap & (1u << i)) == 0)
+            continue;
+
+        ref = &entry->refs[i];
+        code = geosite_get_country_code_by_index ((u16) ref->geosite_index);
+        remain_sec = ref->expire_time_sec > now_sec ?
+                     ref->expire_time_sec - now_sec : 0;
+
+        vlib_cli_output (vm, "%4u %13u %12s %11u %10u %s",
+                         i, ref->geosite_index,
+                         code ? code : "-",
+                         ref->expire_time_sec, remain_sec,
+                         ref->expire_time_sec > now_sec ?
+                         "active" : "expired");
+    }
+
+    return 0;
+}
+
+/* *INDENT-OFF* */
+VLIB_CLI_COMMAND(show_geosite_resolved_ip_command, static) = {
+    .path = "show geosite resolved-ip",
+    .short_help = "show geosite resolved-ip <ip4|ip6 address>",
+    .function = show_geosite_resolved_ip_command_fn,
 };
 /* *INDENT-ON* */
 
@@ -869,6 +1055,67 @@ u32 *geosite_get_country_index_by_domain(char *domain){
 
 }
 
+static u32 *
+geosite_get_resolved_country_code_by_key (clib_bihash_kv_16_8_t *key)
+{
+    geosite_main_t *gmp = &geosite_main;
+    clib_bihash_kv_16_8_t result;
+    geosite_resolved_entry_t *entry;
+    u32 *cc_indices = 0;
+    u32 now_sec;
+    u32 pool_index;
+    u32 i;
+
+    if (clib_bihash_search_16_8 (&gmp->resolved_ip_hash, key, &result))
+    {
+        return 0;
+    }
+
+    pool_index = (u32) result.value;
+    if (pool_is_free_index (gmp->resolved_pool, pool_index))
+    {
+        return 0;
+    }
+
+    now_sec = (u32) vlib_time_now (gmp->vlib_main);
+    entry = pool_elt_at_index (gmp->resolved_pool, pool_index);
+    for (i = 0; i < GEOSITE_RESOLVED_MAX_REFS; i++)
+    {
+        if ((entry->ref_bitmap & (1u << i)) == 0)
+            continue;
+
+        if (entry->refs[i].expire_time_sec <= now_sec)
+        {
+            entry->ref_bitmap &= ~(1u << i);
+            continue;
+        }
+
+        vec_add1 (cc_indices, entry->refs[i].geosite_index);
+    }
+
+    return cc_indices;
+}
+
+__clib_export
+u32 *
+geosite_get_resolved_country_code_by_ip4 (ip4_address_t ip4)
+{
+    clib_bihash_kv_16_8_t key;
+
+    geosite_resolved_make_ip4_key (&key, &ip4);
+    return geosite_get_resolved_country_code_by_key (&key);
+}
+
+__clib_export
+u32 *
+geosite_get_resolved_country_code_by_ip6 (ip6_address_t ip6)
+{
+    clib_bihash_kv_16_8_t key;
+
+    geosite_resolved_make_ip6_key (&key, &ip6);
+    return geosite_get_resolved_country_code_by_key (&key);
+}
+
 __clib_export 
 u32 *geoip_get_country_code_by_ip4(ip4_address_t ip4)
 
@@ -961,12 +1208,8 @@ static void vl_api_geosite_enable_disable_t_handler
 {
   vl_api_geosite_enable_disable_reply_t * rmp;
   geosite_main_t * gmp = &geosite_main;
-  int rv;
-
-  rv = geosite_enable_disable (gmp, ntohl(mp->sw_if_index),
-                                      (int) (mp->enable_disable),true);
+  int rv = 0;
   
-
   REPLY_MACRO(VL_API_GEOSITE_ENABLE_DISABLE_REPLY);
 }
 
@@ -976,24 +1219,27 @@ static void vl_api_geosite_enable_disable_all_t_handler
 {
   vl_api_geosite_enable_disable_all_reply_t * rmp;
   geosite_main_t * gmp = &geosite_main;
-  vnet_main_t *vnm = vnet_get_main ();
-  vnet_interface_main_t *im = &vnm->interface_main;
-  vnet_sw_interface_t *si;
-  u32 sw_if_index = ~0;
   int rv = 0;
-
-
-    pool_foreach (si, im->sw_interfaces)
-    {
-        sw_if_index = si->sw_if_index;
-     
-                rv = geosite_enable_disable (gmp, sw_if_index,
-                                            (int) (mp->enable_disable),false);
-
-    }
  
   REPLY_MACRO(VL_API_GEOSITE_ENABLE_DISABLE_ALL_REPLY);
 }
+
+static clib_error_t *
+geosite_sw_interface_add_del (CLIB_UNUSED (vnet_main_t *vnm),
+			      u32 sw_if_index, u32 is_add)
+{
+  geosite_main_t *gmp = &geosite_main;
+
+  if (!is_add || !gmp->global_feature_enabled)
+    return 0;
+
+  clib_warning ("geosite sw-interface add: sw_if_index=%u global_feature_enabled=%u",
+                sw_if_index, gmp->global_feature_enabled);
+  geosite_enable_disable (gmp, sw_if_index, 1, false);
+  return 0;
+}
+
+VNET_SW_INTERFACE_ADD_DEL_FUNCTION (geosite_sw_interface_add_del);
 
 
 
@@ -1009,6 +1255,13 @@ static clib_error_t * geosite_init (vlib_main_t * vm)
   gmp->vlib_main = vm;
   gmp->vnet_main = vnet_get_main();
   gmp->domain_trie = NULL;
+  gmp->resolved_pool_max_entries = GEOSITE_RESOLVED_POOL_MAX_ENTRIES;
+  clib_spinlock_init (&gmp->resolved_pool_lock);
+  clib_spinlock_init (&gmp->active_refcnt_lock);
+  pool_alloc (gmp->resolved_pool, gmp->resolved_pool_max_entries);
+  clib_bihash_init_16_8 (&gmp->resolved_ip_hash, "geosite resolved ip",
+                         GEOSITE_RESOLVED_HASH_BUCKETS,
+                         GEOSITE_RESOLVED_HASH_MEMORY);
   
   /* Add our API messages to the global name_crc hash table */
   gmp->msg_id_base = setup_message_id_table ();
@@ -1078,4 +1331,3 @@ VLIB_PLUGIN_REGISTER () =
  * eval: (c-set-style "gnu")
  * End:
  */
-

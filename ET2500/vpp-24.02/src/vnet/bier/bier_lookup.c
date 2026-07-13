@@ -248,21 +248,6 @@ bier_lookup (vlib_main_t * vm,
                     to_next += 1;
                     n_left_to_next -= 1;
 
-                    if(b0->flags & VLIB_BUFFER_DOMAIN_VALID && vnet_buffer2(b0)->geosite_domain_ptr != NULL && ci0 != bi0)
-                    {
-                        char *src = vnet_buffer2(b0)->geosite_domain_ptr;
-                        char *dst;
-
-                        dst = clib_mem_alloc(256);
-                        clib_memset(dst, 0, 256);
-                        clib_strncpy(dst, src, 255);
-
-                        vnet_buffer2(c0)->geosite_domain_ptr = dst;
-                       
-                        c0->flags |= VLIB_BUFFER_DOMAIN_VALID;
-                
-                    }
-
                     if (PREDICT_FALSE(b0->flags & VLIB_BUFFER_IS_TRACED))
                     {
                         bier_lookup_trace_t *tr;
