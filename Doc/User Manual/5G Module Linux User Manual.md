@@ -288,6 +288,19 @@ The common AT command port of the 5G module is:
 /dev/ttyUSB2
 ```
 
+Before using AT commands, confirm that `minicom` is installed:
+
+```bash
+which minicom
+```
+
+If it is not installed, run:
+
+```bash
+sudo apt update
+sudo apt install minicom
+```
+
 Use `minicom`:
 
 ```bash
