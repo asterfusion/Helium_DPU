@@ -12,6 +12,8 @@ Confirm the following hardware conditions before use:
 - The antenna is connected, and 4G/5G network coverage is available at the current location.
 - The Linux system can detect the related USB device nodes of the module.
 
+When inserting the SIM card, follow the SIM notch direction marked on the device and gently push the SIM card into the slot. If the direction is correct, resistance or spring force will be felt when the card is inserted about three quarters of the way. Then push the SIM card fully into place. If no spring force is felt or the card does not slide in smoothly, the direction is usually incorrect. Do not force it in, otherwise the SIM card may become difficult to remove.
+
 ## 2. Common Module Device Nodes
 
 Common interfaces are shown below:
@@ -192,6 +194,16 @@ sudo ./quectel-CM -s cment -4 -i wwan0_1 &
 
 Disconnect dial-up:
 
+The current dial-up command uses `&` to run in the background. To bring the background task back to the foreground and stop it, run:
+
+```bash
+fg
+```
+
+After it returns to the foreground, press `Ctrl+C` to stop the program.
+
+Alternatively, run:
+
 ```bash
 sudo killall quectel-CM
 ```
@@ -268,6 +280,8 @@ If an IP address can be pinged but a domain name cannot, check the DNS configura
 
 ## 9. Use AT Commands
 
+### 9.1 AT Command Port
+
 The common AT command port of the 5G module is:
 
 ```text
@@ -286,11 +300,14 @@ Or use `microcom`:
 microcom /dev/ttyUSB2
 ```
 
+### 9.2 Common AT Commands
+
 Common AT commands are shown below:
 
 ```text
 ATI
 AT+CPIN?
+AT+QSIMDET=1,1
 AT+COPS?
 AT+CSQ
 AT+CEREG?
@@ -298,6 +315,8 @@ AT+C5GREG?
 AT+QENG="SERVINGCELL"
 AT+CGDCONT?
 ```
+
+### 9.3 Check SIM Status
 
 Check SIM status:
 
@@ -311,6 +330,54 @@ Expected response:
 +CPIN: READY
 OK
 ```
+
+If `+CME ERROR: 10` is returned, the module usually does not detect the SIM card. Confirm that the SIM card is inserted correctly. If necessary, run `AT+CFUN=1,1` to restart the module and then query again.
+
+### 9.4 Enable SIM Hot-Swap Detection
+
+To enable SIM hot-swap detection, run the following command on the AT command port:
+
+```text
+AT+QSIMDET=1,1
+```
+
+This command enables SIM card insertion/removal detection and status reporting. After configuration, restart the module for the setting to take effect:
+
+```text
+AT+CFUN=1,1
+```
+
+After the module restarts and enumerates again, check the SIM status:
+
+```text
+AT+CPIN?
+```
+
+If the SIM card is ready, the expected response is:
+
+```text
++CPIN: READY
+OK
+```
+
+### 9.5 Check Network Registration Status
+
+Query operator selection and network registration status:
+
+```text
+AT+COPS?
+AT+CEREG?
+AT+C5GREG?
+```
+
+Common interpretation:
+
+- `+CEREG: 0,1` or `+CEREG: 0,5` indicates that EPS/LTE is registered.
+- `+C5GREG: 0,1` or `+C5GREG: 0,5` indicates that 5G is registered.
+- `+C5GREG: 0,2` indicates that the module is searching for or trying to register on the network.
+- If the module remains unregistered for a long time, check the SIM card, antenna, signal coverage, and APN.
+
+### 9.6 Check Serving Cell and Signal
 
 Check serving cell and signal:
 
@@ -333,6 +400,16 @@ Focus on the following fields:
 | `LTE` | 4G network |
 | RSRP, such as `-99` | Received power. A value closer to -44 is better; lower than -110 is usually poor. |
 | RSRQ, such as `-13` | Received quality. Lower than -15 is usually poor. |
+
+### 9.7 Check PDP Configuration
+
+Check the current PDP configuration:
+
+```text
+AT+CGDCONT?
+```
+
+To set the APN, refer to Chapter 10.
 
 For detailed commands, refer to `Helium_DPU/Doc/User Manual/5G Module Series AT Commands Manual.md`.
 
@@ -456,6 +533,31 @@ If `+CPIN: READY` is not returned, confirm:
 - The SIM card is not suspended or out of service.
 - The SIM card does not require a PIN, or the PIN has been entered.
 - The SIM card supports the current network type and operator network.
+
+If the SIM card is inserted but `AT+CPIN?` returns a SIM-not-inserted related error, for example:
+
+```text
++CME ERROR: 10
+```
+
+Run the following AT command to restart the module so that it can detect the SIM card again:
+
+```text
+AT+CFUN=1,1
+```
+
+After the module restarts and enumerates again, check the SIM status:
+
+```text
+AT+CPIN?
+```
+
+Expected response:
+
+```text
++CPIN: READY
+OK
+```
 
 ### 13.4 Network Registration Fails
 
