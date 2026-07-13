@@ -65,7 +65,61 @@ Check the driver bound to the actual network interface:
 ethtool -i wwan0
 ```
 
-## 4. Compile the Dial-Up Tool
+## 4. Confirm and Switch to the cdc_mbim Driver
+
+At the customer site, first confirm the driver currently bound to `wwan0`:
+
+```bash
+ethtool -i wwan0
+```
+
+If the `driver` field is `cdc_mbim`, the current driver is correct and you can continue with the dial-up steps.
+
+Example:
+
+```text
+driver: cdc_mbim
+version: ...
+firmware-version: ...
+bus-info: ...
+```
+
+If the `driver` field is not `cdc_mbim`, use AT commands to switch the module USB network interface mode to MBIM, and then restart the module to make the configuration take effect.
+
+Open the AT command port:
+
+```bash
+sudo minicom -D /dev/ttyUSB2
+```
+
+Or:
+
+```bash
+microcom /dev/ttyUSB2
+```
+
+Run the following AT commands:
+
+```text
+AT+QCFG="usbnet",2
+AT+CFUN=1,1
+```
+
+Notes:
+
+- `AT+QCFG="usbnet",2` sets the USB network interface mode to MBIM.
+- `AT+CFUN=1,1` restarts the module so the configuration can take effect.
+- After the module restarts, wait for the USB device to enumerate again, and then check the `wwan0` driver again.
+
+After the restart, confirm again:
+
+```bash
+ethtool -i wwan0
+```
+
+After confirming that the `driver` field is `cdc_mbim`, continue with dial-up.
+
+## 5. Compile the Dial-Up Tool
 
 Dial-up uses `quectel-CM` from the `QConnectManager` tool package.
 
@@ -108,7 +162,7 @@ After compilation, confirm that the executable files exist:
 ls -l quectel-CM quectel-qmi-proxy quectel-mbim-proxy
 ```
 
-## 5. Dial-Up Networking
+## 6. Dial-Up Networking
 
 Confirm the APN before dialing. The example APN in this document is `cment`. Replace it according to the requirements of the actual SIM card operator.
 
@@ -148,7 +202,7 @@ Run with logs for troubleshooting:
 sudo ./quectel-CM -s cment -4 -v -f quectel-cm.log -u usbmon.log &
 ```
 
-## 6. Confirm Successful Dial-Up
+## 7. Confirm Successful Dial-Up
 
 When dial-up succeeds, the `quectel-CM` log usually contains the following key information:
 
@@ -177,7 +231,7 @@ Confirm the following key items:
 
 Successful dial-up logs are provided in `ET2500/Quectel_QConnectManager/log`. Mainly check `cdc_mbim.txt`.
 
-## 7. Check the Network After Dial-Up
+## 8. Check the Network After Dial-Up
 
 Check the network interface address:
 
@@ -212,7 +266,7 @@ ping -c 4 www.baidu.com
 
 If an IP address can be pinged but a domain name cannot, check the DNS configuration first.
 
-## 8. Use AT Commands
+## 9. Use AT Commands
 
 The common AT command port of the 5G module is:
 
@@ -282,7 +336,7 @@ Focus on the following fields:
 
 For detailed commands, refer to `Helium_DPU/Doc/User Manual/5G Module Series AT Commands Manual.md`.
 
-## 9. Check APN and PDP Configuration
+## 10. Check APN and PDP Configuration
 
 Check the current PDP configuration:
 
@@ -312,7 +366,7 @@ Notes:
 - If a PDP context without APN configuration is used, configure the APN before dialing.
 - `quectel-CM -s <APN>` sets or confirms the dial-up profile during the dial-up process.
 
-## 10. Multi-PDN Dial-Up
+## 11. Multi-PDN Dial-Up
 
 Normal customer scenarios usually require only single dial-up.
 
@@ -328,7 +382,7 @@ sudo ./quectel-CM -s <apn2> -n 2 &
 
 If multi-PDN dial-up is not required, ignore this section.
 
-## 11. Other Dial-Up Settings
+## 12. Other Dial-Up Settings
 
 Use `./quectel-CM -h` to view available options, and add the required parameters as needed.
 
@@ -357,9 +411,9 @@ Use `./quectel-CM -h` to view available options, and add the required parameters
 [07-09_19:38:35:319] Example 3: ./quectel-CM -s 3gnet carl 1234 1 -p 1234 -f gobinet_log.txt
 ```
 
-## 12. Common Issues
+## 13. Common Issues
 
-### 12.1 `/dev/cdc-wdm0` Is Missing
+### 13.1 `/dev/cdc-wdm0` Is Missing
 
 Check:
 
@@ -376,7 +430,7 @@ Possible causes:
 - The module is not powered on correctly or the USB connection is abnormal.
 - The current system kernel does not include the corresponding driver support.
 
-### 12.2 AT Port Is Missing
+### 13.2 AT Port Is Missing
 
 Check:
 
@@ -388,7 +442,7 @@ lsmod | grep option
 
 The common AT port for this module is `/dev/ttyUSB2`. If other USB serial devices already exist in the system, the port number may change. Use the `dmesg` output as the reference.
 
-### 12.3 SIM Is Not Ready
+### 13.3 SIM Is Not Ready
 
 Check:
 
@@ -403,7 +457,7 @@ If `+CPIN: READY` is not returned, confirm:
 - The SIM card does not require a PIN, or the PIN has been entered.
 - The SIM card supports the current network type and operator network.
 
-### 12.4 Network Registration Fails
+### 13.4 Network Registration Fails
 
 Check:
 
@@ -421,7 +475,7 @@ Recommended actions:
 - Confirm that the SIM card operator matches the network available in the current area.
 - Check signal quality. Very low RSRP or poor RSRQ may affect registration and dial-up.
 
-### 12.5 Dial-Up Succeeds but Internet Access Fails
+### 13.5 Dial-Up Succeeds but Internet Access Fails
 
 Check in order:
 
@@ -442,7 +496,7 @@ Common causes:
 - DNS is not configured or unavailable.
 - The APN is incorrect or the SIM card data service is abnormal.
 
-### 12.6 Logs Required for Dial-Up Failure Analysis
+### 13.6 Logs Required for Dial-Up Failure Analysis
 
 Check the following information:
 
@@ -466,7 +520,7 @@ AT+QENG="SERVINGCELL"
 AT+CGDCONT?
 ```
 
-## 13. Recommended Operation Procedure
+## 14. Recommended Operation Procedure
 
 The following steps apply to a single dial-up scenario using APN `cment`. Customers should replace the APN according to the actual SIM card.
 
@@ -492,3 +546,4 @@ echo "6. Test the network."
 ping -c 4 8.8.8.8
 ping -c 4 www.baidu.com
 ```
+
