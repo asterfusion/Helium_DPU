@@ -393,6 +393,10 @@ geosite_resolved_entry_update (geosite_resolved_entry_t *entry,
 
     if (free_slot < 0)
     {
+        clib_warning ("geosite resolved ip update failed: refs full "
+                      "geosite_index=%u ref_bitmap=0x%08x now=%u expire=%u",
+                      geosite_index, entry->ref_bitmap, now_sec,
+                      expire_time_sec);
         return -1;
     }
 
@@ -417,12 +421,21 @@ geosite_resolved_ip_add (clib_bihash_kv_16_8_t *key, u32 geosite_index,
         pool_index = (u32) result.value;
         if (pool_is_free_index (gmp->resolved_pool, pool_index))
         {
+            clib_warning ("geosite resolved ip add failed: stale pool index "
+                          "pool_index=%u geosite_index=%u",
+                          pool_index, geosite_index);
             return -1;
         }
 
         entry = pool_elt_at_index (gmp->resolved_pool, pool_index);
         rv = geosite_resolved_entry_update (entry, geosite_index,
                                             expire_time_sec, now_sec);
+        if (rv != 0)
+        {
+            clib_warning ("geosite resolved ip add failed: update existing "
+                          "geosite_index=%u rv=%d",
+                          geosite_index, rv);
+        }
         return rv;
     }
 
@@ -435,16 +448,30 @@ geosite_resolved_ip_add (clib_bihash_kv_16_8_t *key, u32 geosite_index,
 
         if (pool_is_free_index (gmp->resolved_pool, pool_index))
         {
+            clib_warning ("geosite resolved ip add failed: stale pool index "
+                          "after lock pool_index=%u geosite_index=%u",
+                          pool_index, geosite_index);
             return -1;
         }
 
         entry = pool_elt_at_index (gmp->resolved_pool, pool_index);
-        return geosite_resolved_entry_update (entry, geosite_index,
-                                              expire_time_sec, now_sec);
+        rv = geosite_resolved_entry_update (entry, geosite_index,
+                                            expire_time_sec, now_sec);
+        if (rv != 0)
+        {
+            clib_warning ("geosite resolved ip add failed: update existing "
+                          "after lock geosite_index=%u rv=%d",
+                          geosite_index, rv);
+        }
+        return rv;
     }
 
     if (pool_elts (gmp->resolved_pool) >= gmp->resolved_pool_max_entries)
     {
+        clib_warning ("geosite resolved ip add failed: pool full "
+                      "pool_elts=%u max=%u geosite_index=%u",
+                      (u32) pool_elts (gmp->resolved_pool),
+                      gmp->resolved_pool_max_entries, geosite_index);
         clib_spinlock_unlock (&gmp->resolved_pool_lock);
         return -1;
     }
@@ -457,6 +484,9 @@ geosite_resolved_ip_add (clib_bihash_kv_16_8_t *key, u32 geosite_index,
                                         expire_time_sec, now_sec);
     if (rv != 0)
     {
+        clib_warning ("geosite resolved ip add failed: init new entry "
+                      "geosite_index=%u rv=%d",
+                      geosite_index, rv);
         pool_put (gmp->resolved_pool, entry);
         clib_spinlock_unlock (&gmp->resolved_pool_lock);
         return rv;
@@ -468,6 +498,9 @@ geosite_resolved_ip_add (clib_bihash_kv_16_8_t *key, u32 geosite_index,
         uword_to_pointer ((uword) now_sec, void *));
     if (rv != 0)
     {
+        clib_warning ("geosite resolved ip add failed: hash add "
+                      "pool_index=%u geosite_index=%u rv=%d",
+                      pool_index, geosite_index, rv);
         pool_put (gmp->resolved_pool, entry);
         clib_spinlock_unlock (&gmp->resolved_pool_lock);
         return -1;
@@ -607,6 +640,7 @@ geosite_dns_response_learn (vlib_main_t *vm, u8 *payload, u16 payload_length)
             vec_foreach (cc, cc_indices)
             {
                 u32 refcnt;
+                int rv;
 
                 refcnt = geosite_active_refcnt_get (*cc);
                 if (refcnt == 0)
@@ -616,7 +650,15 @@ geosite_dns_response_learn (vlib_main_t *vm, u8 *payload, u16 payload_length)
 
                 // clib_warning ("geosite dns A: active geosite=%u refcnt=%u qname=%s answer=%s",
                 //               *cc, refcnt, qname, answer_name);
-                geosite_resolved_ip_add (&key, *cc, now_sec + ttl, now_sec);
+                rv = geosite_resolved_ip_add (&key, *cc, now_sec + ttl,
+                                              now_sec);
+                if (rv != 0)
+                {
+                    clib_warning ("geosite dns A add failed: qname=%s "
+                                  "answer=%s ip=%U geosite=%u ttl=%u rv=%d",
+                                  qname, answer_name, format_ip4_address,
+                                  &ip4, *cc, ttl, rv);
+                }
             }
         }
         else if (rr_type == DNS_TYPE_AAAA && rdlen == 16)
@@ -632,6 +674,7 @@ geosite_dns_response_learn (vlib_main_t *vm, u8 *payload, u16 payload_length)
             vec_foreach (cc, cc_indices)
             {
                 u32 refcnt;
+                int rv;
 
                 refcnt = geosite_active_refcnt_get (*cc);
                 if (refcnt == 0)
@@ -641,7 +684,15 @@ geosite_dns_response_learn (vlib_main_t *vm, u8 *payload, u16 payload_length)
 
                 // clib_warning ("geosite dns AAAA: active geosite=%u refcnt=%u qname=%s answer=%s",
                 //               *cc, refcnt, qname, answer_name);
-                geosite_resolved_ip_add (&key, *cc, now_sec + ttl, now_sec);
+                rv = geosite_resolved_ip_add (&key, *cc, now_sec + ttl,
+                                              now_sec);
+                if (rv != 0)
+                {
+                    clib_warning ("geosite dns AAAA add failed: qname=%s "
+                                  "answer=%s ip=%U geosite=%u ttl=%u rv=%d",
+                                  qname, answer_name, format_ip6_address,
+                                  &ip6, *cc, ttl, rv);
+                }
             }
         }
     }
