@@ -1,4 +1,4 @@
-#5G Module Linux User Manual
+# RM520N 5G Module Linux User Manual
 
 This document guides customers through driver verification, dial-up tool compilation, dial-up networking, AT command checks, and common troubleshooting for the RM520N series 5G module on Linux.
 
@@ -321,12 +321,14 @@ Common AT commands are shown below:
 ATI
 AT+CPIN?
 AT+QSIMDET=1,1
+AT+QUIMSLOT?
 AT+COPS?
 AT+CSQ
 AT+CEREG?
 AT+C5GREG?
 AT+QENG="SERVINGCELL"
 AT+CGDCONT?
+AT+QNWPREFCFG="mode_pref"
 ```
 
 ### 9.3 Check SIM Status
@@ -373,7 +375,76 @@ If the SIM card is ready, the expected response is:
 OK
 ```
 
-### 9.5 Check Network Registration Status
+### 9.5 Switch SIM Slot
+
+Query the currently used SIM slot:
+
+```text
+AT+QUIMSLOT?
+```
+
+Example response:
+
+```text
++QUSIMSLOT: 1
+```
+
+Switch to SIM slot 2:
+
+```text
+AT+QUIMSLOT=2
+```
+
+Notes:
+
+- `AT+QUIMSLOT?` queries the currently used SIM slot.
+- `AT+QUIMSLOT=2` switches to SIM slot 2.
+- After switching, check the SIM status again:
+
+```text
+AT+CPIN?
+```
+
+### 9.6 Change Network Mode
+
+Query the current network mode setting:
+
+```text
+AT+QNWPREFCFG="mode_pref"
+```
+
+Example response:
+
+```text
++QNWPREFCFG: "mode_pref",AUTO
+```
+
+Set automatic mode, allowing WCDMA(3G), LTE(4G), and 5G selection:
+
+```text
+AT+QNWPREFCFG="mode_pref",AUTO
+```
+
+Set LTE(4G) only:
+
+```text
+AT+QNWPREFCFG="mode_pref",LTE
+```
+
+Set 5G only:
+
+```text
+AT+QNWPREFCFG="mode_pref",NR5G
+```
+
+Notes:
+
+- `AUTO` is used when the module should automatically select 3G/4G/5G networks.
+- `LTE` restricts the module to 4G only.
+- `NR5G` restricts the module to 5G only.
+- After changing the network mode, check the network registration status and serving cell information again.
+
+### 9.7 Check Network Registration Status
 
 Query operator selection and network registration status:
 
@@ -390,7 +461,7 @@ Common interpretation:
 - `+C5GREG: 0,2` indicates that the module is searching for or trying to register on the network.
 - If the module remains unregistered for a long time, check the SIM card, antenna, signal coverage, and APN.
 
-### 9.6 Check Serving Cell and Signal
+### 9.8 Check Serving Cell and Signal
 
 Check serving cell and signal:
 
@@ -414,7 +485,7 @@ Focus on the following fields:
 | RSRP, such as `-99` | Received power. A value closer to -44 is better; lower than -110 is usually poor. |
 | RSRQ, such as `-13` | Received quality. Lower than -15 is usually poor. |
 
-### 9.7 Check PDP Configuration
+### 9.9 Check PDP Configuration
 
 Check the current PDP configuration:
 
