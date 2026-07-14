@@ -157,6 +157,28 @@ vl_api_lcp_pppoe_bulk_add_del_sessions_t_handler (
   vec_free (sw_if_indices);
 }
 
+static void
+vl_api_lcp_pppoe_hw_if_pool_ensure_t_handler (
+  vl_api_lcp_pppoe_hw_if_pool_ensure_t *mp)
+{
+  vl_api_lcp_pppoe_hw_if_pool_ensure_reply_t *rmp;
+  pppoe_main_t *pem = &pppoe_main;
+  u32 target = ntohl (mp->target);
+  u32 batch = ntohl (mp->batch);
+  int rv;
+
+  rv = lcp_pppoe_hw_if_pool_ensure (target, batch);
+
+  /* *INDENT-OFF* */
+  REPLY_MACRO2 (VL_API_LCP_PPPOE_HW_IF_POOL_ENSURE_REPLY, ({
+    rmp->created = htonl (pem->next_pppoe_dev_instance);
+    rmp->free_count = htonl (vec_len (pem->free_pppoe_session_hw_if_indices));
+    rmp->is_async = (pem->next_pppoe_dev_instance < pem->hw_if_pool_target
+		  || pem->hw_if_pool_growing);
+  }));
+  /* *INDENT-ON* */
+}
+
 static int
 lcp_pppoe_ip_route_add_del_t_handler (vl_api_lcp_pppoe_ip_route_add_del_t * mp, u32 * stats_index)
 {

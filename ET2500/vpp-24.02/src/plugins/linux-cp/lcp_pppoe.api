@@ -131,3 +131,26 @@ define lcp_pppoe_bulk_add_del_sessions_reply
   u32 count;
   vl_api_lcp_pppoe_session_result_t results[count];
 };
+
+/** \brief Grow the PPPoE hw-interface warm pool asynchronously
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param target - total pppN interfaces to pre-create (e.g. 50000)
+    @param batch - interfaces per process batch (0 = default 256)
+*/
+define lcp_pppoe_hw_if_pool_ensure
+{
+  u32 client_index;
+  u32 context;
+  u32 target;
+  u32 batch;
+};
+
+define lcp_pppoe_hw_if_pool_ensure_reply
+{
+  u32 context;
+  i32 retval;
+  u32 created;
+  u32 free_count;
+  bool is_async;
+};

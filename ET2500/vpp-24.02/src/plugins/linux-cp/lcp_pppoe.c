@@ -346,6 +346,180 @@ lcp_pppoe_setup_new_if_features (u32 sw_if_index)
 			       sw_if_index, 0, NULL, 0);
 }
 
+#define PPPOE_HW_IF_POOL_DEFAULT_BATCH 256
+#define PPPOE_HW_IF_POOL_EVENT_GROW 1
+#define PPPOE_HW_IF_POOL_SUSPEND_SEC 0.01
+
+static void
+lcp_pppoe_session_zero_counters (vnet_main_t *vnm, u32 sw_if_index)
+{
+  vnet_interface_main_t *im = &vnm->interface_main;
+
+  vnet_interface_counter_lock (im);
+  vlib_zero_combined_counter (&im->combined_sw_if_counters
+			      [VNET_INTERFACE_COUNTER_TX], sw_if_index);
+  vlib_zero_combined_counter (&im->combined_sw_if_counters
+			      [VNET_INTERFACE_COUNTER_RX], sw_if_index);
+  vlib_zero_simple_counter (&im->sw_if_counters[VNET_INTERFACE_COUNTER_DROP],
+			    sw_if_index);
+  vnet_interface_counter_unlock (im);
+}
+
+static void
+lcp_pppoe_hw_if_setup_dataplane (vnet_main_t *vnm, u32 sw_if_index)
+{
+  lcp_pppoe_setup_new_if_features (sw_if_index);
+  vnet_set_interface_l3_output_node (vnm->vlib_main, sw_if_index,
+				     (u8 *) "tunnel-output-no-count");
+}
+
+/* Register a new PPPoE hw/sw if using next_pppoe_dev_instance for naming.
+ * When push_to_free_pool is set the interface is left HIDDEN+down and pushed
+ * to free_pppoe_session_hw_if_indices for later recycle. */
+static int
+lcp_pppoe_hw_if_create (u32 *hw_if_index_out, u8 push_to_free_pool)
+{
+  pppoe_main_t *pem = &pppoe_main;
+  vnet_main_t *vnm = pem->vnet_main;
+  u32 instance, hw_if_index, sw_if_index;
+  vnet_hw_interface_t *hi;
+  vnet_sw_interface_t *si;
+
+  instance = pem->next_pppoe_dev_instance++;
+  hw_if_index = vnet_register_interface (vnm, pppoe_device_class.index, instance,
+				       pppoe_hw_class.index, instance);
+  hi = vnet_get_hw_interface (vnm, hw_if_index);
+  sw_if_index = hi->sw_if_index;
+
+  lcp_pppoe_hw_if_setup_dataplane (vnm, sw_if_index);
+
+  if (push_to_free_pool)
+    {
+      si = vnet_get_sw_interface (vnm, sw_if_index);
+      si->flags |= VNET_SW_INTERFACE_FLAG_HIDDEN;
+      vec_add1 (pem->free_pppoe_session_hw_if_indices, hw_if_index);
+    }
+
+  if (hw_if_index_out)
+    *hw_if_index_out = hw_if_index;
+
+  return 0;
+}
+
+int
+lcp_pppoe_hw_if_create_one (u32 *hw_if_index_out)
+{
+  return lcp_pppoe_hw_if_create (hw_if_index_out, 1 /* push_to_free_pool */);
+}
+
+static void
+lcp_pppoe_session_acquire_hw_if (pppoe_session_t *t, u32 *hw_if_index_out,
+				 u32 *sw_if_index_out, u8 *is_recycled_out)
+{
+  pppoe_main_t *pem = &pppoe_main;
+  vnet_main_t *vnm = pem->vnet_main;
+  u32 hw_if_index, sw_if_index;
+  vnet_hw_interface_t *hi;
+
+  if (is_recycled_out)
+    *is_recycled_out = 0;
+
+  if (vec_len (pem->free_pppoe_session_hw_if_indices) > 0)
+    {
+      hw_if_index = pem->free_pppoe_session_hw_if_indices
+	[vec_len (pem->free_pppoe_session_hw_if_indices) - 1];
+      vec_dec_len (pem->free_pppoe_session_hw_if_indices, 1);
+
+      hi = vnet_get_hw_interface (vnm, hw_if_index);
+      hi->dev_instance = t - pem->sessions;
+      hi->hw_instance = hi->dev_instance;
+      sw_if_index = hi->sw_if_index;
+      lcp_pppoe_session_zero_counters (vnm, sw_if_index);
+      if (is_recycled_out)
+	*is_recycled_out = 1;
+    }
+  else
+    {
+      lcp_pppoe_hw_if_create (&hw_if_index, 0 /* bind immediately */);
+      hi = vnet_get_hw_interface (vnm, hw_if_index);
+      sw_if_index = hi->sw_if_index;
+    }
+
+  *hw_if_index_out = hw_if_index;
+  *sw_if_index_out = sw_if_index;
+}
+
+int
+lcp_pppoe_hw_if_pool_ensure (u32 target, u32 batch)
+{
+  pppoe_main_t *pem = &pppoe_main;
+  vlib_main_t *vm = pem->vlib_main;
+
+  if (batch != 0)
+    pem->hw_if_pool_batch = batch;
+  else if (pem->hw_if_pool_batch == 0)
+    pem->hw_if_pool_batch = PPPOE_HW_IF_POOL_DEFAULT_BATCH;
+
+  if (target > pem->hw_if_pool_target)
+    pem->hw_if_pool_target = target;
+
+  if (pem->next_pppoe_dev_instance >= pem->hw_if_pool_target)
+    return 0;
+
+  if (!pem->hw_if_pool_growing)
+    {
+      pem->hw_if_pool_growing = 1;
+      vlib_process_signal_event (vm, pem->hw_if_pool_process_node_index,
+				 PPPOE_HW_IF_POOL_EVENT_GROW, 0);
+    }
+
+  return 0;
+}
+
+static uword
+pppoe_hw_if_pool_process (vlib_main_t *vm, vlib_node_runtime_t *rt,
+			  vlib_frame_t *f)
+{
+  pppoe_main_t *pem = &pppoe_main;
+  uword event_type;
+
+  while (1)
+    {
+      vlib_process_wait_for_event (vm);
+      event_type = vlib_process_get_events (vm, NULL);
+
+      if (event_type != PPPOE_HW_IF_POOL_EVENT_GROW)
+	continue;
+
+      while (pem->next_pppoe_dev_instance < pem->hw_if_pool_target)
+	{
+	  u32 batch = pem->hw_if_pool_batch;
+	  u32 remain = pem->hw_if_pool_target - pem->next_pppoe_dev_instance;
+	  u32 n = (remain < batch) ? remain : batch;
+	  u32 i;
+
+	  for (i = 0; i < n; i++)
+	    lcp_pppoe_hw_if_create_one (NULL);
+
+	  vlib_process_suspend (vm, PPPOE_HW_IF_POOL_SUSPEND_SEC);
+	}
+
+      pem->hw_if_pool_growing = 0;
+      clib_warning ("pppoe hw-if pool ready: created=%u free=%u",
+		    pem->next_pppoe_dev_instance,
+		    vec_len (pem->free_pppoe_session_hw_if_indices));
+    }
+
+  return 0;
+}
+
+VLIB_REGISTER_NODE (pppoe_hw_if_pool_process_node) = {
+  .function = pppoe_hw_if_pool_process,
+  .type = VLIB_NODE_TYPE_PROCESS,
+  .name = "pppoe-hw-if-pool-process",
+  .n_next_nodes = 0,
+};
+
 int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_index,
 			  u32 *p_sw_if_index, u8 *sw_if_name, u8 is_add,
 			  u32 lcp_magic, u32 client_ip4, u32 client_table_id)
@@ -411,41 +585,12 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       clib_memcpy (t->server_mac, server_mac, 6);
       pppoe_session_set_lcp_magic (t, lcp_magic);
 
-      if (vec_len (pem->free_pppoe_session_hw_if_indices) > 0)
-	{
-	  vnet_interface_main_t *im = &vnm->interface_main;
-	  hw_if_index = pem->free_pppoe_session_hw_if_indices
-	    [vec_len (pem->free_pppoe_session_hw_if_indices) - 1];
-	  vec_dec_len (pem->free_pppoe_session_hw_if_indices, 1);
-
-	  hi = vnet_get_hw_interface (vnm, hw_if_index);
-	  hi->dev_instance = t - pem->sessions;
-	  hi->hw_instance = hi->dev_instance;
-
-	  /* clear old stats of freed session before reuse */
-	  sw_if_index = hi->sw_if_index;
-	  vnet_interface_counter_lock (im);
-	  vlib_zero_combined_counter
-	    (&im->combined_sw_if_counters[VNET_INTERFACE_COUNTER_TX],
-	     sw_if_index);
-	  vlib_zero_combined_counter (&im->combined_sw_if_counters
-				      [VNET_INTERFACE_COUNTER_RX],
-				      sw_if_index);
-	  vlib_zero_simple_counter (&im->sw_if_counters
-				    [VNET_INTERFACE_COUNTER_DROP],
-				    sw_if_index);
-	  vnet_interface_counter_unlock (im);
-	}
-      else
-	{
-	  hw_if_index = vnet_register_interface
-	    (vnm, pppoe_device_class.index, t - pem->sessions,
-	     pppoe_hw_class.index, t - pem->sessions);
-	  hi = vnet_get_hw_interface (vnm, hw_if_index);
-
-      sw_if_index = hi->sw_if_index;
-      lcp_pppoe_setup_new_if_features (sw_if_index);
-	}
+      {
+	u8 is_recycled = 0;
+	lcp_pppoe_session_acquire_hw_if (t, &hw_if_index, &sw_if_index,
+					 &is_recycled);
+	hi = vnet_get_hw_interface (vnm, hw_if_index);
+      }
 
       t->hw_if_index = hw_if_index;
       t->sw_if_index = sw_if_index = hi->sw_if_index;
@@ -470,8 +615,7 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       si->flags &= ~VNET_SW_INTERFACE_FLAG_HIDDEN;
       vnet_sw_interface_set_flags (vnm, sw_if_index,
 				   VNET_SW_INTERFACE_FLAG_ADMIN_UP);
-      vnet_set_interface_l3_output_node (vnm->vlib_main, sw_if_index,
-					 (u8 *) "tunnel-output-no-count");
+      /* l3_output_node already set during warm pool create or cold create. */
 
       /* Scheme A: store client_ip and decap_fib_index in the session struct
        * (fields that already exist) so the route can be cleaned up on del. */
@@ -504,8 +648,7 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
 	lcp_pppoe_client_route_add_del (t->decap_fib_index, &t->client_ip.ip4,
 					t->sw_if_index, 0 /* del */);
 
-      vnet_reset_interface_l3_output_node (vnm->vlib_main, sw_if_index);
-      //vnet_sw_interface_set_flags (vnm, t->sw_if_index, 0 /* down */ );
+      vnet_sw_interface_set_flags (vnm, t->sw_if_index, 0 /* down */);
       vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, t->sw_if_index);
       si->flags |= VNET_SW_INTERFACE_FLAG_HIDDEN;
 
@@ -598,43 +741,13 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
       clib_memcpy (t->server_mac, server_mac, 6);
       pppoe_session_set_lcp_magic (t, lcp_magic);
 
-      if (vec_len (pem->free_pppoe_session_hw_if_indices) > 0)
-	{
-	  vnet_interface_main_t *im = &vnm->interface_main;
-	  hw_if_index = pem->free_pppoe_session_hw_if_indices
-	    [vec_len (pem->free_pppoe_session_hw_if_indices) - 1];
-	  vec_dec_len (pem->free_pppoe_session_hw_if_indices, 1);
-
-	  hi = vnet_get_hw_interface (vnm, hw_if_index);
-	  hi->dev_instance = t - pem->sessions;
-	  hi->hw_instance = hi->dev_instance;
-
-	  sw_if_index = hi->sw_if_index;
-	  vnet_interface_main_t *im2 = im;
-	  (void) im2;
-	  vnet_interface_counter_lock (im);
-	  vlib_zero_combined_counter (
-	    &im->combined_sw_if_counters[VNET_INTERFACE_COUNTER_TX],
-	    sw_if_index);
-	  vlib_zero_combined_counter (
-	    &im->combined_sw_if_counters[VNET_INTERFACE_COUNTER_RX],
-	    sw_if_index);
-	  vlib_zero_simple_counter (
-	    &im->sw_if_counters[VNET_INTERFACE_COUNTER_DROP], sw_if_index);
-	  vnet_interface_counter_unlock (im);
-	  /* recycled interface — feature arcs already set up */
-	}
-      else
-	{
-	  hw_if_index = vnet_register_interface (
-	    vnm, pppoe_device_class.index, t - pem->sessions,
-	    pppoe_hw_class.index, t - pem->sessions);
-	  hi = vnet_get_hw_interface (vnm, hw_if_index);
-	  sw_if_index = hi->sw_if_index;
-	  /* Signal to caller: feature setup is needed for this index. */
-	  if (is_new_if)
-	    *is_new_if = 1;
-	}
+      {
+	u8 is_recycled = 0;
+	lcp_pppoe_session_acquire_hw_if (t, &hw_if_index, &sw_if_index,
+					 &is_recycled);
+	hi = vnet_get_hw_interface (vnm, hw_if_index);
+	(void) is_recycled;
+      }
 
       t->hw_if_index = hw_if_index;
       t->sw_if_index = sw_if_index = hi->sw_if_index;
@@ -656,8 +769,7 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
       si->flags &= ~VNET_SW_INTERFACE_FLAG_HIDDEN;
       vnet_sw_interface_set_flags (vnm, sw_if_index,
 				   VNET_SW_INTERFACE_FLAG_ADMIN_UP);
-      vnet_set_interface_l3_output_node (vnm->vlib_main, sw_if_index,
-					 (u8 *) "tunnel-output-no-count");
+      /* l3_output_node already set during warm pool create or cold create. */
 
       if (client_ip4 != 0)
 	{
@@ -684,7 +796,6 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
 	lcp_pppoe_client_route_add_del (t->decap_fib_index, &t->client_ip.ip4,
 					t->sw_if_index, 0 /* del */);
 
-      vnet_reset_interface_l3_output_node (vnm->vlib_main, sw_if_index);
       vnet_sw_interface_set_flags (vnm, t->sw_if_index, 0 /* down */);
       vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, t->sw_if_index);
       si->flags |= VNET_SW_INTERFACE_FLAG_HIDDEN;
@@ -1466,6 +1577,74 @@ VLIB_CLI_COMMAND (pppoe_set_echo_proxy_command, static) = {
 };
 /* *INDENT-ON* */
 
+static clib_error_t *
+pppoe_interface_pool_ensure_command_fn (vlib_main_t *vm,
+					unformat_input_t *input,
+					vlib_cli_command_t *cmd)
+{
+  u32 target = 0, batch = 0;
+
+  if (!unformat (input, "%u", &target))
+    return clib_error_return (0, "expected target count, e.g. 50000");
+
+  if (unformat (input, "batch %u", &batch))
+    ;
+
+  if (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    return clib_error_return (0, "unknown input `%U'",
+			      format_unformat_error, input);
+
+  lcp_pppoe_hw_if_pool_ensure (target, batch);
+  vlib_cli_output (vm,
+		   "pppoe hw-if pool ensure %u accepted (created=%u free=%u growing=%u batch=%u)",
+		   target, pppoe_main.next_pppoe_dev_instance,
+		   vec_len (pppoe_main.free_pppoe_session_hw_if_indices),
+		   pppoe_main.hw_if_pool_growing, pppoe_main.hw_if_pool_batch);
+  return 0;
+}
+
+/*?
+ * Pre-create PPPoE hw/sw interfaces into the free pool for fast recycle.
+ *
+ * @cliexcmd{pppoe interface pool ensure 50000}
+ * @cliexcmd{pppoe interface pool ensure 50000 batch 256}
+?*/
+VLIB_CLI_COMMAND (pppoe_interface_pool_ensure_command, static) = {
+  .path = "pppoe interface pool ensure",
+  .short_help = "pppoe interface pool ensure <count> [batch <n>]",
+  .function = pppoe_interface_pool_ensure_command_fn,
+};
+
+static clib_error_t *
+pppoe_interface_pool_show_command_fn (vlib_main_t *vm,
+				      unformat_input_t *input,
+				      vlib_cli_command_t *cmd)
+{
+  pppoe_main_t *pem = &pppoe_main;
+
+  if (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    return clib_error_return (0, "unknown input `%U'",
+			      format_unformat_error, input);
+
+  vlib_cli_output (vm,
+		   "pppoe hw-if pool: target=%u created=%u free=%u growing=%u batch=%u",
+		   pem->hw_if_pool_target, pem->next_pppoe_dev_instance,
+		   vec_len (pem->free_pppoe_session_hw_if_indices),
+		   pem->hw_if_pool_growing, pem->hw_if_pool_batch);
+  return 0;
+}
+
+/*?
+ * Display PPPoE hw-interface warm pool status.
+ *
+ * @cliexcmd{pppoe interface pool show}
+?*/
+VLIB_CLI_COMMAND (pppoe_interface_pool_show_command, static) = {
+  .path = "pppoe interface pool show",
+  .short_help = "pppoe interface pool show",
+  .function = pppoe_interface_pool_show_command_fn,
+};
+
 
 #define foreach_lcp_pppoe                                                       \
   _ (DROP, "error-drop")                                                      \
@@ -2182,6 +2361,8 @@ lcp_pppoe_init (vlib_main_t *vm)
   pem->vlib_main = vm;
   pem->policer_id = UINT32_MAX;
   pem->echo_proxy_enable = 1;
+  pem->hw_if_pool_batch = PPPOE_HW_IF_POOL_DEFAULT_BATCH;
+  pem->hw_if_pool_process_node_index = pppoe_hw_if_pool_process_node.index;
 
   BV (clib_bihash_init) (&pem->session_table, "pppoe session table",
 			 PPPOE_NUM_BUCKETS, PPPOE_MEMORY_SIZE);
