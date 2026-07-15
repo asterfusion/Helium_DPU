@@ -84,17 +84,15 @@ void *geoip_country_index_get_code_ptr;
  void *geosite_get_resolved_country_code_by_ip6_ptr;
  void *geosite_active_refcnt_add_ptr;
  void *geosite_active_refcnt_del_ptr;
- void *hqos_user_group_check_ip4_range_ptr;
- void *hqos_user_group_check_ip6_range_ptr;
+void *hqos_user_group_check_ip4_range_ptr;
+void *hqos_user_group_check_ip6_range_ptr;
 //  void *cc_get_ptr;
 
 static void
 acl_geosite_refcnt_add (u16 geosite_index)
 {
-  if (geosite_index == GEO_CFG)
-    {
-      return;
-    }
+  if (geosite_index == GEO_CFG || geosite_active_refcnt_add_ptr == NULL)
+    return;
 
   ((__typeof__ (geosite_active_refcnt_add) *) geosite_active_refcnt_add_ptr)
     (geosite_index);
@@ -103,29 +101,39 @@ acl_geosite_refcnt_add (u16 geosite_index)
 static void
 acl_geosite_refcnt_del (u16 geosite_index)
 {
-  if (geosite_index == GEO_CFG)
-    {
-      return;
-    }
+  if (geosite_index == GEO_CFG || geosite_active_refcnt_del_ptr == NULL)
+    return;
 
   ((__typeof__ (geosite_active_refcnt_del) *) geosite_active_refcnt_del_ptr)
     (geosite_index);
 }
 
 static void
-acl_geosite_refcnt_update (acl_rule_t *old_rules, acl_rule_t *new_rules)
+acl_geosite_refcnt_update_rules (acl_rule_t *old_rules, acl_rule_t *new_rules)
 {
   acl_rule_t *r;
 
   vec_foreach (r, old_rules)
-    {
-      acl_geosite_refcnt_del (r->geosite_cc_index);
-    }
+    acl_geosite_refcnt_del (r->geosite_cc_index);
 
   vec_foreach (r, new_rules)
-    {
-      acl_geosite_refcnt_add (r->geosite_cc_index);
-    }
+    acl_geosite_refcnt_add (r->geosite_cc_index);
+}
+
+static void
+acl_geosite_refcnt_update_bound_contexts (u32 acl_index,
+					  acl_rule_t *old_rules,
+					  acl_rule_t *new_rules)
+{
+  acl_main_t *am = &acl_main;
+  u32 i;
+  u32 lc_count = 0;
+
+  if (acl_index < vec_len (am->lc_index_vec_by_acl))
+    lc_count = vec_len (am->lc_index_vec_by_acl[acl_index]);
+
+  for (i = 0; i < lc_count; i++)
+    acl_geosite_refcnt_update_rules (old_rules, new_rules);
 }
 
 /* Format vec16. */
@@ -720,11 +728,8 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
   }
   validate_and_reset_acl_counters(am, *acl_list_index, vec_len(acl_old_rules), vec_len(acl_new_rules), 
                                      add_replace_del_flag, replace_del_place);
-  clib_warning ("acl geosite refcnt update from acl_add_list: acl=%u old_rules=%u new_rules=%u flag=%u place=%u",
-                *acl_list_index, vec_len (acl_old_rules),
-                vec_len (acl_new_rules), add_replace_del_flag,
-                replace_del_place);
-  acl_geosite_refcnt_update (acl_old_rules, acl_new_rules);
+  acl_geosite_refcnt_update_bound_contexts (*acl_list_index, acl_old_rules,
+					    acl_new_rules);
   if (acl_old_rules)
   {
       vec_free (acl_old_rules);
@@ -766,9 +771,6 @@ acl_del_list (u32 acl_list_index)
 
   /* now we can delete the ACL itself */
   a = pool_elt_at_index (am->acls, acl_list_index);
-  // clib_warning ("acl geosite refcnt update from acl_del_list: acl=%u old_rules=%u new_rules=0",
-  //               acl_list_index, vec_len (a->rules));
-  acl_geosite_refcnt_update (a->rules, 0);
   if (a->rules)
     vec_free (a->rules);
   pool_put (am->acls, a);

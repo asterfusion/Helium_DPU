@@ -107,6 +107,56 @@ acl_list_needs_geoip (acl_main_t *am, u32 acl_index)
   return 0;
 }
 
+typedef void (*acl_geosite_refcnt_fn_t) (u32 geosite_index);
+
+static void
+acl_lookup_context_geosite_refcnt_add (u16 geosite_index)
+{
+  if (geosite_index == GEO_CFG || geosite_active_refcnt_add_ptr == NULL)
+    return;
+
+  ((acl_geosite_refcnt_fn_t) geosite_active_refcnt_add_ptr) (geosite_index);
+}
+
+static void
+acl_lookup_context_geosite_refcnt_del (u16 geosite_index)
+{
+  if (geosite_index == GEO_CFG || geosite_active_refcnt_del_ptr == NULL)
+    return;
+
+  ((acl_geosite_refcnt_fn_t) geosite_active_refcnt_del_ptr) (geosite_index);
+}
+
+static void
+acl_lookup_context_geosite_refcnt_update_acl (acl_main_t *am, u32 acl_index,
+					      int is_add)
+{
+  acl_list_t *a;
+  acl_rule_t *r;
+
+  if (pool_is_free_index (am->acls, acl_index))
+    return;
+
+  a = pool_elt_at_index (am->acls, acl_index);
+  vec_foreach (r, a->rules)
+    {
+      if (is_add)
+	acl_lookup_context_geosite_refcnt_add (r->geosite_cc_index);
+      else
+	acl_lookup_context_geosite_refcnt_del (r->geosite_cc_index);
+    }
+}
+
+static void
+acl_lookup_context_geosite_refcnt_update_vec (acl_main_t *am, u32 *acls,
+					      int is_add)
+{
+  u32 *acl_index;
+
+  vec_foreach (acl_index, acls)
+    acl_lookup_context_geosite_refcnt_update_acl (am, *acl_index, is_add);
+}
+
 static u8
 acl_vec_needs_geosite (acl_main_t *am, u32 *acls)
 {
@@ -289,6 +339,7 @@ static void acl_plugin_put_lookup_context_index (u32 lc_index)
   vec_del1(am->acl_users[acontext->context_user_id].lookup_contexts, index);
   unapply_acl_vec(lc_index, acontext->acl_indices);
   unlock_acl_vec(lc_index, acontext->acl_indices);
+  acl_lookup_context_geosite_refcnt_update_vec (am, acontext->acl_indices, 0);
   vec_free(acontext->acl_indices);
   pool_put(am->acl_lookup_contexts, acontext);
 }
@@ -340,8 +391,10 @@ static int acl_plugin_set_acl_vec_for_context (u32 lc_index, u32 *acl_list)
 
   unapply_acl_vec(lc_index, old_acl_vector);
   unlock_acl_vec(lc_index, old_acl_vector);
+  acl_lookup_context_geosite_refcnt_update_vec (am, old_acl_vector, 0);
   lock_acl_vec(lc_index, acontext->acl_indices);
   apply_acl_vec(lc_index, acontext->acl_indices);
+  acl_lookup_context_geosite_refcnt_update_vec (am, acontext->acl_indices, 1);
   acl_lookup_context_recalc_geo (am, lc_index);
 
   vec_free(old_acl_vector);
