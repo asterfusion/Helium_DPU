@@ -58,7 +58,6 @@ static u32 abf_acl_user_id;
 static acl_plugin_methods_t acl_plugin;
 
 static void *spi_get_associated_session_ptr;
-static void *spi_get_session_ptr;
 
 /**
  * A DB of attachments; key={abf_index,sw_if_index}
@@ -519,7 +518,6 @@ typedef struct abf_input_trace_t_
   u32 src_sw_if_index;
   u32 acl_index;
   u32 acl_rule;
-  bool had_session;
 } abf_input_trace_t;
 
 typedef enum
@@ -1024,51 +1022,15 @@ abf_input_inline (vlib_main_t * vm,
 					 (FIB_PROTOCOL_IP6 == fproto), 1, 0,
 					 &fa_5tuple0);
 
+      fa_5tuple_t *fa_5tuple_p = (fa_5tuple_t*)&fa_5tuple0;
+      fa_5tuple_p->src_sw_if_index = 0;
+
       spi_session_t *spi_associated_sess = ((__typeof__ (vlib_buffer_spi_get_associated_session) *)spi_get_associated_session_ptr) (b0);
       if(spi_associated_sess != NULL)
       {
-          fa_5tuple_t *fa_5tuple_p = (fa_5tuple_t*)&fa_5tuple0;
           fa_5tuple_p->src_sw_if_index = spi_associated_sess->flow[SPI_FLOW_DIR_UPLINK].in_sw_if_index;;
           match_src_sw_if_index = fa_5tuple_p->src_sw_if_index;
       }
-
-
-fa_5tuple_t fa_5tuple_decoded0;
-      clib_memcpy_fast (&fa_5tuple_decoded0, &fa_5tuple0,
-                        sizeof (fa_5tuple_decoded0));
-      u8 l4_proto0 = fa_5tuple_decoded0.l4.proto;
-      int is_icmp_pkt0 =
-        (l4_proto0 == IP_PROTOCOL_ICMP || l4_proto0 == IP_PROTOCOL_ICMP6);
-
-    spi_session_t *spi_sess = ((__typeof__ (vlib_buffer_spi_get_session) *)spi_get_session_ptr) (b0);
-    if (!is_icmp_pkt0 && spi_sess != NULL)
-    {
-          if(spi_sess->flow[SPI_FLOW_DIR_UPLINK].geosite_match_acl != (~0))
-          {
-            	aia0 = abf_itf_attach_get (attachments0[spi_sess->flow[SPI_FLOW_DIR_UPLINK].geosite_match_acl]);
-
-              next0 = aia0->aia_dpo.dpoi_next_node;
-              vnet_buffer (b0)->ip.adj_index[VLIB_TX] =
-          aia0->aia_dpo.dpoi_index;
-              matches++;
-
-
-          if (PREDICT_FALSE (b0->flags & VLIB_BUFFER_IS_TRACED))
-            {
-              abf_input_trace_t *tr;
-
-              tr = vlib_add_trace (vm, node, b0, sizeof (*tr));
-              tr->next = next0;
-              tr->index = vnet_buffer (b0)->ip.adj_index[VLIB_TX];
-                tr->had_session=true;
-            }              
-              goto has_session;
-          }
-
-
-      }
-
-
 
 	  if (abf_match_5tuple_with_geo (
 		lc_index, b0, &fa_5tuple0, (FIB_PROTOCOL_IP6 == fproto),
@@ -1086,8 +1048,6 @@ fa_5tuple_t fa_5tuple_decoded0;
 	      vnet_buffer (b0)->ip.adj_index[VLIB_TX] =
 		aia0->aia_dpo.dpoi_index;
 	      matches++;
-        if(spi_sess != NULL)
-         spi_sess->flow[SPI_FLOW_DIR_UPLINK].geosite_match_acl = match_acl_pos;
 	    }
 	  else
 	    {
@@ -1110,7 +1070,7 @@ fa_5tuple_t fa_5tuple_decoded0;
           tr->acl_index = match_acl_index;
           tr->acl_rule = match_rule_index;
 	    }
-has_session:      vnet_buffer (b0)->ip.flow_hash = 0;
+	  vnet_buffer (b0)->ip.flow_hash = 0;
 	  /* verify speculative enqueue, maybe switch current next frame */
 	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
 					   to_next, n_left_to_next, bi0,
@@ -1282,13 +1242,6 @@ abf_itf_bond_init (vlib_main_t * vm)
   spi_get_associated_session_ptr = 
     vlib_get_plugin_symbol ("spi_plugin.so", "vlib_buffer_spi_get_associated_session");
   if(spi_get_associated_session_ptr == NULL)
-  {
-      return clib_error_return (0, "spi_plugin.so is not loaded");
-  }
-
-    spi_get_session_ptr = 
-    vlib_get_plugin_symbol ("spi_plugin.so", "vlib_buffer_spi_get_session");
-  if(spi_get_session_ptr == NULL)
   {
       return clib_error_return (0, "spi_plugin.so is not loaded");
   }
