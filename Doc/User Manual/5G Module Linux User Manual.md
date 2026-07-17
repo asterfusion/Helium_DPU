@@ -12,6 +12,8 @@ Confirm the following hardware conditions before use:
 - The antenna is connected, and 4G/5G network coverage is available at the current location.
 - The Linux system can detect the related USB device nodes of the module.
 
+When inserting the SIM card, follow the SIM notch direction marked on the device and gently push the SIM card into the slot. If the direction is correct, resistance or spring force will be felt when the card is inserted about three quarters of the way. Then push the SIM card fully into place. If no spring force is felt or the card does not slide in smoothly, the direction is usually incorrect. Do not force it in, otherwise the SIM card may become difficult to remove.
+
 ## 2. Common Module Device Nodes
 
 Common interfaces are shown below:
@@ -65,7 +67,61 @@ Check the driver bound to the actual network interface:
 ethtool -i wwan0
 ```
 
-## 4. Compile the Dial-Up Tool
+## 4. Confirm and Switch to the cdc_mbim Driver
+
+At the customer site, first confirm the driver currently bound to `wwan0`:
+
+```bash
+ethtool -i wwan0
+```
+
+If the `driver` field is `cdc_mbim`, the current driver is correct and you can continue with the dial-up steps.
+
+Example:
+
+```text
+driver: cdc_mbim
+version: ...
+firmware-version: ...
+bus-info: ...
+```
+
+If the `driver` field is not `cdc_mbim`, use AT commands to switch the module USB network interface mode to MBIM, and then restart the module to make the configuration take effect.
+
+Open the AT command port:
+
+```bash
+sudo minicom -D /dev/ttyUSB2
+```
+
+Or:
+
+```bash
+microcom /dev/ttyUSB2
+```
+
+Run the following AT commands:
+
+```text
+AT+QCFG="usbnet",2
+AT+CFUN=1,1
+```
+
+Notes:
+
+- `AT+QCFG="usbnet",2` sets the USB network interface mode to MBIM.
+- `AT+CFUN=1,1` restarts the module so the configuration can take effect.
+- After the module restarts, wait for the USB device to enumerate again, and then check the `wwan0` driver again.
+
+After the restart, confirm again:
+
+```bash
+ethtool -i wwan0
+```
+
+After confirming that the `driver` field is `cdc_mbim`, continue with dial-up.
+
+## 5. Compile the Dial-Up Tool
 
 Dial-up uses `quectel-CM` from the `QConnectManager` tool package.
 
@@ -108,7 +164,7 @@ After compilation, confirm that the executable files exist:
 ls -l quectel-CM quectel-qmi-proxy quectel-mbim-proxy
 ```
 
-## 5. Dial-Up Networking
+## 6. Dial-Up Networking
 
 Confirm the APN before dialing. The example APN in this document is `cment`. Replace it according to the requirements of the actual SIM card operator.
 
@@ -138,6 +194,16 @@ sudo ./quectel-CM -s cment -4 -i wwan0_1 &
 
 Disconnect dial-up:
 
+The current dial-up command uses `&` to run in the background. To bring the background task back to the foreground and stop it, run:
+
+```bash
+fg
+```
+
+After it returns to the foreground, press `Ctrl+C` to stop the program.
+
+Alternatively, run:
+
 ```bash
 sudo killall quectel-CM
 ```
@@ -148,7 +214,7 @@ Run with logs for troubleshooting:
 sudo ./quectel-CM -s cment -4 -v -f quectel-cm.log -u usbmon.log &
 ```
 
-## 6. Confirm Successful Dial-Up
+## 7. Confirm Successful Dial-Up
 
 When dial-up succeeds, the `quectel-CM` log usually contains the following key information:
 
@@ -177,7 +243,7 @@ Confirm the following key items:
 
 Successful dial-up logs are provided in `ET2500/Quectel_QConnectManager/log`. Mainly check `cdc_mbim.txt`.
 
-## 7. Check the Network After Dial-Up
+## 8. Check the Network After Dial-Up
 
 Check the network interface address:
 
@@ -212,12 +278,27 @@ ping -c 4 www.baidu.com
 
 If an IP address can be pinged but a domain name cannot, check the DNS configuration first.
 
-## 8. Use AT Commands
+## 9. Use AT Commands
+
+### 9.1 AT Command Port
 
 The common AT command port of the 5G module is:
 
 ```text
 /dev/ttyUSB2
+```
+
+Before using AT commands, confirm that `minicom` is installed:
+
+```bash
+which minicom
+```
+
+If it is not installed, run:
+
+```bash
+sudo apt update
+sudo apt install minicom
 ```
 
 Use `minicom`:
@@ -232,18 +313,25 @@ Or use `microcom`:
 microcom /dev/ttyUSB2
 ```
 
+### 9.2 Common AT Commands
+
 Common AT commands are shown below:
 
 ```text
 ATI
 AT+CPIN?
+AT+QSIMDET=1,1
+AT+QUIMSLOT?
 AT+COPS?
 AT+CSQ
 AT+CEREG?
 AT+C5GREG?
 AT+QENG="SERVINGCELL"
 AT+CGDCONT?
+AT+QNWPREFCFG="mode_pref"
 ```
+
+### 9.3 Check SIM Status
 
 Check SIM status:
 
@@ -257,6 +345,123 @@ Expected response:
 +CPIN: READY
 OK
 ```
+
+If `+CME ERROR: 10` is returned, the module usually does not detect the SIM card. Confirm that the SIM card is inserted correctly. If necessary, run `AT+CFUN=1,1` to restart the module and then query again.
+
+### 9.4 Enable SIM Hot-Swap Detection
+
+To enable SIM hot-swap detection, run the following command on the AT command port:
+
+```text
+AT+QSIMDET=1,1
+```
+
+This command enables SIM card insertion/removal detection and status reporting. After configuration, restart the module for the setting to take effect:
+
+```text
+AT+CFUN=1,1
+```
+
+After the module restarts and enumerates again, check the SIM status:
+
+```text
+AT+CPIN?
+```
+
+If the SIM card is ready, the expected response is:
+
+```text
++CPIN: READY
+OK
+```
+
+### 9.5 Switch SIM Slot
+
+Query the currently used SIM slot:
+
+```text
+AT+QUIMSLOT?
+```
+
+Example response:
+
+```text
++QUSIMSLOT: 1
+```
+
+Switch to SIM slot 2:
+
+```text
+AT+QUIMSLOT=2
+```
+
+Notes:
+
+- `AT+QUIMSLOT?` queries the currently used SIM slot.
+- `AT+QUIMSLOT=2` switches to SIM slot 2.
+- After switching, check the SIM status again:
+
+```text
+AT+CPIN?
+```
+
+### 9.6 Change Network Mode
+
+Query the current network mode setting:
+
+```text
+AT+QNWPREFCFG="mode_pref"
+```
+
+Example response:
+
+```text
++QNWPREFCFG: "mode_pref",AUTO
+```
+
+Set automatic mode, allowing WCDMA(3G), LTE(4G), and 5G selection:
+
+```text
+AT+QNWPREFCFG="mode_pref",AUTO
+```
+
+Set LTE(4G) only:
+
+```text
+AT+QNWPREFCFG="mode_pref",LTE
+```
+
+Set 5G only:
+
+```text
+AT+QNWPREFCFG="mode_pref",NR5G
+```
+
+Notes:
+
+- `AUTO` is used when the module should automatically select 3G/4G/5G networks.
+- `LTE` restricts the module to 4G only.
+- `NR5G` restricts the module to 5G only.
+- After changing the network mode, check the network registration status and serving cell information again.
+
+### 9.7 Check Network Registration Status
+
+Query operator selection and network registration status:
+
+```text
+AT+COPS?
+AT+CEREG?
+AT+C5GREG?
+```
+
+Common interpretation:
+
+- `+CEREG: 0,1` or `+CEREG: 0,5` indicates that EPS/LTE is registered.
+- `+C5GREG: 0,1` or `+C5GREG: 0,5` indicates that 5G is registered.
+- `+C5GREG: 0,2` indicates that the module is searching for or trying to register on the network.
+- If the module remains unregistered for a long time, check the SIM card, antenna, signal coverage, and APN.
+
+### 9.8 Check Serving Cell and Signal
 
 Check serving cell and signal:
 
@@ -280,9 +485,19 @@ Focus on the following fields:
 | RSRP, such as `-99` | Received power. A value closer to -44 is better; lower than -110 is usually poor. |
 | RSRQ, such as `-13` | Received quality. Lower than -15 is usually poor. |
 
+### 9.9 Check PDP Configuration
+
+Check the current PDP configuration:
+
+```text
+AT+CGDCONT?
+```
+
+To set the APN, refer to Chapter 10.
+
 For detailed commands, refer to `Helium_DPU/Doc/User Manual/5G Module Series AT Commands Manual.md`.
 
-## 9. Check APN and PDP Configuration
+## 10. Check APN and PDP Configuration
 
 Check the current PDP configuration:
 
@@ -312,7 +527,7 @@ Notes:
 - If a PDP context without APN configuration is used, configure the APN before dialing.
 - `quectel-CM -s <APN>` sets or confirms the dial-up profile during the dial-up process.
 
-## 10. Multi-PDN Dial-Up
+## 11. Multi-PDN Dial-Up
 
 Normal customer scenarios usually require only single dial-up.
 
@@ -328,7 +543,7 @@ sudo ./quectel-CM -s <apn2> -n 2 &
 
 If multi-PDN dial-up is not required, ignore this section.
 
-## 11. Other Dial-Up Settings
+## 12. Other Dial-Up Settings
 
 Use `./quectel-CM -h` to view available options, and add the required parameters as needed.
 
@@ -357,9 +572,9 @@ Use `./quectel-CM -h` to view available options, and add the required parameters
 [07-09_19:38:35:319] Example 3: ./quectel-CM -s 3gnet carl 1234 1 -p 1234 -f gobinet_log.txt
 ```
 
-## 12. Common Issues
+## 13. Common Issues
 
-### 12.1 `/dev/cdc-wdm0` Is Missing
+### 13.1 `/dev/cdc-wdm0` Is Missing
 
 Check:
 
@@ -376,7 +591,7 @@ Possible causes:
 - The module is not powered on correctly or the USB connection is abnormal.
 - The current system kernel does not include the corresponding driver support.
 
-### 12.2 AT Port Is Missing
+### 13.2 AT Port Is Missing
 
 Check:
 
@@ -388,7 +603,7 @@ lsmod | grep option
 
 The common AT port for this module is `/dev/ttyUSB2`. If other USB serial devices already exist in the system, the port number may change. Use the `dmesg` output as the reference.
 
-### 12.3 SIM Is Not Ready
+### 13.3 SIM Is Not Ready
 
 Check:
 
@@ -403,7 +618,32 @@ If `+CPIN: READY` is not returned, confirm:
 - The SIM card does not require a PIN, or the PIN has been entered.
 - The SIM card supports the current network type and operator network.
 
-### 12.4 Network Registration Fails
+If the SIM card is inserted but `AT+CPIN?` returns a SIM-not-inserted related error, for example:
+
+```text
++CME ERROR: 10
+```
+
+Run the following AT command to restart the module so that it can detect the SIM card again:
+
+```text
+AT+CFUN=1,1
+```
+
+After the module restarts and enumerates again, check the SIM status:
+
+```text
+AT+CPIN?
+```
+
+Expected response:
+
+```text
++CPIN: READY
+OK
+```
+
+### 13.4 Network Registration Fails
 
 Check:
 
@@ -421,7 +661,7 @@ Recommended actions:
 - Confirm that the SIM card operator matches the network available in the current area.
 - Check signal quality. Very low RSRP or poor RSRQ may affect registration and dial-up.
 
-### 12.5 Dial-Up Succeeds but Internet Access Fails
+### 13.5 Dial-Up Succeeds but Internet Access Fails
 
 Check in order:
 
@@ -442,7 +682,7 @@ Common causes:
 - DNS is not configured or unavailable.
 - The APN is incorrect or the SIM card data service is abnormal.
 
-### 12.6 Logs Required for Dial-Up Failure Analysis
+### 13.6 Logs Required for Dial-Up Failure Analysis
 
 Check the following information:
 
@@ -466,7 +706,7 @@ AT+QENG="SERVINGCELL"
 AT+CGDCONT?
 ```
 
-## 13. Recommended Operation Procedure
+## 14. Recommended Operation Procedure
 
 The following steps apply to a single dial-up scenario using APN `cment`. Customers should replace the APN according to the actual SIM card.
 
@@ -492,3 +732,4 @@ echo "6. Test the network."
 ping -c 4 8.8.8.8
 ping -c 4 www.baidu.com
 ```
+
