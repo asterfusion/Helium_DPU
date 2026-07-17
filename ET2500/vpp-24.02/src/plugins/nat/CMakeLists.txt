@@ -38,6 +38,8 @@ add_vpp_plugin(nat
   nat44-ed/nat44_ed_affinity.c
   nat44-ed/nat44_ed_handoff.c
   nat44-ed/nat44_ed_classify.c
+  nat44-ed/nat44_ed_ha_sync.c
+
 
   MULTIARCH_SOURCES
   nat44-ed/nat44_ed_in2out.c

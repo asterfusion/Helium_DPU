@@ -27,6 +27,7 @@
 #include <nat/lib/log.h>
 #include <nat/lib/ipfix_logging.h>
 #include <nat/nat44-ed/nat44_ed.h>
+#include <nat/nat44-ed/nat44_ed_ha_sync.h>
 
 always_inline void
 init_ed_k (clib_bihash_kv_16_8_t *kv, u32 l_addr, u16 l_port, u32 r_addr,
@@ -309,6 +310,69 @@ nat_ed_ses_o2i_flow_hash_add_del (snat_main_t *sm, u32 thread_idx,
   return clib_bihash_add_del_16_8 (&sm->flow_hash, &kv, is_add);
 }
 
+static_always_inline int
+nat_ed_ses_i2o_flow_hash_add_del_safe (snat_main_t *sm, u32 thread_idx,
+				       snat_session_t *s, int is_add)
+{
+  snat_main_per_thread_data_t *tsm =
+    vec_elt_at_index (sm->per_thread_data, thread_idx);
+  clib_bihash_kv_16_8_t kv, value;
+
+  if (0 == is_add)
+    {
+      nat_6t_flow_to_ed_k (&kv, &s->i2o);
+      if (clib_bihash_search_16_8 (&sm->flow_hash, &kv, &value))
+	return 0;
+      if (ed_value_get_thread_index (&value) != thread_idx ||
+	      ed_value_get_session_index (&value) != (u32) (s - tsm->sessions))
+	return 0;
+    }
+  else
+    {
+      nat_6t_flow_to_ed_kv (&kv, &s->i2o, thread_idx, s - tsm->sessions);
+      nat_6t_l3_l4_csum_calc (&s->i2o);
+    }
+
+  ASSERT (thread_idx == s->thread_index);
+  return clib_bihash_add_del_16_8 (&sm->flow_hash, &kv, is_add);
+}
+
+static_always_inline int
+nat_ed_ses_o2i_flow_hash_add_del_safe (snat_main_t *sm, u32 thread_idx,
+				       snat_session_t *s, int is_add)
+{
+  snat_main_per_thread_data_t *tsm =
+    vec_elt_at_index (sm->per_thread_data, thread_idx);
+  clib_bihash_kv_16_8_t kv, value;
+
+  if (0 == is_add)
+    {
+      nat_6t_flow_to_ed_k (&kv, &s->o2i);
+      if (clib_bihash_search_16_8 (&sm->flow_hash, &kv, &value))
+	return 0;
+      if (ed_value_get_thread_index (&value) != thread_idx ||
+	      ed_value_get_session_index (&value) != (u32) (s - tsm->sessions))
+	return 0;
+    }
+  else
+    {
+      nat_6t_flow_to_ed_kv (&kv, &s->o2i, thread_idx, s - tsm->sessions);
+      if (!(s->flags & SNAT_SESSION_FLAG_STATIC_MAPPING))
+	{
+	  if (nat44_ed_sm_o2i_lookup (sm, s->o2i.match.daddr,
+				      s->o2i.match.dport, 0,
+				      s->o2i.match.proto))
+	    {
+	      return -1;
+	    }
+	}
+      nat_6t_l3_l4_csum_calc (&s->o2i);
+    }
+
+  ASSERT (thread_idx == s->thread_index);
+  return clib_bihash_add_del_16_8 (&sm->flow_hash, &kv, is_add);
+}
+
 always_inline void
 nat_ed_session_delete (snat_main_t *sm, snat_session_t *ses, u32 thread_index,
 		       int lru_delete
@@ -317,16 +381,21 @@ nat_ed_session_delete (snat_main_t *sm, snat_session_t *ses, u32 thread_index,
   snat_main_per_thread_data_t *tsm =
     vec_elt_at_index (sm->per_thread_data, thread_index);
 
+  clib_spinlock_lock(&tsm->self_lock);
+
   if (lru_delete)
     {
       clib_dlist_remove (tsm->lru_pool, ses->lru_index);
     }
   pool_put_index (tsm->lru_pool, ses->lru_index);
-  if (nat_ed_ses_i2o_flow_hash_add_del (sm, thread_index, ses, 0))
-    nat_elog_warn (sm, "flow hash del failed");
-  if (nat_ed_ses_o2i_flow_hash_add_del (sm, thread_index, ses, 0))
-    nat_elog_warn (sm, "flow hash del failed");
+  if (nat_ed_ses_i2o_flow_hash_add_del_safe (sm, thread_index, ses, 0))
+    nat_elog_debug (sm, "delete flow hash del failed");
+  if (nat_ed_ses_o2i_flow_hash_add_del_safe (sm, thread_index, ses, 0))
+    nat_elog_debug (sm, "delete flow hash del failed");
   pool_put (tsm->sessions, ses);
+
+  clib_spinlock_unlock(&tsm->self_lock);
+
   vlib_set_simple_counter (&sm->total_sessions, thread_index, 0,
 			   pool_elts (tsm->sessions));
 }
@@ -483,6 +552,9 @@ per_vrf_sessions_unregister_session (snat_session_t *s, u32 thread_index)
   ASSERT (s->per_vrf_sessions_index != ~0);
 
   tsm = vec_elt_at_index (sm->per_thread_data, thread_index);
+
+  clib_spinlock_lock(&tsm->self_lock);
+
   per_vrf_sessions =
     pool_elt_at_index (tsm->per_vrf_sessions_pool, s->per_vrf_sessions_index);
 
@@ -490,6 +562,9 @@ per_vrf_sessions_unregister_session (snat_session_t *s, u32 thread_index)
 
   per_vrf_sessions->ses_count--;
   s->per_vrf_sessions_index = ~0;
+
+  clib_spinlock_unlock(&tsm->self_lock);
+
 }
 
 // fast path
@@ -722,6 +797,9 @@ nat44_ed_session_reopen (u32 thread_index, snat_session_t *s)
 			 &s->ext_host_addr, s->ext_host_port, s->proto, 0);
   s->total_pkts = 0;
   s->total_bytes = 0;
+
+  /* ha sync */
+  nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_UPDATE, s);
 }
 
 /*
@@ -818,6 +896,13 @@ nat44_session_update_counters (snat_session_t *s, f64 now, uword bytes,
   s->last_heard = now;
   s->total_pkts++;
   s->total_bytes += bytes;
+
+  if (now - s->ha_last_refreshed > 
+          nat44_ed_ha_sync_ctx.ha_sync_timeout_update_interval)
+  {
+      nat44_ed_ha_sync_event_flow_notify(thread_index, NAT44_ED_HA_OP_UPDATE, s);
+      s->ha_last_refreshed = now;
+  }
 }
 
 /** \brief Per-user LRU list maintenance */

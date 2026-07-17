@@ -248,12 +248,7 @@ onp_platform_link_up_down (onp_main_t *om, u32 hw_if_index, bool is_up)
 			  platform_name, port_id);
 	  return;
 	}
-
-      if(system (cmd) == -1)
-      {
-          onp_pktio_warn("platform %s, port_id %d, cmd error", platform_name, port_id);
-          return;
-      }
+      int __attribute__((unused)) ret = system(cmd);
     }
   else
     {
@@ -292,11 +287,7 @@ onp_platform_link_up_down (onp_main_t *om, u32 hw_if_index, bool is_up)
 			     gpio_offset);
 	      if (rc >= 0 && rc < (int) sizeof (cmd))
           {
-		    if(system (cmd) == -1)
-            {
-                onp_pktio_warn("platform %s, port_id %d, cmd error", platform_name, port_id);
-                return;
-            }
+        int __attribute__((unused)) ret = system(cmd);
           }
 	    }
 	}

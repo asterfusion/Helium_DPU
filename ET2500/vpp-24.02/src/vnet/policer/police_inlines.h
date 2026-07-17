@@ -117,17 +117,22 @@ vnet_policer_police (vlib_main_t *vm, vlib_buffer_t *b, u32 policer_index,
 	return QOS_ACTION_HANDOFF;
     }
 
+  u32 stat_len;
   if (pol->is_pps_type)
-      len = QOS_POLICER_FIXED_PKT_SIZE;
+    {
+      len = 1;					/* 1 token = 1 packet */
+      stat_len = vlib_buffer_length_in_chain (vm, b);
+    }
   else
-  {
+    {
       len = vlib_buffer_length_in_chain (vm, b);
       len += VPP_POLICER_DEFAULT_ADJUST;
-  }
+      stat_len = len;
+    }
   col = vnet_police_packet (pol, len, packet_color, time_in_policer_periods);
   act = pol->action[col];
   vlib_increment_combined_counter (&policer_counters[col], vm->thread_index,
-				   policer_index, 1, len);
+				   policer_index, 1, stat_len);
   if (PREDICT_TRUE (act == QOS_ACTION_MARK_AND_TRANSMIT))
     vnet_policer_mark (b, pol->mark_dscp[col], pol->mark_pcp[col], pol->mark_tc[col]);
 

@@ -674,7 +674,7 @@ static inline void
 vcl_session_add_want_deq_ntf (vcl_session_t *s, svm_fifo_deq_ntf_t evt)
 {
   svm_fifo_t *txf = vcl_session_is_ct (s) ? s->ct_tx_fifo : s->tx_fifo;
-  if (txf)
+  if (txf && s->vpp_handle != ~0ULL)
     {
       svm_fifo_add_want_deq_ntf (txf, evt);
       /* Request tx notification only if 3% of fifo is empty */

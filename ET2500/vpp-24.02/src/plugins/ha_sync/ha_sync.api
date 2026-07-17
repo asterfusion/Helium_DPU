@@ -1,0 +1,77 @@
+/* Hey Emacs use -*- mode: C -*- */
+
+option version = "0.1.0";
+
+import "vnet/interface_types.api";
+import "vnet/ip/ip_types.api";
+
+autoreply define ha_sync_enable_disable {
+  u32 client_index;
+  u32 context;
+  bool enable;
+};
+
+autoreply define ha_sync_add_del_src_address {
+  u32 client_index;
+  u32 context;
+  bool is_add;
+  vl_api_ip4_address_t src_address;
+};
+
+autoreply define ha_sync_add_del_peer_address {
+  u32 client_index;
+  u32 context;
+  bool is_add;
+  vl_api_ip4_address_t peer_address;
+};
+
+autoreply define ha_sync_add_del_interface {
+  u32 client_index;
+  u32 context;
+  bool is_add;
+  u32 sw_if_index;
+};
+
+autoreply define ha_sync_set_config {
+  u32 client_index;
+  u32 context;
+  u32 domain_id;
+  u16 packet_size;
+  u32 retransmit_times;
+  u32 retransmit_interval_ms;
+  u32 heartbeat_interval_ms;
+  u32 heartbeat_max_fail_counts;
+};
+
+autoreply define ha_sync_reset_config {
+  u32 client_index;
+  u32 context;
+};
+
+define ha_sync_get_config {
+  u32 client_index;
+  u32 context;
+};
+
+define ha_sync_get_config_reply {
+  u32 context;
+  i32 retval;
+
+  bool enabled;
+  bool config_ready;
+  bool connection_established;
+  bool src_is_set;
+  bool peer_is_set;
+  bool sw_if_index_is_set;
+
+  vl_api_ip4_address_t src_address;
+  vl_api_ip4_address_t peer_address;
+  u32 sw_if_index;
+  u16 src_port;
+  u16 dst_port;
+  u32 domain_id;
+  u16 packet_size;
+  u32 retransmit_times;
+  u32 retransmit_interval_ms;
+  u16 snapshot_sequence;
+};

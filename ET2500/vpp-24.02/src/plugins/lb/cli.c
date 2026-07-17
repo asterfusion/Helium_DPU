@@ -14,6 +14,7 @@
  */
 
 #include <lb/lb.h>
+#include <lb/lb_ha_sync.h>
 #include <lb/util.h>
 
 static clib_error_t *
@@ -29,6 +30,7 @@ lb_vip_command_fn (vlib_main_t * vm,
   u32 dscp = ~0;
   u32 srv_type = LB_SRV_TYPE_CLUSTERIP;
   u32 target_port = 0;
+  u32 vrf_id = 0;
   clib_error_t *error = 0;
 
   args.new_length = 1024;
@@ -61,6 +63,8 @@ lb_vip_command_fn (vlib_main_t * vm,
         args.protocol = (u8)IP_PROTOCOL_UDP;
       }
     else if (unformat(line_input, "port %d", &port))
+      ;
+    else if (unformat(line_input, "vrf %d", &vrf_id))
       ;
     else if (unformat(line_input, "encap gre4"))
       encap = LB_ENCAP_TYPE_GRE4;
@@ -97,6 +101,8 @@ lb_vip_command_fn (vlib_main_t * vm,
     {
       args.port = (u16)port;
     }
+
+  args.vrf_id = vrf_id;
 
   if ((encap != LB_ENCAP_TYPE_L3DSR) && (dscp != ~0))
     {
@@ -137,10 +143,7 @@ lb_vip_command_fn (vlib_main_t * vm,
       else if (encap == LB_ENCAP_TYPE_NAT6)
         args.type = LB_VIP_TYPE_IP6_NAT6;
       else if (encap == LB_ENCAP_TYPE_NAT4)
-        {
-          error = clib_error_return(0, "currently does not support NAT64");
-          goto done;
-        }
+        args.type = LB_VIP_TYPE_IP6_NAT4;
     }
 
   lb_garbage_collection();
@@ -164,7 +167,7 @@ lb_vip_command_fn (vlib_main_t * vm,
       vlib_cli_output(vm, "lb_vip_add ok %d", index);
     }
   } else {
-    if ((ret = lb_vip_find_index(&(args.prefix), args.plen,
+    if ((ret = lb_vip_find_index(args.vrf_id, &(args.prefix), args.plen,
                                  args.protocol, args.port, &index))) {
       error = clib_error_return (0, "lb_vip_find_index error %d", ret);
       goto done;
@@ -189,10 +192,352 @@ VLIB_CLI_COMMAND (lb_vip_command, static) =
       "[encap (gre6|gre4|l3dsr|nat4|nat6)] "
       "[dscp <n>] "
       "[type (nodeport|clusterip) target_port <n>] "
-      "[new_len <n>] [src_ip_sticky] [del]",
+      "[new_len <n>] [src_ip_sticky] [vrf <id>] [del]",
   .function = lb_vip_command_fn,
 };
 /* clang-format on */
+
+static clib_error_t *
+lb_add_snat_pool_command_fn (vlib_main_t *vm, unformat_input_t *input, vlib_cli_command_t *cmd)
+{
+  clib_error_t *error = 0;
+
+  int rv = 0;
+  u32 pool_idx = (~0);
+
+  rv = lb_add_snat_pool(&pool_idx);
+  if(rv)
+  {
+      error = clib_error_return (0, "lb snat-pool add failed (rv = %d).", rv);
+      goto done;
+  }
+
+  vlib_cli_output (vm, "lb snat-pool id: %u", pool_idx);
+
+done:
+  return error;
+}
+
+VLIB_CLI_COMMAND (lb_add_snat_pool_command, static) = {
+  .path = "lb snat-pool add",
+  .short_help = "lb snat-pool add",
+  .function = lb_add_snat_pool_command_fn,
+};
+
+static clib_error_t *
+lb_del_snat_pool_command_fn (vlib_main_t *vm, unformat_input_t *input, vlib_cli_command_t *cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  clib_error_t *error = 0;
+
+  int rv = 0;
+  u32 pool_idx = (~0);
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+      return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+  {
+      if (unformat (line_input, "index %u", &pool_idx));
+      else
+      {
+          error = clib_error_return (0, "unknown input '%U'", format_unformat_error, line_input);
+          goto done;
+      }
+  }
+
+  if (pool_idx != (~0))
+  {
+      rv = lb_del_snat_pool(pool_idx);
+  }
+  else
+  {
+      error = clib_error_return (0, "Missing index");
+      goto done;
+  }
+
+  if(rv)
+  {
+      error = clib_error_return (0, "lb snat-pool del failed (rv = %d).", rv);
+      goto done;
+  }
+
+done:
+  unformat_free (line_input);
+  return error;
+}
+
+VLIB_CLI_COMMAND (lb_del_snat_pool_command, static) = {
+  .path = "lb snat-pool del",
+  .short_help = "lb snat-pool del index <id>",
+  .function = lb_del_snat_pool_command_fn,
+};
+
+static clib_error_t *
+lb_snat_pool_address_command_fn (vlib_main_t * vm,
+              unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  ip4_address_t address, *addr;
+  ip4_address_t *address_array = 0;
+  u32 pool_idx = (~0);
+  u8 del = 0;
+  int ret;
+  clib_error_t *error = 0;
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "%U", unformat_ip4_address, &address))
+      {
+        vec_add1(address_array, address);
+      }
+    else if (unformat(line_input, "del"))
+      {
+        del = 1;
+      }
+    else if (unformat(line_input, "pool %u", &pool_idx))
+      ;
+    else {
+      error = clib_error_return (0, "parse error: '%U'",
+                                 format_unformat_error, line_input);
+      goto done;
+    }
+  }
+
+  /* If port == 0, it means all-port VIP */
+  if (pool_idx == (~0))
+    {
+      error = clib_error_return (0, "No pool_idx provided");
+      goto done;
+    }
+
+  if (!vec_len(address_array)) {
+    error = clib_error_return (0, "No snat address provided");
+    goto done;
+  }
+
+  if (del) {
+      vec_foreach(addr, address_array)
+      {
+        if ((ret = lb_del_snat_pool_address(pool_idx, addr)))
+        {
+          error = clib_error_return (0, "lb_del_snat_pool_address %U error %d", 
+                                        format_ip4_address, addr, ret);
+          goto done;
+        }
+      }
+  } else {
+      vec_foreach(addr, address_array)
+      {
+          if ((ret = lb_add_snat_pool_address(pool_idx, addr)))
+          {
+              error = clib_error_return (0, "lb_add_snat_pool_address %u error %d", 
+                                        format_ip4_address, addr, ret);
+              goto done;
+          }
+      }
+  }
+done:
+  unformat_free (line_input);
+  vec_free(address_array);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND (lb_snat_pool_address_command, static) =
+{
+  .path = "lb snat-pool address",
+  .short_help = "lb snat-pool address pool <id> [<address> [<address> [...]]] [del]",
+  .function = lb_snat_pool_address_command_fn,
+};
+
+static clib_error_t *
+lb_show_snat_pool_command_fn (vlib_main_t * vm,
+              unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  lb_main_t *lbm = &lb_main;
+  lb_vip_snat_addresses_pool_t *snat_addresses;
+
+  pool_foreach (snat_addresses, lbm->vip_snat_pool) {
+      vlib_cli_output(vm, "%U\n", format_lb_snat_pool, snat_addresses);
+  }
+
+  return NULL;
+}
+
+VLIB_CLI_COMMAND (lb_show_snat_pool_command, static) = {
+  .path = "show lb snat-pool",
+  .short_help = "show lb snat-pool",
+  .function = lb_show_snat_pool_command_fn,
+};
+
+static clib_error_t *
+lb_vip_set_src_ip_sticky_command_fn (vlib_main_t * vm,
+              unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  ip46_address_t vip_prefix;
+  u8 vip_plen;
+  u32 vip_index;
+  u32 port = 0;
+  u8 protocol = 0;
+  u32 vrf_id = 0;
+  bool src_ip_sticky = false;
+  int ret;
+  clib_error_t *error = 0;
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  if (!unformat(line_input, "%U", unformat_ip46_prefix,
+                &vip_prefix, &vip_plen, IP46_TYPE_ANY))
+  {
+    error = clib_error_return (0, "invalid as address: '%U'",
+                               format_unformat_error, line_input);
+    goto done;
+  }
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "protocol tcp"))
+      {
+          protocol = (u8)IP_PROTOCOL_TCP;
+      }
+    else if (unformat(line_input, "protocol udp"))
+      {
+          protocol = (u8)IP_PROTOCOL_UDP;
+      }
+    else if (unformat(line_input, "port %d", &port))
+      ;
+    else if (unformat(line_input, "vrf %u", &vrf_id))
+      ;
+    else if (unformat(line_input, "enable"))
+      src_ip_sticky = true;
+    else if (unformat(line_input, "disable"))
+      src_ip_sticky = false;
+    else {
+      error = clib_error_return (0, "parse error: '%U'",
+                                 format_unformat_error, line_input);
+      goto done;
+    }
+  }
+
+  /* If port == 0, it means all-port VIP */
+  if (port == 0)
+    {
+      protocol = ~0;
+    }
+
+  if ((ret = lb_vip_find_index(vrf_id, &vip_prefix, vip_plen, protocol,
+                               (u16)port, &vip_index))){
+    error = clib_error_return (0, "lb_vip_find_index error %d", ret);
+    goto done;
+  }
+
+  clib_warning("vip index is %d", vip_index);
+  if ((ret = lb_vip_set_src_ip_sticky(vip_index, src_ip_sticky)))
+  {
+      error = clib_error_return (0, "lb_vip_set_src_ip_sticky %s error %u", src_ip_sticky ? "enable" : "disable", ret);
+      goto done;
+  }
+
+done:
+  unformat_free (line_input);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND (lb_vip_set_src_ip_sticky_command, static) =
+{
+  .path = "lb src-ip-sticky",
+  .short_help = "lb src-ip-sticky <vip-prefix> [protocol (tcp|udp) port <n>] [vrf <id>] (enable|disable)",
+  .function = lb_vip_set_src_ip_sticky_command_fn,
+};
+
+static clib_error_t *
+lb_vip_set_snat_addresses_pool_command_fn (vlib_main_t * vm,
+              unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  ip46_address_t vip_prefix;
+  u8 vip_plen;
+  u32 vip_index;
+  u32 port = 0;
+  u8 protocol = 0;
+  u32 vrf_id = 0;
+  u32 pool_idx = (~0);
+  int ret;
+  clib_error_t *error = 0;
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  if (!unformat(line_input, "%U", unformat_ip46_prefix,
+                &vip_prefix, &vip_plen, IP46_TYPE_ANY))
+  {
+    error = clib_error_return (0, "invalid as address: '%U'",
+                               format_unformat_error, line_input);
+    goto done;
+  }
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "protocol tcp"))
+      {
+          protocol = (u8)IP_PROTOCOL_TCP;
+      }
+    else if (unformat(line_input, "protocol udp"))
+      {
+          protocol = (u8)IP_PROTOCOL_UDP;
+      }
+    else if (unformat(line_input, "port %d", &port))
+      ;
+    else if (unformat(line_input, "vrf %u", &vrf_id))
+      ;
+    else if (unformat(line_input, "pool %u", &pool_idx))
+      ;
+    else {
+      error = clib_error_return (0, "parse error: '%U'",
+                                 format_unformat_error, line_input);
+      goto done;
+    }
+  }
+
+  /* If port == 0, it means all-port VIP */
+  if (port == 0)
+    {
+      protocol = ~0;
+    }
+
+  if ((ret = lb_vip_find_index(vrf_id, &vip_prefix, vip_plen, protocol,
+                               (u16)port, &vip_index))){
+    error = clib_error_return (0, "lb_vip_find_index error %d", ret);
+    goto done;
+  }
+
+  clib_warning("vip index is %d", vip_index);
+  if ((ret = lb_vip_set_snat_address_pool(vip_index, pool_idx)))
+  {
+      error = clib_error_return (0, "lb_vip_set_snat_address_pool %u error %u", pool_idx, ret);
+      goto done;
+  }
+
+done:
+  unformat_free (line_input);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND (lb_vip_set_snat_addresses_pool_command, static) =
+{
+  .path = "lb vip-snat-address",
+  .short_help = "lb vip-snat-address <vip-prefix> [protocol (tcp|udp) port <n>] [vrf <id>]"
+      " [pool <id> ]",
+  .function = lb_vip_set_snat_addresses_pool_command_fn,
+};
 
 static clib_error_t *
 lb_as_command_fn (vlib_main_t * vm,
@@ -207,6 +552,8 @@ lb_as_command_fn (vlib_main_t * vm,
   u8 protocol = 0;
   u8 del = 0;
   u8 flush = 0;
+  u32 vrf_id = 0;
+  u32 as_vrf_id = 0;
   int ret;
   clib_error_t *error = 0;
 
@@ -246,6 +593,10 @@ lb_as_command_fn (vlib_main_t * vm,
       }
     else if (unformat(line_input, "port %d", &port))
       ;
+    else if (unformat(line_input, "vrf %d", &vrf_id))
+      ;
+    else if (unformat(line_input, "as_vrf %d", &as_vrf_id))
+      ;
     else {
       error = clib_error_return (0, "parse error: '%U'",
                                  format_unformat_error, line_input);
@@ -259,7 +610,7 @@ lb_as_command_fn (vlib_main_t * vm,
       protocol = ~0;
     }
 
-  if ((ret = lb_vip_find_index(&vip_prefix, vip_plen, protocol,
+  if ((ret = lb_vip_find_index(vrf_id, &vip_prefix, vip_plen, protocol,
                                (u16)port, &vip_index))){
     error = clib_error_return (0, "lb_vip_find_index error %d", ret);
     goto done;
@@ -280,7 +631,7 @@ lb_as_command_fn (vlib_main_t * vm,
       goto done;
     }
   } else {
-    if ((ret = lb_vip_add_ass(vip_index, as_array, vec_len(as_array))))
+    if ((ret = lb_vip_add_ass(vip_index, as_array, vec_len(as_array), as_vrf_id)))
     {
       error = clib_error_return (0, "lb_vip_add_ass error %d", ret);
       goto done;
@@ -298,7 +649,7 @@ VLIB_CLI_COMMAND (lb_as_command, static) =
 {
   .path = "lb as",
   .short_help = "lb as <vip-prefix> [protocol (tcp|udp) port <n>]"
-      " [<address> [<address> [...]]] [del] [flush]",
+      " [<address> [<address> [...]]] [vrf <id>] [as_vrf <id>] [del] [flush]",
   .function = lb_as_command_fn,
 };
 
@@ -310,9 +661,11 @@ lb_conf_command_fn (vlib_main_t * vm,
   unformat_input_t _line_input, *line_input = &_line_input;
   ip4_address_t ip4 = lbm->ip4_src_address;
   ip6_address_t ip6 = lbm->ip6_src_address;
-  u32 per_cpu_sticky_buckets = lbm->per_cpu_sticky_buckets;
-  u32 per_cpu_sticky_buckets_log2 = 0;
+  u32 sticky_buckets = lbm->sticky_buckets;
+  u32 sticky_buckets_log2 = 0;
   u32 flow_timeout = lbm->flow_timeout;
+  u32 flow_tcp_transitory_timeout = lbm->flow_tcp_transitory_timeout;
+  u32 flow_tcp_closing_timeout = lbm->flow_tcp_closing_timeout;
   int ret;
   clib_error_t *error = 0;
 
@@ -325,13 +678,17 @@ lb_conf_command_fn (vlib_main_t * vm,
       ;
     else if (unformat(line_input, "ip6-src-address %U", unformat_ip6_address, &ip6))
       ;
-    else if (unformat(line_input, "buckets %d", &per_cpu_sticky_buckets))
+    else if (unformat(line_input, "buckets %d", &sticky_buckets))
       ;
-    else if (unformat(line_input, "buckets-log2 %d", &per_cpu_sticky_buckets_log2)) {
-      if (per_cpu_sticky_buckets_log2 >= 32)
+    else if (unformat(line_input, "buckets-log2 %d", &sticky_buckets_log2)) {
+      if (sticky_buckets_log2 >= 32)
         return clib_error_return (0, "buckets-log2 value is too high");
-      per_cpu_sticky_buckets = 1 << per_cpu_sticky_buckets_log2;
+      sticky_buckets = 1 << sticky_buckets_log2;
     } else if (unformat(line_input, "timeout %d", &flow_timeout))
+      ;
+    else if (unformat(line_input, "tcp_transitory_timeout %d", &flow_tcp_transitory_timeout))
+      ;
+    else if (unformat(line_input, "tcp_closing_timeout %d", &flow_tcp_closing_timeout))
       ;
     else {
       error = clib_error_return (0, "parse error: '%U'",
@@ -342,7 +699,8 @@ lb_conf_command_fn (vlib_main_t * vm,
 
   lb_garbage_collection();
 
-  if ((ret = lb_conf(&ip4, &ip6, per_cpu_sticky_buckets, flow_timeout))) {
+  if ((ret = lb_conf(&ip4, &ip6, sticky_buckets,
+                     flow_timeout, flow_tcp_transitory_timeout, flow_tcp_closing_timeout))) {
     error = clib_error_return (0, "lb_conf error %d", ret);
     goto done;
   }
@@ -385,11 +743,13 @@ lb_show_vips_command_fn (vlib_main_t * vm,
   lb_vip_t *vip;
   u8 verbose = 0;
 
-  if (!unformat_user (input, unformat_line_input, &line_input))
-      return 0;
+  if (unformat_user (input, unformat_line_input, &line_input))
+  {
+      if (unformat(&line_input, "verbose"))
+          verbose = 1;
 
-  if (unformat(&line_input, "verbose"))
-    verbose = 1;
+      unformat_free (&line_input);
+  }
 
   /* Hide placeholder VIP */
   pool_foreach (vip, lbm->vips) {
@@ -398,7 +758,6 @@ lb_show_vips_command_fn (vlib_main_t * vm,
     }
   }
 
-  unformat_free (&line_input);
   return NULL;
 }
 
@@ -523,6 +882,7 @@ lb_flush_vip_command_fn (vlib_main_t * vm,
   u32 vip_index;
   u8 protocol = 0;
   u32 port = 0;
+  u32 vrf_id = 0;
   clib_error_t *error = 0;
 
   if (!unformat_user (input, unformat_line_input, line_input))
@@ -547,6 +907,8 @@ lb_flush_vip_command_fn (vlib_main_t * vm,
       }
     else if (unformat(line_input, "port %d", &port))
       ;
+    else if (unformat(line_input, "vrf %d", &vrf_id))
+      ;
   }
 
   if (port == 0)
@@ -554,7 +916,7 @@ lb_flush_vip_command_fn (vlib_main_t * vm,
       protocol = ~0;
     }
 
-  if ((ret = lb_vip_find_index(&vip_prefix, vip_plen, protocol,
+  if ((ret = lb_vip_find_index(vrf_id, &vip_prefix, vip_plen, protocol,
                                (u16)port, &vip_index))){
     error = clib_error_return (0, "lb_vip_find_index error %d", ret);
     goto done;
@@ -582,7 +944,7 @@ VLIB_CLI_COMMAND (lb_flush_vip_command, static) =
 {
   .path = "lb flush vip",
   .short_help = "lb flush vip <prefix> "
-      "[protocol (tcp|udp) port <n>]",
+      "[protocol (tcp|udp) port <n>] [vrf <id>]",
   .function = lb_flush_vip_command_fn,
 };
 
@@ -595,4 +957,46 @@ VLIB_CLI_COMMAND (lb_flowtable_flush_command, static) =
   .path = "test lb flowtable flush",
   .short_help = "test lb flowtable flush",
   .function = lb_flowtable_flush_command_fn,
+};
+
+static clib_error_t *
+lb_ha_sync_command_fn (vlib_main_t * vm,
+              unformat_input_t * input, vlib_cli_command_t * cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  int ret;
+  clib_error_t *error = 0;
+
+  u32 ha_sync_timeout_update_interval = LB_HA_SYNC_TIMEOUT_UPDATE_INTERVAL;
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+  {
+    if (unformat(line_input, "update-timeout-interval %d", &ha_sync_timeout_update_interval))
+        ;
+    else {
+      error = clib_error_return (0, "parse error: '%U'",
+                                 format_unformat_error, line_input);
+      goto done;
+    }
+  }
+
+  if ((ret = lb_ha_sync_set_timeout_update_interval(ha_sync_timeout_update_interval))) {
+    error = clib_error_return (0, "lb ha-sync error %d", ret);
+    goto done;
+  }
+
+done:
+  unformat_free (line_input);
+
+  return error;
+}
+
+VLIB_CLI_COMMAND (lb_ha_sync_command, static) =
+{
+  .path = "lb ha-sync",
+  .short_help = "lb ha-sync [update-timeout-interval <s>]",
+  .function = lb_ha_sync_command_fn,
 };

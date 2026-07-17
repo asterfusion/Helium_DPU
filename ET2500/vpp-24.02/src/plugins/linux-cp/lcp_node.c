@@ -148,7 +148,7 @@ VLIB_NODE_FN (lip_punt_node)
 	  lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0);
 	  if (PREDICT_FALSE (lipi0 == INDEX_INVALID))
 	  {
-	      if (vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
+	      if ((b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
 	      {
               u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
 
@@ -174,7 +174,28 @@ VLIB_NODE_FN (lip_punt_node)
 	       */
 	      len0 = ((u8 *) vlib_buffer_get_current (b0) -
 		      (u8 *) ethernet_buffer_get_header (b0));
-	      vlib_buffer_advance (b0, -len0);
+	      if (PREDICT_FALSE (!(b0->flags & VNET_BUFFER_F_L2_HDR_OFFSET_VALID)))
+              {
+                 vnet_main_t *vnm = vnet_get_main ();
+                 vnet_hw_interface_t *hw =
+                   vnet_get_sup_hw_interface (vnm, lip0->lip_phy_sw_if_index);
+                 ethernet_header_t *eh;
+
+                 /* add ethernet headers */
+                 vlib_buffer_advance (b0, -sizeof (ethernet_header_t));
+                 eh = vlib_buffer_get_current (b0);
+                 clib_memcpy (eh->src_address, hw->hw_address,
+                              sizeof (eh->src_address));
+                 clib_memcpy (eh->dst_address, hw->hw_address,
+                              sizeof (eh->dst_address));
+                 eh->type = (b0->flags & VNET_BUFFER_F_IS_IP4) ?
+                          clib_host_to_net_u16 (ETHERNET_TYPE_IP4) :
+                          clib_host_to_net_u16 (ETHERNET_TYPE_IP6);
+               }
+               else
+               {
+                 vlib_buffer_advance (b0, -len0);
+               }
 	    }
 	  /* Tun packets don't need any special treatment, just need to
 	   * be escorted past the TTL decrement. If we still want to use
@@ -853,7 +874,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 		vnet_buffer (b0)->sw_if_index[VLIB_RX]);
 	      lip0 = lcp_itf_pair_get (lipi0);
 
-	      if (lip0 == NULL && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
+	      if (lip0 == NULL && (b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
 	      {
               u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
               vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
@@ -902,7 +923,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 		vnet_buffer (b1)->sw_if_index[VLIB_RX]);
 	      lip1 = lcp_itf_pair_get (lipi1);
 
-	      if (lip1 == NULL && vnet_buffer2(b1)->l2_rx_sw_if_index != ~0)
+	      if (lip1 == NULL && (b1->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b1)->l2_rx_sw_if_index != ~0)
 	      {
               u32 l2_rx_sw_if_index1 = vnet_buffer2(b1)->l2_rx_sw_if_index;
               vnet_sw_interface_t *si1 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index1);
@@ -995,7 +1016,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 		vnet_buffer (b0)->sw_if_index[VLIB_RX]);
 	      lip0 = lcp_itf_pair_get (lipi0);
 
-	      if (lip0 == NULL && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
+	      if (lip0 == NULL && (b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
 	      {
               u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
               vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);

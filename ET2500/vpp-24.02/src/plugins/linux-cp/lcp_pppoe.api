@@ -35,7 +35,12 @@ define lcp_pppoe_add_del_session
   u16 session_id;
   vl_api_interface_index_t encap_sw_if_index;
   vl_api_mac_address_t server_mac;
-  option vat_help = "session-id <nn> encap-if-index <nn> server-mac <server-mac> [del]";
+  u32 lcp_magic;
+  /* Subscriber IPv4 host address; when non-zero a /32 route to the session
+   * interface is installed (on add) / removed (on del) in client_table_id. */
+  vl_api_ip4_address_t client_ip;
+  u32 client_table_id;
+  option vat_help = "session-id <nn> encap-if-index <nn> server-mac <server-mac> [lcp-magic <nn>] [del]";
 };
 
 /** \brief reply for set or delete an PPPOE session
@@ -75,4 +80,77 @@ define lcp_pppoe_ip_route_add_del_reply
   u32 context;
   i32 retval;
   u32 stats_index;
+};
+
+/** \brief Single PPPoE session entry for bulk add/del operations */
+typedef lcp_pppoe_session_entry
+{
+  bool is_add;
+  u16 session_id;
+  vl_api_interface_index_t encap_sw_if_index;
+  vl_api_mac_address_t server_mac;
+  u32 lcp_magic;
+  /* Subscriber IPv4 host address; when non-zero a /32 route to the session
+   * interface is installed (on add) in client_table_id. Ignored on delete:
+   * the route is removed using the address stored in the session. */
+  vl_api_ip4_address_t client_ip;
+  u32 client_table_id;
+};
+
+/** \brief Bulk add / delete PPPoE sessions in a single RPC
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param count - number of session entries
+    @param entries - array of session entries
+*/
+define lcp_pppoe_bulk_add_del_sessions
+{
+  u32 client_index;
+  u32 context;
+  u32 count;
+  vl_api_lcp_pppoe_session_entry_t entries[count];
+};
+
+/** \brief Per-session result returned in lcp_pppoe_bulk_add_del_sessions_reply */
+typedef lcp_pppoe_session_result
+{
+  vl_api_interface_index_t sw_if_index;  /* ~0 on failure */
+  string sw_if_name[16];                 /* VPP hw interface name, e.g. "ppp42"; empty on failure */
+};
+
+/** \brief Reply for bulk add / delete PPPoE sessions
+    @param context - sender context, to match reply w/ request
+    @param retval - return code (0 if all succeeded, first error code otherwise)
+    @param count - number of entries in results
+    @param results - per-session result (sw_if_index + sw_if_name)
+*/
+define lcp_pppoe_bulk_add_del_sessions_reply
+{
+  u32 context;
+  i32 retval;
+  u32 count;
+  vl_api_lcp_pppoe_session_result_t results[count];
+};
+
+/** \brief Grow the PPPoE hw-interface warm pool asynchronously
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param target - total pppN interfaces to pre-create (e.g. 50000)
+    @param batch - interfaces per process batch (0 = default 256)
+*/
+define lcp_pppoe_hw_if_pool_ensure
+{
+  u32 client_index;
+  u32 context;
+  u32 target;
+  u32 batch;
+};
+
+define lcp_pppoe_hw_if_pool_ensure_reply
+{
+  u32 context;
+  i32 retval;
+  u32 created;
+  u32 free_count;
+  bool is_async;
 };

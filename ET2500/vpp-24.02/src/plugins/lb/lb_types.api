@@ -16,14 +16,14 @@
 option version = "1.0.0";
 import "vnet/ip/ip_types.api";
 
-enum lb_srv_type
+enum lb_srv_type:u8
 {
   LB_API_SRV_TYPE_CLUSTERIP = 0,
   LB_API_SRV_TYPE_NODEPORT = 1,
   LB_API_SRV_N_TYPES = 2,
 };
 
-enum lb_encap_type
+enum lb_encap_type:u8
 {
   LB_API_ENCAP_TYPE_GRE4 = 0,
   LB_API_ENCAP_TYPE_GRE6 = 1,
@@ -34,7 +34,7 @@ enum lb_encap_type
 };
 
 /* Lookup types */
-enum lb_lkp_type_t
+enum lb_lkp_type_t:u8
 {
   LB_API_LKP_SAME_IP_PORT = 0,
   LB_API_LKP_DIFF_IP_PORT = 1,
@@ -42,7 +42,7 @@ enum lb_lkp_type_t
   LB_API_LKP_N_TYPES = 3,
 };
 
-enum lb_vip_type
+enum lb_vip_type:u8
 {
   LB_API_VIP_TYPE_IP6_GRE6 = 0,
   LB_API_VIP_TYPE_IP6_GRE4 = 1,
@@ -51,13 +51,14 @@ enum lb_vip_type
   LB_API_VIP_TYPE_IP4_L3DSR = 4,
   LB_API_VIP_TYPE_IP4_NAT4 = 5,
   LB_API_VIP_TYPE_IP6_NAT6 = 6,
-  LB_API_VIP_N_TYPES = 7,
+  LB_API_VIP_TYPE_IP6_NAT4 = 7,
+  LB_API_VIP_N_TYPES = 8,
 };
 
 enum lb_nat_protocol
 {
-  LB_API_NAT_PROTOCOL_UDP = 0x06,
-  LB_API_NAT_PROTOCOL_TCP = 0x17,
+  LB_API_NAT_PROTOCOL_TCP = 0x06,
+  LB_API_NAT_PROTOCOL_UDP = 0x11,
   LB_API_NAT_PROTOCOL_ANY = 0xffffffff,
 };
 
@@ -68,6 +69,7 @@ enum lb_nat_protocol
 */
 typedef lb_vip
 {
+  u32 vrf_id;
   vl_api_address_with_prefix_t pfx;
   vl_api_ip_proto_t protocol;
   u16 port;

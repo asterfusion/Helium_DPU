@@ -39,7 +39,7 @@
 /* number of attempts to get a port for ED overloading algorithm, if rolling
  * a dice this many times doesn't produce a free port, it's treated
  * as if there were no free ports available to conserve resources */
-#define ED_PORT_ALLOC_ATTEMPTS (10)
+#define ED_PORT_ALLOC_ATTEMPTS (20)
 
 /* system ports range is 0-1023, first user port is 1024 per
  * https://www.rfc-editor.org/rfc/rfc6335#section-6
@@ -169,6 +169,7 @@ format_function_t format_nat44_ed_tcp_state;
 #define SNAT_SESSION_FLAG_AFFINITY	     (1 << 6)
 #define SNAT_SESSION_FLAG_EXACT_ADDRESS	     (1 << 7)
 #define SNAT_SESSION_FLAG_HAIRPINNING	     (1 << 8)
+#define SNAT_SESSION_FLAG_HA_ORPHAN	     (1 << 9)
 
 /* NAT interface flags */
 #define NAT_INTERFACE_FLAG_IS_INSIDE 1
@@ -476,6 +477,9 @@ typedef struct
 
   per_vrf_sessions_t *per_vrf_sessions_pool;
 
+  /* lock : Useful for ha_sync in certain situations */
+  clib_spinlock_t self_lock;
+
 } snat_main_per_thread_data_t;
 
 struct snat_main_s;
@@ -519,8 +523,6 @@ typedef struct snat_main_s
   snat_static_mapping_t *static_mappings;
 
   /* Endpoint independent lookup tables */
-  clib_bihash_8_8_t in2out;
-  clib_bihash_8_8_t out2in;
 
   /* Endpoint dependent lookup table */
   clib_bihash_16_8_t flow_hash;

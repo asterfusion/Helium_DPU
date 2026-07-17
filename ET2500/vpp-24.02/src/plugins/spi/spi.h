@@ -304,6 +304,7 @@ typedef struct
     f64 create_timestamp;
     f64 last_pkt_timestamp;
     f64 tcp_last_syn_timestamp;
+    f64 last_ha_sync_keep_timestamp;
 
     /* Counters */
     u64 total_bytes[SPI_FLOW_N_DIR];

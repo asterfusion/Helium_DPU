@@ -63,6 +63,7 @@ VNET_FEATURE_INIT (worker_handoff, static) = {
 VNET_FEATURE_INIT (span_input, static) = {
   .arc_name = "device-input",
   .node_name = "span-input",
+  .runs_after = VNET_FEATURES ("bond-input"),
   .runs_before = VNET_FEATURES ("ethernet-input"),
 };
 
@@ -134,3 +135,4 @@ VLIB_INIT_FUNCTION (vnet_device_init);
  * eval: (c-set-style "gnu")
  * End:
  */
+

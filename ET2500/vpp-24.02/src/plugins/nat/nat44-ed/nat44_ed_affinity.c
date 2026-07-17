@@ -21,6 +21,7 @@
 
 #include <nat/nat44-ed/nat44_ed.h>
 #include <nat/nat44-ed/nat44_ed_affinity.h>
+#include <nat/nat44-ed/nat44_ed_ha_sync.h>
 
 nat_affinity_main_t nat_affinity_main;
 

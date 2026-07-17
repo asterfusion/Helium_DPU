@@ -699,9 +699,16 @@ abf_input_inline (vlib_main_t * vm,
       }
 
 
-      spi_session_t *spi_sess = ((__typeof__ (vlib_buffer_spi_get_session) *)spi_get_session_ptr) (b0);
-      if(spi_sess != NULL)
-      {
+fa_5tuple_t fa_5tuple_decoded0;
+      clib_memcpy_fast (&fa_5tuple_decoded0, &fa_5tuple0,
+                        sizeof (fa_5tuple_decoded0));
+      u8 l4_proto0 = fa_5tuple_decoded0.l4.proto;
+      int is_icmp_pkt0 =
+        (l4_proto0 == IP_PROTOCOL_ICMP || l4_proto0 == IP_PROTOCOL_ICMP6);
+
+    spi_session_t *spi_sess = ((__typeof__ (vlib_buffer_spi_get_session) *)spi_get_session_ptr) (b0);
+    if (!is_icmp_pkt0 && spi_sess != NULL)
+    {
           if(spi_sess->flow[SPI_FLOW_DIR_UPLINK].geosite_match_acl != (~0))
           {
             	aia0 = abf_itf_attach_get (attachments0[spi_sess->flow[SPI_FLOW_DIR_UPLINK].geosite_match_acl]);

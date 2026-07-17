@@ -50,6 +50,21 @@ locate_ethertype (ethernet_header_t *eth)
   return ethertype_p;
 }
 
+static_always_inline u32
+hash_eth_l2_inline (void **p, u32 seed)
+{
+  ethernet_header_t *eth = *p;
+  u64 *dst = (u64 *) &eth->dst_address[0];
+  u64 a = clib_mem_unaligned (dst, u64);
+  u32 *src = (u32 *) &eth->src_address[2];
+  u32 b = clib_mem_unaligned (src, u32);
+
+  if (seed != 0)
+    b ^= seed;
+
+  return lb_hash_hash_2_tuples (a, b);
+}
+
 static void
 hash_eth_l2 (void **p, u32 *hash, u32 n_packets)
 {
@@ -58,26 +73,15 @@ hash_eth_l2 (void **p, u32 *hash, u32 n_packets)
 
   while (n_left_from >= 8)
     {
-      ethernet_header_t *eth = *p;
-      u64 *dst = (u64 *) &eth->dst_address[0];
-      u64 a = clib_mem_unaligned (dst, u64);
-      u32 *src = (u32 *) &eth->src_address[2];
-      u32 b = clib_mem_unaligned (src, u32);
-
-      if( hm->hash_seed != 0)
-      {
-        b ^= hm->hash_seed;
-      }
-
       clib_prefetch_load (p[4]);
       clib_prefetch_load (p[5]);
       clib_prefetch_load (p[6]);
       clib_prefetch_load (p[7]);
 
-      hash[0] = lb_hash_hash_2_tuples (a, b);
-      hash[1] = lb_hash_hash_2_tuples (a, b);
-      hash[2] = lb_hash_hash_2_tuples (a, b);
-      hash[3] = lb_hash_hash_2_tuples (a, b);
+      hash[0] = hash_eth_l2_inline (&p[0], hm->hash_seed);
+      hash[1] = hash_eth_l2_inline (&p[1], hm->hash_seed);
+      hash[2] = hash_eth_l2_inline (&p[2], hm->hash_seed);
+      hash[3] = hash_eth_l2_inline (&p[3], hm->hash_seed);
 
       hash += 4;
       n_left_from -= 4;
@@ -86,13 +90,7 @@ hash_eth_l2 (void **p, u32 *hash, u32 n_packets)
 
   while (n_left_from > 0)
     {
-      ethernet_header_t *eth = *p;
-      u64 *dst = (u64 *) &eth->dst_address[0];
-      u64 a = clib_mem_unaligned (dst, u64);
-      u32 *src = (u32 *) &eth->src_address[2];
-      u32 b = clib_mem_unaligned (src, u32);
-
-      hash[0] = lb_hash_hash_2_tuples (a, b);
+      hash[0] = hash_eth_l2_inline (&p[0], hm->hash_seed);
 
       hash += 1;
       n_left_from -= 1;
@@ -348,3 +346,4 @@ VNET_REGISTER_HASH_FUNCTION (hash_eth_l34, static) = {
  * eval: (c-set-style "gnu")
  * End:
  */
+

@@ -23,6 +23,7 @@
 
 #include <vppinfra/hash.h>
 #include <vppinfra/error.h>
+#include <vppinfra/lock.h>
 #include <vnet/ipfix-export/flow_report.h>
 #include <vnet/ipfix-export/flow_report_classify.h>
 #include <vppinfra/tw_timer_2t_1w_2048sl.h>
@@ -133,6 +134,7 @@ typedef struct
   flowprobe_protocol_context_t context[FLOW_N_VARIANTS];
   u16 template_reports[FLOW_N_RECORDS];
   u16 template_size[FLOW_N_RECORDS];
+  clib_spinlock_t stream_lock;
 
   /** Time reference pair */
   u64 nanosecond_time_0;

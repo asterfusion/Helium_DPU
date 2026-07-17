@@ -11,7 +11,7 @@
 
 /* Copy size in units of 128 bits */
 #define CPT_LMT_SIZE_COPY (sizeof (struct cpt_inst_s) / 16)
-#define CN10K_MAX_LMT_SZ  16
+#define CN10K_MAX_LMT_SZ  8
 
 /* TODO: Use different LMT line for CPT ops */
 #define CN10K_CPT_LMT_GET_LINE_ADDR(lmt_addr, lmt_num)                        \

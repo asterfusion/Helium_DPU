@@ -28,7 +28,9 @@ crypto_session_alloc (vlib_main_t *vm)
   u32 size;
 
   size = sizeof (cnxk_crypto_session_t);
+  clib_spinlock_lock (&vm->phymem_lock);
   addr = cnxk_drv_physmem_alloc (vm, size, CLIB_CACHE_LINE_BYTES);
+  clib_spinlock_unlock (&vm->phymem_lock);
   if (addr == NULL)
     {
       cnxk_crypto_err ("Failed to allocate crypto session memory");
@@ -219,6 +221,15 @@ cnxk_crypto_aead_session_update (vlib_main_t *vm, cnxk_crypto_session_t *sess,
       sess->param.cpt_op = type;
       digest_len = 16;
       break;
+    case VNET_CRYPTO_ALG_CHACHA20_POLY1305_TAG16_AAD0:
+      enc_type = ROC_SE_CHACHA20;
+      sess->param.iv_offset = 0;
+      sess->param.iv_length = 12;
+      sess->cpt_ctx.mac_len = 16;
+      sess->param.cpt_op = type;
+      digest_len = 16;
+      auth_type = ROC_SE_POLY1305;
+      break;
     default:
       cnxk_crypto_err (
 	"Crypto: Undefined cipher algo %u specified. Key index %u",
@@ -333,22 +344,10 @@ cnxk_crypto_burst_submit (cnxk_crypto_dev_t *cryptodev,
 
   ROC_LMT_CPT_BASE_ID_GET (lmt_base, core_lmt_id);
 
-  lmt_line[0] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 0);
-  lmt_line[1] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 1);
-  lmt_line[2] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 2);
-  lmt_line[3] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 3);
-  lmt_line[4] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 4);
-  lmt_line[5] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 5);
-  lmt_line[6] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 6);
-  lmt_line[7] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 7);
-  lmt_line[8] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 8);
-  lmt_line[9] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 9);
-  lmt_line[10] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 10);
-  lmt_line[11] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 11);
-  lmt_line[12] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 12);
-  lmt_line[13] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 13);
-  lmt_line[14] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 14);
-  lmt_line[15] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, 15);
+  for (int i = 0; i < CN10K_MAX_LMT_SZ; i++)
+  {
+      lmt_line[i] = CN10K_CPT_LMT_GET_LINE_ADDR (lmt_base, i);
+  }
 
   while (n_left > CN10K_MAX_LMT_SZ)
     {
@@ -361,22 +360,10 @@ cnxk_crypto_burst_submit (cnxk_crypto_dev_t *cryptodev,
 
       lmt_arg = ROC_CN10K_CPT_LMT_ARG | (uint64_t) core_lmt_id;
 
-      roc_lmt_mov_seg ((void *) lmt_line[0], inst, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[1], inst + 1, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[2], inst + 2, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[3], inst + 3, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[4], inst + 4, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[5], inst + 5, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[6], inst + 6, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[7], inst + 7, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[8], inst + 8, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[9], inst + 9, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[10], inst + 10, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[11], inst + 11, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[12], inst + 12, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[13], inst + 13, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[14], inst + 14, CPT_LMT_SIZE_COPY);
-      roc_lmt_mov_seg ((void *) lmt_line[15], inst + 15, CPT_LMT_SIZE_COPY);
+      for (int i = 0; i < CN10K_MAX_LMT_SZ; i++)
+      {
+          roc_lmt_mov_seg ((void *) lmt_line[i], inst + i, CPT_LMT_SIZE_COPY);
+      }
 
       /* Set number of LMTSTs, excluding the first */
       lmt_arg |= (CN10K_MAX_LMT_SZ - 1) << 12;
@@ -1123,7 +1110,7 @@ cnxk_crypto_cpt_hmac_prep (uint32_t flags, uint64_t d_offs, uint64_t d_lens,
   const uint8_t *src = NULL;
   struct roc_se_ctx *se_ctx;
   uint64_t offset_ctrl;
-  uint8_t iv_len = 16;
+  uint8_t iv_len = 12;
   uint8_t op_minor;
   uint32_t mac_len;
   int ret;
@@ -1132,6 +1119,8 @@ cnxk_crypto_cpt_hmac_prep (uint32_t flags, uint64_t d_offs, uint64_t d_lens,
   auth_offset = ROC_SE_AUTH_OFFSET (d_offs);
   encr_data_len = ROC_SE_ENCR_DLEN (d_lens);
   auth_data_len = ROC_SE_AUTH_DLEN (d_lens);
+  auth_offset = encr_offset;
+  auth_data_len = encr_data_len;
 
   if (PREDICT_FALSE (flags & ROC_SE_VALID_AAD_BUF))
     {
@@ -1147,6 +1136,7 @@ cnxk_crypto_cpt_hmac_prep (uint32_t flags, uint64_t d_offs, uint64_t d_lens,
   mac_len = se_ctx->mac_len;
   cpt_inst_w4.u64 = se_ctx->template_w4.u64;
   op_minor = cpt_inst_w4.s.opcode_minor;
+
 
   if (PREDICT_FALSE (!(flags & ROC_SE_VALID_IV_BUF)))
     {
@@ -1250,6 +1240,7 @@ cnxk_crypto_cpt_hmac_prep (uint32_t flags, uint64_t d_offs, uint64_t d_lens,
       return -1;
     }
 
+  iv_offset = 16;
   offset_ctrl = clib_host_to_net_u64 (((uint64_t) encr_offset << 16) |
 				      ((uint64_t) iv_offset << 8) |
 				      ((uint64_t) auth_offset));
@@ -1312,9 +1303,12 @@ cnxk_crypto_fill_fc_params (cnxk_crypto_session_t *sess,
       d_lens = cipher_data_length;
       d_lens = d_lens << 32;
 
-      fc_params.aad_buf.vaddr = elts->aad;
-      fc_params.aad_buf.size = aad_length;
-      flags |= ROC_SE_VALID_AAD_BUF;
+      if (PREDICT_FALSE (aad_length))
+      {
+          fc_params.aad_buf.vaddr = elts->aad;
+          fc_params.aad_buf.size = aad_length;
+          flags |= ROC_SE_VALID_AAD_BUF;
+      }
 
       /* Digest immediately following data is best case */
       if (sess->cpt_ctx.mac_len)
@@ -1397,7 +1391,7 @@ cnxk_crypto_enqueue_enc_dec (vlib_main_t *vm, vnet_crypto_async_frame_t *frame,
   u16 adj_len;
 
   /* GCM packets having 8 bytes of aad and 8 bytes of iv */
-  u8 aad_iv = 8 + 8;
+  u8 aad_iv = 12;
 
   pend_q = &cnxk_crypto_main.pend_q[vlib_get_thread_index ()];
 
@@ -2069,7 +2063,7 @@ cnxk_drv_crypto_sw_queue_init (vlib_main_t *vm)
   int i, j = 0;
 
   num_worker_cores =
-    vdm->last_worker_thread_index - vdm->first_worker_thread_index + 1;
+    vdm->last_worker_thread_index - vdm->first_worker_thread_index + 2;
 
   cnxk_crypto_main.pend_q = cnxk_drv_physmem_alloc (
     vm, num_worker_cores * sizeof (struct cnxk_crypto_pending_queue),
@@ -2081,7 +2075,7 @@ cnxk_drv_crypto_sw_queue_init (vlib_main_t *vm)
       return -1;
     }
 
-  for (i = 0; i <= num_worker_cores; ++i)
+  for (i = 0; i < num_worker_cores; ++i)
     {
       cnxk_crypto_main.pend_q[i].n_desc =
 	CNXK_CRYPTO_DEFAULT_SW_ASYNC_FRAME_COUNT;

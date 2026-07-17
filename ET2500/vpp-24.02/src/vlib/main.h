@@ -260,6 +260,7 @@ typedef struct vlib_main_t
   uword *pending_rpc_requests;
   uword *processing_rpc_requests;
   clib_spinlock_t pending_rpc_lock;
+  clib_spinlock_t phymem_lock;
 
   /* buffer fault injector */
   u32 buffer_alloc_success_seed;
