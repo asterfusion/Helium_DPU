@@ -482,6 +482,7 @@ onp_pktio_early_setup (vlib_main_t *vm, onp_main_t *om,
       eth_config.n_tx_queues = pconf->n_tx_q;
       eth_config.n_tx_ipsec_queues = pconf->n_tx_ipsec_q;
       eth_config.rss_flow_key = pconf->rss_flow_key;
+      eth_config.vlan_strip_enable = pconf->vlan_strip;
 
       if (!pktio_capa.is_pktio_inl_outbound)
 	{

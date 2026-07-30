@@ -132,6 +132,9 @@ cn9k_pktio_config (vlib_main_t *vm, cnxk_pktio_t *dev,
   dev->n_rx_queues = config->n_rx_queues;
   dev->n_tx_queues = config->n_tx_queues;
 
+  /* VLAN tag strip is configured via NPC flow on port start */
+  dev->vlan_strip_enable = config->vlan_strip_enable ? 1 : 0;
+
   /* Get channel base from kernel */
   dev->npc.channel = roc_nix_get_base_chan (nix);
 

@@ -169,6 +169,8 @@ typedef struct
   u8 is_used;
   u8 is_configured;
   u8 is_started;
+  u8 vlan_strip_enable;
+  struct roc_npc_flow *vlan_strip_npc_flow;
 } cnxk_pktio_t;
 
 typedef struct cnxk_pktio_ops

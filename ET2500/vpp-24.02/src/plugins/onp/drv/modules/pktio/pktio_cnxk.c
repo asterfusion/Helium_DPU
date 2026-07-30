@@ -304,6 +304,48 @@ cnxk_pktio_start (vlib_main_t *vm, cnxk_pktio_t *dev)
 		      roc_error_msg_get (rv));
       return -1;
     }
+
+  if (dev->vlan_strip_enable && !dev->vlan_strip_npc_flow)
+    {
+      struct roc_npc_item_info item_info[ROC_NPC_ITEM_TYPE_END] = { 0 };
+      struct roc_npc_action actions[ROC_NPC_ITEM_TYPE_END] = { 0 };
+      struct roc_npc_attr attr = { 0 };
+      ethernet_header_t eth_spec = { 0 }, eth_mask = { 0 };
+      int layer = 0, action = 0, flow_rv = 0;
+
+      /* Match tagged (TPID 0x8100) ingress packets only, untagged
+       * packets are left intact.
+       */
+      eth_spec.type = clib_host_to_net_u16 (ETHERNET_TYPE_VLAN);
+      eth_mask.type = clib_host_to_net_u16 (0xFFFF);
+
+      item_info[layer].type = ROC_NPC_ITEM_TYPE_ETH;
+      item_info[layer].spec = (void *) &eth_spec;
+      item_info[layer].mask = (void *) &eth_mask;
+      item_info[layer].size = sizeof (ethernet_header_t);
+      layer++;
+
+      item_info[layer].type = ROC_NPC_ITEM_TYPE_END;
+
+      actions[action].type = ROC_NPC_ACTION_TYPE_VLAN_STRIP;
+      action++;
+
+      actions[action].type = ROC_NPC_ACTION_TYPE_END;
+
+      /* Lowest usable priority, above the default miss rule */
+      attr.priority = CNXK_NPC_MAX_FLOW_PRIORITY - 1;
+      attr.ingress = 1;
+
+      dev->vlan_strip_npc_flow =
+	roc_npc_flow_create (&dev->npc, &attr, item_info, actions,
+			     dev->npc.pf_func, &flow_rv);
+      if (flow_rv)
+	{
+	  cnxk_pktio_err ("roc_npc_flow_create (vlan strip) failed with '%s' error",
+			  roc_error_msg_get (flow_rv));
+	  return -1;
+	}
+    }
         if (dev->pci_device_id == PCI_DEVID_CNXK_RVU_VF)
     {
       struct roc_npc_item_info item_info[ROC_NPC_ITEM_TYPE_END] = {0};
@@ -396,6 +438,15 @@ cnxk_pktio_stop (vlib_main_t *vm, cnxk_pktio_t *dev)
 	  return -1;
 	}
     }
+  if (dev->vlan_strip_npc_flow)
+    {
+      rv = roc_npc_flow_destroy (&dev->npc, dev->vlan_strip_npc_flow);
+      if (rv)
+	cnxk_pktio_err ("roc_npc_flow_destroy (vlan strip) failed with '%s' error",
+			roc_error_msg_get (rv));
+      dev->vlan_strip_npc_flow = NULL;
+    }
+
   rv = roc_nix_npc_rx_ena_dis (nix, 0);
   if (rv)
     {

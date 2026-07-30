@@ -176,6 +176,7 @@ typedef struct
   u32 n_tx_queues;
   u32 n_tx_ipsec_queues;
   u32 rss_flow_key;
+  u32 vlan_strip_enable;
 } cnxk_pktio_config_t;
 
 typedef struct

@@ -192,7 +192,8 @@ _ (num-tx-desc, n_tx_desc, ONP_DEFAULT_N_TX_DESC, 256, ONP_MAX_N_TX_DESC, 1)    
 _ (rq-poll-algo, rxq_poll_algo, ONP_RSS_DEFAULT_POLL_ALGO, CNXK_PKTIO_RQ_POLL_ALGO_GREEDY, CNXK_PKTIO_RQ_POLL_ALGO_GREEDY, 1)                                                                                                          \
 _ (rq-min-vec-size, rxq_min_vec_size, ONP_RSS_DEFAULT_MIN_VEC, 1, ONP_RX_BURST_SIZE, 1)                       \
 _ (rq-max-vec-size, rxq_max_vec_size, ONP_RSS_DEFAULT_MAX_VEC, 1, ONP_RX_BURST_SIZE, 1)                       \
-_ (rq-poll-retries, n_rxq_poll_retries, ONP_RSS_DEFAULT_POLL_RETRIES, 0, ONP_RSS_MAX_POLL_RETRIES, 1)
+_ (rq-poll-retries, n_rxq_poll_retries, ONP_RSS_DEFAULT_POLL_RETRIES, 0, ONP_RSS_MAX_POLL_RETRIES, 1)               \
+_ (vlan-strip, vlan_strip, 1, 0, 1, 1)
 /* clang-format on */
 
 typedef struct
