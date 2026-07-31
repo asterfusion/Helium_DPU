@@ -40,8 +40,12 @@ typedef struct wg_if_t_
   /* Under load params */
   f64 handshake_counting_end;
   u32 handshake_num;
+
+  fib_prefix_t *route_dst_ips;
 } wg_if_t;
 
+
+int wg_if_route_set(u32 tun_sw_if_index, const fib_prefix_t *route_dst_ips);
 
 int wg_if_create (u32 user_instance,
 		  const u8 private_key_64[NOISE_PUBLIC_KEY_LEN],
