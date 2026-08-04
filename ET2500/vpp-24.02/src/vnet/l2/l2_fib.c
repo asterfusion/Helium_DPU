@@ -134,6 +134,15 @@ l2fib_dump_walk_cb (BVT (clib_bihash_kv) * kvp, void *arg)
   key.raw = kvp->key;
   result.raw = kvp->value;
 
+  /* Skip torn reads: the walk holds no bucket locks, so a concurrent
+   * writer may have freed and reused the page this kvp came from. */
+  if (PREDICT_FALSE (key.fields.bd_index >=
+		     vec_len (l2input_main.bd_configs) ||
+		     (result.fields.sw_if_index >=
+		      vec_len (l2input_main.configs) &&
+		      result.fields.sw_if_index != ~0)))
+    return (BIHASH_WALK_CONTINUE);
+
   if ((ctx->bd_index == ~0) || (ctx->bd_index == key.fields.bd_index))
     {
       vec_add1 (ctx->l2fe_key, key);
@@ -214,6 +223,15 @@ l2fib_show_walk_cb (BVT (clib_bihash_kv) * kvp, void *arg)
   key.raw = kvp->key;
   result.raw = kvp->value;
   ctx->total_entries++;
+
+  /* Skip torn reads: the walk holds no bucket locks, so a concurrent
+   * writer may have freed and reused the page this kvp came from. */
+  if (PREDICT_FALSE (key.fields.bd_index >=
+		     vec_len (l2input_main.bd_configs) ||
+		     (result.fields.sw_if_index >=
+		      vec_len (l2input_main.configs) &&
+		      result.fields.sw_if_index != ~0)))
+    return (BIHASH_WALK_CONTINUE);
 
   if (ctx->verbose &&
       ((ctx->bd_index >> 31) || (ctx->bd_index == key.fields.bd_index)))
@@ -1151,6 +1169,23 @@ l2fib_scan (vlib_main_t * vm, f64 start_time, u8 event_only)
 
 	      l2fib_entry_key_t key = {.raw = v->kvp[k].key };
 	      l2fib_entry_result_t result = {.raw = v->kvp[k].value };
+
+	      /*
+	       * The scanner walks bihash value pages without holding
+	       * bucket locks, while concurrent writers (worker-thread
+	       * learning splitting a bucket, or entry deletion while
+	       * this process is suspended) may free those pages and
+	       * hand them back to the heap. A torn/stale read then
+	       * yields garbage indices; skip such entries instead of
+	       * dereferencing wild pointers. Note that filter entries
+	       * legitimately carry sw_if_index == ~0.
+	       */
+	      if (PREDICT_FALSE (key.fields.bd_index >=
+				 vec_len (l2input_main.bd_configs) ||
+				 (result.fields.sw_if_index >=
+				  vec_len (l2input_main.configs) &&
+				  result.fields.sw_if_index != ~0)))
+		continue;
 
 	      if (client)
 		{
