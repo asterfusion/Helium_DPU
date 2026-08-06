@@ -22,27 +22,22 @@
 static void
 handle_event1 (geosite_main_t *pm, f64 now, uword event_data)
 {
-  clib_warning ("received GEOSITE_EVENT1");
 }
 
 static void
 handle_event2 (geosite_main_t *pm, f64 now, uword event_data)
 {
-  clib_warning ("received GEOSITE_EVENT2");
 }
 
 static void
 handle_periodic_enable_disable (geosite_main_t *pm, f64 now, uword event_data)
 {
-   clib_warning ("Periodic timeouts now %s",
-     event_data ? "enabled" : "disabled");
    pm->periodic_timer_enabled = event_data;
 }
 
 static void
 handle_timeout (geosite_main_t *pm, f64 now)
 {
-  //clib_warning ("timeout at %.2f", now);
   return;
 }
 

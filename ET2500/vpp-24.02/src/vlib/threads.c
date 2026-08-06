@@ -1014,6 +1014,17 @@ vlib_worker_thread_node_refork (void)
       clib_memcpy_fast (rt->runtime_data, n->runtime_data,
 			clib_min (VLIB_NODE_RUNTIME_DATA_SIZE,
 				  n->runtime_data_bytes));
+
+    /* Recompute node_runtime_index using this worker's own layout. */
+    for (j = 0; j < rt->n_next_nodes; j++)
+      {
+	u32 next_node_index = n->next_nodes[j];
+	vlib_node_t *next_node = vlib_get_node (vm_clone, next_node_index);
+	vlib_next_frame_t *nf =
+	  &nm_clone->next_frames[rt->next_frame_index + j];
+
+	nf->node_runtime_index = next_node->runtime_index;
+      }
   }
 
   for (j = 0; j < vec_len (old_rt); j++)
@@ -1047,6 +1058,17 @@ vlib_worker_thread_node_refork (void)
       clib_memcpy_fast (rt->runtime_data, n->runtime_data,
 			clib_min (VLIB_NODE_RUNTIME_DATA_SIZE,
 				  n->runtime_data_bytes));
+
+    /* Recompute node_runtime_index using this worker's own layout. */
+    for (j = 0; j < rt->n_next_nodes; j++)
+      {
+	u32 next_node_index = n->next_nodes[j];
+	vlib_node_t *next_node = vlib_get_node (vm_clone, next_node_index);
+	vlib_next_frame_t *nf =
+	  &nm_clone->next_frames[rt->next_frame_index + j];
+
+	nf->node_runtime_index = next_node->runtime_index;
+      }
   }
 
   for (j = 0; j < vec_len (old_rt); j++)
@@ -1074,6 +1096,17 @@ vlib_worker_thread_node_refork (void)
       clib_memcpy_fast (rt->runtime_data, n->runtime_data,
 			clib_min (VLIB_NODE_RUNTIME_DATA_SIZE,
 				  n->runtime_data_bytes));
+
+    /* Recompute node_runtime_index using this worker's own layout. */
+    for (j = 0; j < rt->n_next_nodes; j++)
+      {
+	u32 next_node_index = n->next_nodes[j];
+	vlib_node_t *next_node = vlib_get_node (vm_clone, next_node_index);
+	vlib_next_frame_t *nf =
+	  &nm_clone->next_frames[rt->next_frame_index + j];
+
+	nf->node_runtime_index = next_node->runtime_index;
+      }
   }
 
   for (j = 0; j < vec_len (old_rt); j++)

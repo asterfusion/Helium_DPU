@@ -125,6 +125,7 @@ void *vlib_stats_set_heap ();
 void vlib_stats_segment_lock (void);
 void vlib_stats_segment_unlock (void);
 void vlib_stats_register_mem_heap (clib_mem_heap_t *);
+void vlib_stats_register_mem_heap_named (clib_mem_heap_t *, const char *);
 f64 vlib_stats_get_segment_update_rate (void);
 
 /* gauge */

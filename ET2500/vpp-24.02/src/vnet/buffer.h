@@ -65,8 +65,7 @@
   _ (16, IS_DVR, "dvr", 1)                                                    \
   _ (17, QOS_DATA_VALID, "qos-data-valid", 0)                                 \
   _ (18, GSO, "gso", 0)                                                       \
-  _ (19, AVAIL1, "avail1", 1)                                                 \
-  _ (20, TCP_ORIG_RX_SAVED, "tcp-orig-rx-saved", 1)
+  _ (19, TCP_ORIG_RX_SAVED, "tcp-orig-rx-saved", 1)
 
 /*
  * Please allocate the FIRST available bit, redefine
@@ -75,7 +74,7 @@
  */
 
 #define VNET_BUFFER_FLAGS_ALL_AVAIL                                           \
-  (VNET_BUFFER_F_AVAIL1)
+  (0)
 
 #define VNET_BUFFER_FLAGS_VLAN_BITS \
   (VNET_BUFFER_F_VLAN_1_DEEP | VNET_BUFFER_F_VLAN_2_DEEP)
@@ -511,7 +510,6 @@ typedef struct
   struct{
   u32 l2_rx_sw_if_index; /* store the orignal if index when bvi */
   u32 tc_index; /* store the traffic class index*/
-  char *geosite_domain_ptr; /* store the domain pointer for geosite */  
   u32 hqos_user_id;  /* store the hqos user id */
   u32 hqos_guser_id; /* store the hqos user group id */
   u32 actual_tx_sw_if_index;

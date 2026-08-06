@@ -277,7 +277,7 @@ static void
 	}
       else
 	{
-	  rv = nat44_ed_del_address (this_addr, twice_nat);
+	  rv = nat44_ed_del_address (this_addr, vrf_id, twice_nat);
 	}
 
       if (rv)
@@ -333,7 +333,7 @@ static void
 	}
       else
 	{
-	  rv = nat44_ed_del_address (this_addr, twice_nat);
+	  rv = nat44_ed_del_address (this_addr, vrf_id, twice_nat);
 	}
 
       if (rv)
@@ -566,6 +566,11 @@ static void
       flags |= NAT_SM_FLAG_OUT2IN_ONLY;
     }
 
+  if (mp->flags & NAT_API_IS_OUTSIDE)
+    {
+      flags |= NAT_SM_FLAG_DNAT;
+    }
+
   sw_if_index = clib_net_to_host_u32 (mp->external_sw_if_index);
   if (sw_if_index != ~0)
     {
@@ -652,6 +657,11 @@ static void
   if (mp->flags & NAT_API_IS_OUT2IN_ONLY)
     {
       flags |= NAT_SM_FLAG_OUT2IN_ONLY;
+    }
+
+  if (mp->flags & NAT_API_IS_OUTSIDE)
+    {
+      flags |= NAT_SM_FLAG_DNAT;
     }
 
   sw_if_index = clib_net_to_host_u32 (mp->external_sw_if_index);

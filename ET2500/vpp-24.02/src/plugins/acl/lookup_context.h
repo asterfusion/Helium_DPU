@@ -30,6 +30,10 @@ typedef struct {
 typedef struct {
   /* vector of acl #s within this context */
   u32 *acl_indices;
+  /* whether any ACL in this context needs geosite lookup */
+  u8 geosite_required;
+  /* whether any ACL in this context needs geoip lookup */
+  u8 geoip_required;
   /* index of corresponding acl_lookup_context_user_t */
   u32 context_user_id;
   /* per-instance user value 1 */
@@ -50,4 +54,3 @@ void acl_plugin_show_tables_applied_info (u32 sw_if_index);
 void acl_plugin_show_tables_bihash (u32 show_bihash_verbose);
 
 #endif
-

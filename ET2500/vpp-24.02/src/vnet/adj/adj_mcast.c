@@ -327,6 +327,32 @@ adj_mcast_walk (u32 sw_if_index,
     }
 }
 
+/**
+ * Callback function invoked when an interface's MAC Address changes
+ */
+static void
+adj_mcast_ethernet_change_mac (ethernet_main_t * em,
+                               u32 sw_if_index,
+                               uword opaque)
+{
+    /*
+     * the mcast adjacency's rewrite contains the interface's source MAC,
+     * so it needs refreshing when that MAC address changes
+     */
+    fib_protocol_t proto;
+
+    for (proto = FIB_PROTOCOL_IP4; proto <= FIB_PROTOCOL_IP6; proto++)
+    {
+	if (sw_if_index >= vec_len(adj_mcasts[proto]) ||
+	    ADJ_INDEX_INVALID == adj_mcasts[proto][sw_if_index])
+	    continue;
+
+	vnet_update_adjacency_for_sw_interface(vnet_get_main(),
+					       sw_if_index,
+					       adj_mcasts[proto][sw_if_index]);
+    }
+}
+
 u8*
 format_adj_mcast (u8* s, va_list *ap)
 {
@@ -484,4 +510,10 @@ adj_mcast_module_init (void)
     dpo_register(DPO_ADJACENCY_MCAST_MIDCHAIN,
                  &adj_mcast_midchain_dpo_vft,
                  adj_mcast_midchain_nodes);
+
+    ethernet_address_change_ctx_t ctx = {
+        .function = adj_mcast_ethernet_change_mac,
+        .function_opaque = 0,
+    };
+    vec_add1 (ethernet_main.address_change_callbacks, ctx);
 }

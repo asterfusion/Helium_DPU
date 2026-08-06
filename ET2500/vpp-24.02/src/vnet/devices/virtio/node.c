@@ -431,6 +431,7 @@ virtio_device_input_gso_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
               if (type == VIRTIO_IF_TYPE_TAP)
               {
 		virtio_handle_vrrp_no_nat(b0);
+                b0->flags |= VLIB_BUFFER_RECV_FROM_TAP;
               }
 	      /* copy feature arc data from template */
 	      b0->current_config_index = bt.current_config_index;
