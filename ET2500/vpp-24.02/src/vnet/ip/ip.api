@@ -226,6 +226,69 @@ define ip_route_add_del_v2_reply
   u32 stats_index;
 };
 
+/** \brief An IP route batch entry
+    @param table_id The IP table the route is in
+    @param stats_index The index of the route in the stats segment
+    @param is_multipath - Set to 1 if these paths will be added/removed
+                          to/from the existing set, or 0 to replace
+			  the existing set.
+    @param prefix the prefix for the route
+    @param n_paths The number of paths the route has (max 16)
+    @param src The entity adding the route. either 0 for default
+               or a value returned from fib_source_add.
+    @param paths The paths of the route (fixed size array, use n_paths valid entries)
+*/
+typedef ip_route_batch_entry
+{
+  u32 table_id;
+  u32 stats_index;
+  bool is_multipath;
+  vl_api_prefix_t prefix;
+  u8 n_paths;
+  u8 src;
+  vl_api_fib_path_t paths[16];
+};
+
+/** \brief Add / del route batch request
+    @param client_index - opaque cookie to identify the sender
+    @param context - sender context, to match reply w/ request
+    @param is_add - Are the paths being added or removed
+    @param n_routes - Number of routes in the batch
+    @param routes - Array of routes
+*/
+define ip_route_add_del_batch
+{
+  u32 client_index;
+  u32 context;
+  bool is_add [default=true];
+  u32 n_routes;
+  vl_api_ip_route_batch_entry_t routes[n_routes];
+};
+
+/** \brief An IP route batch result
+    @param retval - return code for this route
+    @param stats_index - stats segment index for this route
+*/
+typedef ip_route_batch_result
+{
+  i32 retval;
+  u32 stats_index;
+};
+
+/** \brief Add / del route batch reply
+    @param context - sender context
+    @param retval - return code. 0 if all routes succeeded, or first error encountered
+    @param n_results - Number of results (matches request n_routes)
+    @param results - Per-route results
+*/
+define ip_route_add_del_batch_reply
+{
+  u32 context;
+  i32 retval;
+  u32 n_results;
+  vl_api_ip_route_batch_result_t results[n_results];
+};
+
 /** \brief Dump IP routes from a table
     @param client_index - opaque cookie to identify the sender
     @param src The entity adding the route. either 0 for default

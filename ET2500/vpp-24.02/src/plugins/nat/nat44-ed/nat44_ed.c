@@ -577,6 +577,7 @@ nat44_ed_add_address (ip4_address_t *addr, u32 vrf_id, u8 twice_nat, u32 acl_ind
 {
   snat_main_t *sm = &snat_main;
   snat_address_t *ap, *addresses;
+  u32 fib_index = ~0;
 
   addresses = twice_nat ? sm->twice_nat_addresses : sm->addresses;
 
@@ -585,12 +586,22 @@ nat44_ed_add_address (ip4_address_t *addr, u32 vrf_id, u8 twice_nat, u32 acl_ind
       return VNET_API_ERROR_UNSUPPORTED;
     }
 
+  if (vrf_id != ~0)
+    {
+      fib_index = fib_table_find_or_create_and_lock (
+	FIB_PROTOCOL_IP4, vrf_id, sm->fib_src_low);
+    }
+
   // check if address already exists
   vec_foreach (ap, addresses)
     {
-      if (ap->addr.as_u32 == addr->as_u32)
+      if ((ap->addr.as_u32 == addr->as_u32) && (ap->fib_index == fib_index))
         {
           nat_log_err ("address exist");
+          if (fib_index != ~0)
+            {
+              fib_table_unlock (fib_index, FIB_PROTOCOL_IP4, sm->fib_src_low);
+            }
           return VNET_API_ERROR_VALUE_EXIST;
         }
     }
@@ -605,15 +616,9 @@ nat44_ed_add_address (ip4_address_t *addr, u32 vrf_id, u8 twice_nat, u32 acl_ind
     }
 
   ap->addr_len = ~0;
-  ap->fib_index = ~0;
+  ap->fib_index = fib_index;
   ap->addr = *addr;
   ap->acl_index = acl_index;
-
-  if (vrf_id != ~0)
-    {
-      ap->fib_index = fib_table_find_or_create_and_lock (
-	FIB_PROTOCOL_IP4, vrf_id, sm->fib_src_low);
-    }
 
   if (!twice_nat)
     {
@@ -626,20 +631,31 @@ nat44_ed_add_address (ip4_address_t *addr, u32 vrf_id, u8 twice_nat, u32 acl_ind
 }
 
 int
-nat44_ed_del_address (ip4_address_t addr, u8 twice_nat)
+nat44_ed_del_address (ip4_address_t addr, u32 vrf_id, u8 twice_nat)
 {
   snat_main_t *sm = &snat_main;
   snat_address_t *a = 0, *addresses;
   snat_session_t *ses;
   u32 *ses_to_be_removed = 0, *ses_index;
   snat_main_per_thread_data_t *tsm;
+  u32 fib_index = ~0;
   int j;
 
   addresses = twice_nat ? sm->twice_nat_addresses : sm->addresses;
 
+  if (vrf_id != ~0)
+    {
+      fib_index = fib_table_find (FIB_PROTOCOL_IP4, vrf_id);
+      if (fib_index == ~0)
+      {
+        nat_log_err ("no such vrf");
+        return VNET_API_ERROR_NO_SUCH_ENTRY;
+      }
+    }
+
   for (j = 0; j < vec_len (addresses); j++)
     {
-      if (addresses[j].addr.as_u32 == addr.as_u32)
+      if ((addresses[j].addr.as_u32 == addr.as_u32) && (addresses[j].fib_index == fib_index))
 	{
 	  a = addresses + j;
 	  break;
@@ -657,6 +673,10 @@ nat44_ed_del_address (ip4_address_t addr, u8 twice_nat)
       pool_foreach (ses, tsm->sessions)
 	{
 	  if (ses->flags & SNAT_SESSION_FLAG_STATIC_MAPPING)
+	    {
+	      continue;
+	    }
+	  if (a->fib_index != ~0 && ses->in2out.fib_index != a->fib_index)
 	    {
 	      continue;
 	    }
@@ -867,6 +887,9 @@ nat_ed_static_mapping_del_sessions (snat_main_t * sm,
       {
 	if (keep_proto && s->proto != protocol)
 	  continue;
+
+  if (s->out2in.addr.as_u32 != e_addr.as_u32)
+    continue;
       }
 
     if (nat44_ed_is_lb_session (s))
@@ -1132,6 +1155,7 @@ nat44_ed_add_static_mapping_internal (ip4_address_t l_addr,
   nat44_lb_addr_port_t *local;
   snat_static_mapping_t *m;
   u32 fib_index = ~0;
+  u32 o2i_fib_index = ~0;
 
   if (is_sm_addr_only (flags))
     {
@@ -1153,37 +1177,6 @@ nat44_ed_add_static_mapping_internal (ip4_address_t l_addr,
       l_addr.as_u32 = e_addr.as_u32;
     }
 
-  m = nat44_ed_sm_o2i_lookup (sm, e_addr, e_port, 0, proto);
-  if (m)
-    {
-      // case:
-      // adding local identity nat record for different vrf table
-
-      if (!is_sm_identity_nat (m->flags))
-	{
-	  return VNET_API_ERROR_VALUE_EXIST;
-	}
-
-      pool_foreach (local, m->locals)
-	{
-	  if (local->vrf_id == vrf_id)
-	    {
-	      return VNET_API_ERROR_VALUE_EXIST;
-	    }
-	}
-
-      pool_get (m->locals, local);
-
-      local->vrf_id = vrf_id;
-      local->fib_index = fib_table_find_or_create_and_lock (
-	FIB_PROTOCOL_IP4, vrf_id, sm->fib_src_low);
-
-      nat44_ed_sm_i2o_add (sm, m, m->local_addr, m->local_port,
-			   local->fib_index, m->proto);
-
-      return 0;
-    }
-
   if (vrf_id != ~0)
     {
       fib_index = fib_table_find_or_create_and_lock (FIB_PROTOCOL_IP4, vrf_id,
@@ -1197,12 +1190,64 @@ nat44_ed_add_static_mapping_internal (ip4_address_t l_addr,
       fib_table_lock (fib_index, FIB_PROTOCOL_IP4, sm->fib_src_low);
     }
 
+  o2i_fib_index = is_sm_dnat (flags) ? 0 : fib_index;
+
+  m = nat44_ed_sm_o2i_lookup (sm, e_addr, e_port, o2i_fib_index, proto);
+  if (m)
+    {
+      // case:
+      // adding local identity nat record for different vrf table
+
+      if (!is_sm_identity_nat (m->flags))
+	{
+	  clib_warning ("static add o2i exists: vrf_id %u fib_index %u "
+			"e %U:%u l %U:%u proto %u flags 0x%x "
+			"old_vrf %u old_fib %u old_flags 0x%x",
+			vrf_id, fib_index, format_ip4_address, &e_addr,
+			e_port, format_ip4_address, &l_addr, l_port, proto,
+			flags, m->vrf_id, m->fib_index, m->flags);
+	  fib_table_unlock (fib_index, FIB_PROTOCOL_IP4, sm->fib_src_low);
+	  return VNET_API_ERROR_VALUE_EXIST;
+	}
+
+      pool_foreach (local, m->locals)
+	{
+	  if (local->vrf_id == vrf_id)
+	    {
+	      clib_warning ("static add identity local exists: vrf_id %u "
+			    "fib_index %u e %U:%u l %U:%u proto %u "
+			    "flags 0x%x local_fib %u",
+			    vrf_id, fib_index, format_ip4_address, &e_addr,
+			    e_port, format_ip4_address, &l_addr, l_port,
+			    proto, flags, local->fib_index);
+	      fib_table_unlock (fib_index, FIB_PROTOCOL_IP4, sm->fib_src_low);
+	      return VNET_API_ERROR_VALUE_EXIST;
+	    }
+	}
+
+      pool_get (m->locals, local);
+
+      local->vrf_id = vrf_id;
+      local->fib_index = fib_index;
+
+      nat44_ed_sm_i2o_add (sm, m, m->local_addr, m->local_port,
+			   local->fib_index, m->proto);
+
+      return 0;
+    }
+
   // test if local mapping record doesn't exist
   // identity nat supports multiple records in local mapping
   if (!(is_sm_out2in_only (flags) || is_sm_identity_nat (flags)))
     {
       if (nat44_ed_sm_i2o_lookup (sm, l_addr, l_port, fib_index, proto))
 	{
+	  clib_warning ("static add i2o exists: vrf_id %u fib_index %u "
+			"e %U:%u l %U:%u proto %u flags 0x%x",
+			vrf_id, fib_index, format_ip4_address, &e_addr,
+			e_port, format_ip4_address, &l_addr, l_port, proto,
+			flags);
+	  fib_table_unlock (fib_index, FIB_PROTOCOL_IP4, sm->fib_src_low);
 	  return VNET_API_ERROR_VALUE_EXIST;
 	}
     }
@@ -1249,7 +1294,8 @@ nat44_ed_add_static_mapping_internal (ip4_address_t l_addr,
 			   m->proto);
     }
 
-  nat44_ed_sm_o2i_add (sm, m, m->external_addr, m->external_port, 0, m->proto);
+  nat44_ed_sm_o2i_add (sm, m, m->external_addr, m->external_port,
+                       o2i_fib_index, m->proto);
 
   if (sm->num_workers > 1)
     {
@@ -1280,6 +1326,7 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
   nat44_lb_addr_port_t *local;
   snat_static_mapping_t *m;
   u32 fib_index = ~0;
+  u32 o2i_fib_index = ~0;
 
   if (is_sm_addr_only (flags))
     {
@@ -1301,8 +1348,19 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
       l_addr.as_u32 = e_addr.as_u32;
     }
 
-  // fib index 0
-  m = nat44_ed_sm_o2i_lookup (sm, e_addr, e_port, 0, proto);
+  if (vrf_id == ~0)
+    {
+      vrf_id = sm->inside_vrf_id;
+    }
+
+  fib_index = fib_table_find (FIB_PROTOCOL_IP4, vrf_id);
+  if (fib_index == ~0)
+    {
+      return VNET_API_ERROR_NO_SUCH_ENTRY;
+    }
+  o2i_fib_index = is_sm_dnat (flags) ? 0 : fib_index;
+
+  m = nat44_ed_sm_o2i_lookup (sm, e_addr, e_port, o2i_fib_index, proto);
   if (!m)
     {
       return VNET_API_ERROR_NO_SUCH_ENTRY;
@@ -1381,8 +1439,7 @@ nat44_ed_del_static_mapping_internal (ip4_address_t l_addr,
   if (!pool_elts (m->locals))
     {
       // this is last record remove all required stuff
-      // fib_index 0
-      nat44_ed_sm_o2i_del (sm, e_addr, e_port, 0, proto);
+      nat44_ed_sm_o2i_del (sm, e_addr, e_port, o2i_fib_index, proto);
 
       vec_free (m->tag);
       vec_free (m->workers);
@@ -2640,7 +2697,13 @@ nat44_ed_del_addresses ()
   vec = vec_dup (sm->addresses);
   vec_foreach (a, vec)
     {
-      error = nat44_ed_del_address (a->addr, 0);
+      u32 vrf_id = ~0;
+      if (a->fib_index != ~0)
+	{
+	  fib_table_t *fib = fib_table_get (a->fib_index, FIB_PROTOCOL_IP4);
+	  vrf_id = fib->ft_table_id;
+	}
+      error = nat44_ed_del_address (a->addr, vrf_id, 0);
       if (error)
 	{
 	  nat_log_err ("error occurred while removing adderess");
@@ -2653,7 +2716,13 @@ nat44_ed_del_addresses ()
   vec = vec_dup (sm->twice_nat_addresses);
   vec_foreach (a, vec)
     {
-      error = nat44_ed_del_address (a->addr, 1);
+      u32 vrf_id = ~0;
+      if (a->fib_index != ~0)
+      {
+        fib_table_t *fib = fib_table_get (a->fib_index, FIB_PROTOCOL_IP4);
+        vrf_id = fib->ft_table_id;
+      }
+      error = nat44_ed_del_address (a->addr, vrf_id, 1);
       if (error)
 	{
 	  nat_log_err ("error occurred while removing adderess");
@@ -2832,9 +2901,14 @@ int
 nat44_plugin_disable ()
 {
   snat_main_t *sm = &snat_main;
+  vlib_main_t *vm = vlib_get_main ();
   int rc, error = 0;
 
   fail_if_disabled ();
+
+  /* Make sure no worker is concurrently walking NAT state while we free
+   * it (e.g. sm->max_translations_per_fib). */
+  vlib_worker_thread_barrier_sync (vm);
 
   rc = nat44_ed_del_static_mappings ();
   if (rc)
@@ -2865,6 +2939,8 @@ nat44_plugin_disable ()
 
   sm->forwarding_enabled = 0;
   sm->enabled = 0;
+
+  vlib_worker_thread_barrier_release (vm);
 
   //nat44-ed ha sync unregister
   nat44_ed_ha_sync_unregister();
@@ -2978,21 +3054,40 @@ nat44_ed_sm_match (snat_main_t *sm, ip4_address_t match_addr, u16 match_port,
   else
     {
       m =
-	nat44_ed_sm_o2i_lookup (sm, match_addr, match_port, 0, match_protocol);
+	nat44_ed_sm_o2i_lookup (sm, match_addr, match_port, match_fib_index, match_protocol);
       if (m)
 	return m;
 
 #ifdef SUPPORT_NAT_PROTO
       // try address+proto mapping
-      m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, 0, match_protocol);
+      m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, match_fib_index, match_protocol);
       if (m)
           return m;
 #endif
 
       // try address only mapping
-      m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, 0, 0);
+      m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, match_fib_index, 0);
       if (m)
 	return m;
+
+      if (match_fib_index != 0)
+    {
+      m = nat44_ed_sm_o2i_lookup (sm, match_addr, match_port, 0,
+                match_protocol);
+      if (m)
+        return m;
+
+  #ifdef SUPPORT_NAT_PROTO
+      m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, 0,
+                match_protocol);
+      if (m)
+        return m;
+  #endif
+
+      m = nat44_ed_sm_o2i_lookup (sm, match_addr, 0, 0, 0);
+      if (m)
+        return m;
+    }
     }
   return 0;
 }
@@ -3333,7 +3428,11 @@ nat44_ed_get_out2in_worker_index (vlib_buffer_t *b, ip4_header_t *ip,
   /* first try static mappings without port */
   if (PREDICT_FALSE (pool_elts (sm->static_mappings)))
     {
-      m = nat44_ed_sm_o2i_lookup (sm, ip->dst_address, 0, 0, proto);
+      m = nat44_ed_sm_o2i_lookup (sm, ip->dst_address, 0, rx_fib_index, proto);
+      if (!m && rx_fib_index != 0)
+      {
+        m = nat44_ed_sm_o2i_lookup (sm, ip->dst_address, 0, 0, proto);
+      }
       if (m)
 	{
 	  {
@@ -3389,7 +3488,12 @@ nat44_ed_get_out2in_worker_index (vlib_buffer_t *b, ip4_header_t *ip,
   /* try static mappings with port */
   if (PREDICT_FALSE (pool_elts (sm->static_mappings)))
     {
-      m = nat44_ed_sm_o2i_lookup (sm, ip->dst_address, port, 0, proto);
+      m = nat44_ed_sm_o2i_lookup (sm, ip->dst_address, port, rx_fib_index,
+				  proto);
+      if (!m && rx_fib_index != 0)
+      {
+        m = nat44_ed_sm_o2i_lookup (sm, ip->dst_address, port, 0, proto);
+      }
       if (m)
 	{
 	  if (!is_sm_lb (m->flags))
@@ -3734,7 +3838,8 @@ nat44_ed_add_del_interface_address_cb (ip4_main_t *im, uword opaque,
 	  return;
 	}
 
-      rv = nat44_ed_del_address (address[0], arp->is_twice_nat);
+      ip4_fib_t *fib = ip4_fib_get (fib_index);
+      rv = nat44_ed_del_address (address[0], fib->hash.table_id, arp->is_twice_nat);
       if (0 == rv)
 	{
 	  arp->is_resolved = 0;
@@ -3807,7 +3912,9 @@ nat44_ed_del_interface_address (u32 sw_if_index, u8 twice_nat)
   first_int_addr = ip4_interface_first_address (ip4_main, sw_if_index, 0);
   if (first_int_addr)
     {
-      return nat44_ed_del_address (first_int_addr[0], twice_nat);
+      u32 fib_index = ip4_fib_table_get_index_for_sw_if_index(sw_if_index);
+      ip4_fib_t *fib = ip4_fib_get (fib_index);
+      return nat44_ed_del_address (first_int_addr[0], fib->hash.table_id, twice_nat);
     }
 
   return 0;
@@ -3878,6 +3985,10 @@ VLIB_REGISTER_NODE (nat_default_node) = {
     [NAT_NEXT_OUT2IN_ED_SLOW_PATH] = "nat44-ed-out2in-slowpath",
     [NAT_NEXT_IN2OUT_CLASSIFY] = "nat44-in2out-worker-handoff",
     [NAT_NEXT_OUT2IN_CLASSIFY] = "nat44-out2in-worker-handoff",
+    [NAT_NEXT_IN2OUT_OUTPUT_CLASSIFY] = "nat44-in2out-output-worker-handoff",
+    [NAT_NEXT_IN2OUT_RECLASSIFY] = "nat44-in2out-worker-rehandoff",
+    [NAT_NEXT_OUT2IN_RECLASSIFY] = "nat44-out2in-worker-rehandoff",
+    [NAT_NEXT_IN2OUT_OUTPUT_RECLASSIFY] = "nat44-in2out-output-worker-rehandoff",
   },
 };
 

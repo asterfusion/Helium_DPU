@@ -97,9 +97,19 @@ cnxk_pktio_chain_segs (vlib_main_t *vm, const cnxk_pktio_nix_parse_t *rxp0,
   seg_len = seg_len >> CNXK_SEG_LEN_SHIFT;
   n_words_processed = 2;
 
-  buf->flags |= VLIB_BUFFER_TOTAL_LENGTH_VALID;
-  buf->total_length_not_including_first_buffer = 0;
+  //buf->flags |= VLIB_BUFFER_TOTAL_LENGTH_VALID;
+  //buf->total_length_not_including_first_buffer = 0;
+
+  if (!(buf->flags & VLIB_BUFFER_TOTAL_LENGTH_VALID))
+  {
+      buf->flags |= VLIB_BUFFER_TOTAL_LENGTH_VALID;
+      buf->total_length_not_including_first_buffer = 0;
+  }
   last_buf = buf;
+  while (last_buf->flags & VLIB_BUFFER_NEXT_PRESENT)
+  {
+      last_buf = vlib_get_next_buffer (vm, last_buf);
+  }
 
   while (current_desc <= n_sg_desc)
     {
@@ -219,6 +229,15 @@ cnxk_pktio_init_vlib_from_cq (vlib_main_t *vm, i32 data_off, u64 *cq_hdr,
       rxp = orig_rxp;
       /* Set the outer packet length when IPsec operation is unsuccessful */
       b->current_length = olen;
+      if (off_flags & CNXK_PKTIO_RX_OFF_FLAG_MSEG)
+      {
+          *n_segs += cnxk_pktio_chain_segs (vm, orig_rxp, bt, b, data_off,
+                                            fp_flags, off_flags, 0 /* is_ipsec */);
+      }
+      else
+      {
+          *n_segs += 1;
+      }
     }
   else
     {
@@ -434,6 +453,12 @@ cnxk_pktio_process_ipsec_pkts_x4 (
 	   * unsuccessful
 	   */
 	  buffer0->current_length = olen0;
+          if (off_flags & CNXK_PKTIO_RX_OFF_FLAG_MSEG)
+            *n_segs +=
+              cnxk_pktio_chain_segs (vm, orig_rxp0, bt, buffer0, data_off,
+                                     fp_flags, off_flags, 0 /* is_ipsec */);
+          else
+            *n_segs += 1;
 	}
       else
 	{
@@ -461,6 +486,13 @@ cnxk_pktio_process_ipsec_pkts_x4 (
 	{
 	  rxp1 = orig_rxp1;
 	  buffer1->current_length = olen1;
+          if (off_flags & CNXK_PKTIO_RX_OFF_FLAG_MSEG)
+            *n_segs +=
+              cnxk_pktio_chain_segs (vm, orig_rxp1, bt, buffer1, data_off,
+                                     fp_flags, off_flags, 0 /* is_ipsec */);
+          else
+            *n_segs += 1;
+
 	}
       else
 	{
@@ -487,6 +519,12 @@ cnxk_pktio_process_ipsec_pkts_x4 (
 	{
 	  rxp2 = orig_rxp2;
 	  buffer2->current_length = olen2;
+          if (off_flags & CNXK_PKTIO_RX_OFF_FLAG_MSEG)
+            *n_segs +=
+              cnxk_pktio_chain_segs (vm, orig_rxp2, bt, buffer2, data_off,
+                                     fp_flags, off_flags, 0 /* is_ipsec */);
+          else
+            *n_segs += 1;
 	}
       else
 	{
@@ -513,6 +551,12 @@ cnxk_pktio_process_ipsec_pkts_x4 (
 	{
 	  rxp3 = orig_rxp3;
 	  buffer3->current_length = olen3;
+          if (off_flags & CNXK_PKTIO_RX_OFF_FLAG_MSEG)
+            *n_segs +=
+              cnxk_pktio_chain_segs (vm, orig_rxp3, bt, buffer3, data_off,
+                                     fp_flags, off_flags, 0 /* is_ipsec */);
+          else
+            *n_segs += 1;
 	}
       else
 	{

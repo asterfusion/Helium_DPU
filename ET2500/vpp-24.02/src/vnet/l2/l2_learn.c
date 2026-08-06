@@ -105,6 +105,24 @@ typedef enum
   L2LEARN_N_NEXT,
 } l2learn_next_t;
 
+typedef struct
+{
+  u8 overwritten;
+  u8 overwritten_age_not;
+} l2learn_overwrite_ctx_t;
+
+static void
+l2learn_overwrite_cb (BVT (clib_bihash_kv) * old_kv, void *arg)
+{
+  l2learn_overwrite_ctx_t *ctx = arg;
+  l2fib_entry_result_t old_result = {
+    .raw = old_kv->value,
+  };
+
+  ctx->overwritten = 1;
+  ctx->overwritten_age_not = l2fib_entry_result_is_set_AGE_NOT (&old_result);
+}
+
 
 /** Perform learning on one packet based on the mac table lookup result. */
 
@@ -121,6 +139,7 @@ l2learn_process (vlib_node_runtime_t * node,
 {
   l2_bridge_domain_t *bd_config =
     vec_elt_at_index (l2input_main.bd_configs, vnet_buffer (b0)->l2.bd_index);
+  u8 reserved_limits = 0;
   /* Set up the default next node (typically L2FWD) */
   *next0 = vnet_l2_feature_next (b0, msm->feat_next_node_index,
 				 L2INPUT_FEAT_LEARN);
@@ -137,9 +156,11 @@ l2learn_process (vlib_node_runtime_t * node,
 	return;			/* MAC entry up to date */
       if (l2fib_entry_result_is_set_AGE_NOT (result0))
 	return;			/* Static MAC always age_not */
-      if (msm->global_learn_count > msm->global_learn_limit)
+      if (clib_atomic_load_relax_n (&msm->global_learn_count) >
+	  msm->global_learn_limit)
 	return;			/* Above learn limit - do not update */
-      if (bd_config->learn_count > bd_config->learn_limit)
+      if (clib_atomic_load_relax_n (&bd_config->learn_count) >
+	  bd_config->learn_limit)
 	return; /* Above bridge domain learn limit - do not update */
 
       /* Limit updates per l2-learn node call to avoid prolonged update burst
@@ -154,18 +175,9 @@ l2learn_process (vlib_node_runtime_t * node,
   else if (result0->raw == ~0)
     {
       /* Entry not in L2FIB - add it  */
-      counter_base[L2LEARN_ERROR_MISS] += 1;
+      l2learn_overwrite_ctx_t overwrite_ctx = { 0 };
 
-      if ((msm->global_learn_count >= msm->global_learn_limit) ||
-	  (bd_config->learn_count >= bd_config->learn_limit))
-	{
-	  /*
-	   * Global limit reached. Do not learn the mac but forward the packet.
-	   * In the future, limits could also be per-interface or bridge-domain.
-	   */
-	  counter_base[L2LEARN_ERROR_LIMIT] += 1;
-	  return;
-	}
+      counter_base[L2LEARN_ERROR_MISS] += 1;
 
       /* Do not learn if mac is 0 */
       l2fib_entry_key_t key = *key0;
@@ -173,18 +185,49 @@ l2learn_process (vlib_node_runtime_t * node,
       if (key.raw == 0)
 	return;
 
-      /* It is ok to learn */
-      /* learn_count variable may have little inaccuracy because they are not
-       * incremented/decremented with atomic operations */
-      /* l2fib_scan is call every 2sec fixing potential inaccuracy */
-      msm->global_learn_count++;
-      bd_config->learn_count++;
+      if (!l2learn_count_reserve (&msm->global_learn_count,
+				  msm->global_learn_limit))
+	{
+	  counter_base[L2LEARN_ERROR_LIMIT] += 1;
+	  return;
+	}
+      if (!l2learn_count_reserve (&bd_config->learn_count,
+				  bd_config->learn_limit))
+	{
+	  l2learn_count_release (&msm->global_learn_count);
+	  counter_base[L2LEARN_ERROR_LIMIT] += 1;
+	  return;
+	}
+
+      reserved_limits = 1;
       result0->raw = 0;		/* clear all fields */
       result0->fields.sw_if_index = sw_if_index0;
       if (msm->client_pid != 0)
 	l2fib_entry_result_set_LRN_EVT (result0);
       else
 	l2fib_entry_result_clear_LRN_EVT (result0);
+
+      /* Another worker may have learned the same key after the search but
+       * before this add. Roll back the reserved quota if we only overwrote an
+       * already dynamic entry. */
+      result0->fields.timestamp = timestamp;
+      result0->fields.sn = vnet_buffer (b0)->l2.l2fib_sn;
+
+      BVT (clib_bihash_kv) kv = {
+	.key = key0->raw,
+	.value = result0->raw,
+      };
+      BV (clib_bihash_add_with_overwrite_cb)
+	(msm->mac_table, &kv, l2learn_overwrite_cb, &overwrite_ctx);
+
+      if (overwrite_ctx.overwritten && !overwrite_ctx.overwritten_age_not)
+	{
+	  l2learn_count_release (&bd_config->learn_count);
+	  l2learn_count_release (&msm->global_learn_count);
+	}
+
+      cached_key->raw = ~0;
+      return;
     }
   else
     {
@@ -213,18 +256,31 @@ l2learn_process (vlib_node_runtime_t * node,
        * TODO: may want to rate limit mac moves
        * TODO: check global/bridge domain/interface learn limits
        */
-      result0->fields.sw_if_index = sw_if_index0;
       if (l2fib_entry_result_is_set_AGE_NOT (result0))
 	{
-	  /* The mac was provisioned */
-	  /* learn_count variable may have little inaccuracy because they are
-	   * not incremented/decremented with atomic operations */
-	  /* l2fib_scan is call every 2sec fixing potential inaccuracy */
-	  msm->global_learn_count++;
-	  bd_config->learn_count++;
-
-	  l2fib_entry_result_clear_AGE_NOT (result0);
+	  if (!l2learn_count_reserve (&msm->global_learn_count,
+				      msm->global_learn_limit))
+	    {
+	      counter_base[L2LEARN_ERROR_LIMIT] += 1;
+	      return;
+	    }
+	  else
+	    {
+	      if (!l2learn_count_reserve (&bd_config->learn_count,
+					  bd_config->learn_limit))
+		{
+		  l2learn_count_release (&msm->global_learn_count);
+		  counter_base[L2LEARN_ERROR_LIMIT] += 1;
+		  return;
+		}
+	      else
+		{
+		  reserved_limits = 1;
+		  l2fib_entry_result_clear_AGE_NOT (result0);
+		}
+	    }
 	}
+      result0->fields.sw_if_index = sw_if_index0;
       if (msm->client_pid != 0)
 	l2fib_entry_result_set_bits (result0,
 				     (L2FIB_ENTRY_RESULT_FLAG_LRN_EVT |
@@ -243,7 +299,24 @@ l2learn_process (vlib_node_runtime_t * node,
   BVT (clib_bihash_kv) kv;
   kv.key = key0->raw;
   kv.value = result0->raw;
-  BV (clib_bihash_add_del) (msm->mac_table, &kv, 1 /* is_add */ );
+
+  if (reserved_limits)
+    {
+      l2learn_overwrite_ctx_t overwrite_ctx = { 0 };
+
+      BV (clib_bihash_add_with_overwrite_cb)
+	(msm->mac_table, &kv, l2learn_overwrite_cb, &overwrite_ctx);
+
+      if (overwrite_ctx.overwritten && !overwrite_ctx.overwritten_age_not)
+	{
+	  l2learn_count_release (&bd_config->learn_count);
+	  l2learn_count_release (&msm->global_learn_count);
+	}
+    }
+  else
+    {
+      BV (clib_bihash_add_del) (msm->mac_table, &kv, 1 /* is_add */ );
+    }
 
   /* Invalidate the cache */
   cached_key->raw = ~0;

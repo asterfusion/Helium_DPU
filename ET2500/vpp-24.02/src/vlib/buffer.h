@@ -79,7 +79,7 @@
   _ (6, ACL_INDEX_VALID, "acl-index-valid")                                   \
   _ (7, NOT_PHY_INTF, "not-phy-intf")                                         \
   _ (8, SPI_SESSION_VALID, "spi-session-valid")                               \
-  _ (9, DOMAIN_VALID, "domain-valid")                                         \
+  _ (9, RECV_FROM_TAP, "recv-from-tap")                                         \
   _ (10, ACL_SET_TC_VALID, "acl-set-tc-valid")                                \
   _ (11, ACL_SET_USER_VALID, "acl-set-user-valid")                            \
   _ (12, ACL_SET_GUSER_IP_RANGE_VALID, "acl-set-guser-ip-range-valid")
@@ -101,10 +101,17 @@ enum
 #undef _
 };
 
+/*punt-from-wg and dpu-to-host-hdr-valid use the same vlue for dpu-to-host-hdr-valid is currently not being used*/
+#define VLIB_BUFFER_PUNT_FROM_WG      VLIB_BUFFER_DPU_TO_HOST_HDR_VALID
+
+/*recv-from-tap and domain-valid use the same vlue for domain-valid is currently not being used*/
+#define VLIB_BUFFER_DOMAIN_VALID      VLIB_BUFFER_RECV_FROM_TAP
+
+
   /* User defined buffer flags. */
 #define LOG2_VLIB_BUFFER_FLAG_USER(n) (32 - (n))
 #define VLIB_BUFFER_FLAG_USER(n) (1 << LOG2_VLIB_BUFFER_FLAG_USER(n))
-#define VLIB_BUFFER_FLAGS_ALL (0xfff)
+#define VLIB_BUFFER_FLAGS_ALL (0x1fff)
 
 /** \brief Compile time buffer trajectory tracing option
     Turn this on if you run into "bad monkey" contexts,

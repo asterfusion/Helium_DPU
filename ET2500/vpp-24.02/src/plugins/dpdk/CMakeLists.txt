@@ -127,6 +127,7 @@ endif()
 
 add_vpp_plugin(dpdk
   SOURCES
+  api/api.c
   buffer.c
   main.c
   device/cli.c
@@ -145,6 +146,9 @@ add_vpp_plugin(dpdk
   buffer.c
   device/device.c
   device/node.c
+
+  API_FILES
+  api/dpdk.api
 
   INSTALL_HEADERS
   device/dpdk.h

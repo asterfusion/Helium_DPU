@@ -199,7 +199,7 @@ vl_socket_client_write_internal (socket_client_main_t * scm)
 
   if (n < len)
     {
-      clib_unix_warning ("socket write (msg)");
+      clib_unix_warning ("socket write (msg) : need write %d, write %d", len, n);
       return -1;
     }
 

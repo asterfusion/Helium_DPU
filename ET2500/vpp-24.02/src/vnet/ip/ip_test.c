@@ -55,6 +55,20 @@ api_ip_route_add_del_v2 (vat_main_t *vam)
   return -1;
 }
 
+static int
+api_ip_route_add_del_batch (vat_main_t *vam)
+{
+  return -1;
+}
+
+static void
+vl_api_ip_route_add_del_batch_reply_t_handler (
+  vl_api_ip_route_add_del_batch_reply_t *mp)
+{
+  vat_main_t *vam = ip_test_main.vat_main;
+  vam->result_ready = 1;
+}
+
 static void
 set_ip4_address (vl_api_address_t *a, u32 v)
 {

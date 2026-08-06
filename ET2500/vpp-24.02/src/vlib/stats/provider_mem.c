@@ -47,22 +47,28 @@ stat_provider_mem_usage_update_fn (vlib_stats_collector_data_t *d)
  * Two dimensional array of heap index and per-heap gauges.
  */
 void
-vlib_stats_register_mem_heap (clib_mem_heap_t *heap)
+vlib_stats_register_mem_heap_named (clib_mem_heap_t *heap, const char *name)
 {
   vlib_stats_collector_reg_t r = {};
   u32 idx;
 
   vec_add1 (memory_heaps_vec, heap);
 
-  r.entry_index = idx = vlib_stats_add_counter_vector ("/mem/%s", heap->name);
+  r.entry_index = idx = vlib_stats_add_counter_vector ("/mem/%s", name);
   vlib_stats_validate (idx, 0, STAT_MEM_RELEASABLE);
 
   /* Create symlink */
-  vlib_stats_add_symlink (idx, STAT_MEM_USED, "/mem/%s/used", heap->name);
-  vlib_stats_add_symlink (idx, STAT_MEM_TOTAL, "/mem/%s/total", heap->name);
-  vlib_stats_add_symlink (idx, STAT_MEM_FREE, "/mem/%s/free", heap->name);
+  vlib_stats_add_symlink (idx, STAT_MEM_USED, "/mem/%s/used", name);
+  vlib_stats_add_symlink (idx, STAT_MEM_TOTAL, "/mem/%s/total", name);
+  vlib_stats_add_symlink (idx, STAT_MEM_FREE, "/mem/%s/free", name);
 
   r.private_data = vec_len (memory_heaps_vec) - 1;
   r.collect_fn = stat_provider_mem_usage_update_fn;
   vlib_stats_register_collector_fn (&r);
+}
+
+void
+vlib_stats_register_mem_heap (clib_mem_heap_t *heap)
+{
+  vlib_stats_register_mem_heap_named (heap, heap->name);
 }

@@ -366,6 +366,7 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
                 s = pool_elt_at_index (sm->per_thread_data[s_thread_index].sessions,
                                        ed_value_get_session_index (&value_i2o));
                 s->flags |= SNAT_SESSION_FLAG_HA_ORPHAN;
+                clib_bihash_add_del_16_8 (&sm->flow_hash, &kv_i2o, 0);
             }
 
             s_thread_index = ed_value_get_thread_index(&value_o2i);
@@ -381,6 +382,7 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
                 s = pool_elt_at_index (sm->per_thread_data[s_thread_index].sessions,
                                        ed_value_get_session_index (&value_o2i));
                 s->flags |= SNAT_SESSION_FLAG_HA_ORPHAN;
+                clib_bihash_add_del_16_8 (&sm->flow_hash, &kv_o2i, 0);
             }
 
             goto session_create;
@@ -407,6 +409,7 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
             s = pool_elt_at_index (sm->per_thread_data[s_thread_index].sessions,
                                    ed_value_get_session_index (&value_i2o));
             s->flags |= SNAT_SESSION_FLAG_HA_ORPHAN;
+            clib_bihash_add_del_16_8 (&sm->flow_hash, &kv_i2o, 0);
         }
 
         goto session_create;
@@ -432,6 +435,7 @@ nat44_ed_ha_sync_flow_add(u32 thread_index, nat44_ed_ha_sync_flow_data_t *data, 
             s = pool_elt_at_index (sm->per_thread_data[s_thread_index].sessions,
                                    ed_value_get_session_index (&value_o2i));
             s->flags |= SNAT_SESSION_FLAG_HA_ORPHAN;
+            clib_bihash_add_del_16_8 (&sm->flow_hash, &kv_o2i, 0);
         }
 
         goto session_create;
