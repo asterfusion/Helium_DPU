@@ -39,12 +39,16 @@ typedef wireguard_interface
 };
 
 /** \brief Create an Wireguard interface
+    @param n_route_dst_ips - number of prefixes in route_dst_ips
+    @param route_dst_ips - flow redirect ip prefixes
  */
 define wireguard_interface_create {
   u32 client_index;
   u32 context;
   vl_api_wireguard_interface_t interface;
   bool generate_key;
+  u8 n_route_dst_ips;
+  vl_api_prefix_t route_dst_ips[n_route_dst_ips];
 };
 
 /** \brief Add Wireguard interface interface response
