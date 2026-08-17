@@ -202,6 +202,12 @@ counters arp {
     units "packets";
     description "RX interface is unnumbered to different subnet";
   };
+  reply_suppressed_linux_owner {
+    severity info;
+    type counter64;
+    units "packets";
+    description "ARP reply suppressed because Linux is the reply owner";
+  };
 };
 
 paths {
