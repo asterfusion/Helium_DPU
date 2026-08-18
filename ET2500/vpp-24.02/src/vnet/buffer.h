@@ -514,7 +514,10 @@ typedef struct
   u32 hqos_guser_id; /* store the hqos user group id */
   u32 actual_tx_sw_if_index;
   u8 tc_index_dpo; /* store the traffic class dpo */
-
+  /*
+  * Set by linux-cp-arp-phy when an ARP packet has been
+  * successfully copied and queued for the Linux host interface.*/
+  u8 lcp_arp_host_copy_done;
   };
 
   u32 unused[8];

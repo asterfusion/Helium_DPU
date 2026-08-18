@@ -247,6 +247,7 @@ arp_input (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	  n_left_to_next -= 1;
 
 	  p0 = vlib_get_buffer (vm, pi0);
+	  vnet_buffer2 (p0)->lcp_arp_host_copy_done = 0;
 	  arp0 = vlib_buffer_get_current (p0);
 
 	  error0 = ARP_ERROR_REPLIES_SENT;
@@ -397,7 +398,7 @@ arp_reply (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	  ethernet_header_t *eth_rx;
 	  const ip4_address_t *if_addr0;
 	  u32 pi0, error0, next0, sw_if_index0, conn_sw_if_index0, fib_index0;
-	  u8 dst_is_local0, is_vrrp_reply0;
+	  u8 dst_is_local0, is_vrrp_reply0, is_unnumbered0;
 	  fib_node_index_t dst_fei, src_fei;
 	  const fib_prefix_t *pfx0;
 	  fib_entry_flag_t src_flags, dst_flags;
@@ -417,6 +418,7 @@ arp_reply (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	  next0 = ARP_REPLY_NEXT_DROP;
 	  error0 = ARP_ERROR_REPLIES_SENT;
 	  sw_if_index0 = vnet_buffer (p0)->sw_if_index[VLIB_RX];
+	  is_unnumbered0 = 0;
 
 	  /* Check that IP address is local and matches incoming interface. */
 	  fib_index0 = ip4_fib_table_get_index_for_sw_if_index (sw_if_index0);
@@ -634,6 +636,12 @@ arp_reply (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 		  error0 = ARP_ERROR_UNNUMBERED_MISMATCH;
 		  goto drop;
 		}
+		    /*
+			* The request is valid through an unnumbered relationship.
+			* Keep VPP Reply enabled because Linux arp_ignore=2 may not
+			* answer for an address configured on another interface.
+			*/
+		is_unnumbered0 = 1;
 	    }
 	  if (arp0->ip4_over_ethernet[0].ip4.as_u32 ==
 	      arp0->ip4_over_ethernet[1].ip4.as_u32)
@@ -641,6 +649,34 @@ arp_reply (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	      error0 = ARP_ERROR_GRATUITOUS_ARP;
 	      goto drop;
 	    }
+
+/*
+ * AsterNOS uses Linux as the ARP Reply owner for ordinary local
+ * addresses on LCP-enabled interfaces.
+ *
+ * Suppress the VPP Reply only after all of the following have
+ * already been validated:
+ *
+ *  - the packet is an ARP Request;
+ *  - the target address is a VPP local address;
+ *  - source and destination interface checks passed;
+ *  - this is not a gratuitous ARP;
+ *  - this is not an unnumbered fallback case;
+ *  - linux-cp-arp-phy successfully copied the Request to Linux.
+ *
+ * If the Linux copy was not created, keep the original VPP Reply
+ * path as a fail-open fallback.
+ */
+if (arp0->opcode ==
+      clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_request) &&
+    dst_is_local0 &&
+    !is_unnumbered0 &&
+    vnet_buffer2 (p0)->lcp_arp_host_copy_done)
+  {
+    error0 = ARP_ERROR_REPLY_SUPPRESSED_LINUX_OWNER;
+    goto drop;
+  }
+
 
 	  next0 = arp_mk_reply (vnm, p0, sw_if_index0,
 				if_addr0, arp0, eth_rx);
