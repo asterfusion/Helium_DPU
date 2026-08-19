@@ -483,6 +483,10 @@ void wg_peer_src_init(wg_peer_t *peer)
         {
             peer->src.addr.ip4.data_u32 = r4->data_u32;
         }
+        else
+        {
+            peer->src.addr.ip4.data_u32 = 0;
+        }
     }
 
     else
@@ -501,6 +505,11 @@ void wg_peer_src_init(wg_peer_t *peer)
         {
             peer->src.addr.ip6.as_u64[0] = r6->as_u64[0];
             peer->src.addr.ip6.as_u64[1] = r6->as_u64[1];
+        }
+        else
+        {
+            peer->src.addr.ip6.as_u64[0] = 0;
+            peer->src.addr.ip6.as_u64[1] = 0;
         }
     }
 
