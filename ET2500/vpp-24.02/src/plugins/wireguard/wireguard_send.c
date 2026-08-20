@@ -163,7 +163,7 @@ wg_send_handshake (vlib_main_t * vm, wg_peer_t * peer, bool is_retry)
 {
   ASSERT (vm->thread_index == 0);
 
-  if (!wg_peer_can_send (peer))
+  if (!wg_peer_can_send (peer) || !wg_peer_src_resolved (peer))
     return false;
 
   message_handshake_initiation_t packet;
@@ -252,7 +252,7 @@ wg_send_keepalive (vlib_main_t * vm, wg_peer_t * peer)
 {
   ASSERT (vm->thread_index == 0);
 
-  if (!wg_peer_can_send (peer))
+  if (!wg_peer_can_send (peer) || !wg_peer_src_resolved (peer))
     return false;
 
   u32 size_of_packet = message_data_len (0);
@@ -309,7 +309,7 @@ wg_send_handshake_response (vlib_main_t * vm, wg_peer_t * peer)
 {
   message_handshake_response_t packet;
 
-  if (!wg_peer_can_send (peer))
+  if (!wg_peer_can_send (peer) || !wg_peer_src_resolved (peer))
     return false;
 
   if (noise_create_response (vm,

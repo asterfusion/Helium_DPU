@@ -221,6 +221,12 @@ wg_peer_can_send (wg_peer_t *peer)
   return peer && peer->rewrite;
 }
 
+static inline bool
+wg_peer_src_resolved (wg_peer_t *peer)
+{
+  return peer && !ip46_address_is_zero (&peer->src.addr);
+}
+
 #endif // __included_wg_peer_h__
 
 /*

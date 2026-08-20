@@ -60,6 +60,8 @@ static uword sf_wireguard_thread_fn(vlib_main_t *vm,
 
         pool_foreach (peer, wg_peer_pool)
         {
+            u8 src_just_resolved = 0;
+
             if (peer->config_dst.addr.ip4.data_u32 != 0 && peer->config_dst.port != 0)
             {
                 out_sw_if_index = wg_peer_get_output_interface(&peer->config_dst);
@@ -74,7 +76,7 @@ static uword sf_wireguard_thread_fn(vlib_main_t *vm,
             if (out_sw_if_index == peer->output_sw_index || 1 == out_sw_if_index)
             {
                 hw = vnet_get_sup_hw_interface (vnm, out_sw_if_index);
-                if (!(hw && strncmp((const char*)(hw->name), "ppp", 3) == 0))
+                if (!(hw && strncmp((const char*)(hw->name), "ppp", 3) == 0) && !ip46_address_is_zero (&peer->src.addr))
                 {
                     continue;
                 }
@@ -95,6 +97,10 @@ static uword sf_wireguard_thread_fn(vlib_main_t *vm,
                     {
                         if (peer->src.addr.ip4.data_u32 != r4->data_u32)
                         {
+                            if (0 == peer->src.addr.ip4.data_u32)
+                            {
+                                src_just_resolved = 1;
+                            }
                             peer->src.addr.ip4.data_u32 = r4->data_u32;
                             peer->output_sw_index = out_sw_if_index;
                             wgi = wg_if_get (wg_if_find_by_sw_if_index (peer->wg_sw_if_index));
@@ -124,6 +130,10 @@ static uword sf_wireguard_thread_fn(vlib_main_t *vm,
                         if (peer->src.addr.ip6.as_u64[0] != r6->as_u64[0] ||
                             peer->src.addr.ip6.as_u64[1] != r6->as_u64[1])
                         {
+                            if (0 == peer->src.addr.ip6.as_u64[0] && 0 == peer->src.addr.ip6.as_u64[1])
+                            {
+                                src_just_resolved = 1;
+                            }
                             peer->src.addr.ip6.as_u64[0] = r6->as_u64[0];
                             peer->src.addr.ip6.as_u64[1] = r6->as_u64[1];
                             peer->output_sw_index = out_sw_if_index;
@@ -145,6 +155,11 @@ static uword sf_wireguard_thread_fn(vlib_main_t *vm,
                 {
                     adj_nbr_walk (peer->wg_sw_if_index, proto, wg_peer_adj_walk, &perri);
                 }
+
+		if (src_just_resolved)
+                {
+                    wg_send_handshake (vm, peer, false);
+                }
             }
 
             else
@@ -163,6 +178,10 @@ static uword sf_wireguard_thread_fn(vlib_main_t *vm,
 
                     if (r4)
                     {
+                        if (0 == peer->src.addr.ip4.data_u32)
+                        {
+                            src_just_resolved = 1;
+                        }
                         peer->src.addr.ip4.data_u32 = r4->data_u32;
                         peer->output_sw_index = out_sw_if_index;
                         wgi = wg_if_get (wg_if_find_by_sw_if_index (peer->wg_sw_if_index));
@@ -184,6 +203,10 @@ static uword sf_wireguard_thread_fn(vlib_main_t *vm,
 
                     if (r6)
                     {
+                        if (0 == peer->src.addr.ip6.as_u64[0] && 0 == peer->src.addr.ip6.as_u64[1])
+                        {
+                            src_just_resolved = 1;
+                        }
                         peer->src.addr.ip6.as_u64[0] = r6->as_u64[0];
                         peer->src.addr.ip6.as_u64[1] = r6->as_u64[1];
                         peer->output_sw_index = out_sw_if_index;
@@ -199,6 +222,11 @@ static uword sf_wireguard_thread_fn(vlib_main_t *vm,
                 FOR_EACH_FIB_IP_PROTOCOL (proto)
                 {
                     adj_nbr_walk (peer->wg_sw_if_index, proto, wg_peer_adj_walk, &perri);
+                }
+
+                if (src_just_resolved)
+                {
+                    wg_send_handshake (vm, peer, false);
                 }
             }
         }
