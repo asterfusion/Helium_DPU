@@ -90,6 +90,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	  icmp6_neighbor_discovery_ethernet_link_layer_address_option_t *o0;
 	  u32 bi0, options_len0, sw_if_index0, next0, error0;
 	  u32 ip6_sadd_link_local, ip6_sadd_unspecified;
+	  u8 target_is_interface_local0;
 	  ip_neighbor_counter_type_t c_type;
 	  int is_rewrite0;
 	  u32 ni0;
@@ -109,6 +110,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 
 	  error0 = ICMP6_ERROR_NONE;
 	  sw_if_index0 = vnet_buffer (p0)->sw_if_index[VLIB_RX];
+	  target_is_interface_local0 = 0;
 	  ip6_sadd_link_local =
 	    ip6_address_is_link_local_unicast (&ip0->src_address);
 	  ip6_sadd_unspecified =
@@ -206,6 +208,15 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 			{
 			  /* It's an address that belongs to one of our interfaces
 			   * that's good. */
+			   /*
+			   * Suppress VPP's NA only when the local address belongs to
+			   * the interface on which this NS was received. Linux NDP
+			   * ownership is interface-specific.
+			   */
+			   target_is_interface_local0 =(sw_if_index0 ==
+				fib_entry_get_resolving_interface_for_source (
+					fei, FIB_SOURCE_INTERFACE));
+
 			}
 		      else if (FIB_ENTRY_FLAG_LOCAL &
 			       fib_entry_get_flags_for_source (
@@ -232,6 +243,14 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 
 	  if (is_solicitation)
 	    {
+			if(error0 == ICMP6_ERROR_NONE &&
+				target_is_interface_local0 &&
+				(vnet_buffer2(p0)->lcp_host_copy_flags &
+				VNET_BUFFER_LCP_HOST_COPY_NDP)
+			){
+				error0 =
+					ICMP6_ERROR_NEIGHBOR_ADVERTISEMENT_SUPPRESSED_LINUX_OWNER;
+			}
 	      next0 = (error0 != ICMP6_ERROR_NONE ?
 			       ICMP6_NEIGHBOR_SOLICITATION_NEXT_DROP :
 			       ICMP6_NEIGHBOR_SOLICITATION_NEXT_REPLY);
