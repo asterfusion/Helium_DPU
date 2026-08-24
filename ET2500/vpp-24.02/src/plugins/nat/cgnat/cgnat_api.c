@@ -184,6 +184,7 @@ vl_api_cgnat_pool_stats_get_t_handler (vl_api_cgnat_pool_stats_get_t *mp)
   cgnat_pool_t *pool;
   u32 pool_index;
   u32 pool_id = ntohl (mp->pool_id);
+  int rv = VNET_API_ERROR_INVALID_VALUE;
 
   if (!reg)
     return;
@@ -202,6 +203,7 @@ vl_api_cgnat_pool_stats_get_t_handler (vl_api_cgnat_pool_stats_get_t *mp)
 	{
 	  cgnat_instance_t *instance =
 	    cgnat_instance_get_by_index (cm, pool->owner_instance_index);
+	  rv = 0;
 	  rmp->pool_id = htonl (pool_id);
 	  rmp->owner_instance_id =
 	    htonl (instance ? instance->instance_id : CGNAT_INVALID_INDEX);
@@ -215,6 +217,7 @@ vl_api_cgnat_pool_stats_get_t_handler (vl_api_cgnat_pool_stats_get_t *mp)
 	}
     }
 
+  rmp->retval = htonl (rv);
   vl_api_send_msg (reg, (u8 *) rmp);
 }
 
@@ -389,6 +392,7 @@ vl_api_cgnat_instance_stats_get_t_handler (
   cgnat_instance_t *instance;
   u32 instance_index;
   u32 instance_id = ntohl (mp->instance_id);
+  int rv = VNET_API_ERROR_INVALID_VALUE;
 
   if (!reg)
     return;
@@ -406,6 +410,7 @@ vl_api_cgnat_instance_stats_get_t_handler (
       if (instance)
 	{
 	  cgnat_recalculate_instance (cm, instance);
+	  rv = 0;
 	  rmp->instance_id = htonl (instance_id);
 	  rmp->total_blocks = htonl (instance->total_blocks);
 	  rmp->allocated_blocks = htonl (instance->allocated_blocks);
@@ -416,6 +421,7 @@ vl_api_cgnat_instance_stats_get_t_handler (
 	}
     }
 
+  rmp->retval = htonl (rv);
   vl_api_send_msg (reg, (u8 *) rmp);
 }
 

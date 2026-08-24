@@ -190,6 +190,7 @@ define cgnat_pool_stats_get
 define cgnat_pool_stats_get_reply
 {
   u32 context;
+  i32 retval;
   u32 pool_id;
   u32 owner_instance_id;
   u32 total_blocks;
@@ -306,6 +307,7 @@ define cgnat_instance_stats_get
 define cgnat_instance_stats_get_reply
 {
   u32 context;
+  i32 retval;
   u32 instance_id;
   u32 total_blocks;
   u32 allocated_blocks;
