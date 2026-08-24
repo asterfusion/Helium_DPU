@@ -1721,12 +1721,6 @@ counters icmp6 {
     units "packets";
     description "neighbor advertisements sent";
   };
-  neighbor_advertisement_suppressed_linux_owner {
-    severity info;
-    type counter64;
-    units "packets";
-    description "neighbor advertisement suppressed because Linux is the reply owner";
-  };
   neighbor_advertisements_rx {
     severity info;
     type counter64;
@@ -1810,6 +1804,12 @@ counters icmp6 {
     type counter64;
     units "packets";
     description "buffer allocation failure";
+  };
+  neighbor_advertisement_suppressed_linux_owner {
+    severity info;
+    type counter64;
+    units "packets";
+    description "neighbor advertisement suppressed because Linux is the reply owner";
   };
 };
 

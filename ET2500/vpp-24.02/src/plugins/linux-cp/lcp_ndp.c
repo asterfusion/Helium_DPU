@@ -156,8 +156,7 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
           */
           if (icmp0->type == ICMP6_neighbor_solicitation &&
 	        lcp_ndp_host_pair_exists (b0))
-          vnet_buffer2 (b0)->lcp_host_copy_flags |=
-          VNET_BUFFER_LCP_HOST_COPY_NDP;
+          vnet_buffer2 (b0)->lcp_host_copy_done = 1;
 		  }
               }
           }
@@ -181,8 +180,7 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
 		  {
 		      copies[n_copies++] = vlib_get_buffer_index (vm, c1);
           if (icmp1->type == ICMP6_neighbor_solicitation && lcp_ndp_host_pair_exists (b1))
-          vnet_buffer2 (b1)->lcp_host_copy_flags |=
-        VNET_BUFFER_LCP_HOST_COPY_NDP;
+          vnet_buffer2 (b1)->lcp_host_copy_done = 1;
 		  }
               }
           }
@@ -257,8 +255,7 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
 		  {
 		      copies[n_copies++] = vlib_get_buffer_index (vm, c);
           if (icmp->type == ICMP6_neighbor_solicitation && lcp_ndp_host_pair_exists (b0))
-          vnet_buffer2 (b0)->lcp_host_copy_flags |=
-        VNET_BUFFER_LCP_HOST_COPY_NDP;
+          vnet_buffer2 (b0)->lcp_host_copy_done = 1;
 		  }
               }
           }

@@ -139,8 +139,8 @@ VLIB_NODE_FN (ip6_input_node) (vlib_main_t * vm, vlib_node_runtime_t * node,
     * opaque2 is not guaranteed to be zero when a buffer is reused.
     * Clear LCP host-copy state before starting the IPv6 feature arc.
     */
-    vnet_buffer2 (p0)->lcp_host_copy_flags = 0;
-    vnet_buffer2 (p1)->lcp_host_copy_flags = 0;
+    vnet_buffer2 (p0)->lcp_host_copy_done = 0;
+    vnet_buffer2 (p1)->lcp_host_copy_done = 0;
 
 	  ip0 = vlib_buffer_get_current (p0);
 	  ip1 = vlib_buffer_get_current (p1);
@@ -226,7 +226,7 @@ VLIB_NODE_FN (ip6_input_node) (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  n_left_to_next -= 1;
 
 	  p0 = vlib_get_buffer (vm, pi0);
-    vnet_buffer2 (p0)->lcp_host_copy_flags = 0;
+    vnet_buffer2 (p0)->lcp_host_copy_done = 0;
 	  ip0 = vlib_buffer_get_current (p0);
 
 	  sw_if_index0 = vnet_buffer (p0)->sw_if_index[VLIB_RX];

@@ -458,12 +458,7 @@ STATIC_ASSERT (sizeof (vnet_buffer_opaque_t) <=
 #define vnet_buffer(b) ((vnet_buffer_opaque_t *) (b)->opaque)
 
 
-/*
- * Per-packet flags recording which LCP protocol successfully created
- * a copy for the Linux host.
- */
-#define VNET_BUFFER_LCP_HOST_COPY_ARP (1 << 0)
-#define VNET_BUFFER_LCP_HOST_COPY_NDP (1 << 1)
+
 /* Full cache line (64 bytes) of additional space */
 typedef struct
 {
@@ -522,9 +517,9 @@ typedef struct
   u32 actual_tx_sw_if_index;
   u8 tc_index_dpo; /* store the traffic class dpo */
   /*
-  * Set by linux-cp-arp-phy when an ARP packet has been
+  * Set by linux-cp-arp-phy when an ARP packet or a NDP packet has been
   * successfully copied and queued for the Linux host interface.*/
-  u8 lcp_host_copy_flags;
+  u8 lcp_host_copy_done : 1;
   };
 
   u32 unused[8];

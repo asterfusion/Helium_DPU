@@ -245,8 +245,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	    {
 			if(error0 == ICMP6_ERROR_NONE &&
 				target_is_interface_local0 &&
-				(vnet_buffer2(p0)->lcp_host_copy_flags &
-				VNET_BUFFER_LCP_HOST_COPY_NDP)
+				vnet_buffer2(p0)->lcp_host_copy_done
 			){
 				error0 =
 					ICMP6_ERROR_NEIGHBOR_ADVERTISEMENT_SUPPRESSED_LINUX_OWNER;
