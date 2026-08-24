@@ -1,0 +1,592 @@
+/* CGNAT control-plane API. */
+
+option version = "2.5.0";
+import "vnet/interface_types.api";
+import "vnet/ip/ip_types.api";
+
+enum cgnat_interface_role : u8
+{
+  CGNAT_API_INTERFACE_ROLE_NONE = 0,
+  CGNAT_API_INTERFACE_ROLE_INSIDE = 1,
+  CGNAT_API_INTERFACE_ROLE_OUTSIDE = 2,
+};
+
+enum cgnat_block_alloc_mode : u8
+{
+  CGNAT_API_BLOCK_ALLOC_MODE_ON_DEMAND = 0,
+  CGNAT_API_BLOCK_ALLOC_MODE_PRE_ALLOC = 1,
+};
+
+enum cgnat_port_alloc_mode : u8
+{
+  CGNAT_API_PORT_ALLOC_MODE_RANDOM = 0,
+  CGNAT_API_PORT_ALLOC_MODE_SEQUENCE = 1,
+};
+
+enum cgnat_filter_mode : u8
+{
+  CGNAT_API_FILTER_MODE_EIF = 0,
+  CGNAT_API_FILTER_MODE_ADF = 1,
+  CGNAT_API_FILTER_MODE_ADPF = 2,
+};
+
+enum cgnat_log_mode : u8
+{
+  CGNAT_API_LOG_MODE_PORT_BLOCK = 0,
+  CGNAT_API_LOG_MODE_SESSION = 1,
+};
+
+enum cgnat_instance_mode : u8
+{
+  CGNAT_API_INSTANCE_MODE_DYNAMIC = 0,
+  CGNAT_API_INSTANCE_MODE_DETERMINISTIC = 1,
+};
+
+enum cgnat_inside_address_type : u8
+{
+  CGNAT_API_INSIDE_ADDRESS_RANGE = 0,
+  CGNAT_API_INSIDE_ADDRESS_PREFIX = 1,
+};
+
+enum cgnat_block_state : u8
+{
+  CGNAT_API_BLOCK_STATE_FREE = 0,
+  CGNAT_API_BLOCK_STATE_ALLOCATED = 1,
+  CGNAT_API_BLOCK_STATE_COOLING = 2,
+};
+
+enum cgnat_static_mapping_type : u8
+{
+  CGNAT_API_STATIC_MAPPING_ADDRESS = 0,
+  CGNAT_API_STATIC_MAPPING_ADDRESS_PROTOCOL = 1,
+  CGNAT_API_STATIC_MAPPING_ADDRESS_PROTOCOL_PORT = 2,
+};
+
+enum cgnat_instance_config_flags : u32
+{
+  CGNAT_API_INSTANCE_SET_FILTER_MODE = 0x00000001,
+  CGNAT_API_INSTANCE_SET_HAIRPINNING = 0x00000002,
+  CGNAT_API_INSTANCE_SET_MAX_USER_BLOCKS = 0x00000004,
+  CGNAT_API_INSTANCE_SET_MAX_USER_PORTS = 0x00000008,
+  CGNAT_API_INSTANCE_SET_MAX_USER_SESSIONS = 0x00000010,
+  CGNAT_API_INSTANCE_SET_MAX_USER_CREATE_RATE = 0x00000020,
+  CGNAT_API_INSTANCE_SET_AGING_TCP_SYN = 0x00000040,
+  CGNAT_API_INSTANCE_SET_AGING_TCP_ESTABLISHED = 0x00000080,
+  CGNAT_API_INSTANCE_SET_AGING_TCP_FIN_RST = 0x00000100,
+  CGNAT_API_INSTANCE_SET_AGING_UDP = 0x00000200,
+  CGNAT_API_INSTANCE_SET_AGING_ICMP = 0x00000400,
+  CGNAT_API_INSTANCE_SET_AGING_OTHER = 0x00000800,
+  CGNAT_API_INSTANCE_SET_LOG_MODE = 0x00001000,
+  CGNAT_API_INSTANCE_SET_SYSLOG = 0x00002000,
+  CGNAT_API_INSTANCE_SET_IPFIX = 0x00004000,
+  CGNAT_API_INSTANCE_SET_TCP_MSS = 0x00008000,
+};
+
+enum cgnat_session_filter_flags : u32
+{
+  CGNAT_API_SESSION_FILTER_INSIDE_IP = 0x01,
+  CGNAT_API_SESSION_FILTER_INSIDE_PORT = 0x02,
+  CGNAT_API_SESSION_FILTER_PUBLIC_IP = 0x04,
+  CGNAT_API_SESSION_FILTER_PUBLIC_PORT = 0x08,
+  CGNAT_API_SESSION_FILTER_PROTOCOL = 0x10,
+};
+
+typedef cgnat_inside_address
+{
+  vl_api_cgnat_inside_address_type_t type;
+  vl_api_ip4_address_t first_ip;
+  vl_api_ip4_address_t last_ip;
+  u8 prefix_len;
+};
+
+autoreply define cgnat_plugin_enable_disable
+{
+  u32 client_index;
+  u32 context;
+  bool enable;
+};
+
+define cgnat_plugin_get
+{
+  u32 client_index;
+  u32 context;
+};
+
+define cgnat_plugin_get_reply
+{
+  u32 context;
+  i32 retval;
+  bool enabled;
+};
+
+define cgnat_pool_add_del
+{
+  u32 client_index;
+  u32 context;
+  u32 pool_id;
+  string label[64];
+  vl_api_ip4_address_t first_ip;
+  vl_api_ip4_address_t last_ip;
+  u16 block_size;
+  u16 reserved_port_start;
+  u16 reserved_port_end;
+  u16 prealloc_blocks_per_user;
+  u16 cooling_time;
+  vl_api_cgnat_block_alloc_mode_t block_alloc_mode;
+  vl_api_cgnat_port_alloc_mode_t port_alloc_mode;
+  bool is_add;
+};
+
+define cgnat_pool_add_del_reply
+{
+  u32 context;
+  i32 retval;
+  u32 pool_id;
+};
+
+autoreply define cgnat_pool_set
+{
+  u32 client_index;
+  u32 context;
+  u32 pool_id;
+  string label[64];
+  u16 cooling_time;
+};
+
+define cgnat_pool_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+define cgnat_pool_details
+{
+  u32 context;
+  u32 pool_id;
+  u32 owner_instance_id;
+  string label[64];
+  vl_api_ip4_address_t first_ip;
+  vl_api_ip4_address_t last_ip;
+  u16 block_size;
+  u16 reserved_port_start;
+  u16 reserved_port_end;
+  u16 prealloc_blocks_per_user;
+  u16 cooling_time;
+  vl_api_cgnat_block_alloc_mode_t block_alloc_mode;
+  vl_api_cgnat_port_alloc_mode_t port_alloc_mode;
+  u32 total_blocks;
+  u32 allocated_blocks;
+  u32 cooling_blocks;
+  u32 active_users;
+};
+
+define cgnat_pool_stats_get
+{
+  u32 client_index;
+  u32 context;
+  u32 pool_id;
+};
+
+define cgnat_pool_stats_get_reply
+{
+  u32 context;
+  u32 pool_id;
+  u32 owner_instance_id;
+  u32 total_blocks;
+  u32 allocated_blocks;
+  u32 cooling_blocks;
+  u32 active_users;
+};
+
+define cgnat_instance_add_del
+{
+  u32 client_index;
+  u32 context;
+  u32 instance_id;
+  string label[64];
+  u32 inside_vrf_id;
+  u32 outside_vrf_id;
+  vl_api_cgnat_instance_mode_t mode;
+  bool is_add;
+  u32 pool_count;
+  u32 inside_address_count;
+  u32 pool_ids[16];
+  vl_api_cgnat_inside_address_t inside_addresses[16];
+};
+
+define cgnat_instance_add_del_reply
+{
+  u32 context;
+  i32 retval;
+  u32 instance_id;
+};
+
+autoreply define cgnat_instance_set
+{
+  u32 client_index;
+  u32 context;
+  u32 instance_id;
+  vl_api_cgnat_instance_config_flags_t flags;
+  u32 max_user_sessions;
+  u32 max_user_create_sessions_rate;
+  u32 aging_tcp_syn;
+  u32 aging_tcp_established;
+  u32 aging_tcp_fin_rst;
+  u32 aging_udp;
+  u32 aging_icmp;
+  u32 aging_other;
+  u16 max_user_blocks;
+  u16 max_user_ports;
+  u16 tcp_mss;
+  vl_api_cgnat_filter_mode_t filter_mode;
+  bool hairpinning_enabled;
+  vl_api_cgnat_log_mode_t log_mode;
+  bool syslog_enabled;
+  bool ipfix_enabled;
+};
+
+autoreply define cgnat_instance_acl_set
+{
+  u32 client_index;
+  u32 context;
+  u32 instance_id;
+  u32 acl_index;
+  bool enable;
+};
+
+define cgnat_instance_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+define cgnat_instance_details
+{
+  u32 context;
+  u32 instance_id;
+  string label[64];
+  u32 inside_vrf_id;
+  u32 outside_vrf_id;
+  vl_api_cgnat_instance_mode_t mode;
+  u32 acl_count;
+  u32 inside_address_count;
+  u32 syslog_server_count;
+  u32 ipfix_exporter_count;
+  vl_api_cgnat_filter_mode_t filter_mode;
+  bool hairpinning_enabled;
+  u16 max_user_blocks;
+  u16 max_user_ports;
+  u32 max_user_sessions;
+  u32 max_user_create_sessions_rate;
+  u32 aging_tcp_syn;
+  u32 aging_tcp_established;
+  u32 aging_tcp_fin_rst;
+  u32 aging_udp;
+  u32 aging_icmp;
+  u32 aging_other;
+  vl_api_cgnat_log_mode_t log_mode;
+  bool syslog_enabled;
+  bool ipfix_enabled;
+  u16 tcp_mss;
+  u32 total_blocks;
+  u32 allocated_blocks;
+  u32 cooling_blocks;
+  u32 active_users;
+  u32 active_sessions;
+  vl_api_cgnat_inside_address_t inside_addresses[16];
+};
+
+define cgnat_instance_stats_get
+{
+  u32 client_index;
+  u32 context;
+  u32 instance_id;
+};
+
+define cgnat_instance_stats_get_reply
+{
+  u32 context;
+  u32 instance_id;
+  u32 total_blocks;
+  u32 allocated_blocks;
+  u32 cooling_blocks;
+  u32 active_users;
+  u32 active_sessions;
+};
+
+define cgnat_instance_acl_dump
+{
+  u32 client_index;
+  u32 context;
+  u32 instance_id;
+};
+
+define cgnat_instance_acl_details
+{
+  u32 context;
+  u32 instance_id;
+  u32 acl_index;
+};
+
+autoreply define cgnat_syslog_server_add_del
+{
+  u32 client_index;
+  u32 context;
+  u32 instance_id;
+  vl_api_ip4_address_t address;
+  u16 port;
+  bool is_add;
+};
+
+define cgnat_syslog_server_dump
+{
+  u32 client_index;
+  u32 context;
+  u32 instance_id;
+};
+
+define cgnat_syslog_server_details
+{
+  u32 context;
+  u32 instance_id;
+  vl_api_ip4_address_t address;
+  u16 port;
+};
+
+autoreply define cgnat_ipfix_exporter_add_del
+{
+  u32 client_index;
+  u32 context;
+  u32 instance_id;
+  vl_api_ip4_address_t collector_address;
+  u16 collector_port;
+  vl_api_ip4_address_t src_address;
+  u16 src_port;
+  bool is_add;
+};
+
+define cgnat_ipfix_exporter_dump
+{
+  u32 client_index;
+  u32 context;
+  u32 instance_id;
+};
+
+define cgnat_ipfix_exporter_details
+{
+  u32 context;
+  u32 instance_id;
+  vl_api_ip4_address_t collector_address;
+  u16 collector_port;
+  vl_api_ip4_address_t src_address;
+  u16 src_port;
+};
+
+autoreply define cgnat_interface_zone_set
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_cgnat_interface_role_t role;
+};
+
+define cgnat_interface_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+define cgnat_interface_details
+{
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  bool is_inside;
+  bool is_outside;
+};
+
+autoreply define cgnat_static_mapping_add_del
+{
+  u32 client_index;
+  u32 context;
+  u32 instance_id;
+  u32 inside_vrf_id;
+  vl_api_ip4_address_t outside_ip;
+  vl_api_ip4_address_t inside_ip;
+  u16 outside_port;
+  u16 inside_port;
+  u8 protocol;
+  vl_api_cgnat_static_mapping_type_t mapping_type;
+  bool is_add;
+};
+
+define cgnat_static_mapping_dump
+{
+  u32 client_index;
+  u32 context;
+  u32 instance_id;
+};
+
+define cgnat_static_mapping_details
+{
+  u32 context;
+  u32 instance_id;
+  u32 inside_vrf_id;
+  vl_api_ip4_address_t outside_ip;
+  vl_api_ip4_address_t inside_ip;
+  u16 outside_port;
+  u16 inside_port;
+  u8 protocol;
+  vl_api_cgnat_static_mapping_type_t mapping_type;
+};
+
+define cgnat_session_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_cgnat_session_filter_flags_t flags;
+  vl_api_ip4_address_t inside_ip;
+  vl_api_ip4_address_t public_ip;
+  u16 inside_port;
+  u16 public_port;
+  u8 protocol;
+};
+
+define cgnat_session_details
+{
+  u32 context;
+  u32 instance_id;
+  vl_api_ip4_address_t inside_ip;
+  u16 inside_port;
+  vl_api_ip4_address_t public_ip;
+  u16 public_port;
+  vl_api_ip4_address_t remote_ip;
+  u16 remote_port;
+  u8 protocol;
+  u8 tcp_state;
+  bool is_static;
+  u64 idle_milliseconds;
+};
+
+define cgnat_session_delete
+{
+  u32 client_index;
+  u32 context;
+  vl_api_cgnat_session_filter_flags_t flags;
+  vl_api_ip4_address_t inside_ip;
+  vl_api_ip4_address_t public_ip;
+  u16 inside_port;
+  u16 public_port;
+  u8 protocol;
+};
+
+define cgnat_session_delete_reply
+{
+  u32 context;
+  i32 retval;
+  u32 deleted_count;
+};
+
+define cgnat_user_dump
+{
+  u32 client_index;
+  u32 context;
+  bool filter_by_inside_ip;
+  vl_api_ip4_address_t inside_ip;
+};
+
+define cgnat_user_details
+{
+  u32 context;
+  u32 instance_id;
+  vl_api_ip4_address_t inside_ip;
+  u32 inside_fib_index;
+  u32 active_sessions;
+  u32 active_ports[3];
+  u32 session_rate_count;
+  u32 max_sessions;
+  u32 max_session_create_rate;
+  u32 session_limit_drops;
+  u32 session_rate_drops;
+  u32 session_lock_drops;
+};
+
+define cgnat_block_summary_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+define cgnat_block_summary_details
+{
+  u32 context;
+  u32 instance_id;
+  u32 pool_id;
+  vl_api_ip4_address_t public_ip;
+  u32 total_blocks;
+  u32 allocated_blocks;
+  u32 cooling_blocks;
+  u32 active_users;
+};
+
+define cgnat_block_user_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip4_address_t inside_ip;
+};
+
+define cgnat_block_user_details
+{
+  u32 context;
+  u32 instance_id;
+  u32 inside_fib_index;
+  u32 pool_id;
+  vl_api_ip4_address_t inside_ip;
+  vl_api_ip4_address_t public_ip;
+  u32 owned_blocks;
+  u32 allocated_blocks;
+  u32 cooling_blocks;
+  u32 active_ports[3];
+};
+
+define cgnat_block_public_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip4_address_t public_ip;
+};
+
+define cgnat_block_public_details
+{
+  u32 context;
+  u32 instance_id;
+  u32 pool_id;
+  vl_api_ip4_address_t public_ip;
+  u32 total_blocks;
+  u32 allocated_blocks;
+  u32 cooling_blocks;
+  u32 active_users;
+};
+
+define cgnat_block_public_entry_dump
+{
+  u32 client_index;
+  u32 context;
+  vl_api_ip4_address_t public_ip;
+};
+
+define cgnat_block_public_entry_details
+{
+  u32 context;
+  u32 instance_id;
+  u32 inside_fib_index;
+  u32 pool_id;
+  vl_api_ip4_address_t public_ip;
+  vl_api_ip4_address_t inside_ip;
+  u16 block_id;
+  u16 start_port;
+  u16 end_port;
+  u16 active_ports[3];
+  vl_api_cgnat_block_state_t state;
+  bool owner_valid;
+};
