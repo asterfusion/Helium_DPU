@@ -135,54 +135,58 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
           icmp0 = ip6_ext_header_find(vm, b0, ip60, IP_PROTOCOL_ICMP6, NULL);
           if(icmp0)
           {
-              if(PREDICT_FALSE(
-                 ICMP6_neighbor_solicitation == icmp0->type ||
-                 ICMP6_neighbor_advertisement == icmp0->type ||
-                 ICMP6_router_solicitation == icmp0->type ||
-                 ICMP6_router_advertisement == icmp0->type ||
-                 ICMP6_redirect == icmp0->type
-                 ))
-              {
-		  len0 = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
-		  vlib_buffer_advance (b0, -len0);
-		  c0 = vlib_buffer_copy (vm, b0);
-		  vlib_buffer_advance (b0, len0);
-		  if (c0)
-		  {
-		      copies[n_copies++] = vlib_get_buffer_index (vm, c0);
-          /*
-          * Mark only the original NS. The copy was made before this
-          * assignment, so the copy does not inherit the marker.
-          */
-          if (icmp0->type == ICMP6_neighbor_solicitation &&
-	        lcp_ndp_host_pair_exists (b0))
-          vnet_buffer2 (b0)->lcp_host_copy_done = 1;
-		  }
+            if(PREDICT_FALSE(
+              ICMP6_neighbor_solicitation == icmp0->type ||
+              ICMP6_neighbor_advertisement == icmp0->type ||
+              ICMP6_router_solicitation == icmp0->type ||
+              ICMP6_router_advertisement == icmp0->type ||
+              ICMP6_redirect == icmp0->type
+            ))
+            {
+              if (lcp_ndp_host_pair_exists (b0))
+	            {
+		            len0 = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
+		            vlib_buffer_advance (b0, -len0);
+		            c0 = vlib_buffer_copy (vm, b0);
+		            vlib_buffer_advance (b0, len0);
+		            if (c0)
+		            {
+		              copies[n_copies++] = vlib_get_buffer_index (vm, c0);
+                  /*
+                  * Mark only the original NS. The copy was made before this
+                  * assignment, so the copy does not inherit the marker.
+                  */
+                  if (icmp0->type == ICMP6_neighbor_solicitation)
+                    vnet_buffer2 (b0)->lcp_host_copy_done = 1;
+		            }
               }
+            }
           }
 
           icmp1 = ip6_ext_header_find(vm, b1, ip61, IP_PROTOCOL_ICMP6, NULL);
           if (icmp1)
           {
-              if(PREDICT_FALSE(
-                 ICMP6_neighbor_solicitation == icmp1->type ||
-                 ICMP6_neighbor_advertisement == icmp1->type ||
-                 ICMP6_router_solicitation == icmp1->type ||
-                 ICMP6_router_advertisement == icmp1->type ||
-                 ICMP6_redirect == icmp1->type
-                ))
-              {
-		  len1 = ((u8 *) vlib_buffer_get_current (b1) - (u8 *) ethernet_buffer_get_header (b1));
-		  vlib_buffer_advance (b1, -len1);
-		  c1 = vlib_buffer_copy (vm, b1);
-		  vlib_buffer_advance (b1, len1);
-		  if (c1)
-		  {
-		      copies[n_copies++] = vlib_get_buffer_index (vm, c1);
-          if (icmp1->type == ICMP6_neighbor_solicitation && lcp_ndp_host_pair_exists (b1))
-          vnet_buffer2 (b1)->lcp_host_copy_done = 1;
-		  }
+            if(PREDICT_FALSE(
+              ICMP6_neighbor_solicitation == icmp1->type ||
+              ICMP6_neighbor_advertisement == icmp1->type ||
+              ICMP6_router_solicitation == icmp1->type ||
+              ICMP6_router_advertisement == icmp1->type ||
+              ICMP6_redirect == icmp1->type
+            ))
+            {
+              if (lcp_ndp_host_pair_exists (b1)){
+		            len1 = ((u8 *) vlib_buffer_get_current (b1) - (u8 *) ethernet_buffer_get_header (b1));
+		            vlib_buffer_advance (b1, -len1);
+		            c1 = vlib_buffer_copy (vm, b1);
+		            vlib_buffer_advance (b1, len1);
+		            if (c1)
+		            {
+		              copies[n_copies++] = vlib_get_buffer_index (vm, c1);
+                  if (icmp1->type == ICMP6_neighbor_solicitation)
+                    vnet_buffer2 (b1)->lcp_host_copy_done = 1;
+		            }
               }
+            }
           }
 
       if (b0->flags & VLIB_BUFFER_IS_TRACED)
@@ -239,25 +243,28 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
           icmp = ip6_ext_header_find(vm, b0, ip6, IP_PROTOCOL_ICMP6, NULL);
           if(icmp)
           {
-              if(PREDICT_FALSE(
-                 ICMP6_neighbor_solicitation == icmp->type ||
-                 ICMP6_neighbor_advertisement == icmp->type ||
-                 ICMP6_router_solicitation == icmp->type ||
-                 ICMP6_router_advertisement == icmp->type ||
-                 ICMP6_redirect == icmp->type
-                 ))
+            if(PREDICT_FALSE(
+              ICMP6_neighbor_solicitation == icmp->type ||
+              ICMP6_neighbor_advertisement == icmp->type ||
+              ICMP6_router_solicitation == icmp->type ||
+              ICMP6_router_advertisement == icmp->type ||
+              ICMP6_redirect == icmp->type
+            ))
+            {
+              if (lcp_ndp_host_pair_exists (b0))
               {
-		  len = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
-		  vlib_buffer_advance (b0, -len);
-		  c = vlib_buffer_copy (vm, b0);
-		  vlib_buffer_advance (b0, len);
-		  if (c)
-		  {
-		      copies[n_copies++] = vlib_get_buffer_index (vm, c);
-          if (icmp->type == ICMP6_neighbor_solicitation && lcp_ndp_host_pair_exists (b0))
-          vnet_buffer2 (b0)->lcp_host_copy_done = 1;
-		  }
+		            len = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
+		            vlib_buffer_advance (b0, -len);
+		            c = vlib_buffer_copy (vm, b0);
+		            vlib_buffer_advance (b0, len);
+		            if (c)
+		            {
+		              copies[n_copies++] = vlib_get_buffer_index (vm, c);
+                  if (icmp->type == ICMP6_neighbor_solicitation)
+                  vnet_buffer2 (b0)->lcp_host_copy_done = 1;
+		            }
               }
+            }
           }
 
 

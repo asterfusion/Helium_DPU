@@ -224,6 +224,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 			{
 			  /* It's one of our link local addresses
 			   * that's good. */
+			  target_is_interface_local0 = 1;
 			}
 		      else if (fib_entry_is_sourced (fei,
 						     FIB_SOURCE_IP6_ND_PROXY))
