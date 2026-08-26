@@ -373,12 +373,25 @@ cgnat_update_tcp_state (cgnat_session_t *session, tcp_header_t *tcp)
   if (!tcp)
     return 0;
 
+  /* Transitions must not resurrect a closing session: once FIN/RST is seen
+   * the session stays in FIN_RST until it ages out on the short timeout -
+   * a plain ACK of a half-closed connection or a retransmitted SYN must not
+   * pull it back to ESTABLISHED (which would keep the port block alive for
+   * the full established timeout).  Likewise a stray SYN must not downgrade
+   * an ESTABLISHED session. */
   if (tcp->flags & (TCP_FLAG_FIN | TCP_FLAG_RST))
     session->tcp_state = CGNAT_TCP_FIN_RST;
   else if (tcp->flags & TCP_FLAG_SYN)
-    session->tcp_state = CGNAT_TCP_SYN;
+    {
+      if (session->tcp_state != CGNAT_TCP_FIN_RST &&
+	  session->tcp_state != CGNAT_TCP_ESTABLISHED)
+	session->tcp_state = CGNAT_TCP_SYN;
+    }
   else if (tcp->flags & TCP_FLAG_ACK)
-    session->tcp_state = CGNAT_TCP_ESTABLISHED;
+    {
+      if (session->tcp_state != CGNAT_TCP_FIN_RST)
+	session->tcp_state = CGNAT_TCP_ESTABLISHED;
+    }
 
   return old_state != session->tcp_state;
 }
@@ -535,8 +548,12 @@ cgnat_ip_csum_delta_for_ip4_address (ip4_address_t old_addr,
   ip_csum_t delta = 0;
   if (old_addr.as_u32 == new_addr.as_u32)
     return 0;
-  delta = ip_csum_add_even (delta, old_addr.as_u32);
-  delta = ip_csum_sub_even (delta, new_addr.as_u32);
+  /* Build delta = old - new.  Callers apply it via
+   * ip_csum_sub_even (sum, delta) = sum + old - new, as required by
+   * RFC 1624.  Note that ip_csum_add_even()/ip_csum_sub_even() subtract/add
+   * their argument respectively (see src/vnet/ip/ip_packet.h). */
+  delta = ip_csum_sub_even (delta, old_addr.as_u32);
+  delta = ip_csum_add_even (delta, new_addr.as_u32);
   return delta;
 }
 
@@ -549,35 +566,51 @@ cgnat_icmp_error_rewrite_inner_l4 (ip4_header_t *inner_ip, void *inner_l4,
   ip_csum_t l3_delta = 0;
   ip_csum_t l4_delta = 0;
 
+  /* Accumulate deltas with ones-complement-aware adds: a plain "+=" on two
+   * ip_csum_t values can lose the end-around carry out of bit 63 when both
+   * deltas went "negative" (borrowed), corrupting the result by one. */
   l3_delta =
     cgnat_ip_csum_delta_for_ip4_address (inner_ip->src_address, new_src_ip);
-  l3_delta +=
-    cgnat_ip_csum_delta_for_ip4_address (inner_ip->dst_address, new_dst_ip);
+  l3_delta = ip_csum_sub_even (
+    l3_delta,
+    cgnat_ip_csum_delta_for_ip4_address (inner_ip->dst_address, new_dst_ip));
 
   if (inner_protocol == IP_PROTOCOL_TCP)
     {
       tcp_header_t *tcp = inner_l4;
-      l4_delta = ip_csum_add_even (l4_delta, clib_net_to_host_u16 (tcp->src_port));
-      l4_delta = ip_csum_add_even (l4_delta, clib_net_to_host_u16 (tcp->dst_port));
-      l4_delta = ip_csum_sub_even (l4_delta, new_src_port);
-      l4_delta = ip_csum_sub_even (l4_delta, new_dst_port);
+      /* All quantities fed into the delta must share one representation:
+       * network-order field values, same as the raw checksum field and the
+       * as_u32 addresses used by cgnat_ip_csum_delta_for_ip4_address(). */
+      l4_delta = ip_csum_sub_even (l4_delta, tcp->src_port);
+      l4_delta = ip_csum_sub_even (l4_delta, tcp->dst_port);
+      l4_delta = ip_csum_add_even (l4_delta, clib_host_to_net_u16 (new_src_port));
+      l4_delta = ip_csum_add_even (l4_delta, clib_host_to_net_u16 (new_dst_port));
       tcp->src_port = clib_host_to_net_u16 (new_src_port);
       tcp->dst_port = clib_host_to_net_u16 (new_dst_port);
-      tcp->checksum =
-	ip_csum_fold (ip_csum_sub_even (tcp->checksum, l3_delta + l4_delta));
+      /* Apply the two deltas separately: ip_csum_sub_even() folds the
+       * end-around carry of each addition, while "l3_delta + l4_delta"
+       * would lose a carry out of bit 63. */
+      ip_csum_t sum = tcp->checksum;
+      sum = ip_csum_sub_even (sum, l3_delta);
+      sum = ip_csum_sub_even (sum, l4_delta);
+      tcp->checksum = ip_csum_fold (sum);
     }
   else if (inner_protocol == IP_PROTOCOL_UDP)
     {
       udp_header_t *udp = inner_l4;
-      l4_delta = ip_csum_add_even (l4_delta, clib_net_to_host_u16 (udp->src_port));
-      l4_delta = ip_csum_add_even (l4_delta, clib_net_to_host_u16 (udp->dst_port));
-      l4_delta = ip_csum_sub_even (l4_delta, new_src_port);
-      l4_delta = ip_csum_sub_even (l4_delta, new_dst_port);
+      l4_delta = ip_csum_sub_even (l4_delta, udp->src_port);
+      l4_delta = ip_csum_sub_even (l4_delta, udp->dst_port);
+      l4_delta = ip_csum_add_even (l4_delta, clib_host_to_net_u16 (new_src_port));
+      l4_delta = ip_csum_add_even (l4_delta, clib_host_to_net_u16 (new_dst_port));
       udp->src_port = clib_host_to_net_u16 (new_src_port);
       udp->dst_port = clib_host_to_net_u16 (new_dst_port);
       if (udp->checksum)
-	udp->checksum =
-	  ip_csum_fold (ip_csum_sub_even (udp->checksum, l3_delta + l4_delta));
+	{
+	  ip_csum_t sum = udp->checksum;
+	  sum = ip_csum_sub_even (sum, l3_delta);
+	  sum = ip_csum_sub_even (sum, l4_delta);
+	  udp->checksum = ip_csum_fold (sum);
+	}
     }
   else if (inner_protocol == IP_PROTOCOL_ICMP)
     {
@@ -647,15 +680,20 @@ cgnat_icmp_error_translate_out2in (cgnat_main_t *cm, vlib_main_t *vm,
 				     inner_ip->dst_address, inner_dst_port);
   inner_ip->checksum = ip4_header_checksum (inner_ip);
 
-  /* Recompute outer ICMP checksum over the rewritten payload. */
+  /* Recompute outer ICMP checksum over the rewritten payload.  Zero the
+   * checksum field before summing and store the one's complement of the
+   * folded sum. */
   {
     icmp46_header_t *icmp =
       (icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
     u32 icmp_len =
       clib_net_to_host_u16 (ip->length) - ip4_header_bytes (ip);
-    ip_csum_t sum = ip_incremental_checksum_buffer (
+    ip_csum_t sum;
+
+    icmp->checksum = 0;
+    sum = ip_incremental_checksum_buffer (
       vm, b, (u8 *) icmp - (u8 *) vlib_buffer_get_current (b), icmp_len, 0);
-    icmp->checksum = ip_csum_fold (sum);
+    icmp->checksum = ~ip_csum_fold (sum);
   }
 
   vnet_buffer (b)->sw_if_index[VLIB_TX] = mapping->inside_fib_index;
@@ -665,7 +703,7 @@ cgnat_icmp_error_translate_out2in (cgnat_main_t *cm, vlib_main_t *vm,
 static int
 cgnat_icmp_error_translate_in2out (cgnat_main_t *cm, vlib_main_t *vm,
 				   vlib_buffer_t *b, ip4_header_t *ip,
-				   u32 instance_index)
+				   u32 instance_index, u32 inside_fib_index)
 {
   ip4_header_t *inner_ip;
   u8 inner_protocol;
@@ -685,16 +723,19 @@ cgnat_icmp_error_translate_in2out (cgnat_main_t *cm, vlib_main_t *vm,
   if (!instance)
     return VNET_API_ERROR_NO_SUCH_ENTRY;
 
-  /* The original packet was remote -> public; look up the public destination
-   * in this instance's out2in table. */
-  cgnat_make_out2in_mapping_key (&kv, instance->outside_fib_index,
+  /* The quoted datagram is the packet as the inside network saw it, i.e.
+   * after out2in translation: src = remote, dst = inside_ip:inside_port.
+   * Find the mapping that performed that translation in the in2out table;
+   * the out2in table is keyed by public values and can never match the
+   * private inside address quoted here. */
+  cgnat_make_in2out_mapping_key (&kv, instance_index, inside_fib_index,
 				 inner_ip->dst_address, inner_dst_port,
 				 inner_protocol);
-  if (cgnat_mapping_table_search (cm, &cm->out2in_mapping_table, &kv, &value))
+  if (cgnat_mapping_table_search (cm, &cm->in2out_mapping_table, &kv, &value))
     return VNET_API_ERROR_NO_SUCH_ENTRY;
 
   mapping = cgnat_mapping_get_if_valid (cm, value.value);
-  if (!mapping || mapping->instance_index != instance_index)
+  if (!mapping)
     return VNET_API_ERROR_NO_SUCH_ENTRY;
 
   rv = cgnat_icmp_error_validate_checksum (vm, b, ip);
@@ -703,26 +744,39 @@ cgnat_icmp_error_translate_in2out (cgnat_main_t *cm, vlib_main_t *vm,
 
   inner_l4 = (u8 *) inner_ip + ip4_header_bytes (inner_ip);
 
-  /* Rewrite inner IP destination and L4 destination to the inside values.
-   * Outer IP is not changed: src=inside router, dst=remote. */
+  /* Rewrite the inner destination back to the public endpoint the remote
+   * peer originally addressed (nat_ip:nat_port); the inner source (remote
+   * endpoint) is left untouched. */
   cgnat_icmp_error_rewrite_inner_l4 (inner_ip, inner_l4, inner_protocol,
 				     inner_ip->src_address, inner_src_port,
-				     mapping->inside_ip, mapping->inside_port);
+				     mapping->nat_ip, mapping->nat_port);
   inner_ip->checksum = ip4_header_checksum (inner_ip);
 
-  /* Recompute outer ICMP checksum. */
+  /* The error itself was originated inside (by the NATed host or an inside
+   * router); translate the outer source address with the same mapping so
+   * the remote peer can associate the error with the public endpoint and
+   * no private address leaks out. */
+  ip->src_address = mapping->nat_ip;
+  ip->checksum = ip4_header_checksum (ip);
+
+  /* Recompute outer ICMP checksum over the rewritten payload.  Zero the
+   * checksum field before summing and store the one's complement of the
+   * folded sum. */
   {
     icmp46_header_t *icmp =
       (icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
     u32 icmp_len =
       clib_net_to_host_u16 (ip->length) - ip4_header_bytes (ip);
-    ip_csum_t sum = ip_incremental_checksum_buffer (
+    ip_csum_t sum;
+
+    icmp->checksum = 0;
+    sum = ip_incremental_checksum_buffer (
       vm, b, (u8 *) icmp - (u8 *) vlib_buffer_get_current (b), icmp_len, 0);
-    icmp->checksum = ip_csum_fold (sum);
+    icmp->checksum = ~ip_csum_fold (sum);
   }
 
   /* The packet continues toward the remote destination on the outside fib. */
-  vnet_buffer (b)->sw_if_index[VLIB_TX] = instance->outside_fib_index;
+  vnet_buffer (b)->sw_if_index[VLIB_TX] = mapping->outside_fib_index;
   return 0;
 }
 
@@ -2335,7 +2389,7 @@ cgnat_l4_rewrite_in2out (ip4_header_t *ip, tcp_header_t *tcp, udp_header_t *udp,
 
 static_always_inline void
 cgnat_l4_rewrite_out2in (ip4_header_t *ip, tcp_header_t *tcp, udp_header_t *udp,
-			 cgnat_mapping_t *mapping)
+			 cgnat_mapping_t *mapping, u16 tcp_mss)
 {
   u32 old_addr = ip->dst_address.as_u32;
   u32 new_addr = mapping->inside_ip.as_u32;
@@ -2353,6 +2407,7 @@ cgnat_l4_rewrite_out2in (ip4_header_t *ip, tcp_header_t *tcp, udp_header_t *udp,
       sum = ip_csum_update (sum, old_addr, new_addr, ip4_header_t,
 			    dst_address);
       sum = ip_csum_update (sum, old_port, new_port, tcp_header_t, dst_port);
+      mss_clamping (tcp_mss, tcp, &sum);
       tcp->checksum = ip_csum_fold (sum);
     }
   else if (udp && udp->checksum)
@@ -2447,16 +2502,15 @@ cgnat_l4_rewrite_hairpin (ip4_header_t *ip, tcp_header_t *tcp,
 						     ip4_header_bytes (ip));
       nat_icmp_echo_header_t *echo = (nat_icmp_echo_header_t *) (icmp + 1);
 
-      /* ICMP has a single identifier; the destination inside host simply
-       * echoes it back, so keep the source's public NAT identifier. */
+      /* Currently unreachable: ICMP echo hairpinning is disabled at the
+       * call site (see cgnat_session_in2out).  Kept correct for when it is
+       * revisited: the ICMP checksum covers only the ICMP message itself,
+       * so the rewritten IP addresses must NOT be folded into it - only
+       * the identifier change matters. */
       old_src_port = echo->identifier;
       echo->identifier = new_src_port;
 
       sum = icmp->checksum;
-      sum = ip_csum_update (sum, old_src_addr, new_src_addr, ip4_header_t,
-			    src_address);
-      sum = ip_csum_update (sum, old_dst_addr, new_dst_addr, ip4_header_t,
-			    dst_address);
       sum = ip_csum_update (sum, old_src_port, new_src_port,
 			    nat_icmp_echo_header_t, identifier);
       icmp->checksum = ip_csum_fold (sum);
@@ -2525,7 +2579,8 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
 	(icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
       if (icmp_type_is_error_message (icmp->type))
 	return cgnat_icmp_error_translate_in2out (cm, vm, b, ip,
-						  instance_index);
+						  instance_index,
+						  inside_fib_index);
     }
 
   rv = cgnat_extract_l4 (b, ip, &inside_port, &remote_port, &tcp, &udp);
@@ -2653,8 +2708,13 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
       return rv;
     }
 
-  // check whether hairpinning is enabled
-  if (instance->hairpinning_enabled)
+  /* Check whether hairpinning is enabled.  ICMP echo is excluded: the echo
+   * identifier serves as the NAT "port" for both directions of the
+   * hairpinned exchange and cannot be pair-wise translated without extra
+   * state - the echo reply would miss the peer's mapping and allocate a
+   * bogus port.  ICMP packets take the normal in2out path. */
+  if (PREDICT_FALSE (instance->hairpinning_enabled) &&
+      ip->protocol != IP_PROTOCOL_ICMP)
     hairpin_dst_mapping = cgnat_in2out_hairpin_dst_lookup (
       cm, instance, ip, remote_port, inside_fib_index);
 
@@ -2767,7 +2827,7 @@ cgnat_session_out2in (vlib_main_t *vm, vlib_buffer_t *b)
     }
 
 rewrite:
-  cgnat_l4_rewrite_out2in (ip, tcp, udp, mapping);
+  cgnat_l4_rewrite_out2in (ip, tcp, udp, mapping, instance->tcp_mss);
   vnet_buffer (b)->sw_if_index[VLIB_TX] = mapping->inside_fib_index;
   return 0;
 }

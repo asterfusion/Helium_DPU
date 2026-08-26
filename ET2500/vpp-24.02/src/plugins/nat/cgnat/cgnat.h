@@ -273,7 +273,8 @@ typedef struct
   /* ALLOCATED only. COOLING is tracked separately and is not reusable. */
   u16 allocated_blocks;
   u16 cooling_blocks;
-  u16 active_users;
+  /* Updated atomically: user deletion paths do not always hold ip->lock. */
+  u32 active_users;
 
   clib_spinlock_t lock;
 

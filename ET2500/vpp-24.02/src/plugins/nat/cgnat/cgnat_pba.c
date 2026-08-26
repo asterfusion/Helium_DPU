@@ -62,7 +62,7 @@ cgnat_effective_max_ports (cgnat_instance_t *instance,
   if (!max_blocks)
     max_blocks = 1;
 
-  by_blocks = max_blocks * pool->block_size;
+  by_blocks = clib_min (max_blocks * pool->block_size, 65535u);
   if (!max_ports || max_ports > by_blocks)
     max_ports = by_blocks;
 
@@ -466,7 +466,8 @@ cgnat_public_ip_better (cgnat_public_ip_t *a, cgnat_public_ip_t *b,
     return below_a;
 
   if (below_a && below_b)
-    return a->active_users <= b->active_users;
+    return clib_atomic_load_relax_n (&a->active_users) <=
+	   clib_atomic_load_relax_n (&b->active_users);
 
   if (enough_a != enough_b)
     return enough_a;
@@ -475,9 +476,11 @@ cgnat_public_ip_better (cgnat_public_ip_t *a, cgnat_public_ip_t *b,
     return free_a > free_b;
 
   return cgnat_util_cmp (cgnat_public_ip_unavailable_blocks (a),
-			 a->total_blocks, a->active_users,
+			 a->total_blocks,
+			 clib_atomic_load_relax_n (&a->active_users),
 			 cgnat_public_ip_unavailable_blocks (b),
-			 b->total_blocks, b->active_users) <= 0;
+			 b->total_blocks,
+			 clib_atomic_load_relax_n (&b->active_users)) <= 0;
 }
 
 static cgnat_public_ip_t *
@@ -1047,8 +1050,11 @@ cgnat_delete_user (cgnat_instance_t *instance, cgnat_user_t *user)
 	  cgnat_public_ip_t *ip =
 	    vec_elt_at_index (pool->public_ips, user->public_ip_index);
 
-	  if (ip->active_users)
-	    ip->active_users--;
+	  /* Some deletion paths (idle timeout, instance teardown) run
+	   * without ip->lock held; keep the counter atomic to avoid lost
+	   * updates against the bind path. */
+	  if (clib_atomic_load_relax_n (&ip->active_users))
+	    clib_atomic_fetch_add (&ip->active_users, -1);
 	  cgnat_pool_active_users_add (pool, -1);
 	}
     }
@@ -1181,8 +1187,15 @@ cgnat_bind_user_to_public_ip (cgnat_instance_t *instance, u32 instance_index,
       return VNET_API_ERROR_LIMIT_EXCEEDED;
     }
 
-    user->max_blocks = allocated_blocks;
-    user->max_ports = allocated_blocks * pool->block_size;
+    /* Cap the quota at the configured effective maximum, and compute the
+     * port quota in u32 before clamping to u16 - a plain
+     * allocated_blocks * block_size product can exceed 65535 and would be
+     * truncated when stored into the u16 max_ports. */
+    user->max_blocks = clib_min (allocated_blocks,
+				 cgnat_effective_max_blocks (instance, pool));
+    user->max_ports =
+      (u16) clib_min ((u32) user->max_blocks * pool->block_size,
+		      (u32) cgnat_effective_max_ports (instance, pool));
   }
   else
   {
@@ -1198,7 +1211,7 @@ cgnat_bind_user_to_public_ip (cgnat_instance_t *instance, u32 instance_index,
         pool_index);
   }
 
-  ip->active_users++;
+  clib_atomic_fetch_add (&ip->active_users, 1);
   cgnat_pool_active_users_add (pool, 1);
   clib_spinlock_unlock (&ip->lock);
   return 0;
@@ -1321,6 +1334,37 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
 			   user->pool_index);
       rv = cgnat_alloc_port_from_block (instance, pool, block, private_port,
 					protocol, &public_port);
+    }
+
+  /* PRE_ALLOC: blocks reclaimed by the cooling timer are removed from
+   * owned_block_ids, so a user returning after an idle period would
+   * otherwise keep a permanently shrunken capacity.  Top back up to the
+   * user's quota before giving up. */
+  if (user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_PRE_ALLOC &&
+      vec_len (user->owned_block_ids) < user->max_blocks)
+    {
+      u16 old_owned = vec_len (user->owned_block_ids);
+
+      cgnat_prealloc_blocks_for_user (instance, pool, ip, user,
+				      user->pool_index);
+      for (i = old_owned; i < vec_len (user->owned_block_ids); i++)
+	{
+	  u16 block_id = user->owned_block_ids[i];
+
+	  bi = ip->block_index_by_id[block_id];
+	  if (bi == CGNAT_INVALID_INDEX)
+	    continue;
+	  block = pool_elt_at_index (ip->blocks, bi);
+	  if (block->owner_user_index != user - instance->users ||
+	      block->state != CGNAT_BLOCK_ALLOCATED)
+	    continue;
+
+	  rv = cgnat_alloc_port_from_block (instance, pool, block,
+					    private_port, protocol,
+					    &public_port);
+	  if (!rv)
+	    goto done;
+	}
     }
 
 done:
@@ -1864,7 +1908,8 @@ cgnat_block_summary_snapshot (ip4_address_t *public_ip_filter)
 		unavailable < public_ip->total_blocks ?
 		  public_ip->total_blocks - unavailable :
 		  0;
-	      summary->active_users = public_ip->active_users;
+	      summary->active_users =
+		clib_atomic_load_relax_n (&public_ip->active_users);
 	    }
 	}
     }

@@ -1014,6 +1014,7 @@ cgnat_instance_add_del (u32 *instance_id, u8 *label, u32 inside_vrf_id,
 		cgnat_instance_runtime_fini (instance);
 		clib_memset (instance, 0, sizeof (*instance));
 		vlib_worker_thread_barrier_release (cm->vlib_main);
+		vec_free (saved_inside_addresses);
 		vec_free (pool_indices);
 		return rv;
 	      }
@@ -1367,14 +1368,22 @@ cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
 
       if (!match)
 	{
+	  /* Workers dereference cm->interfaces and
+	   * interface_index_by_sw_if_index lock-free in the packet path, and
+	   * pool/vec growth can realloc the backing store.  Mutate them only
+	   * while the workers are paused. */
+	  vlib_worker_thread_barrier_sync (cm->vlib_main);
 	  pool_get_zero (cm->interfaces, match);
 	  match->sw_if_index = sw_if_index;
 	  vec_validate_init_empty (cm->interface_index_by_sw_if_index,
 				   sw_if_index, CGNAT_INVALID_INDEX);
+	  match->flags |= flag;
 	  cm->interface_index_by_sw_if_index[sw_if_index] =
 	    match - cm->interfaces;
+	  vlib_worker_thread_barrier_release (cm->vlib_main);
 	}
-      match->flags |= flag;
+      else
+	match->flags |= flag;
 
       /* Make VPP answer ARP for all pool public IPs and static mapping
        * outside IPs on this outside interface. */
@@ -1406,9 +1415,13 @@ cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
       match->flags &= ~flag;
       if (!match->flags)
 	{
+	  /* Pause workers before unlinking and freeing the interface entry;
+	   * the packet path reads it lock-free. */
+	  vlib_worker_thread_barrier_sync (cm->vlib_main);
 	  cm->interface_index_by_sw_if_index[sw_if_index] =
 	    CGNAT_INVALID_INDEX;
 	  pool_put (cm->interfaces, match);
+	  vlib_worker_thread_barrier_release (cm->vlib_main);
 	}
     }
 
