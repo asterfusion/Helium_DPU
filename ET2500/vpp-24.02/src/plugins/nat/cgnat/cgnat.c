@@ -12,27 +12,11 @@
 #include <vpp/app/version.h>
 #include <plugins/acl/public_inlines.h>
 
-#include <time.h>
-
 #include <nat/cgnat/cgnat.h>
 
 cgnat_main_t cgnat_main;
 /* Shared with cgnat_config.c (ACL existence checks on binding). */
 acl_plugin_methods_t cgnat_acl_plugin;
-
-u8 *
-format_cgnat_log_timestamp (u8 *s, va_list *args)
-{
-  f64 timestamp = va_arg (*args, f64);
-  time_t seconds = timestamp;
-  struct tm tm;
-  u32 milliseconds = (timestamp - seconds) * 1000;
-
-  gmtime_r (&seconds, &tm);
-  return format (s, "%04u-%02u-%02u %02u:%02u:%02u.%03u",
-		 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour,
-		 tm.tm_min, tm.tm_sec, milliseconds);
-}
 
 u8 *
 format_cgnat_instance_name (u8 *s, va_list *args)
@@ -52,7 +36,7 @@ cgnat_timer_process (vlib_main_t *vm, vlib_node_runtime_t *rt,
     {
       f64 now;
 
-      vlib_process_wait_for_event_or_clock (vm, 0.5);
+      vlib_process_wait_for_event_or_clock (vm, 0.1);
       vlib_process_get_events (vm, 0);
       now = vlib_time_now (vm);
       vlib_worker_thread_barrier_sync (vm);
@@ -76,6 +60,8 @@ VNET_FEATURE_INIT (ip4_cgnat_in2out_policy, static) = {
   .node_name = "cgnat-in2out-policy",
   .runs_after = VNET_FEATURES ("acl-plugin-in-ip4-fa",
                                "ip4-sv-reassembly-feature"),
+  .runs_before = VNET_FEATURES ("spi-ip4-input-worker-handoff",
+				"spi-ip4-input-node"),
 };
 
 VNET_FEATURE_INIT (ip4_cgnat_out2in, static) = {
@@ -84,6 +70,8 @@ VNET_FEATURE_INIT (ip4_cgnat_out2in, static) = {
   .runs_after = VNET_FEATURES ("acl-plugin-in-ip4-fa",
                                "ip4-sv-reassembly-feature",
                                "ip4-dhcp-client-detect"),
+  .runs_before = VNET_FEATURES ("spi-ip4-input-worker-handoff",
+				"spi-ip4-input-node"),
 };
 
 VLIB_PLUGIN_REGISTER () = {

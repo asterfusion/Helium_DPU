@@ -44,7 +44,6 @@ cgnat_log_event_set_common (cgnat_log_event_t *event,
 			    cgnat_instance_t *instance, char *event_name,
 			    char *reason)
 {
-  event->timestamp = unix_time_now ();
   event->instance_id = instance->instance_id;
   cgnat_log_copy_str (event->event, sizeof (event->event), event_name);
   cgnat_log_copy_str (event->reason, sizeof (event->reason), reason);
@@ -65,17 +64,17 @@ cgnat_log_emit (cgnat_log_event_t *event)
     {
       if (event->reason[0])
 	vlib_log (VLIB_LOG_LEVEL_NOTICE, log_class,
-		  "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U private_ip=%U "
+		  "event=%s instance=%U private_ip=%U "
 		  "public_ip=%U reason=%s",
-		  event->event, format_cgnat_log_timestamp, event->timestamp,
+		  event->event,
 		  format_cgnat_log_instance_snapshot, event->instance_label,
 		  event->instance_id, format_ip4_address, &event->block.private_ip,
 		  format_ip4_address, &event->block.public_ip, event->reason);
       else
 	vlib_log (VLIB_LOG_LEVEL_NOTICE, log_class,
-		  "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U private_ip=%U "
+		  "event=%s instance=%U private_ip=%U "
 		  "public_ip=%U",
-		  event->event, format_cgnat_log_timestamp, event->timestamp,
+		  event->event,
 		  format_cgnat_log_instance_snapshot, event->instance_label,
 		  event->instance_id, format_ip4_address, &event->block.private_ip,
 		  format_ip4_address, &event->block.public_ip);
@@ -84,10 +83,10 @@ cgnat_log_emit (cgnat_log_event_t *event)
 
   if (event->reason[0])
     vlib_log (VLIB_LOG_LEVEL_NOTICE, log_class,
-	      "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U protocol=%u "
+	      "event=%s instance=%U protocol=%u "
 	      "private_ip=%U private_port=%u public_ip=%U public_port=%u "
 	      "remote_ip=%U remote_port=%u type=%s reason=%s",
-	      event->event, format_cgnat_log_timestamp, event->timestamp,
+	      event->event,
 	      format_cgnat_log_instance_snapshot, event->instance_label,
 	      event->instance_id, event->session.protocol, format_ip4_address,
 	      &event->session.private_ip, event->session.private_port,
@@ -99,10 +98,10 @@ cgnat_log_emit (cgnat_log_event_t *event)
 	      event->reason);
   else
     vlib_log (VLIB_LOG_LEVEL_NOTICE, log_class,
-	      "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U protocol=%u "
+	      "event=%s instance=%U protocol=%u "
 	      "private_ip=%U private_port=%u public_ip=%U public_port=%u "
 	      "remote_ip=%U remote_port=%u type=%s",
-	      event->event, format_cgnat_log_timestamp, event->timestamp,
+	      event->event,
 	      format_cgnat_log_instance_snapshot, event->instance_label,
 	      event->instance_id, event->session.protocol, format_ip4_address,
 	      &event->session.private_ip, event->session.private_port,

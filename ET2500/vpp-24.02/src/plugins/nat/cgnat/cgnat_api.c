@@ -56,7 +56,7 @@ cgnat_decode_pool_config (vl_api_ip4_address_t first_ip,
   config->port_alloc_mode = port_mode;
 }
 
-static void
+static_always_inline void
 cgnat_decode_inside_address (vl_api_cgnat_inside_address_t *api,
 			     cgnat_inside_address_t *address)
 {
@@ -67,7 +67,7 @@ cgnat_decode_inside_address (vl_api_cgnat_inside_address_t *api,
   address->prefix_len = api->prefix_len;
 }
 
-static void
+static_always_inline void
 cgnat_encode_inside_address (cgnat_inside_address_t *address,
 			     vl_api_cgnat_inside_address_t *api)
 {
@@ -78,7 +78,7 @@ cgnat_encode_inside_address (cgnat_inside_address_t *address,
   api->prefix_len = address->prefix_len;
 }
 
-static u32
+static_always_inline u32
 cgnat_api_instance_active_sessions (cgnat_instance_t *instance)
 {
   return clib_atomic_load_relax_n (&instance->active_sessions);

@@ -38,13 +38,13 @@ cgnat_user_has_active_ports (cgnat_user_t *user)
 	 user->active_ports[CGNAT_PBA_PROTO_ICMP];
 }
 
-static u16
+static_always_inline u16
 cgnat_pool_start_port (cgnat_pool_t *pool)
 {
   return pool->start_port ? pool->start_port : CGNAT_DEFAULT_START_PORT;
 }
 
-static u16
+static_always_inline u16
 cgnat_pool_end_port (cgnat_pool_t *pool)
 {
   return pool->end_port ? pool->end_port : CGNAT_DEFAULT_END_PORT;
@@ -69,7 +69,7 @@ cgnat_effective_max_ports (cgnat_instance_t *instance,
   return (u16) max_ports;
 }
 
-static u16
+static_always_inline u16
 cgnat_prealloc_blocks (cgnat_pool_t *pool)
 {
   return pool->prealloc_blocks_per_user ? pool->prealloc_blocks_per_user : 1;
@@ -95,7 +95,7 @@ cgnat_effective_max_blocks (cgnat_instance_t *instance,
   return (u16) clib_min ((u32) max_blocks, blocks_by_ports);
 }
 
-static u16
+static_always_inline u16
 cgnat_blocks_needed_for_new_user (cgnat_instance_t *instance,
 				  cgnat_pool_t *pool)
 {
@@ -105,39 +105,39 @@ cgnat_blocks_needed_for_new_user (cgnat_instance_t *instance,
   return cgnat_effective_max_blocks (instance, pool);
 }
 
-static u32
+static_always_inline u32
 cgnat_public_ip_unavailable_blocks (cgnat_public_ip_t *ip)
 {
   return ip->allocated_blocks + ip->cooling_blocks;
 }
 
-static u32
+static_always_inline u32
 cgnat_public_ip_free_blocks (cgnat_public_ip_t *ip)
 {
   return ip->total_blocks - cgnat_public_ip_unavailable_blocks (ip);
 }
 
-static u8
+static_always_inline u8
 cgnat_public_ip_below_threshold (cgnat_public_ip_t *ip)
 {
   return cgnat_public_ip_unavailable_blocks (ip) * 100 <
 	 ip->total_blocks * CGNAT_DEFAULT_UTIL_THRESHOLD;
 }
 
-static u32
+static_always_inline u32
 cgnat_pool_unavailable_blocks (cgnat_pool_t *pool)
 {
   return clib_atomic_load_relax_n (&pool->allocated_blocks) +
 	 clib_atomic_load_relax_n (&pool->cooling_blocks);
 }
 
-static u32
+static_always_inline u32
 cgnat_pool_free_blocks (cgnat_pool_t *pool)
 {
   return pool->total_blocks - cgnat_pool_unavailable_blocks (pool);
 }
 
-static u32
+static_always_inline u32
 cgnat_pool_alloc_weight (cgnat_pool_t *pool)
 {
   if (!pool->configured)
@@ -206,7 +206,7 @@ cgnat_util_cmp (u32 used_a, u32 total_a, u32 users_a, u32 used_b,
   return 0;
 }
 
-static u16
+static_always_inline u16
 cgnat_block_start_port (cgnat_pool_t *pool, u16 block_id)
 {
   return cgnat_pool_start_port (pool) + block_id * pool->block_size;
@@ -960,7 +960,8 @@ cgnat_pba_init (cgnat_main_t *cm)
     return;
 
   tw_timer_wheel_init_2t_1w_2048sl (&cm->cooling_timer_wheel,
-				    cgnat_timer_expired_cb, 1.0, ~0);
+				    cgnat_timer_expired_cb, 1.0,
+				    CGNAT_COOLING_TIMER_MAX_EXPIRATIONS);
   cm->cooling_timer_initialized = 1;
 }
 
@@ -1023,7 +1024,7 @@ cgnat_create_user (cgnat_instance_t *instance, cgnat_user_key_t *key,
   return user;
 }
 
-static void
+static_always_inline void
 cgnat_commit_user (cgnat_instance_t *instance, cgnat_user_t *user)
 {
   hash_set_mem_alloc (&instance->user_index_by_key, &user->key,

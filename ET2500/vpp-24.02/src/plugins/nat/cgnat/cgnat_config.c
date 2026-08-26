@@ -15,7 +15,7 @@
 /* Owned by cgnat.c, used here to validate ACL existence on binding. */
 extern acl_plugin_methods_t cgnat_acl_plugin;
 
-static int
+static_always_inline int
 cgnat_find_free_instance_slot (cgnat_main_t *cm)
 {
   cgnat_instance_t *instance;
@@ -26,7 +26,7 @@ cgnat_find_free_instance_slot (cgnat_main_t *cm)
   return CGNAT_INVALID_INDEX;
 }
 
-static u32
+static_always_inline u32
 cgnat_find_free_instance_id (cgnat_main_t *cm)
 {
   u32 instance_id;
@@ -37,7 +37,7 @@ cgnat_find_free_instance_id (cgnat_main_t *cm)
   return CGNAT_INVALID_INDEX;
 }
 
-static u32
+static_always_inline u32
 cgnat_find_free_pool_id (cgnat_main_t *cm)
 {
   u32 pool_id;
@@ -48,7 +48,7 @@ cgnat_find_free_pool_id (cgnat_main_t *cm)
   return CGNAT_INVALID_INDEX;
 }
 
-static int
+static_always_inline int
 cgnat_find_free_pool_slot (cgnat_main_t *cm)
 {
   cgnat_pool_t *pool;
@@ -321,7 +321,7 @@ cgnat_instance_runtime_init (cgnat_main_t *cm, cgnat_instance_t *instance,
   instance->active_sessions = 0;
 }
 
-static void
+static_always_inline void
 cgnat_instance_runtime_fini (cgnat_instance_t *instance)
 {
   u32 i;
@@ -339,7 +339,7 @@ cgnat_instance_runtime_fini (cgnat_instance_t *instance)
   instance->user_index_by_key = 0;
 }
 
-static void
+static_always_inline void
 cgnat_instance_runtime_reset (cgnat_main_t *cm, cgnat_instance_t *instance,
 			      u32 instance_index)
 {
@@ -348,7 +348,7 @@ cgnat_instance_runtime_reset (cgnat_main_t *cm, cgnat_instance_t *instance,
   cgnat_instance_runtime_init (cm, instance, instance_index);
 }
 
-static void
+static_always_inline void
 cgnat_pool_runtime_reset_full (cgnat_pool_t *pool)
 {
   cgnat_pool_free_runtime (pool);
@@ -359,10 +359,14 @@ cgnat_pool_runtime_reset_full (cgnat_pool_t *pool)
   pool->active_sessions = 0;
 }
 
-static void
-_cgnat_instance_acl_del (cgnat_main_t *cm, u32 acl_index);
+static_always_inline void
+_cgnat_instance_acl_del (cgnat_main_t *cm, u32 acl_index)
+{
+  if (acl_index < vec_len (cm->instance_index_by_acl))
+    cm->instance_index_by_acl[acl_index] = CGNAT_INVALID_INDEX;
+}
 
-static void
+static_always_inline void
 cgnat_instance_clear_acls_inline (cgnat_main_t *cm,
 				  cgnat_instance_t *instance)
 {
@@ -445,7 +449,7 @@ cgnat_del_fib_entry_reg (ip4_address_t addr, u32 sw_if_index)
     }
 }
 
-static void
+static_always_inline void
 cgnat_add_pool_fib_entries_for_sw_if (cgnat_pool_t *pool, u32 sw_if_index)
 {
   cgnat_public_ip_t *ip;
@@ -454,7 +458,7 @@ cgnat_add_pool_fib_entries_for_sw_if (cgnat_pool_t *pool, u32 sw_if_index)
     cgnat_add_fib_entry_reg (ip->addr, sw_if_index);
 }
 
-static void
+static_always_inline void
 cgnat_del_pool_fib_entries_for_sw_if (cgnat_pool_t *pool, u32 sw_if_index)
 {
   cgnat_public_ip_t *ip;
@@ -1451,7 +1455,7 @@ cgnat_interface_zone_set (u32 sw_if_index, cgnat_interface_role_t role)
   return 0;
 }
 
-static int
+static_always_inline int
 cgnat_instance_acl_add (cgnat_main_t *cm, u32 instance_index, u32 acl_index)
 {
   u32 owner;
@@ -1466,13 +1470,6 @@ cgnat_instance_acl_add (cgnat_main_t *cm, u32 instance_index, u32 acl_index)
 
   cm->instance_index_by_acl[acl_index] = instance_index;
   return 0;
-}
-
-static void
-_cgnat_instance_acl_del (cgnat_main_t *cm, u32 acl_index)
-{
-  if (acl_index < vec_len (cm->instance_index_by_acl))
-    cm->instance_index_by_acl[acl_index] = CGNAT_INVALID_INDEX;
 }
 
 int

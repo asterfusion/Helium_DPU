@@ -48,8 +48,8 @@
 #define CGNAT_ICMP_TIMEOUT 60
 #define CGNAT_OTHER_TIMEOUT 60
 #define CGNAT_TIMER_MAX_DELAY 2047
-#define CGNAT_SESSION_TIMER_MAX_EXPIRATIONS 5120
-#define CGNAT_COOLING_TIMER_MAX_EXPIRATIONS 5120
+#define CGNAT_SESSION_TIMER_MAX_EXPIRATIONS 1024
+#define CGNAT_COOLING_TIMER_MAX_EXPIRATIONS 1024
 #define CGNAT_LOG_QUEUE_SIZE (64 * 1024)
 #define CGNAT_LOG_POLL_INTERVAL_DEFAULT 0.1
 #define CGNAT_LOG_EVENT_STR_LEN 24
@@ -135,7 +135,6 @@ typedef enum
 
 typedef struct
 {
-  f64 timestamp;
   u8 kind;
   u8 event[CGNAT_LOG_EVENT_STR_LEN];
   u8 reason[CGNAT_LOG_REASON_STR_LEN];
@@ -404,7 +403,7 @@ typedef struct
   u8 protocol;
   u8 filter_mode;
   u8 mapping_type;
-  u8 pad0;
+  u8 flags;
 
   u32 instance_index;
   u32 inside_fib_index;
@@ -415,9 +414,9 @@ typedef struct
   u32 user_index;
   u32 block_index;
   u32 static_rule_index;
-
-  u16 flags;
 } cgnat_mapping_t;
+
+STATIC_ASSERT_SIZEOF (cgnat_mapping_t, 64);
 
 static_always_inline u8
 cgnat_mapping_is_auto (cgnat_mapping_t *mapping)
@@ -760,7 +759,6 @@ typedef struct
 
 extern cgnat_main_t cgnat_main;
 
-u8 *format_cgnat_log_timestamp (u8 *s, va_list *args);
 u8 *format_cgnat_instance_name (u8 *s, va_list *args);
 void cgnat_log_init (cgnat_main_t *cm);
 void cgnat_log_enqueue (cgnat_log_event_t *event);

@@ -198,7 +198,7 @@ cgnat_set_pool_command_fn (vlib_main_t *vm, unformat_input_t *input,
   return 0;
 }
 
-static cgnat_pool_t *
+static_always_inline cgnat_pool_t *
 cgnat_pool_find_by_label (cgnat_main_t *cm, u8 *label)
 {
   cgnat_pool_t *pool;
@@ -209,7 +209,7 @@ cgnat_pool_find_by_label (cgnat_main_t *cm, u8 *label)
   return 0;
 }
 
-static cgnat_pool_t *
+static_always_inline cgnat_pool_t *
 cgnat_pool_find_by_name_or_id (cgnat_main_t *cm, u8 *name)
 {
   u32 pool_id;
@@ -223,7 +223,7 @@ cgnat_pool_find_by_name_or_id (cgnat_main_t *cm, u8 *name)
   return cgnat_pool_find_by_label (cm, name);
 }
 
-static cgnat_instance_t *
+static_always_inline cgnat_instance_t *
 cgnat_instance_find_by_label (cgnat_main_t *cm, u8 *label)
 {
   cgnat_instance_t *instance;
@@ -235,7 +235,7 @@ cgnat_instance_find_by_label (cgnat_main_t *cm, u8 *label)
   return 0;
 }
 
-static cgnat_instance_t *
+static_always_inline cgnat_instance_t *
 cgnat_instance_find_by_name_or_id (cgnat_main_t *cm, u8 *name)
 {
   u32 instance_id;
@@ -541,7 +541,7 @@ cgnat_set_interface_command_fn (vlib_main_t *vm, unformat_input_t *input,
   return rv ? clib_error_return (0, "cgnat interface returned %d", rv) : 0;
 }
 
-static u8
+static_always_inline u8
 cgnat_unformat_static_protocol (unformat_input_t *input, u8 *protocol)
 {
   if (unformat (input, "tcp"))
@@ -1085,7 +1085,7 @@ cgnat_show_interfaces (vlib_main_t *vm)
     }
 }
 
-static const char *
+static_always_inline const char *
 cgnat_protocol_str (u8 protocol)
 {
   if (protocol == IP_PROTOCOL_TCP)
