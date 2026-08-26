@@ -805,7 +805,7 @@ cgnat_adf_remote_ref (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   cgnat_adf_remote_t *remote;
   u32 remote_index;
 
-  if (mapping->mapping_type != CGNAT_MAPPING_DYNAMIC)
+  if (!cgnat_mapping_is_auto (mapping))
     return 0;
 
   cgnat_make_adf_remote_key_from_mapping (&kv, mapping, remote_ip);
@@ -864,7 +864,7 @@ cgnat_adf_remote_allowed (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   cgnat_adf_remote_t *remote;
   u8 allowed = 0;
 
-  if (mapping->mapping_type != CGNAT_MAPPING_DYNAMIC)
+  if (!cgnat_mapping_is_auto (mapping))
     return 1;
 
   cgnat_make_adf_remote_key_from_mapping (&kv, mapping, remote_ip);
@@ -894,7 +894,7 @@ cgnat_adf_remote_unref (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   clib_bihash_kv_24_8_t kv, value;
   cgnat_adf_remote_t *remote;
 
-  if (mapping->mapping_type != CGNAT_MAPPING_DYNAMIC)
+  if (!cgnat_mapping_is_auto (mapping))
     return;
 
   cgnat_make_adf_remote_key_from_mapping (&kv, mapping, remote_ip);
@@ -939,7 +939,7 @@ cgnat_session_ensure_adf_remote (cgnat_main_t *cm, cgnat_mapping_t *mapping,
 {
   int rv;
 
-  if (mapping->mapping_type != CGNAT_MAPPING_DYNAMIC ||
+  if (!cgnat_mapping_is_auto (mapping) ||
       (session->flags & CGNAT_SESSION_FLAG_ADF_REMOTE_RECORDED))
     return 0;
 
@@ -1063,30 +1063,32 @@ cgnat_log_session (cgnat_main_t *cm, char *event, char *reason,
       instance->log_mode != CGNAT_LOG_MODE_SESSION)
     return;
 
-  mapping_type =
-    session->mapping_type == CGNAT_MAPPING_STATIC ? "static" : "dynamic";
+  if (session->mapping_type == CGNAT_MAPPING_STATIC)
+    mapping_type = "static";
+  else if (session->mapping_type == CGNAT_MAPPING_DETERMINISTIC)
+    mapping_type = "deterministic";
+  else
+    mapping_type = "dynamic";
   if (reason)
     cgnat_log_notice (
       "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U protocol=%u "
       "private_ip=%U private_port=%u public_ip=%U public_port=%u "
-      "remote_ip=%U remote_port=%u mapping=%u session=%u type=%s reason=%s",
+      "remote_ip=%U remote_port=%u type=%s reason=%s",
       event, format_cgnat_log_timestamp, unix_time_now (),
       format_cgnat_instance_name, instance, session->protocol, format_ip4_address,
       &session->inside_ip, session->inside_port, format_ip4_address, &session->nat_ip,
       session->nat_port, format_ip4_address, &session->remote_ip,
-      session->remote_port, session->mapping_index, (u32) (session - cm->sessions),
-      mapping_type, reason);
+      session->remote_port, mapping_type, reason);
   else
     cgnat_log_notice (
       "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U protocol=%u "
       "private_ip=%U private_port=%u public_ip=%U public_port=%u "
-      "remote_ip=%U remote_port=%u mapping=%u session=%u type=%s",
+      "remote_ip=%U remote_port=%u type=%s",
       event, format_cgnat_log_timestamp, unix_time_now (),
       format_cgnat_instance_name, instance, session->protocol, format_ip4_address,
       &session->inside_ip, session->inside_port, format_ip4_address, &session->nat_ip,
       session->nat_port, format_ip4_address, &session->remote_ip,
-      session->remote_port, session->mapping_index, (u32) (session - cm->sessions),
-      mapping_type);
+      session->remote_port, mapping_type);
 }
 
 static void cgnat_dynamic_mapping_schedule_delete (cgnat_main_t *cm,
@@ -1103,6 +1105,9 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
   u32 release_user_instance_index = CGNAT_INVALID_INDEX;
   u32 release_user_inside_fib_index = CGNAT_INVALID_INDEX;
   ip4_address_t release_user_private_ip = { 0 };
+  u32 mapping_index = CGNAT_INVALID_INDEX;
+  u32 mapping_generation = 0;
+  u8 mapping_is_auto = 0;
 
   if (session->flags & CGNAT_SESSION_FLAG_DELETING)
     {
@@ -1122,12 +1127,30 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
     cm, cgnat_index_to_value (session->mapping_index, session->mapping_generation));
   if (mapping)
     {
-      if (mapping->active_sessions)
+      u32 old, new;
+
+      mapping_index = session->mapping_index;
+      mapping_generation = session->mapping_generation;
+      mapping_is_auto = cgnat_mapping_is_auto (mapping);
+
+      /* Atomic decrement with CAS to avoid the check-then-act race on
+       * mapping->active_sessions.  We intentionally do not take mapping->lock
+       * here; the create path takes mapping->lock then increments, while the
+       * delete path uses CAS to decrement, which is sufficient and avoids a
+       * lock-order reversal with the session table lock. */
+      do
 	{
-	  previous_active_sessions =
-	    clib_atomic_fetch_add (&mapping->active_sessions, -1);
-	  cgnat_session_counter_dec (cm, mapping);
+	  old = clib_atomic_load_relax_n (&mapping->active_sessions);
+	  if (old == 0)
+	    break;
+	  new = old - 1;
 	}
+      while (!clib_atomic_cmp_and_swap_acq_relax_n (
+		      &mapping->active_sessions, &old, new, 0));
+      previous_active_sessions = old;
+      if (old)
+	cgnat_session_counter_dec (cm, mapping);
+
       user = cgnat_mapping_get_user (cm, mapping, 0);
       if (user)
 	{
@@ -1148,9 +1171,18 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
     cgnat_pba_release_user_if_idle (release_user_instance_index,
 				    release_user_inside_fib_index,
 				    release_user_private_ip);
-  if (mapping && mapping->mapping_type == CGNAT_MAPPING_DYNAMIC &&
+
+  /* Schedule dynamic mapping deletion only after dropping session->lock to
+   * avoid a lock-order reversal: schedule_delete takes mapping->lock, while
+   * the create path takes mapping->lock before the session table lock. */
+  if (mapping_index != CGNAT_INVALID_INDEX && mapping_is_auto &&
       previous_active_sessions == 1)
-    cgnat_dynamic_mapping_schedule_delete (cm, mapping);
+    {
+      mapping = cgnat_mapping_get_if_valid (
+	cm, cgnat_index_to_value (mapping_index, mapping_generation));
+      if (mapping)
+	cgnat_dynamic_mapping_schedule_delete (cm, mapping);
+    }
 
   clib_spinlock_free (&session->lock);
   clib_spinlock_lock (&cm->session_pool_lock);
@@ -1489,7 +1521,8 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
 static int
 cgnat_static_rule_public_pool_overlap (cgnat_main_t *cm,
 			       cgnat_instance_t *instance,
-			       ip4_address_t outside_ip)
+			       ip4_address_t outside_ip,
+			       u8 mapping_type, u16 outside_port)
 {
   cgnat_pool_t *pool;
   u32 *pool_index;
@@ -1502,7 +1535,14 @@ cgnat_static_rule_public_pool_overlap (cgnat_main_t *cm,
 	continue;
       if (outside >= clib_net_to_host_u32 (pool->first_ip.as_u32) &&
 	  outside <= clib_net_to_host_u32 (pool->last_ip.as_u32))
-	return 1;
+	{
+	  /* Address-level mappings must not overlap the dynamic pool at all.
+	   * Port-level mappings may reuse a pool IP, but only on reserved ports
+	   * that the dynamic PBA allocator will never use. */
+	  if (mapping_type == CGNAT_STATIC_PORT_MAP)
+	    return outside_port > pool->exclude_end_port;
+	  return 1;
+	}
     }
 
   return 0;
@@ -1561,9 +1601,10 @@ cgnat_mapping_pool_put (cgnat_main_t *cm, cgnat_mapping_t *mapping)
 }
 
 /*
- * Remove a zero-session dynamic mapping from both lookup tables immediately,
- * but defer pool/PBA reclamation until the main thread has crossed a worker
- * barrier. Workers that already resolved the old value can then finish safely.
+ * Remove a zero-session dynamic/deterministic mapping from both lookup tables
+ * immediately, but defer pool/PBA reclamation until the main thread has crossed
+ * a worker barrier. Workers that already resolved the old value can then finish
+ * safely.
  */
 static void
 cgnat_dynamic_mapping_schedule_delete (cgnat_main_t *cm,
@@ -1572,7 +1613,7 @@ cgnat_dynamic_mapping_schedule_delete (cgnat_main_t *cm,
   u64 value;
   clib_bihash_kv_16_8_t in_kv, out_kv;
 
-  if (!mapping || mapping->mapping_type != CGNAT_MAPPING_DYNAMIC)
+  if (!mapping || !cgnat_mapping_is_auto (mapping))
     return;
 
   clib_spinlock_lock (&mapping->lock);
@@ -1640,18 +1681,28 @@ cgnat_dynamic_mapping_reap (cgnat_main_t *cm)
 	  continue;
 	}
 
-      rv = cgnat_pba_release_port (
-	mapping->instance_index, mapping->pool_index, mapping->public_ip_index,
-	mapping->inside_fib_index, mapping->inside_ip, mapping->nat_port,
-	mapping->protocol);
-      if (rv)
+      if (mapping->mapping_type == CGNAT_MAPPING_DETERMINISTIC)
 	{
-	  cgnat_log_err ("dynamic mapping %u PBA release failed: %d; "
-			 "quarantined", mapping_index, rv);
-	  clib_spinlock_lock (&cm->mapping_reap_lock);
-	  vec_add1 (cm->mapping_reap_quarantine, *value);
-	  clib_spinlock_unlock (&cm->mapping_reap_lock);
-	  continue;
+	  cgnat_instance_t *instance =
+	    cgnat_instance_get_by_index (cm, mapping->instance_index);
+	  if (instance)
+	    cgnat_det_release_port (instance, mapping);
+	}
+      else
+	{
+	  rv = cgnat_pba_release_port (
+	    mapping->instance_index, mapping->pool_index, mapping->public_ip_index,
+	    mapping->inside_fib_index, mapping->inside_ip, mapping->nat_port,
+	    mapping->protocol);
+	  if (rv)
+	    {
+	      cgnat_log_err ("dynamic mapping %u PBA release failed: %d; "
+			     "quarantined", mapping_index, rv);
+	      clib_spinlock_lock (&cm->mapping_reap_lock);
+	      vec_add1 (cm->mapping_reap_quarantine, *value);
+	      clib_spinlock_unlock (&cm->mapping_reap_lock);
+	      continue;
+	    }
 	}
       cgnat_mapping_pool_put (cm, mapping);
     }
@@ -1675,7 +1726,7 @@ cgnat_static_dynamic_mapping_conflict (cgnat_main_t *cm,
 
   pool_foreach (mapping, cm->mappings)
     {
-      if (mapping->mapping_type != CGNAT_MAPPING_DYNAMIC ||
+      if (!cgnat_mapping_is_auto (mapping) ||
 	  mapping->instance_index != candidate->instance_index ||
 	  (mapping->flags & CGNAT_MAPPING_FLAG_DELETING))
 	continue;
@@ -2023,6 +2074,10 @@ cgnat_static_mapping_add_del (u32 instance_index, ip4_address_t outside_ip,
 	goto done;
 
       rule = pool_elt_at_index (instance->static_rules, rule_index);
+
+      /* Remove the local receive entry for this static mapping's outside IP. */
+      cgnat_static_fib_del_for_rule (cm, rule);
+
       cgnat_make_static_rule_key (&rule_kv, rule);
       clib_bihash_add_del_24_8 (&cm->static_rule_table, &rule_kv, 0);
       if (rule->type != CGNAT_STATIC_PORT_MAP)
@@ -2040,7 +2095,8 @@ cgnat_static_mapping_add_del (u32 instance_index, ip4_address_t outside_ip,
       goto done;
     }
 
-  if (cgnat_static_rule_public_pool_overlap (cm, instance, outside_ip))
+  if (cgnat_static_rule_public_pool_overlap (cm, instance, outside_ip,
+					     mapping_type, outside_port))
     {
       rv = VNET_API_ERROR_VALUE_EXIST;
       goto done;
@@ -2120,6 +2176,10 @@ cgnat_static_mapping_add_del (u32 instance_index, ip4_address_t outside_ip,
       rv = VNET_API_ERROR_BUG;
       goto done;
     }
+
+  /* Make VPP answer ARP for this static mapping's outside IP on all outside
+   * interfaces. */
+  cgnat_static_fib_add_for_rule (cm, rule);
 
 done:
   vlib_worker_thread_barrier_release (cm->vlib_main);
@@ -2407,7 +2467,7 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
   if (static_addr_hit && !mapping)
     return VNET_API_ERROR_BUG;
 
-  // not hit static rule, begin dynamic PBA allocate
+  // not hit static rule, begin dynamic/deterministic allocation
   if (!mapping)
     {
       cgnat_user_lock (instance, inside_fib_index, ip->src_address);
@@ -2417,9 +2477,14 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
 
       if (!mapping)
 	{
-	  rv = cgnat_pba_alloc_port_locked (instance_index, inside_fib_index,
-					    ip->src_address, inside_port,
-					    ip->protocol, &result);
+	  if (instance->mode == CGNAT_INSTANCE_MODE_DETERMINISTIC)
+	    rv = cgnat_det_alloc_port (instance, inside_fib_index,
+				       ip->src_address, inside_port,
+				       ip->protocol, &result);
+	  else
+	    rv = cgnat_pba_alloc_port_locked (instance_index, inside_fib_index,
+					      ip->src_address, inside_port,
+					      ip->protocol, &result);
 
 	  if (rv)
 	    {
@@ -2441,6 +2506,9 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
 	  mapping->public_ip_index = result.public_ip_index;
 	  mapping->user_index = result.user_index;
 	  mapping->block_index = result.block_index;
+	  mapping->mapping_type =
+	    (instance->mode == CGNAT_INSTANCE_MODE_DETERMINISTIC) ?
+	      CGNAT_MAPPING_DETERMINISTIC : CGNAT_MAPPING_DYNAMIC;
 
 	  // allocate and fill mapping
 	  kv.value = cgnat_index_to_value (mapping_index, mapping->generation);
@@ -2477,7 +2545,7 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
 				       session_remote_port,
 				       CGNAT_SESSION_FLAG_SEEN_IN2OUT,
 				       tcp, now, 1,
-				       mapping->mapping_type == CGNAT_MAPPING_DYNAMIC &&
+				       cgnat_mapping_is_auto (mapping) &&
 					 cgnat_instance_filter_mode (
 					   cm, mapping->instance_index) ==
 					   CGNAT_FILTER_MODE_ADF);
@@ -2590,7 +2658,7 @@ cgnat_session_out2in (vlib_main_t *vm, vlib_buffer_t *b)
     allow_create = 0;
   rv = cgnat_session_lookup_or_create ( cm, mapping, ip->src_address, session_remote_port,
       CGNAT_SESSION_FLAG_SEEN_OUT2IN, tcp, now, allow_create, filter_mode == CGNAT_FILTER_MODE_ADF &&
-      mapping->mapping_type == CGNAT_MAPPING_DYNAMIC);
+      cgnat_mapping_is_auto (mapping));
   if (rv)
     {
       /* Mapping hit means this packet targets a CGNAT public endpoint.
@@ -2605,6 +2673,294 @@ rewrite:
   cgnat_l4_rewrite_out2in (ip, tcp, udp, mapping);
   vnet_buffer (b)->sw_if_index[VLIB_TX] = mapping->inside_fib_index;
   return 0;
+}
+
+static void
+cgnat_instance_delete_sessions (cgnat_main_t *cm, cgnat_instance_t *instance)
+{
+  cgnat_session_t *session;
+  u32 *session_indices = 0;
+  u32 *si;
+  u32 instance_index = instance - cm->instances;
+
+  pool_foreach (session, cm->sessions)
+    {
+      if (session->instance_index == instance_index &&
+	  !(session->flags & CGNAT_SESSION_FLAG_DELETING))
+	vec_add1 (session_indices, session - cm->sessions);
+    }
+
+  vec_foreach (si, session_indices)
+    {
+      if (pool_is_free_index (cm->sessions, *si))
+	continue;
+      session = pool_elt_at_index (cm->sessions, *si);
+      cgnat_session_delete (cm, session, "instance_delete");
+    }
+  vec_free (session_indices);
+}
+
+static void
+cgnat_mapping_delete_runtime (cgnat_main_t *cm, cgnat_mapping_t *mapping,
+			      char *reason)
+{
+  clib_bihash_kv_16_8_t in_kv, out_kv;
+  u32 mapping_index = mapping - cm->mappings;
+
+  if (cgnat_mapping_is_auto (mapping))
+    {
+      int rv;
+
+      if (mapping->mapping_type == CGNAT_MAPPING_DETERMINISTIC)
+	{
+	  cgnat_instance_t *instance =
+	    cgnat_instance_get_by_index (cm, mapping->instance_index);
+	  if (instance)
+	    cgnat_det_release_port (instance, mapping);
+	}
+      else
+	{
+	  rv = cgnat_pba_release_port (
+	    mapping->instance_index, mapping->pool_index, mapping->public_ip_index,
+	    mapping->inside_fib_index, mapping->inside_ip, mapping->nat_port,
+	    mapping->protocol);
+	  if (rv)
+	    cgnat_log_err ("%s: PBA release failed for mapping %u: %d", reason,
+			   mapping_index, rv);
+	}
+    }
+
+  cgnat_make_in2out_mapping_key (&in_kv, mapping->instance_index,
+				 mapping->inside_fib_index, mapping->inside_ip,
+				 mapping->inside_port, mapping->protocol);
+  cgnat_make_out2in_mapping_key (&out_kv, mapping->outside_fib_index,
+				 mapping->nat_ip, mapping->nat_port,
+				 mapping->protocol);
+  cgnat_mapping_table_locks_lock (cm, &in_kv, &out_kv);
+  clib_bihash_add_del_16_8 (&cm->in2out_mapping_table, &in_kv, 0);
+  clib_bihash_add_del_16_8 (&cm->out2in_mapping_table, &out_kv, 0);
+  cgnat_mapping_table_locks_unlock (cm, &in_kv, &out_kv);
+
+  cgnat_mapping_pool_put (cm, mapping);
+}
+
+static void
+cgnat_instance_delete_mappings (cgnat_main_t *cm, cgnat_instance_t *instance)
+{
+  cgnat_mapping_t *mapping;
+  u32 *mapping_indices = 0;
+  u32 *mi;
+  u32 instance_index = instance - cm->instances;
+
+  pool_foreach (mapping, cm->mappings)
+    {
+      if (mapping->instance_index == instance_index)
+	vec_add1 (mapping_indices, mapping - cm->mappings);
+    }
+
+  vec_foreach (mi, mapping_indices)
+    {
+      if (pool_is_free_index (cm->mappings, *mi))
+	continue;
+      mapping = pool_elt_at_index (cm->mappings, *mi);
+      cgnat_mapping_delete_runtime (cm, mapping, "instance_delete");
+    }
+  vec_free (mapping_indices);
+}
+
+static void
+cgnat_instance_delete_static_rules (cgnat_main_t *cm,
+				    cgnat_instance_t *instance)
+{
+  cgnat_static_rule_t *rule;
+  u32 *rule_indices = 0;
+  u32 *ri;
+
+  pool_foreach (rule, instance->static_rules)
+    vec_add1 (rule_indices, rule - instance->static_rules);
+
+  vec_foreach (ri, rule_indices)
+    {
+      clib_bihash_kv_16_8_t kv;
+      clib_bihash_kv_24_8_t rule_kv;
+
+      if (pool_is_free_index (instance->static_rules, *ri))
+	continue;
+      rule = pool_elt_at_index (instance->static_rules, *ri);
+
+      cgnat_static_fib_del_for_rule (cm, rule);
+      cgnat_static_rule_delete_mappings (cm, instance, rule);
+
+      cgnat_make_static_rule_key (&rule_kv, rule);
+      clib_bihash_add_del_24_8 (&cm->static_rule_table, &rule_kv, 0);
+
+      if (rule->type != CGNAT_STATIC_PORT_MAP)
+	{
+	  cgnat_make_static_addr_key (&kv, rule->inside_fib_index,
+				      rule->inside_ip, rule->protocol);
+	  clib_bihash_add_del_16_8 (&cm->static_addr_in2out_table, &kv, 0);
+	  cgnat_make_static_addr_key (&kv, rule->outside_fib_index,
+				      rule->outside_ip, rule->protocol);
+	  clib_bihash_add_del_16_8 (&cm->static_addr_out2in_table, &kv, 0);
+	}
+
+      cgnat_static_rule_pool_put (instance, rule);
+    }
+  vec_free (rule_indices);
+}
+
+static void
+cgnat_instance_delete_users (cgnat_main_t *cm, cgnat_instance_t *instance)
+{
+  cgnat_user_t *user;
+  u32 *user_indices = 0;
+  u32 *ui;
+
+  (void) cm;
+  pool_foreach (user, instance->users)
+    vec_add1 (user_indices, user - instance->users);
+
+  vec_foreach (ui, user_indices)
+    {
+      if (pool_is_free_index (instance->users, *ui))
+	continue;
+      user = pool_elt_at_index (instance->users, *ui);
+      cgnat_delete_user (instance, user);
+    }
+  vec_free (user_indices);
+}
+
+
+static void
+cgnat_pool_delete_sessions_of_pool (cgnat_main_t *cm, u32 pool_index)
+{
+  cgnat_session_t *session;
+  cgnat_mapping_t *mapping;
+  u32 *session_indices = 0;
+  u32 *si;
+
+  pool_foreach (session, cm->sessions)
+    {
+      if (session->flags & CGNAT_SESSION_FLAG_DELETING)
+	continue;
+      if (pool_is_free_index (cm->mappings, session->mapping_index))
+	continue;
+
+      mapping = pool_elt_at_index (cm->mappings, session->mapping_index);
+      if (mapping->generation != session->mapping_generation ||
+	  mapping->pool_index != pool_index)
+	continue;
+
+      vec_add1 (session_indices, session - cm->sessions);
+    }
+
+  vec_foreach (si, session_indices)
+    {
+      if (pool_is_free_index (cm->sessions, *si))
+	continue;
+      session = pool_elt_at_index (cm->sessions, *si);
+      cgnat_session_delete (cm, session, "pool_delete");
+    }
+  vec_free (session_indices);
+}
+
+static void
+cgnat_pool_delete_mappings_of_pool (cgnat_main_t *cm, u32 pool_index)
+{
+  cgnat_mapping_t *mapping;
+  u32 *mapping_indices = 0;
+  u32 *mi;
+
+  pool_foreach (mapping, cm->mappings)
+    {
+      if (mapping->pool_index == pool_index)
+	vec_add1 (mapping_indices, mapping - cm->mappings);
+    }
+
+  vec_foreach (mi, mapping_indices)
+    {
+      if (pool_is_free_index (cm->mappings, *mi))
+	continue;
+      mapping = pool_elt_at_index (cm->mappings, *mi);
+      cgnat_mapping_delete_runtime (cm, mapping, "pool_delete");
+    }
+  vec_free (mapping_indices);
+}
+
+static void
+cgnat_pool_delete_users_of_pool (cgnat_instance_t *instance, u32 pool_index)
+{
+  cgnat_user_t *user;
+  u32 *user_indices = 0;
+  u32 *ui;
+
+  pool_foreach (user, instance->users)
+    {
+      if (user->pool_index == pool_index)
+	vec_add1 (user_indices, user - instance->users);
+    }
+
+  vec_foreach (ui, user_indices)
+    {
+      if (pool_is_free_index (instance->users, *ui))
+	continue;
+      user = pool_elt_at_index (instance->users, *ui);
+      cgnat_delete_user (instance, user);
+    }
+  vec_free (user_indices);
+}
+
+void
+cgnat_pool_cleanup_runtime (cgnat_main_t *cm, cgnat_pool_t *pool,
+			    u32 pool_index, cgnat_instance_t *instance)
+{
+  cgnat_pool_delete_sessions_of_pool (cm, pool_index);
+  cgnat_dynamic_mapping_reap (cm);
+  cgnat_pool_delete_mappings_of_pool (cm, pool_index);
+  if (instance)
+    cgnat_pool_delete_users_of_pool (instance, pool_index);
+  cgnat_pool_runtime_reset (pool);
+}
+
+void
+cgnat_instance_cleanup_runtime_state (cgnat_main_t *cm,
+				      cgnat_instance_t *instance)
+{
+  cgnat_static_rule_t *rule;
+
+  /* Sessions and dynamic mappings are runtime state.  Static rules are
+   * configuration and are preserved; only their cached exact-mapping handles
+   * (which point to freed mappings) are reset. */
+  cgnat_instance_delete_sessions (cm, instance);
+  cgnat_dynamic_mapping_reap (cm);
+  cgnat_instance_delete_mappings (cm, instance);
+  cgnat_dynamic_mapping_reap (cm);
+
+  pool_foreach (rule, instance->static_rules)
+    {
+      rule->exact_mapping_index = CGNAT_INVALID_INDEX;
+      vec_free (rule->exact_mapping_indices);
+      rule->exact_mapping_indices = 0;
+    }
+
+  cgnat_instance_delete_users (cm, instance);
+
+  instance->total_blocks = 0;
+  instance->allocated_blocks = 0;
+  instance->cooling_blocks = 0;
+  instance->active_users = 0;
+  instance->active_sessions = 0;
+}
+
+void
+cgnat_instance_cleanup_resources (cgnat_main_t *cm,
+				  cgnat_instance_t *instance)
+{
+  cgnat_instance_delete_static_rules (cm, instance);
+  cgnat_instance_delete_sessions (cm, instance);
+  cgnat_dynamic_mapping_reap (cm);
+  cgnat_instance_delete_mappings (cm, instance);
+  cgnat_instance_delete_users (cm, instance);
 }
 
 void
@@ -2648,6 +3004,67 @@ cgnat_session_init (cgnat_main_t *cm)
   clib_spinlock_init (&cm->session_timer_lock);
   cm->session_timer_initialized = 1;
   cm->session_tables_initialized = 1;
+}
+
+void
+cgnat_session_reset (cgnat_main_t *cm)
+{
+  cgnat_mapping_t *mapping;
+  cgnat_session_t *session;
+  u32 i;
+
+  if (!cm->session_tables_initialized)
+    return;
+
+  pool_foreach (session, cm->sessions)
+    clib_spinlock_free (&session->lock);
+  pool_foreach (mapping, cm->mappings)
+    clib_spinlock_free (&mapping->lock);
+
+  pool_free (cm->sessions);
+  pool_free (cm->mappings);
+  pool_free (cm->adf_remotes);
+  vec_free (cm->session_generation_by_index);
+  vec_free (cm->mapping_generation_by_index);
+  vec_free (cm->adf_remote_generation_by_index);
+  vec_free (cm->mapping_reap_queue);
+  vec_free (cm->mapping_reap_quarantine);
+  pool_free (cm->session_timers);
+
+  clib_bihash_free_16_8 (&cm->in2out_mapping_table);
+  clib_bihash_free_16_8 (&cm->out2in_mapping_table);
+  clib_bihash_free_16_8 (&cm->static_addr_in2out_table);
+  clib_bihash_free_16_8 (&cm->static_addr_out2in_table);
+  clib_bihash_free_24_8 (&cm->static_rule_table);
+  clib_bihash_free_24_8 (&cm->session_table);
+  clib_bihash_free_24_8 (&cm->adf_remote_table);
+
+  if (cm->session_timer_initialized)
+    {
+      tw_timer_wheel_free_2t_1w_2048sl (&cm->session_timer_wheel);
+      cm->session_timer_initialized = 0;
+    }
+
+  for (i = 0; i < CGNAT_MAPPING_TABLE_LOCK_BUCKETS; i++)
+    clib_spinlock_free (&cm->mapping_table_locks[i]);
+  for (i = 0; i < CGNAT_SESSION_TABLE_LOCK_BUCKETS; i++)
+    clib_spinlock_free (&cm->session_table_locks[i]);
+  for (i = 0; i < CGNAT_ADF_REMOTE_LOCK_BUCKETS; i++)
+    clib_spinlock_free (&cm->adf_remote_locks[i]);
+  clib_spinlock_free (&cm->mapping_pool_lock);
+  clib_spinlock_free (&cm->adf_remote_pool_lock);
+  clib_spinlock_free (&cm->mapping_reap_lock);
+  clib_spinlock_free (&cm->session_pool_lock);
+  clib_spinlock_free (&cm->session_timer_lock);
+
+  cm->session_tables_initialized = 0;
+
+  cm->active_sessions_tcp = 0;
+  cm->active_sessions_udp = 0;
+  cm->active_sessions_icmp = 0;
+  cm->active_sessions_total = 0;
+
+  cgnat_session_init (cm);
 }
 
 void

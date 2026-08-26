@@ -600,10 +600,48 @@ cgnat_static_mapping_command (unformat_input_t *input, u8 is_add)
 	if (outside_port > CLIB_U16_MAX ||
 	    (inside_port != CGNAT_INVALID_INDEX && inside_port > CLIB_U16_MAX))
 	  return clib_error_return (0, "static mapping port exceeds 65535");
-      if (!protocol_set || protocol == CGNAT_STATIC_PROTO_ALL)
+      if (!protocol_set)
 	return clib_error_return (0, "port mapping requires a protocol");
       if (inside_port == CGNAT_INVALID_INDEX)
 	inside_port = outside_port;
+
+      if (protocol == CGNAT_STATIC_PROTO_ALL)
+	{
+	  /* Expand port-level protocol-all into three concrete protocol rules. */
+	  u8 protos[] = { IP_PROTOCOL_TCP, IP_PROTOCOL_UDP, IP_PROTOCOL_ICMP };
+	  int errs[3] = { 0, 0, 0 };
+	  u32 i;
+
+	  for (i = 0; i < 3; i++)
+	    {
+	      rv = cgnat_static_mapping_add_del (
+		instance_index, outside_ip, (u16) outside_port, inside_ip,
+		(u16) inside_port, protos[i], CGNAT_STATIC_PORT_MAP, inside_vrf,
+		is_add);
+	      errs[i] = rv;
+	      if (rv && is_add)
+		break;
+	    }
+
+	  if (is_add && rv)
+	    {
+	      u32 j;
+	      for (j = 0; j < i; j++)
+		if (!errs[j])
+		  cgnat_static_mapping_add_del (
+		    instance_index, outside_ip, (u16) outside_port, inside_ip,
+		    (u16) inside_port, protos[j], CGNAT_STATIC_PORT_MAP,
+		    inside_vrf, 0);
+	      return clib_error_return (0, "cgnat static-mapping returned %d", rv);
+	    }
+
+	  /* Delete: best-effort remove all three protocol entries. */
+	  if (!is_add)
+	    return 0;
+
+	  return 0;
+	}
+
       rv = cgnat_static_mapping_add_del (
 	instance_index, outside_ip, outside_port, inside_ip, inside_port,
 	protocol, CGNAT_STATIC_PORT_MAP, inside_vrf, is_add);
@@ -734,14 +772,15 @@ cgnat_show_user_stats (vlib_main_t *vm, unformat_input_t *input, u8 rate_only)
 	    if (rate_only)
 	      vlib_cli_output (
 		vm, "instance %u user %U create-rate %u limit %u rate-drops %u "
-		    "lock-drops %u",
+		    "lock-drops %u port-block-drops %u",
 		instance->instance_id, format_ip4_address, &inside_ip, rate,
 		instance->max_session_create_rate, user->session_rate_drops,
-		user->session_lock_drops);
+		user->session_lock_drops, user->port_block_drops);
 	    else
 	      vlib_cli_output (
 		vm, "instance %u user %U sessions %u/%u ports tcp %u udp %u icmp %u "
-	    "blocks %u create-rate %u/%u limit-drops %u rate-drops %u lock-drops %u",
+	    "blocks %u create-rate %u/%u limit-drops %u rate-drops %u lock-drops %u "
+	    "port-block-drops %u",
 		instance->instance_id, format_ip4_address, &inside_ip,
 		user->active_sessions, instance->max_sessions_per_user,
 		user->active_ports[CGNAT_PBA_PROTO_TCP],
@@ -749,7 +788,8 @@ cgnat_show_user_stats (vlib_main_t *vm, unformat_input_t *input, u8 rate_only)
 		user->active_ports[CGNAT_PBA_PROTO_ICMP],
 		vec_len (user->owned_block_ids), rate,
 		instance->max_session_create_rate, user->session_limit_drops,
-		user->session_rate_drops, user->session_lock_drops);
+		user->session_rate_drops, user->session_lock_drops,
+		user->port_block_drops);
 	  }
     }
   vlib_worker_thread_barrier_release (cm->vlib_main);
@@ -838,6 +878,197 @@ cgnat_del_session_exact_command_fn (vlib_main_t *vm, unformat_input_t *input,
   return 0;
 }
 
+static clib_error_t *
+cgnat_show_det_o2imap_command_fn (vlib_main_t *vm, unformat_input_t *input,
+				  vlib_cli_command_t *cmd)
+{
+  cgnat_main_t *cm = &cgnat_main;
+  cgnat_instance_t *instance;
+  ip4_address_t public_ip;
+  u32 instance_id, instance_index;
+  u32 public_port;
+  ip4_address_t inside_ip;
+  int rv;
+
+  if (!unformat (input, "instance %u", &instance_id))
+    return clib_error_return (0, "expected instance <id>");
+  if (cgnat_instance_index_from_id (instance_id, &instance_index))
+    return clib_error_return (0, "instance %u not found", instance_id);
+
+  instance = cgnat_instance_get_by_index (cm, instance_index);
+  if (!instance || !instance->configured)
+    return clib_error_return (0, "instance %u not found", instance_id);
+  if (instance->mode != CGNAT_INSTANCE_MODE_DETERMINISTIC)
+    return clib_error_return (0, "instance %u is not deterministic",
+			      instance_id);
+
+  if (!unformat (input, "%U:%u", unformat_ip4_address, &public_ip,
+		 &public_port))
+    return clib_error_return (0, "expected <public-ip>:<port>");
+  if (public_port > CLIB_U16_MAX)
+    return clib_error_return (0, "port exceeds 65535");
+
+  rv = cgnat_det_o2imap (instance, public_ip, (u16) public_port, &inside_ip);
+  if (rv)
+    return clib_error_return (0, "no deterministic mapping found for %U:%u",
+			      format_ip4_address, &public_ip, public_port);
+
+  vlib_cli_output (vm, "%U", format_ip4_address, &inside_ip);
+  return 0;
+}
+
+static clib_error_t *
+cgnat_show_det_i2omap_command_fn (vlib_main_t *vm, unformat_input_t *input,
+				  vlib_cli_command_t *cmd)
+{
+  cgnat_main_t *cm = &cgnat_main;
+  cgnat_instance_t *instance;
+  cgnat_det_runtime_t *det;
+  u32 instance_id, instance_index;
+  ip4_address_t inside_ip;
+  u8 show_all = 0;
+
+  if (!unformat (input, "instance %u", &instance_id))
+    return clib_error_return (0, "expected instance <id>");
+  if (cgnat_instance_index_from_id (instance_id, &instance_index))
+    return clib_error_return (0, "instance %u not found", instance_id);
+
+  instance = cgnat_instance_get_by_index (cm, instance_index);
+  if (!instance || !instance->configured)
+    return clib_error_return (0, "instance %u not found", instance_id);
+  if (instance->mode != CGNAT_INSTANCE_MODE_DETERMINISTIC)
+    return clib_error_return (0, "instance %u is not deterministic",
+			      instance_id);
+
+  if (unformat (input, "all"))
+    show_all = 1;
+  else if (!unformat (input, "%U", unformat_ip4_address, &inside_ip))
+    return clib_error_return (0, "expected <inside-ip> or all");
+
+  det = &instance->det;
+  if (show_all)
+    {
+      u32 i;
+
+      for (i = 0; i < det->inside_count; i++)
+	{
+	  ip4_address_t public_ip;
+	  u16 port_start, port_end;
+	  ip4_address_t addr;
+	  int rv;
+
+	  addr.as_u32 = clib_host_to_net_u32 (det->inside_first_host + i);
+	  rv = cgnat_det_i2omap (instance, addr, &public_ip, &port_start,
+				 &port_end);
+	  if (rv)
+	    continue;
+
+	  vlib_cli_output (vm, "%U -> %U:%u-%u", format_ip4_address, &addr,
+			   format_ip4_address, &public_ip, port_start,
+			   port_end);
+	}
+    }
+  else
+    {
+      ip4_address_t public_ip;
+      u16 port_start, port_end;
+      int rv;
+
+      rv = cgnat_det_i2omap (instance, inside_ip, &public_ip, &port_start,
+			     &port_end);
+      if (rv)
+	return clib_error_return (
+	  0, "no deterministic mapping found for %U in instance %u",
+	  format_ip4_address, &inside_ip, instance_id);
+
+      vlib_cli_output (vm, "%U:%u-%u", format_ip4_address, &public_ip,
+		       port_start, port_end);
+    }
+
+  return 0;
+}
+
+static clib_error_t *
+cgnat_show_det_mappings_command_fn (vlib_main_t *vm, unformat_input_t *input,
+				    vlib_cli_command_t *cmd)
+{
+  cgnat_main_t *cm = &cgnat_main;
+  cgnat_instance_t *instance;
+  cgnat_inside_address_t *addr;
+  cgnat_det_runtime_t *det;
+  u32 instance_id, instance_index;
+  u32 *pool_index;
+  ip4_address_t out_first, out_last;
+  u8 out_first_set = 0;
+  u32 active_sessions;
+
+  if (!unformat (input, "instance %u", &instance_id))
+    return clib_error_return (0, "expected instance <id>");
+  if (cgnat_instance_index_from_id (instance_id, &instance_index))
+    return clib_error_return (0, "instance %u not found", instance_id);
+
+  instance = cgnat_instance_get_by_index (cm, instance_index);
+  if (!instance || !instance->configured)
+    return clib_error_return (0, "instance %u not found", instance_id);
+  if (instance->mode != CGNAT_INSTANCE_MODE_DETERMINISTIC)
+    return clib_error_return (0, "instance %u is not deterministic",
+			      instance_id);
+
+  addr = instance->inside_addresses;
+  if (!addr || vec_len (addr) != 1)
+    return clib_error_return (0,
+			      "instance %u has no deterministic inside address",
+			      instance_id);
+
+  det = &instance->det;
+
+  vec_foreach (pool_index, instance->pool_indices)
+    {
+      cgnat_pool_t *pool = cgnat_pool_get_by_index (cm, *pool_index);
+      if (!pool)
+	continue;
+      if (!out_first_set)
+	{
+	  out_first = pool->first_ip;
+	  out_last = pool->last_ip;
+	  out_first_set = 1;
+	}
+      else
+	{
+	  if (clib_net_to_host_u32 (pool->first_ip.as_u32) <
+	      clib_net_to_host_u32 (out_first.as_u32))
+	    out_first = pool->first_ip;
+	  if (clib_net_to_host_u32 (pool->last_ip.as_u32) >
+	      clib_net_to_host_u32 (out_last.as_u32))
+	    out_last = pool->last_ip;
+	}
+    }
+
+  if (!out_first_set)
+    return clib_error_return (0, "instance %u has no pool", instance_id);
+
+  if (addr->type == CGNAT_INSIDE_ADDRESS_PREFIX)
+    vlib_cli_output (vm, "in %U/%u out %U-%U",
+		     format_ip4_address, &addr->first_ip, addr->prefix_len,
+		     format_ip4_address, &out_first,
+		     format_ip4_address, &out_last);
+  else
+    vlib_cli_output (vm, "in %U-%U out %U-%U",
+		     format_ip4_address, &addr->first_ip,
+		     format_ip4_address, &addr->last_ip,
+		     format_ip4_address, &out_first,
+		     format_ip4_address, &out_last);
+
+  vlib_cli_output (vm, "    outside address sharing ratio: %u",
+		   det->sharing_ratio);
+  vlib_cli_output (vm, "    number of ports per inside host: %u",
+		   det->ports_per_host);
+  active_sessions = clib_atomic_load_relax_n (&instance->active_sessions);
+  vlib_cli_output (vm, "    sessions number: %u", active_sessions);
+
+  return 0;
+}
+
 static void
 cgnat_show_interfaces (vlib_main_t *vm)
 {
@@ -854,6 +1085,20 @@ cgnat_show_interfaces (vlib_main_t *vm)
     }
 }
 
+static const char *
+cgnat_protocol_str (u8 protocol)
+{
+  if (protocol == IP_PROTOCOL_TCP)
+    return "tcp";
+  if (protocol == IP_PROTOCOL_UDP)
+    return "udp";
+  if (protocol == IP_PROTOCOL_ICMP)
+    return "icmp";
+  if (protocol == CGNAT_STATIC_PROTO_ALL)
+    return "all";
+  return "other";
+}
+
 static void
 cgnat_show_instance_config_one (vlib_main_t *vm, cgnat_instance_t *instance)
 {
@@ -862,6 +1107,7 @@ cgnat_show_instance_config_one (vlib_main_t *vm, cgnat_instance_t *instance)
   cgnat_inside_address_t *address;
   cgnat_syslog_server_t *server;
   cgnat_ipfix_exporter_t *exporter;
+  cgnat_static_rule_t *rule;
   cgnat_pool_t *pool;
   u32 *acl_index, *pool_index;
 
@@ -935,6 +1181,26 @@ cgnat_show_instance_config_one (vlib_main_t *vm, cgnat_instance_t *instance)
 			 pool->label[0] ? " label " : "",
 			 pool->label[0] ? (char *) pool->label : "");
     }
+  pool_foreach (rule, instance->static_rules)
+    {
+      if (rule->type == CGNAT_STATIC_ADDR_MAP)
+	vlib_cli_output (vm, " static-mapping outside %U inside %U protocol all",
+			 format_ip4_address, &rule->outside_ip,
+			 format_ip4_address, &rule->inside_ip);
+      else if (rule->type == CGNAT_STATIC_ADDR_PROTO_MAP)
+	vlib_cli_output (vm,
+			 " static-mapping outside %U inside %U protocol %s",
+			 format_ip4_address, &rule->outside_ip,
+			 format_ip4_address, &rule->inside_ip,
+			 cgnat_protocol_str (rule->protocol));
+      else
+	vlib_cli_output (
+	  vm,
+	  " static-mapping outside %U port %u inside %U port %u protocol %s",
+	  format_ip4_address, &rule->outside_ip, rule->outside_port,
+	  format_ip4_address, &rule->inside_ip, rule->inside_port,
+	  cgnat_protocol_str (rule->protocol));
+    }
   vec_foreach (server, instance->syslog_servers)
     vlib_cli_output (vm, " syslog server %U %u", format_ip4_address,
 		     &server->address, server->port);
@@ -1003,6 +1269,7 @@ cgnat_show_instance_stat_one (vlib_main_t *vm, cgnat_instance_t *instance)
   u32 used_block = 0;
 
   vlib_worker_thread_barrier_sync (cm->vlib_main);
+  cgnat_recalculate_instance (cm, instance);
   current_user = clib_atomic_load_relax_n (&instance->active_users);
   current_session = clib_atomic_load_relax_n (&instance->active_sessions);
   vec_foreach (pool_index, instance->pool_indices)
@@ -1360,6 +1627,21 @@ VLIB_CLI_COMMAND (cgnat_del_session_exact_command, static) = {
 		"outside <public-ip> port <public-port> "
 		"protocol <tcp|udp|icmp|all>",
   .function = cgnat_del_session_exact_command_fn,
+};
+VLIB_CLI_COMMAND (cgnat_show_det_o2imap_command, static) = {
+  .path = "cgnat show det o2imap",
+  .short_help = "cgnat show det o2imap instance <id> <public-ip>:<port>",
+  .function = cgnat_show_det_o2imap_command_fn,
+};
+VLIB_CLI_COMMAND (cgnat_show_det_i2omap_command, static) = {
+  .path = "cgnat show det i2omap",
+  .short_help = "cgnat show det i2omap instance <id> <inside-ip>|all",
+  .function = cgnat_show_det_i2omap_command_fn,
+};
+VLIB_CLI_COMMAND (cgnat_show_det_mappings_command, static) = {
+  .path = "cgnat show det mappings",
+  .short_help = "cgnat show det mappings instance <id>",
+  .function = cgnat_show_det_mappings_command_fn,
 };
 /* *INDENT-ON* */
 

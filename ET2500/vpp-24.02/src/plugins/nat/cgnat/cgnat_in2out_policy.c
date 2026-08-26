@@ -95,7 +95,7 @@ cgnat_in2out_policy_inline (cgnat_main_t *cm, vlib_buffer_t *b0, u16 *next0,
   vnet_feature_next_u16 (arc_next0, b0);
   *next0 = *arc_next0;
 
-  if (PREDICT_FALSE (!cm->enabled))
+  if (PREDICT_FALSE (!clib_atomic_load_acq_n (&cm->enabled)))
     return CGNAT_IN2OUT_POLICY_ERROR_BYPASS_DISABLED;
 
   i = cgnat_get_interface (cm, sw_if_index);
