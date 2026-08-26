@@ -106,9 +106,20 @@ cgnat_init (vlib_main_t *vm)
   cm->ip4_main = &ip4_main;
   cm->fib_src = fib_source_allocate ("cgnat", FIB_SOURCE_PRIORITY_LOW,
                                      FIB_SOURCE_BH_SIMPLE);
-  cm->log_class = vlib_log_register_class ("cgnat", 0);
-  vlib_log_get_subclass_data (cm->log_class)->syslog_level =
+  cm->log_class_dynamic =
+    vlib_log_register_class_rate_limit ("CGNAT", "DYNAMIC", 0x7FFFFFFF);
+  vlib_log_get_subclass_data (cm->log_class_dynamic)->level =
     VLIB_LOG_LEVEL_NOTICE;
+  vlib_log_get_subclass_data (cm->log_class_dynamic)->syslog_level =
+    VLIB_LOG_LEVEL_NOTICE;
+
+  cm->log_class_deterministic =
+    vlib_log_register_class_rate_limit ("CGNAT", "DETERMINISTIC", 0x7FFFFFFF);
+  vlib_log_get_subclass_data (cm->log_class_deterministic)->level =
+    VLIB_LOG_LEVEL_NOTICE;
+  vlib_log_get_subclass_data (cm->log_class_deterministic)->syslog_level =
+    VLIB_LOG_LEVEL_NOTICE;
+
   cgnat_log_init (cm);
 
   error = acl_plugin_exports_init (&cgnat_acl_plugin);

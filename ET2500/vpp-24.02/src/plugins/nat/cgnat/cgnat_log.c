@@ -55,64 +55,62 @@ cgnat_log_event_set_common (cgnat_log_event_t *event,
 void
 cgnat_log_emit (cgnat_log_event_t *event)
 {
+  vlib_log_class_t log_class = cgnat_main.log_class_dynamic;
+
+  if (event->kind == CGNAT_LOG_EVENT_KIND_SESSION &&
+      event->session.mapping_type == CGNAT_MAPPING_DETERMINISTIC)
+    log_class = cgnat_main.log_class_deterministic;
+
   if (event->kind == CGNAT_LOG_EVENT_KIND_PBA_BLOCK)
     {
       if (event->reason[0])
-	cgnat_log_notice (
-	  "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U private_ip=%U "
-	  "public_ip=%U public_port_start=%u public_port_end=%u block_id=%u "
-	  "pool=%u reason=%s",
-	  event->event, format_cgnat_log_timestamp, event->timestamp,
-	  format_cgnat_log_instance_snapshot, event->instance_label,
-	  event->instance_id, format_ip4_address, &event->block.private_ip,
-	  format_ip4_address, &event->block.public_ip,
-	  event->block.public_port_start, event->block.public_port_end,
-	  event->block.block_id, event->block.pool_index, event->reason);
+	vlib_log (VLIB_LOG_LEVEL_NOTICE, log_class,
+		  "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U private_ip=%U "
+		  "public_ip=%U reason=%s",
+		  event->event, format_cgnat_log_timestamp, event->timestamp,
+		  format_cgnat_log_instance_snapshot, event->instance_label,
+		  event->instance_id, format_ip4_address, &event->block.private_ip,
+		  format_ip4_address, &event->block.public_ip, event->reason);
       else
-	cgnat_log_notice (
-	  "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U private_ip=%U "
-	  "public_ip=%U public_port_start=%u public_port_end=%u block_id=%u "
-	  "pool=%u",
-	  event->event, format_cgnat_log_timestamp, event->timestamp,
-	  format_cgnat_log_instance_snapshot, event->instance_label,
-	  event->instance_id, format_ip4_address, &event->block.private_ip,
-	  format_ip4_address, &event->block.public_ip,
-	  event->block.public_port_start, event->block.public_port_end,
-	  event->block.block_id, event->block.pool_index);
+	vlib_log (VLIB_LOG_LEVEL_NOTICE, log_class,
+		  "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U private_ip=%U "
+		  "public_ip=%U",
+		  event->event, format_cgnat_log_timestamp, event->timestamp,
+		  format_cgnat_log_instance_snapshot, event->instance_label,
+		  event->instance_id, format_ip4_address, &event->block.private_ip,
+		  format_ip4_address, &event->block.public_ip);
       return;
     }
 
   if (event->reason[0])
-    cgnat_log_notice (
-      "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U protocol=%u "
-      "private_ip=%U private_port=%u public_ip=%U public_port=%u "
-      "remote_ip=%U remote_port=%u mapping=%u session=%u type=%s reason=%s",
-      event->event, format_cgnat_log_timestamp, event->timestamp,
-      format_cgnat_log_instance_snapshot, event->instance_label,
-      event->instance_id, event->session.protocol, format_ip4_address,
-      &event->session.private_ip, event->session.private_port,
-      format_ip4_address, &event->session.public_ip,
-      event->session.public_port, format_ip4_address,
-      &event->session.remote_ip, event->session.remote_port,
-      event->session.mapping_index, event->session.session_index,
-      event->session.mapping_type == CGNAT_MAPPING_STATIC ? "static" :
-							    "dynamic",
-      event->reason);
+    vlib_log (VLIB_LOG_LEVEL_NOTICE, log_class,
+	      "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U protocol=%u "
+	      "private_ip=%U private_port=%u public_ip=%U public_port=%u "
+	      "remote_ip=%U remote_port=%u type=%s reason=%s",
+	      event->event, format_cgnat_log_timestamp, event->timestamp,
+	      format_cgnat_log_instance_snapshot, event->instance_label,
+	      event->instance_id, event->session.protocol, format_ip4_address,
+	      &event->session.private_ip, event->session.private_port,
+	      format_ip4_address, &event->session.public_ip,
+	      event->session.public_port, format_ip4_address,
+	      &event->session.remote_ip, event->session.remote_port,
+	      event->session.mapping_type == CGNAT_MAPPING_STATIC ? "static" :
+								    "dynamic",
+	      event->reason);
   else
-    cgnat_log_notice (
-      "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U protocol=%u "
-      "private_ip=%U private_port=%u public_ip=%U public_port=%u "
-      "remote_ip=%U remote_port=%u mapping=%u session=%u type=%s",
-      event->event, format_cgnat_log_timestamp, event->timestamp,
-      format_cgnat_log_instance_snapshot, event->instance_label,
-      event->instance_id, event->session.protocol, format_ip4_address,
-      &event->session.private_ip, event->session.private_port,
-      format_ip4_address, &event->session.public_ip,
-      event->session.public_port, format_ip4_address,
-      &event->session.remote_ip, event->session.remote_port,
-      event->session.mapping_index, event->session.session_index,
-      event->session.mapping_type == CGNAT_MAPPING_STATIC ? "static" :
-							    "dynamic");
+    vlib_log (VLIB_LOG_LEVEL_NOTICE, log_class,
+	      "CGNAT_LOG event=%s TIMESTAMP=%U instance=%U protocol=%u "
+	      "private_ip=%U private_port=%u public_ip=%U public_port=%u "
+	      "remote_ip=%U remote_port=%u type=%s",
+	      event->event, format_cgnat_log_timestamp, event->timestamp,
+	      format_cgnat_log_instance_snapshot, event->instance_label,
+	      event->instance_id, event->session.protocol, format_ip4_address,
+	      &event->session.private_ip, event->session.private_port,
+	      format_ip4_address, &event->session.public_ip,
+	      event->session.public_port, format_ip4_address,
+	      &event->session.remote_ip, event->session.remote_port,
+	      event->session.mapping_type == CGNAT_MAPPING_STATIC ? "static" :
+								    "dynamic");
 }
 
 void

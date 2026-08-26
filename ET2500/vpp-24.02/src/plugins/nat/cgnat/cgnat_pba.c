@@ -219,23 +219,20 @@ cgnat_log_pba_block (cgnat_instance_t *instance, char *event, char *reason,
 		     u32 pool_index)
 {
   cgnat_log_event_t log_event;
-  u16 start_port, end_port;
+
+  (void) pool;
+  (void) block;
+  (void) pool_index;
 
   if (!instance || !instance->syslog_enabled ||
       instance->log_mode != CGNAT_LOG_MODE_PORT_BLOCK)
     return;
 
-  start_port = cgnat_block_start_port (pool, block->block_id);
-  end_port = start_port + pool->block_size - 1;
   clib_memset (&log_event, 0, sizeof (log_event));
   log_event.kind = CGNAT_LOG_EVENT_KIND_PBA_BLOCK;
   cgnat_log_event_set_common (&log_event, instance, event, reason);
   log_event.block.private_ip = private_ip;
   log_event.block.public_ip = public_ip;
-  log_event.block.public_port_start = start_port;
-  log_event.block.public_port_end = end_port;
-  log_event.block.block_id = block->block_id;
-  log_event.block.pool_index = pool_index;
   cgnat_log_enqueue (&log_event);
 }
 
@@ -272,13 +269,10 @@ cgnat_public_ip_runtime_init (cgnat_public_ip_t *ip, cgnat_pool_t *pool)
 }
 
 int
-cgnat_pool_runtime_init (cgnat_pool_t *pool)
+cgnat_pool_runtime_init (cgnat_pool_t *pool, u8 create_blocks)
 {
   u32 first, last, i, old_len, n_ips;
   cgnat_public_ip_t *ip;
-
-  if (!pool->block_size)
-    return VNET_API_ERROR_INVALID_VALUE;
 
   if (!pool->start_port)
     pool->start_port = CGNAT_DEFAULT_START_PORT;
@@ -289,30 +283,42 @@ cgnat_pool_runtime_init (cgnat_pool_t *pool)
 
   if (pool->exclude_start_port)
     return VNET_API_ERROR_INVALID_VALUE;
-  if (pool->port_alloc_mode > CGNAT_PORT_ALLOC_MODE_SEQUENCE)
-    return VNET_API_ERROR_INVALID_VALUE;
-  if (pool->block_size < 2)
-    return VNET_API_ERROR_INVALID_VALUE;
-  if (!is_pow2 (pool->exclude_end_port + 1))
-    return VNET_API_ERROR_INVALID_VALUE;
   if (pool->start_port <= pool->exclude_end_port)
     return VNET_API_ERROR_INVALID_VALUE;
   if (pool->start_port > pool->end_port)
     return VNET_API_ERROR_INVALID_VALUE;
-  if (((pool->end_port - pool->start_port + 1) / pool->block_size) == 0)
-    return VNET_API_ERROR_INVALID_VALUE;
+
+  if (create_blocks)
+    {
+      if (pool->port_alloc_mode > CGNAT_PORT_ALLOC_MODE_SEQUENCE)
+	return VNET_API_ERROR_INVALID_VALUE;
+      if (!pool->block_size || pool->block_size < 2)
+	return VNET_API_ERROR_INVALID_VALUE;
+      if (!is_pow2 (pool->exclude_end_port + 1))
+	return VNET_API_ERROR_INVALID_VALUE;
+      if (((pool->end_port - pool->start_port + 1) / pool->block_size) == 0)
+	return VNET_API_ERROR_INVALID_VALUE;
+    }
 
   first = clib_net_to_host_u32 (pool->first_ip.as_u32);
   last = clib_net_to_host_u32 (pool->last_ip.as_u32);
   if (first > last)
     return VNET_API_ERROR_INVALID_VALUE;
 
-  cgnat_pool_free_port_bitmap_init (pool);
-
   n_ips = last - first + 1;
+  if (n_ips > CGNAT_MAX_PUBLIC_IPS_PER_POOL)
+    return VNET_API_ERROR_LIMIT_EXCEEDED;
+
+  if (create_blocks)
+    cgnat_pool_free_port_bitmap_init (pool);
+
   old_len = vec_len (pool->public_ips);
   if (old_len >= n_ips)
-    return pool->total_blocks ? 0 : VNET_API_ERROR_NO_SUCH_ENTRY;
+    {
+      if (create_blocks)
+	return pool->total_blocks ? 0 : VNET_API_ERROR_NO_SUCH_ENTRY;
+      return 0;
+    }
 
   vec_validate (pool->public_ips, n_ips - 1);
   for (i = old_len; i < n_ips; i++)
@@ -320,11 +326,57 @@ cgnat_pool_runtime_init (cgnat_pool_t *pool)
       ip = vec_elt_at_index (pool->public_ips, i);
       clib_memset (ip, 0, sizeof (*ip));
       ip->addr.as_u32 = clib_host_to_net_u32 (first + i);
-      cgnat_public_ip_runtime_init (ip, pool);
-      pool->total_blocks += ip->total_blocks;
+      if (create_blocks)
+	{
+	  cgnat_public_ip_runtime_init (ip, pool);
+	  pool->total_blocks += ip->total_blocks;
+	}
     }
 
-  return pool->total_blocks ? 0 : VNET_API_ERROR_NO_SUCH_ENTRY;
+  return create_blocks && !pool->total_blocks ?
+	   VNET_API_ERROR_NO_SUCH_ENTRY : 0;
+}
+
+static void cgnat_block_return_free (cgnat_pool_t *pool,
+				     cgnat_public_ip_t *ip,
+				     cgnat_block_t *block, u8 from_cooling);
+
+void
+cgnat_pool_runtime_reset (cgnat_pool_t *pool)
+{
+  cgnat_public_ip_t *ip;
+  cgnat_block_t *block;
+  u32 *block_indices = 0;
+  u32 *bi;
+
+  if (!pool || !pool->public_ips)
+    return;
+
+  vec_foreach (ip, pool->public_ips)
+    {
+      if (ip->blocks)
+	{
+	  pool_foreach (block, ip->blocks)
+	    vec_add1 (block_indices, block - ip->blocks);
+
+	  vec_foreach (bi, block_indices)
+	    {
+	      if (pool_is_free_index (ip->blocks, *bi))
+		continue;
+	      block = pool_elt_at_index (ip->blocks, *bi);
+	      cgnat_block_return_free (pool, ip, block,
+				       block->state == CGNAT_BLOCK_COOLING);
+	    }
+	  vec_reset_length (block_indices);
+	}
+
+      ip->active_users = 0;
+    }
+  vec_free (block_indices);
+
+  clib_atomic_store_relax_n (&pool->active_users, 0);
+  clib_atomic_store_relax_n (&pool->allocated_blocks, 0);
+  clib_atomic_store_relax_n (&pool->cooling_blocks, 0);
 }
 
 static cgnat_pool_t *
@@ -600,7 +652,7 @@ cgnat_user_remove_owned_block (cgnat_user_t *user, u16 block_id)
     }
 }
 
-static void
+void
 cgnat_delete_user (cgnat_instance_t *instance, cgnat_user_t *user);
 
 static void
@@ -913,6 +965,19 @@ cgnat_pba_init (cgnat_main_t *cm)
 }
 
 void
+cgnat_pba_reset (cgnat_main_t *cm)
+{
+  pool_free (cm->cooling_timers);
+  if (cm->cooling_timer_initialized)
+    {
+      tw_timer_wheel_free_2t_1w_2048sl (&cm->cooling_timer_wheel);
+      cm->cooling_timer_initialized = 0;
+    }
+
+  cgnat_pba_init (cm);
+}
+
+void
 cgnat_pba_expire_timers (f64 now)
 {
   cgnat_main_t *cm = &cgnat_main;
@@ -965,7 +1030,7 @@ cgnat_commit_user (cgnat_instance_t *instance, cgnat_user_t *user)
 		      user - instance->users);
 }
 
-static void
+void
 cgnat_delete_user (cgnat_instance_t *instance, cgnat_user_t *user)
 {
   uword *p = hash_get_mem (instance->user_index_by_key, &user->key);
@@ -989,6 +1054,11 @@ cgnat_delete_user (cgnat_instance_t *instance, cgnat_user_t *user)
 
   hash_unset_mem_free (&instance->user_index_by_key, &user->key);
   vec_free (user->owned_block_ids);
+  {
+    int i;
+    for (i = 0; i < CGNAT_PBA_PROTO_COUNT; i++)
+      clib_bitmap_free (user->det_port_bitmap[i]);
+  }
   clib_spinlock_free (&user->session_lock);
   pool_put (instance->users, user);
 }
@@ -1012,26 +1082,43 @@ cgnat_pba_release_user_if_idle (u32 instance_index, u32 inside_fib_index,
   key.fib_index = inside_fib_index;
   key.private_ip = private_ip;
   user = cgnat_find_user (instance, &key);
-  if (!cgnat_prealloc_user_idle (user))
+  if (!user)
     {
       cgnat_user_unlock (instance, inside_fib_index, private_ip);
       return;
     }
 
-  pool = cgnat_pool_get_by_index (cm, user->pool_index);
-  if (!pool || user->public_ip_index >= vec_len (pool->public_ips))
+  if (vec_len (user->owned_block_ids))
     {
-      cgnat_user_unlock (instance, inside_fib_index, private_ip);
-      return;
+      /* Pre-allocated dynamic user: cool all owned blocks when fully idle. */
+      if (!cgnat_prealloc_user_idle (user))
+	{
+	  cgnat_user_unlock (instance, inside_fib_index, private_ip);
+	  return;
+	}
+
+      pool = cgnat_pool_get_by_index (cm, user->pool_index);
+      if (!pool || user->public_ip_index >= vec_len (pool->public_ips))
+	{
+	  cgnat_user_unlock (instance, inside_fib_index, private_ip);
+	  return;
+	}
+
+      ip = vec_elt_at_index (pool->public_ips, user->public_ip_index);
+      clib_spinlock_lock (&ip->lock);
+      if (cgnat_prealloc_user_idle (user))
+	cgnat_start_prealloc_user_cooling (cm, instance, instance_index,
+					   user->pool_index, user->public_ip_index,
+					   pool, ip, user);
+      clib_spinlock_unlock (&ip->lock);
+    }
+  else
+    {
+      /* On-demand dynamic or deterministic user: delete when fully idle. */
+      if (!cgnat_user_has_active_ports (user) && !user->active_sessions)
+	cgnat_delete_user (instance, user);
     }
 
-  ip = vec_elt_at_index (pool->public_ips, user->public_ip_index);
-  clib_spinlock_lock (&ip->lock);
-  if (cgnat_prealloc_user_idle (user))
-    cgnat_start_prealloc_user_cooling (cm, instance, instance_index,
-				       user->pool_index, user->public_ip_index,
-				       pool, ip, user);
-  clib_spinlock_unlock (&ip->lock);
   cgnat_user_unlock (instance, inside_fib_index, private_ip);
 }
 
@@ -1169,7 +1256,10 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
     return VNET_API_ERROR_UNSUPPORTED;
 
   if (user->active_ports[proto_index] >= user->max_ports)
-    return VNET_API_ERROR_LIMIT_EXCEEDED;
+    {
+      user->port_block_drops++;
+      return VNET_API_ERROR_LIMIT_EXCEEDED;
+    }
 
   pool = cgnat_pool_get_by_index (cm, user->pool_index);
   if (!pool)
@@ -1233,6 +1323,8 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
     }
 
 done:
+  if (rv == VNET_API_ERROR_LIMIT_EXCEEDED)
+    user->port_block_drops++;
   if (!rv)
     {
       user->active_ports[proto_index]++;
@@ -1348,6 +1440,248 @@ cgnat_pba_alloc_port_locked (u32 instance_index, u32 fib_index,
   return VNET_API_ERROR_LIMIT_EXCEEDED;
 }
 
+static void
+cgnat_det_global_offset_to_pool_ip (cgnat_instance_t *instance, u32 global_offset,
+				    u32 *pool_index, u32 *public_ip_index,
+				    ip4_address_t *public_ip)
+{
+  cgnat_main_t *cm = &cgnat_main;
+  cgnat_pool_t *pool;
+  u32 *pi, offset = 0;
+
+  *pool_index = CGNAT_INVALID_INDEX;
+  *public_ip_index = CGNAT_INVALID_INDEX;
+  public_ip->as_u32 = 0;
+
+  vec_foreach (pi, instance->pool_indices)
+    {
+      pool = cgnat_pool_get_by_index (cm, *pi);
+      if (!pool)
+	continue;
+      u32 count = clib_net_to_host_u32 (pool->last_ip.as_u32) -
+		  clib_net_to_host_u32 (pool->first_ip.as_u32) + 1;
+      if (global_offset < offset + count)
+	{
+	  *pool_index = *pi;
+	  *public_ip_index = global_offset - offset;
+	  public_ip->as_u32 =
+	    clib_host_to_net_u32 (clib_net_to_host_u32 (pool->first_ip.as_u32) +
+				  global_offset - offset);
+	  return;
+	}
+      offset += count;
+    }
+}
+
+/* Allocate a deterministic public port for (inside_ip, inside_port, protocol).
+ * Caller must hold the user lock for the corresponding inside host. */
+int
+cgnat_det_alloc_port (cgnat_instance_t *instance, u32 inside_fib_index,
+		      ip4_address_t inside_ip, u16 inside_port, u8 protocol,
+		      cgnat_pba_alloc_result_t *result)
+{
+  cgnat_det_runtime_t *det = &instance->det;
+  cgnat_user_t *user;
+  cgnat_user_key_t key;
+  u32 in_offset, global_out_offset, host_slot;
+  u32 pool_index, public_ip_index, base_port, public_port;
+  ip4_address_t public_ip;
+  int proto_index;
+
+  proto_index = cgnat_pba_proto_index (protocol);
+  if (proto_index < 0)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  in_offset = clib_net_to_host_u32 (inside_ip.as_u32) - det->inside_first_host;
+  if (in_offset >= det->inside_count)
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  global_out_offset = in_offset / det->sharing_ratio;
+  host_slot = in_offset % det->sharing_ratio;
+
+  cgnat_det_global_offset_to_pool_ip (instance, global_out_offset, &pool_index,
+				      &public_ip_index, &public_ip);
+  if (pool_index == CGNAT_INVALID_INDEX)
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  base_port = det->usable_port_start + host_slot * det->ports_per_host;
+  public_port = base_port + (inside_port % det->ports_per_host);
+
+  clib_memset (&key, 0, sizeof (key));
+  key.fib_index = inside_fib_index;
+  key.private_ip = inside_ip;
+  user = cgnat_find_user (instance, &key);
+  if (!user)
+    {
+      user = cgnat_create_user (instance, &key, pool_index);
+      if (!user)
+	return VNET_API_ERROR_LIMIT_EXCEEDED;
+      cgnat_commit_user (instance, user);
+    }
+
+  if (!user->det_port_bitmap[proto_index])
+    clib_bitmap_alloc (user->det_port_bitmap[proto_index],
+		       det->ports_per_host);
+
+  if (clib_bitmap_get (user->det_port_bitmap[proto_index],
+		       public_port - base_port))
+    {
+      u32 idx;
+      for (idx = 0; idx < det->ports_per_host; idx++)
+	{
+	  if (!clib_bitmap_get (user->det_port_bitmap[proto_index], idx))
+	    {
+	      public_port = base_port + idx;
+	      goto port_found;
+	    }
+	}
+      /* Caller is expected to hold the user lock. */
+      cgnat_delete_user_if_idle (instance, user);
+      return VNET_API_ERROR_LIMIT_EXCEEDED;
+    }
+port_found:
+  user->det_port_bitmap[proto_index] =
+    clib_bitmap_set (user->det_port_bitmap[proto_index],
+		     public_port - base_port, 1);
+  user->active_ports[proto_index]++;
+
+  result->public_ip = public_ip;
+  result->public_port = public_port;
+  result->pool_index = pool_index;
+  result->public_ip_index = public_ip_index;
+  result->user_index = user - instance->users;
+  result->block_index = CGNAT_INVALID_INDEX;
+
+  return 0;
+}
+
+void
+cgnat_det_release_port (cgnat_instance_t *instance, cgnat_mapping_t *mapping)
+{
+  cgnat_det_runtime_t *det = &instance->det;
+  cgnat_user_t *user;
+  cgnat_user_key_t key;
+  u32 in_offset, host_slot, base_port;
+  int proto_index;
+
+  proto_index = cgnat_pba_proto_index (mapping->protocol);
+  if (proto_index < 0)
+    return;
+
+  clib_memset (&key, 0, sizeof (key));
+  key.fib_index = mapping->inside_fib_index;
+  key.private_ip = mapping->inside_ip;
+
+  cgnat_user_lock (instance, key.fib_index, key.private_ip);
+  user = cgnat_find_user (instance, &key);
+  if (!user)
+    {
+      cgnat_user_unlock (instance, key.fib_index, key.private_ip);
+      return;
+    }
+
+  in_offset =
+    clib_net_to_host_u32 (mapping->inside_ip.as_u32) - det->inside_first_host;
+  if (in_offset >= det->inside_count)
+    goto done;
+
+  host_slot = in_offset % det->sharing_ratio;
+  base_port = det->usable_port_start + host_slot * det->ports_per_host;
+
+  if (user->det_port_bitmap[proto_index] &&
+      mapping->nat_port >= base_port &&
+      mapping->nat_port < base_port + det->ports_per_host)
+    {
+      user->det_port_bitmap[proto_index] =
+	clib_bitmap_set (user->det_port_bitmap[proto_index],
+			 mapping->nat_port - base_port, 0);
+      if (user->active_ports[proto_index])
+	user->active_ports[proto_index]--;
+    }
+
+done:
+  cgnat_delete_user_if_idle (instance, user);
+  cgnat_user_unlock (instance, key.fib_index, key.private_ip);
+}
+
+/* Compute the deterministic outside mapping for INSIDE_IP.
+ * Returns the public IP and the inclusive port range allocated to that host. */
+int
+cgnat_det_i2omap (cgnat_instance_t *instance, ip4_address_t inside_ip,
+		  ip4_address_t *public_ip, u16 *port_start, u16 *port_end)
+{
+  cgnat_det_runtime_t *det = &instance->det;
+  u32 in_offset, global_out_offset, host_slot;
+  u32 pool_index, public_ip_index;
+
+  in_offset = clib_net_to_host_u32 (inside_ip.as_u32) - det->inside_first_host;
+  if (in_offset >= det->inside_count)
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  global_out_offset = in_offset / det->sharing_ratio;
+  host_slot = in_offset % det->sharing_ratio;
+
+  cgnat_det_global_offset_to_pool_ip (instance, global_out_offset, &pool_index,
+				      &public_ip_index, public_ip);
+  if (pool_index == CGNAT_INVALID_INDEX)
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  *port_start = det->usable_port_start + host_slot * det->ports_per_host;
+  *port_end = *port_start + det->ports_per_host - 1;
+  return 0;
+}
+
+/* Compute the deterministic inside IP that maps to PUBLIC_IP:PUBLIC_PORT.
+ * Only validates that the public side falls inside the deterministic space. */
+int
+cgnat_det_o2imap (cgnat_instance_t *instance, ip4_address_t public_ip,
+		  u16 public_port, ip4_address_t *inside_ip)
+{
+  cgnat_det_runtime_t *det = &instance->det;
+  cgnat_main_t *cm = &cgnat_main;
+  cgnat_pool_t *pool;
+  u32 *pi, global_out_offset = CGNAT_INVALID_INDEX;
+  u32 host_slot;
+  u64 inside_offset;
+  u32 offset = 0;
+
+  if (public_port < det->usable_port_start || public_port > det->usable_port_end)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  vec_foreach (pi, instance->pool_indices)
+    {
+      u32 first, last, pub;
+
+      pool = cgnat_pool_get_by_index (cm, *pi);
+      if (!pool)
+	continue;
+      first = clib_net_to_host_u32 (pool->first_ip.as_u32);
+      last = clib_net_to_host_u32 (pool->last_ip.as_u32);
+      pub = clib_net_to_host_u32 (public_ip.as_u32);
+      if (pub >= first && pub <= last)
+	{
+	  global_out_offset = offset + (pub - first);
+	  break;
+	}
+      offset += last - first + 1;
+    }
+
+  if (global_out_offset == CGNAT_INVALID_INDEX)
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  host_slot = (public_port - det->usable_port_start) / det->ports_per_host;
+  if (host_slot >= det->sharing_ratio)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  inside_offset = (u64) global_out_offset * det->sharing_ratio + host_slot;
+  if (inside_offset >= det->inside_count)
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  inside_ip->as_u32 =
+    clib_host_to_net_u32 (det->inside_first_host + (u32) inside_offset);
+  return 0;
+}
+
 int
 cgnat_pba_alloc_port (u32 instance_index, u32 fib_index,
 		      ip4_address_t private_ip, u16 private_port,
@@ -1432,16 +1766,27 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
       return VNET_API_ERROR_NO_SUCH_ENTRY;
     }
 
+  if (pool_is_free_index (instance->users, block->owner_user_index))
+    {
+      clib_spinlock_unlock (&ip->lock);
+      cgnat_user_unlock (instance, inside_fib_index, private_ip);
+      return VNET_API_ERROR_NO_SUCH_ENTRY;
+    }
+
+  user = pool_elt_at_index (instance->users, block->owner_user_index);
+  if (user->key.fib_index != inside_fib_index ||
+      user->key.private_ip.as_u32 != private_ip.as_u32)
+    {
+      clib_spinlock_unlock (&ip->lock);
+      cgnat_user_unlock (instance, inside_fib_index, private_ip);
+      return VNET_API_ERROR_NO_SUCH_ENTRY;
+    }
+
   block->free_port_bitmap[proto_index][port_offset & 1] =
     clib_bitmap_set (block->free_port_bitmap[proto_index][port_offset & 1],
 		     port_offset, 1);
   block->active_ports[proto_index]--;
-
-  if (!pool_is_free_index (instance->users, block->owner_user_index))
-    {
-      user = pool_elt_at_index (instance->users, block->owner_user_index);
-      user->active_ports[proto_index]--;
-    }
+  user->active_ports[proto_index]--;
 
   if (!cgnat_block_has_active_ports (block))
     {

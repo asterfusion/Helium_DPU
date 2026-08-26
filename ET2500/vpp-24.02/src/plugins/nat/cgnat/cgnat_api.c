@@ -34,7 +34,7 @@ vl_api_cgnat_plugin_get_t_handler (vl_api_cgnat_plugin_get_t *mp)
   vl_api_cgnat_plugin_get_reply_t *rmp;
   int rv = 0;
   REPLY_MACRO2 (VL_API_CGNAT_PLUGIN_GET_REPLY,
-		({ rmp->enabled = cm->enabled; }));
+		({ rmp->enabled = clib_atomic_load_relax_n (&cm->enabled); }));
 }
 
 static void

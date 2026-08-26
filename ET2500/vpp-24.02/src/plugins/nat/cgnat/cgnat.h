@@ -26,11 +26,11 @@
 #define CGNAT_INVALID_INDEX ((u32) ~0)
 #define CGNAT_DEFAULT_START_PORT 1024
 #define CGNAT_DEFAULT_END_PORT 65535
-#define CGNAT_DEFAULT_BLOCK_SIZE 128
+#define CGNAT_DEFAULT_BLOCK_SIZE 2048
 #define CGNAT_DEFAULT_PREALLOC_BLOCKS 1
 #define CGNAT_DEFAULT_COOLING_TIME 120
 #define CGNAT_DEFAULT_MAX_USER_BLOCKS 8
-#define CGNAT_DEFAULT_MAX_USER_PORTS 1024
+#define CGNAT_DEFAULT_MAX_USER_PORTS 2048
 #define CGNAT_DEFAULT_TCP_MSS 0
 #define CGNAT_DEFAULT_UTIL_THRESHOLD 80
 #define CGNAT_MAPPING_HASH_BUCKETS (64 * 1024)
@@ -57,6 +57,7 @@
 #define CGNAT_LOG_INSTANCE_LABEL_LEN 64
 #define CGNAT_MAX_INSTANCE_POOLS 16
 #define CGNAT_MAX_INSIDE_ADDRESSES 16
+#define CGNAT_MAX_PUBLIC_IPS_PER_POOL 65536
 #define CGNAT_USER_LOCK_BUCKETS 128
 #define CGNAT_MAPPING_TABLE_LOCK_BUCKETS 128
 #define CGNAT_SESSION_TABLE_LOCK_BUCKETS 256
@@ -117,6 +118,7 @@ typedef enum
 {
   CGNAT_MAPPING_DYNAMIC = 0,
   CGNAT_MAPPING_STATIC = 1,
+  CGNAT_MAPPING_DETERMINISTIC = 2,
 } cgnat_mapping_type_t;
 
 typedef enum
@@ -146,10 +148,6 @@ typedef struct
     {
       ip4_address_t private_ip;
       ip4_address_t public_ip;
-      u16 public_port_start;
-      u16 public_port_end;
-      u32 block_id;
-      u32 pool_index;
     } block;
 
     struct
@@ -162,8 +160,6 @@ typedef struct
       u16 remote_port;
       u8 protocol;
       u8 mapping_type;
-      u32 mapping_index;
-      u32 session_index;
     } session;
   };
 } cgnat_log_event_t;
@@ -213,6 +209,18 @@ typedef enum
   CGNAT_INSTANCE_SET_IPFIX = (1ULL << 14),
   CGNAT_INSTANCE_SET_TCP_MSS = (1ULL << 15),
 } cgnat_instance_set_flags_t;
+
+#define CGNAT_INSTANCE_SET_VALID_FLAGS                                       \
+  (CGNAT_INSTANCE_SET_FILTER_MODE | CGNAT_INSTANCE_SET_HAIRPINNING |         \
+   CGNAT_INSTANCE_SET_MAX_USER_BLOCKS | CGNAT_INSTANCE_SET_MAX_USER_PORTS |  \
+   CGNAT_INSTANCE_SET_MAX_USER_SESSIONS |                                    \
+   CGNAT_INSTANCE_SET_MAX_USER_CREATE_RATE |                                 \
+   CGNAT_INSTANCE_SET_AGING_TCP_SYN |                                        \
+   CGNAT_INSTANCE_SET_AGING_TCP_ESTABLISHED |                                \
+   CGNAT_INSTANCE_SET_AGING_TCP_FIN_RST | CGNAT_INSTANCE_SET_AGING_UDP |     \
+   CGNAT_INSTANCE_SET_AGING_ICMP | CGNAT_INSTANCE_SET_AGING_OTHER |          \
+   CGNAT_INSTANCE_SET_LOG_MODE | CGNAT_INSTANCE_SET_SYSLOG |                 \
+   CGNAT_INSTANCE_SET_IPFIX | CGNAT_INSTANCE_SET_TCP_MSS)
 
 typedef enum
 {
@@ -312,6 +320,10 @@ typedef struct
   /* Owned blocks include both ALLOCATED and user-revivable COOLING blocks. */
   u16 *owned_block_ids;
 
+  /* Deterministic NAT only: per-protocol port bitmap within the host's
+   * ports_per_host range. */
+  clib_bitmap_t *det_port_bitmap[CGNAT_PBA_PROTO_COUNT];
+
   clib_spinlock_t session_lock;
   u32 active_sessions;
   f64 session_rate_window_start;
@@ -319,6 +331,7 @@ typedef struct
   u32 session_limit_drops;
   u32 session_rate_drops;
   u32 session_lock_drops;
+  u32 port_block_drops;
 } cgnat_user_t;
 
 typedef struct
@@ -405,6 +418,13 @@ typedef struct
 
   u16 flags;
 } cgnat_mapping_t;
+
+static_always_inline u8
+cgnat_mapping_is_auto (cgnat_mapping_t *mapping)
+{
+  return mapping->mapping_type == CGNAT_MAPPING_DYNAMIC ||
+	 mapping->mapping_type == CGNAT_MAPPING_DETERMINISTIC;
+}
 
 typedef struct
 {
@@ -531,6 +551,25 @@ typedef struct
 
 typedef struct
 {
+  /* Total deterministic outside addresses across all pools of this instance. */
+  u32 outside_count;
+  /* Total inside addresses (single contiguous prefix/range). */
+  u32 inside_count;
+  /* ceil(inside_count / outside_count). */
+  u32 sharing_ratio;
+  /* Ports allocated per inside host. */
+  u32 ports_per_host;
+
+  u16 usable_port_start;
+  u16 usable_port_end;
+  u16 usable_port_count;
+
+  /* First inside IP (network byte order host address). */
+  u32 inside_first_host;
+} cgnat_det_runtime_t;
+
+typedef struct
+{
   u32 instance_id;
   u8 configured;
   /* Optional operator-provided alias, used in logs and show output. */
@@ -578,6 +617,9 @@ typedef struct
   uword *user_index_by_key;
 
   cgnat_static_rule_t *static_rules;
+
+  /* Valid when mode == CGNAT_INSTANCE_MODE_DETERMINISTIC. */
+  cgnat_det_runtime_t det;
 } cgnat_instance_t;
 
 typedef struct
@@ -666,7 +708,8 @@ typedef struct
   u32 out2in_node_index;
 
   u16 msg_id_base;
-  vlib_log_class_t log_class;
+  vlib_log_class_t log_class_dynamic;
+  vlib_log_class_t log_class_deterministic;
   cgnat_log_queue_t *log_queues;
   f64 log_poll_interval;
 
@@ -727,15 +770,31 @@ void cgnat_log_event_set_common (cgnat_log_event_t *event,
 				 char *reason);
 
 #define cgnat_log_err(...)                                                    \
-  vlib_log (VLIB_LOG_LEVEL_ERR, cgnat_main.log_class, __VA_ARGS__)
+  vlib_log (VLIB_LOG_LEVEL_ERR, cgnat_main.log_class_dynamic, __VA_ARGS__)
 #define cgnat_log_warn(...)                                                   \
-  vlib_log (VLIB_LOG_LEVEL_WARNING, cgnat_main.log_class, __VA_ARGS__)
+  vlib_log (VLIB_LOG_LEVEL_WARNING, cgnat_main.log_class_dynamic, __VA_ARGS__)
 #define cgnat_log_notice(...)                                                 \
-  vlib_log (VLIB_LOG_LEVEL_NOTICE, cgnat_main.log_class, __VA_ARGS__)
+  vlib_log (VLIB_LOG_LEVEL_NOTICE, cgnat_main.log_class_dynamic, __VA_ARGS__)
 #define cgnat_log_info(...)                                                   \
-  vlib_log (VLIB_LOG_LEVEL_INFO, cgnat_main.log_class, __VA_ARGS__)
+  vlib_log (VLIB_LOG_LEVEL_INFO, cgnat_main.log_class_dynamic, __VA_ARGS__)
 #define cgnat_log_debug(...)                                                  \
-  vlib_log (VLIB_LOG_LEVEL_DEBUG, cgnat_main.log_class, __VA_ARGS__)
+  vlib_log (VLIB_LOG_LEVEL_DEBUG, cgnat_main.log_class_dynamic, __VA_ARGS__)
+
+#define cgnat_log_det_err(...)                                                \
+  vlib_log (VLIB_LOG_LEVEL_ERR, cgnat_main.log_class_deterministic,          \
+	    __VA_ARGS__)
+#define cgnat_log_det_warn(...)                                               \
+  vlib_log (VLIB_LOG_LEVEL_WARNING, cgnat_main.log_class_deterministic,      \
+	    __VA_ARGS__)
+#define cgnat_log_det_notice(...)                                             \
+  vlib_log (VLIB_LOG_LEVEL_NOTICE, cgnat_main.log_class_deterministic,       \
+	    __VA_ARGS__)
+#define cgnat_log_det_info(...)                                               \
+  vlib_log (VLIB_LOG_LEVEL_INFO, cgnat_main.log_class_deterministic,         \
+	    __VA_ARGS__)
+#define cgnat_log_det_debug(...)                                              \
+  vlib_log (VLIB_LOG_LEVEL_DEBUG, cgnat_main.log_class_deterministic,        \
+	    __VA_ARGS__)
 
 #define cgnat_interface_is_inside(i)                                          \
   ((i)->flags & CGNAT_INTERFACE_FLAG_IS_INSIDE)
@@ -885,11 +944,24 @@ int cgnat_static_mapping_add_del (u32 instance_index, ip4_address_t outside_ip,
 				  u16 inside_port, u8 protocol,
 				  u8 mapping_type, u32 inside_vrf_id,
 				  u8 is_add);
+void cgnat_static_fib_add_for_rule (cgnat_main_t *cm,
+				    cgnat_static_rule_t *rule);
+void cgnat_static_fib_del_for_rule (cgnat_main_t *cm,
+				    cgnat_static_rule_t *rule);
+void cgnat_instance_cleanup_resources (cgnat_main_t *cm,
+				       cgnat_instance_t *instance);
+void cgnat_instance_cleanup_runtime_state (cgnat_main_t *cm,
+					   cgnat_instance_t *instance);
+void cgnat_pool_cleanup_runtime (cgnat_main_t *cm, cgnat_pool_t *pool,
+				 u32 pool_index, cgnat_instance_t *instance);
 
 void cgnat_pba_init (cgnat_main_t *cm);
-int cgnat_pool_runtime_init (cgnat_pool_t *pool);
+int cgnat_pool_runtime_init (cgnat_pool_t *pool, u8 create_blocks);
+void cgnat_pool_runtime_reset (cgnat_pool_t *pool);
+void cgnat_pba_reset (cgnat_main_t *cm);
 void cgnat_pba_expire_timers (f64 now);
 void cgnat_session_init (cgnat_main_t *cm);
+void cgnat_session_reset (cgnat_main_t *cm);
 void cgnat_session_expire_timers (f64 now);
 cgnat_session_t *cgnat_session_snapshot (cgnat_session_filter_t *filter);
 u32 cgnat_session_delete_matching (cgnat_session_filter_t *filter);
@@ -906,6 +978,16 @@ int cgnat_pba_release_port (u32 instance_index, u32 pool_index,
 			    ip4_address_t private_ip, u16 port, u8 protocol);
 void cgnat_pba_release_user_if_idle (u32 instance_index, u32 inside_fib_index,
 				     ip4_address_t private_ip);
+void cgnat_delete_user (cgnat_instance_t *instance, cgnat_user_t *user);
+
+int cgnat_det_alloc_port (cgnat_instance_t *instance, u32 inside_fib_index,
+			  ip4_address_t inside_ip, u16 inside_port, u8 protocol,
+			  cgnat_pba_alloc_result_t *result);
+void cgnat_det_release_port (cgnat_instance_t *instance, cgnat_mapping_t *mapping);
+int cgnat_det_i2omap (cgnat_instance_t *instance, ip4_address_t inside_ip,
+		      ip4_address_t *public_ip, u16 *port_start, u16 *port_end);
+int cgnat_det_o2imap (cgnat_instance_t *instance, ip4_address_t public_ip,
+		      u16 public_port, ip4_address_t *inside_ip);
 cgnat_block_ip_summary_t *
 cgnat_block_summary_snapshot (ip4_address_t *public_ip);
 cgnat_block_user_summary_t *

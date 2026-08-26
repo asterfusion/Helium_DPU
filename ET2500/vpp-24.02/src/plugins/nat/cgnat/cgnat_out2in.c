@@ -75,7 +75,7 @@ VLIB_NODE_FN (cgnat_out2in_node) (vlib_main_t *vm,
       b0 = vlib_get_buffer (vm, bi0);
       sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
 
-      if (PREDICT_FALSE (!cm->enabled))
+      if (PREDICT_FALSE (!clib_atomic_load_acq_n (&cm->enabled)))
 	next0 = CGNAT_OUT2IN_NEXT_LOOKUP;
       else
 	{
