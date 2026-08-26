@@ -247,7 +247,7 @@ arp_input (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	  n_left_to_next -= 1;
 
 	  p0 = vlib_get_buffer (vm, pi0);
-	  vnet_buffer2 (p0)->lcp_arp_host_copy_done = 0;
+	  vnet_buffer2 (p0)->lcp_host_copy_done = 0;
 	  arp0 = vlib_buffer_get_current (p0);
 
 	  error0 = ARP_ERROR_REPLIES_SENT;
@@ -671,7 +671,7 @@ if (arp0->opcode ==
       clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_request) &&
     dst_is_local0 &&
     !is_unnumbered0 &&
-    vnet_buffer2 (p0)->lcp_arp_host_copy_done)
+    vnet_buffer2 (p0)->lcp_host_copy_done)
   {
     error0 = ARP_ERROR_REPLY_SUPPRESSED_LINUX_OWNER;
     goto drop;

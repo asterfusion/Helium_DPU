@@ -911,7 +911,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 		       * arp-reply will use this to decide whether VPP can
 		       * safely suppress its own Reply.
 		       */
-		      vnet_buffer2 (b0)->lcp_arp_host_copy_done = 1;
+			vnet_buffer2 (b0)->lcp_host_copy_done = 1;
 #ifdef SUPPORT_LCP_VLAN_TAG_ACT
 		      lip_punt_vlan_tag_proc(lip0, c0);
 #endif
@@ -961,7 +961,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 		      reply_copies[n_copies++] =
 			vlib_get_buffer_index (vm, c1);
 		      /* Mark only the original buffer.*/
-		      vnet_buffer2 (b1)->lcp_arp_host_copy_done = 1;
+			vnet_buffer2 (b1)->lcp_host_copy_done = 1;
 #ifdef SUPPORT_LCP_VLAN_TAG_ACT
 		      lip_punt_vlan_tag_proc(lip1, c1);
 #endif
@@ -1059,7 +1059,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 		      /*
 		       * Mark only the original buffer.
 		       */
-		      vnet_buffer2 (b0)->lcp_arp_host_copy_done = 1;
+			vnet_buffer2 (b0)->lcp_host_copy_done = 1;
 #ifdef SUPPORT_LCP_VLAN_TAG_ACT
 		      lip_punt_vlan_tag_proc(lip0, c0);
 #endif

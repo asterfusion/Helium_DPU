@@ -457,6 +457,8 @@ STATIC_ASSERT (sizeof (vnet_buffer_opaque_t) <=
 
 #define vnet_buffer(b) ((vnet_buffer_opaque_t *) (b)->opaque)
 
+
+
 /* Full cache line (64 bytes) of additional space */
 typedef struct
 {
@@ -515,9 +517,9 @@ typedef struct
   u32 actual_tx_sw_if_index;
   u8 tc_index_dpo; /* store the traffic class dpo */
   /*
-  * Set by linux-cp-arp-phy when an ARP packet has been
+  * Set by linux-cp-arp-phy when an ARP packet or a NDP packet has been
   * successfully copied and queued for the Linux host interface.*/
-  u8 lcp_arp_host_copy_done;
+  u8 lcp_host_copy_done : 1;
   };
 
   u32 unused[8];

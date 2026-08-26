@@ -17,6 +17,7 @@
 
 #include <vnet/feature/feature.h>
 #include <vppinfra/error.h>
+#include <plugins/linux-cp/lcp_interface.h>
 #include <linux-cp/lcp.api_enum.h>
 
 #define foreach_lcp_ndp                                                       \
@@ -48,6 +49,39 @@ format_lcp_ndp_trace (u8 * s, va_list * va)
 	      format_ip6_header, t->packet_data, sizeof (t->packet_data));
 
   return s;
+}
+
+static_always_inline int
+lcp_ndp_host_pair_exists (vlib_buffer_t *b)
+{
+  index_t lipi;
+  u32 phy_sw_if_index;
+
+  phy_sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
+  lipi = lcp_itf_pair_find_by_phy (phy_sw_if_index);
+
+  /*
+   * After an L2-to-BVI transition, the RX sw_if_index can refer to
+   * the BVI. Recover the original physical RX interface in the same
+   * way as linux-cp-punt.
+   */
+  if (lipi == INDEX_INVALID &&
+      (b->flags & VLIB_BUFFER_NOT_PHY_INTF) &&
+      vnet_buffer2 (b)->l2_rx_sw_if_index != ~0)
+    {
+      vnet_sw_interface_t *si;
+
+      phy_sw_if_index = vnet_buffer2 (b)->l2_rx_sw_if_index;
+      si = vnet_get_sw_interface_or_null (vnet_get_main (),
+					   phy_sw_if_index);
+
+      if (si != NULL && si->type == VNET_SW_INTERFACE_TYPE_SUB)
+	phy_sw_if_index = si->sup_sw_if_index;
+
+      lipi = lcp_itf_pair_find_by_phy (phy_sw_if_index);
+    }
+
+  return (lipi != INDEX_INVALID);
 }
 
 VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
@@ -101,45 +135,58 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
           icmp0 = ip6_ext_header_find(vm, b0, ip60, IP_PROTOCOL_ICMP6, NULL);
           if(icmp0)
           {
-              if(PREDICT_FALSE(
-                 ICMP6_neighbor_solicitation == icmp0->type ||
-                 ICMP6_neighbor_advertisement == icmp0->type ||
-                 ICMP6_router_solicitation == icmp0->type ||
-                 ICMP6_router_advertisement == icmp0->type ||
-                 ICMP6_redirect == icmp0->type
-                 ))
-              {
-		  len0 = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
-		  vlib_buffer_advance (b0, -len0);
-		  c0 = vlib_buffer_copy (vm, b0);
-		  vlib_buffer_advance (b0, len0);
-		  if (c0)
-		  {
-		      copies[n_copies++] = vlib_get_buffer_index (vm, c0);
-		  }
+            if(PREDICT_FALSE(
+              ICMP6_neighbor_solicitation == icmp0->type ||
+              ICMP6_neighbor_advertisement == icmp0->type ||
+              ICMP6_router_solicitation == icmp0->type ||
+              ICMP6_router_advertisement == icmp0->type ||
+              ICMP6_redirect == icmp0->type
+            ))
+            {
+              if (lcp_ndp_host_pair_exists (b0))
+	            {
+		            len0 = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
+		            vlib_buffer_advance (b0, -len0);
+		            c0 = vlib_buffer_copy (vm, b0);
+		            vlib_buffer_advance (b0, len0);
+		            if (c0)
+		            {
+		              copies[n_copies++] = vlib_get_buffer_index (vm, c0);
+                  /*
+                  * Mark only the original NS. The copy was made before this
+                  * assignment, so the copy does not inherit the marker.
+                  */
+                  if (icmp0->type == ICMP6_neighbor_solicitation)
+                    vnet_buffer2 (b0)->lcp_host_copy_done = 1;
+		            }
               }
+            }
           }
 
           icmp1 = ip6_ext_header_find(vm, b1, ip61, IP_PROTOCOL_ICMP6, NULL);
           if (icmp1)
           {
-              if(PREDICT_FALSE(
-                 ICMP6_neighbor_solicitation == icmp1->type ||
-                 ICMP6_neighbor_advertisement == icmp1->type ||
-                 ICMP6_router_solicitation == icmp1->type ||
-                 ICMP6_router_advertisement == icmp1->type ||
-                 ICMP6_redirect == icmp1->type
-                ))
-              {
-		  len1 = ((u8 *) vlib_buffer_get_current (b1) - (u8 *) ethernet_buffer_get_header (b1));
-		  vlib_buffer_advance (b1, -len1);
-		  c1 = vlib_buffer_copy (vm, b1);
-		  vlib_buffer_advance (b1, len1);
-		  if (c1)
-		  {
-		      copies[n_copies++] = vlib_get_buffer_index (vm, c1);
-		  }
+            if(PREDICT_FALSE(
+              ICMP6_neighbor_solicitation == icmp1->type ||
+              ICMP6_neighbor_advertisement == icmp1->type ||
+              ICMP6_router_solicitation == icmp1->type ||
+              ICMP6_router_advertisement == icmp1->type ||
+              ICMP6_redirect == icmp1->type
+            ))
+            {
+              if (lcp_ndp_host_pair_exists (b1)){
+		            len1 = ((u8 *) vlib_buffer_get_current (b1) - (u8 *) ethernet_buffer_get_header (b1));
+		            vlib_buffer_advance (b1, -len1);
+		            c1 = vlib_buffer_copy (vm, b1);
+		            vlib_buffer_advance (b1, len1);
+		            if (c1)
+		            {
+		              copies[n_copies++] = vlib_get_buffer_index (vm, c1);
+                  if (icmp1->type == ICMP6_neighbor_solicitation)
+                    vnet_buffer2 (b1)->lcp_host_copy_done = 1;
+		            }
               }
+            }
           }
 
       if (b0->flags & VLIB_BUFFER_IS_TRACED)
@@ -148,7 +195,7 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
               vlib_add_trace (vm, node, b0, sizeof (*t0));
 
           t0->sw_if_index = sw_if_index0;
-	  clib_memcpy_fast (t0, b0->data + b0->current_data, LCP_NDP_TRACE_DATA_SIZE);
+	  clib_memcpy_fast (t0->packet_data, b0->data + b0->current_data, LCP_NDP_TRACE_DATA_SIZE);
       }
 
       if (b1->flags & VLIB_BUFFER_IS_TRACED)
@@ -157,7 +204,7 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
               vlib_add_trace (vm, node, b1, sizeof (*t1));
 
           t1->sw_if_index = sw_if_index1;
-	  clib_memcpy_fast (t1, b1->data + b1->current_data, LCP_NDP_TRACE_DATA_SIZE);
+	  clib_memcpy_fast (t1->packet_data, b1->data + b1->current_data, LCP_NDP_TRACE_DATA_SIZE);
       }
 
 	  from += 2;
@@ -196,23 +243,28 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
           icmp = ip6_ext_header_find(vm, b0, ip6, IP_PROTOCOL_ICMP6, NULL);
           if(icmp)
           {
-              if(PREDICT_FALSE(
-                 ICMP6_neighbor_solicitation == icmp->type ||
-                 ICMP6_neighbor_advertisement == icmp->type ||
-                 ICMP6_router_solicitation == icmp->type ||
-                 ICMP6_router_advertisement == icmp->type ||
-                 ICMP6_redirect == icmp->type
-                 ))
+            if(PREDICT_FALSE(
+              ICMP6_neighbor_solicitation == icmp->type ||
+              ICMP6_neighbor_advertisement == icmp->type ||
+              ICMP6_router_solicitation == icmp->type ||
+              ICMP6_router_advertisement == icmp->type ||
+              ICMP6_redirect == icmp->type
+            ))
+            {
+              if (lcp_ndp_host_pair_exists (b0))
               {
-		  len = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
-		  vlib_buffer_advance (b0, -len);
-		  c = vlib_buffer_copy (vm, b0);
-		  vlib_buffer_advance (b0, len);
-		  if (c)
-		  {
-		      copies[n_copies++] = vlib_get_buffer_index (vm, c);
-		  }
+		            len = ((u8 *) vlib_buffer_get_current (b0) - (u8 *) ethernet_buffer_get_header (b0));
+		            vlib_buffer_advance (b0, -len);
+		            c = vlib_buffer_copy (vm, b0);
+		            vlib_buffer_advance (b0, len);
+		            if (c)
+		            {
+		              copies[n_copies++] = vlib_get_buffer_index (vm, c);
+                  if (icmp->type == ICMP6_neighbor_solicitation)
+                  vnet_buffer2 (b0)->lcp_host_copy_done = 1;
+		            }
               }
+            }
           }
 
 
@@ -222,7 +274,7 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
               vlib_add_trace (vm, node, b0, sizeof (*t));
 
           t->sw_if_index = sw_if_index0;
-	  clib_memcpy_fast (t, b0->data + b0->current_data, LCP_NDP_TRACE_DATA_SIZE);
+	  clib_memcpy_fast (t->packet_data, b0->data + b0->current_data, LCP_NDP_TRACE_DATA_SIZE);
       }
 
 	  from += 1;
