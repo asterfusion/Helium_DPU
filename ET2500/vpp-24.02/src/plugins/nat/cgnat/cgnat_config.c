@@ -291,6 +291,7 @@ cgnat_instance_free_runtime (cgnat_instance_t *instance)
 
   for (i = 0; i < CGNAT_USER_LOCK_BUCKETS; i++)
     clib_spinlock_free (&instance->user_locks[i]);
+  clib_spinlock_free (&instance->users_lock);
   clib_spinlock_free (&instance->random_lock);
 
   clib_memset (instance, 0, sizeof (*instance));
@@ -306,6 +307,7 @@ cgnat_instance_runtime_init (cgnat_main_t *cm, cgnat_instance_t *instance,
 
   for (i = 0; i < CGNAT_USER_LOCK_BUCKETS; i++)
     clib_spinlock_init (&instance->user_locks[i]);
+  clib_spinlock_init (&instance->users_lock);
   clib_spinlock_init (&instance->random_lock);
   instance->random_seed =
     random_default_seed () ^ instance->instance_id ^ instance_index;
@@ -328,6 +330,7 @@ cgnat_instance_runtime_fini (cgnat_instance_t *instance)
 
   for (i = 0; i < CGNAT_USER_LOCK_BUCKETS; i++)
     clib_spinlock_free (&instance->user_locks[i]);
+  clib_spinlock_free (&instance->users_lock);
   clib_spinlock_free (&instance->random_lock);
 
   if (instance->users)

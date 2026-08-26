@@ -451,6 +451,27 @@ cgnat_mapping_get_if_valid (cgnat_main_t *cm, u64 value)
   return mapping;
 }
 
+/* Like cgnat_mapping_get_if_valid, but allows mappings already scheduled for
+ * deletion (e.g. sitting in mapping_reap_quarantine).  Session teardown must
+ * still decrement active_sessions / user reservations / ADF remote refs even
+ * when the mapping is no longer reachable from the lookup tables. */
+static cgnat_mapping_t *
+cgnat_mapping_get_for_session_delete (cgnat_main_t *cm, u64 value)
+{
+  u32 mapping_index = cgnat_value_get_index (value);
+  u32 generation = cgnat_value_get_generation (value);
+  cgnat_mapping_t *mapping;
+
+  if (PREDICT_FALSE (pool_is_free_index (cm->mappings, mapping_index)))
+    return 0;
+
+  mapping = pool_elt_at_index (cm->mappings, mapping_index);
+  if (PREDICT_FALSE (mapping->generation != generation))
+    return 0;
+
+  return mapping;
+}
+
 static_always_inline int
 cgnat_icmp_error_extract_inner (vlib_buffer_t *b, ip4_header_t *ip,
 				ip4_header_t **inner_ip, u8 *inner_protocol,
@@ -1177,7 +1198,7 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
     clib_bihash_add_del_24_8 (&cm->session_table, kv, 0);
   cgnat_session_table_unlock (cm, kv);
 
-  mapping = cgnat_mapping_get_if_valid (
+  mapping = cgnat_mapping_get_for_session_delete (
     cm, cgnat_index_to_value (session->mapping_index, session->mapping_generation));
   if (mapping)
     {
@@ -3127,6 +3148,17 @@ cgnat_session_init (cgnat_main_t *cm)
 
   if (cm->session_tables_initialized)
     return;
+
+  /* Keep a modest initial reserve to reduce early pool growth without
+   * requiring a large VPP main heap on small test machines. */
+  pool_alloc_aligned (cm->sessions, CGNAT_SESSION_POOL_INITIAL_SIZE,
+		      CLIB_CACHE_LINE_BYTES);
+  pool_alloc_aligned (cm->mappings, CGNAT_MAPPING_POOL_INITIAL_SIZE,
+		      CLIB_CACHE_LINE_BYTES);
+  vec_validate (cm->session_generation_by_index,
+		CGNAT_SESSION_POOL_INITIAL_SIZE - 1);
+  vec_validate (cm->mapping_generation_by_index,
+		CGNAT_MAPPING_POOL_INITIAL_SIZE - 1);
 
   clib_bihash_init_16_8 (&cm->in2out_mapping_table, "cgnat-in2out-mapping",
 			 CGNAT_MAPPING_HASH_BUCKETS, CGNAT_MAPPING_HASH_MEMORY);

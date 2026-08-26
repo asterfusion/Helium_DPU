@@ -219,20 +219,25 @@ cgnat_log_pba_block (cgnat_instance_t *instance, char *event, char *reason,
 		     u32 pool_index)
 {
   cgnat_log_event_t log_event;
+  u32 block_start, block_end;
 
-  (void) pool;
-  (void) block;
   (void) pool_index;
 
-  if (!instance || !instance->syslog_enabled ||
+  if (!instance || !pool || !block || !instance->syslog_enabled ||
       instance->log_mode != CGNAT_LOG_MODE_PORT_BLOCK)
     return;
+
+  block_start = cgnat_block_start_port (pool, block->block_id);
+  block_end = clib_min (block_start + pool->block_size - 1,
+			(u32) cgnat_pool_end_port (pool));
 
   clib_memset (&log_event, 0, sizeof (log_event));
   log_event.kind = CGNAT_LOG_EVENT_KIND_PBA_BLOCK;
   cgnat_log_event_set_common (&log_event, instance, event, reason);
   log_event.block.private_ip = private_ip;
   log_event.block.public_ip = public_ip;
+  log_event.block.public_port_start = (u16) block_start;
+  log_event.block.public_port_end = (u16) block_end;
   cgnat_log_enqueue (&log_event);
 }
 
@@ -997,15 +1002,18 @@ static cgnat_user_t *
 cgnat_find_user (cgnat_instance_t *instance, cgnat_user_key_t *key)
 {
   uword *p;
+  cgnat_user_t *user = 0;
 
-  if (!instance->user_index_by_key)
-    return 0;
+  clib_spinlock_lock (&instance->users_lock);
+  if (instance->user_index_by_key)
+    {
+      p = hash_get_mem (instance->user_index_by_key, key);
+      if (p)
+	user = pool_elt_at_index (instance->users, p[0]);
+    }
+  clib_spinlock_unlock (&instance->users_lock);
 
-  p = hash_get_mem (instance->user_index_by_key, key);
-  if (!p)
-    return 0;
-
-  return pool_elt_at_index (instance->users, p[0]);
+  return user;
 }
 
 static cgnat_user_t *
@@ -1014,6 +1022,7 @@ cgnat_create_user (cgnat_instance_t *instance, cgnat_user_key_t *key,
 {
   cgnat_user_t *user;
 
+  clib_spinlock_lock (&instance->users_lock);
   if (!instance->user_index_by_key)
     instance->user_index_by_key =
       hash_create_mem (0, sizeof (cgnat_user_key_t), sizeof (uword));
@@ -1023,6 +1032,7 @@ cgnat_create_user (cgnat_instance_t *instance, cgnat_user_key_t *key,
   user->pool_index = pool_index;
   user->public_ip_index = CGNAT_INVALID_INDEX;
   clib_spinlock_init (&user->session_lock);
+  clib_spinlock_unlock (&instance->users_lock);
 
   return user;
 }
@@ -1030,15 +1040,21 @@ cgnat_create_user (cgnat_instance_t *instance, cgnat_user_key_t *key,
 static_always_inline void
 cgnat_commit_user (cgnat_instance_t *instance, cgnat_user_t *user)
 {
+  clib_spinlock_lock (&instance->users_lock);
   hash_set_mem_alloc (&instance->user_index_by_key, &user->key,
 		      user - instance->users);
+  clib_spinlock_unlock (&instance->users_lock);
 }
 
 void
 cgnat_delete_user (cgnat_instance_t *instance, cgnat_user_t *user)
 {
-  uword *p = hash_get_mem (instance->user_index_by_key, &user->key);
-  u32 user_index = user - instance->users;
+  uword *p;
+  u32 user_index;
+
+  clib_spinlock_lock (&instance->users_lock);
+  p = hash_get_mem (instance->user_index_by_key, &user->key);
+  user_index = user - instance->users;
 
   if (p && p[0] == user_index)
     {
@@ -1068,6 +1084,7 @@ cgnat_delete_user (cgnat_instance_t *instance, cgnat_user_t *user)
   }
   clib_spinlock_free (&user->session_lock);
   pool_put (instance->users, user);
+  clib_spinlock_unlock (&instance->users_lock);
 }
 
 void

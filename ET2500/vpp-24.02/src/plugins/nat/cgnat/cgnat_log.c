@@ -39,6 +39,16 @@ cgnat_log_copy_str (u8 *dst, u32 dst_len, char *src)
   dst[len] = 0;
 }
 
+static_always_inline char *
+cgnat_log_mapping_type (u8 mapping_type)
+{
+  if (mapping_type == CGNAT_MAPPING_STATIC)
+    return "static";
+  if (mapping_type == CGNAT_MAPPING_DETERMINISTIC)
+    return "deterministic";
+  return "dynamic";
+}
+
 void
 cgnat_log_event_set_common (cgnat_log_event_t *event,
 			    cgnat_instance_t *instance, char *event_name,
@@ -65,19 +75,23 @@ cgnat_log_emit (cgnat_log_event_t *event)
       if (event->reason[0])
 	vlib_log (VLIB_LOG_LEVEL_NOTICE, log_class,
 		  "event=%s instance=%U private_ip=%U "
-		  "public_ip=%U reason=%s",
+		  "public_ip=%U public_port_start=%u public_port_end=%u "
+		  "reason=%s",
 		  event->event,
 		  format_cgnat_log_instance_snapshot, event->instance_label,
 		  event->instance_id, format_ip4_address, &event->block.private_ip,
-		  format_ip4_address, &event->block.public_ip, event->reason);
+		  format_ip4_address, &event->block.public_ip,
+		  event->block.public_port_start, event->block.public_port_end,
+		  event->reason);
       else
 	vlib_log (VLIB_LOG_LEVEL_NOTICE, log_class,
 		  "event=%s instance=%U private_ip=%U "
-		  "public_ip=%U",
+		  "public_ip=%U public_port_start=%u public_port_end=%u",
 		  event->event,
 		  format_cgnat_log_instance_snapshot, event->instance_label,
 		  event->instance_id, format_ip4_address, &event->block.private_ip,
-		  format_ip4_address, &event->block.public_ip);
+		  format_ip4_address, &event->block.public_ip,
+		  event->block.public_port_start, event->block.public_port_end);
       return;
     }
 
@@ -93,8 +107,7 @@ cgnat_log_emit (cgnat_log_event_t *event)
 	      format_ip4_address, &event->session.public_ip,
 	      event->session.public_port, format_ip4_address,
 	      &event->session.remote_ip, event->session.remote_port,
-	      event->session.mapping_type == CGNAT_MAPPING_STATIC ? "static" :
-								    "dynamic",
+	      cgnat_log_mapping_type (event->session.mapping_type),
 	      event->reason);
   else
     vlib_log (VLIB_LOG_LEVEL_NOTICE, log_class,
@@ -108,8 +121,7 @@ cgnat_log_emit (cgnat_log_event_t *event)
 	      format_ip4_address, &event->session.public_ip,
 	      event->session.public_port, format_ip4_address,
 	      &event->session.remote_ip, event->session.remote_port,
-	      event->session.mapping_type == CGNAT_MAPPING_STATIC ? "static" :
-								    "dynamic");
+	      cgnat_log_mapping_type (event->session.mapping_type));
 }
 
 void

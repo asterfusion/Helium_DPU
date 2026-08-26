@@ -33,6 +33,8 @@
 #define CGNAT_DEFAULT_MAX_USER_PORTS 2048
 #define CGNAT_DEFAULT_TCP_MSS 0
 #define CGNAT_DEFAULT_UTIL_THRESHOLD 80
+#define CGNAT_SESSION_POOL_INITIAL_SIZE (100 * 1000)
+#define CGNAT_MAPPING_POOL_INITIAL_SIZE (10 * 1000)
 #define CGNAT_MAPPING_HASH_BUCKETS (64 * 1024)
 #define CGNAT_MAPPING_HASH_MEMORY (256 << 20)
 #define CGNAT_SESSION_HASH_BUCKETS (128 * 1024)
@@ -141,13 +143,15 @@ typedef struct
   u8 instance_label[CGNAT_LOG_INSTANCE_LABEL_LEN];
   u32 instance_id;
 
-  union
-  {
-    struct
-    {
-      ip4_address_t private_ip;
-      ip4_address_t public_ip;
-    } block;
+	  union
+	  {
+	    struct
+	    {
+	      ip4_address_t private_ip;
+	      ip4_address_t public_ip;
+	      u16 public_port_start;
+	      u16 public_port_end;
+	    } block;
 
     struct
     {
@@ -589,6 +593,7 @@ typedef struct
   /* 0 = no TCP MSS clamping; non-zero clamps SYN MSS option to this value. */
   u16 tcp_mss;
   clib_spinlock_t user_locks[CGNAT_USER_LOCK_BUCKETS];
+  clib_spinlock_t users_lock;
   clib_spinlock_t random_lock;
   u32 random_seed;
 
