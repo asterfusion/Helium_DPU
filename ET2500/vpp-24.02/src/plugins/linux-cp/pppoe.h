@@ -92,6 +92,7 @@ _(IP4_INPUT, "ip4-input")              \
 _(IP6_INPUT, "ip6-input" )             \
 _(CP_INPUT, "lcp-pppoe-punt" )         \
 _(ECHO_REPLY, "interface-output")      \
+_(COPP_PUNT, "linux-cp-copp-punt")     \
 
 typedef enum
 {

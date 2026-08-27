@@ -21,6 +21,7 @@
 #include <vnet/fib/fib_sas.h>
 #include <vppinfra/error.h>
 #include <linux-cp/lcp.api_enum.h>
+#include <linux-cp/lcp_punt.h>
 #include <plugins/linux-cp/lcp_interface.h>
 #include <plugins/linux-cp/pppoe.h>
 
@@ -1200,7 +1201,7 @@ done:
  ?*/
 /* *INDENT-OFF* */
 VLIB_CLI_COMMAND (create_pppoe_session_command, static) = {
-  .path = "create pppoe session",
+  .path = "create lcp pppoe session",
   .short_help =
   "create pppoe session client-ip <client-ip> server-ip <server-ip> session-id <nn>"
   " server-mac <server-mac> encap-if-index <nn> [decap-vrf-id <nn>] [del]",
@@ -1447,8 +1448,8 @@ show_pppoe_session_command_fn (vlib_main_t * vm,
  ?*/
 /* *INDENT-OFF* */
 VLIB_CLI_COMMAND (show_pppoe_session_command, static) = {
-    .path = "show pppoe session",
-    .short_help = "show pppoe session",
+    .path = "show lcp pppoe session",
+    .short_help = "show lcp pppoe session",
     .function = show_pppoe_session_command_fn,
 };
 /* *INDENT-ON* */
@@ -1533,8 +1534,8 @@ show_pppoe_fib_command_fn (vlib_main_t * vm,
 ?*/
 /* *INDENT-OFF* */
 VLIB_CLI_COMMAND (show_pppoe_fib_command, static) = {
-    .path = "show pppoe fib",
-    .short_help = "show pppoe fib",
+    .path = "show lcp pppoe fib",
+    .short_help = "show lcp pppoe fib",
     .function = show_pppoe_fib_command_fn,
 };
 /* *INDENT-ON* */
@@ -1648,7 +1649,8 @@ VLIB_CLI_COMMAND (pppoe_interface_pool_show_command, static) = {
 
 #define foreach_lcp_pppoe                                                       \
   _ (DROP, "error-drop")                                                      \
-  _ (IO, "interface-output")
+  _ (IO, "interface-output")                                                  \
+  _ (COPP_PUNT, "linux-cp-copp-punt")
 
 typedef enum
 {
@@ -1657,6 +1659,38 @@ typedef enum
 #undef _
     LCP_PPPOE_N_NEXT,
 } lcp_pppoe_next_t;
+
+static_always_inline u32
+lcp_pppoe_apply_copp (vlib_main_t *vm, vlib_buffer_t *b,
+		      vl_api_lcp_trap_type_t trap_id, u8 default_action,
+		      u32 original_next, u32 drop_next, u32 punt_next,
+		      u32 *next)
+{
+  lcp_action_result_t result;
+
+  if (!lcp_buffer_set_trap_id (b, trap_id))
+    {
+      *next = drop_next;
+      return LCP_PUNT_BUFFER_INVALID;
+    }
+
+  result = lcp_punt_process_with_default (vm, b, default_action);
+  switch (result.disposition)
+    {
+    case LCP_DISPOSITION_DROP:
+      *next = drop_next;
+      break;
+    case LCP_DISPOSITION_FORWARD:
+    case LCP_DISPOSITION_COPY:
+      *next = original_next;
+      break;
+    case LCP_DISPOSITION_TRAP:
+      *next = punt_next;
+      break;
+    }
+
+  return result.cpu_bi;
+}
 
 typedef struct lcp_pppoe_trace_t_
 {
@@ -1687,10 +1721,8 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
 
-  u64 time_in_policer_periods;
-  time_in_policer_periods = clib_cpu_time_now () >> POLICER_TICKS_PER_PERIOD_SHIFT;
-  pppoe_main_t *pem = &pppoe_main;
-  u32 policer_id = pem->policer_id;
+  u32 copies[VLIB_FRAME_SIZE];
+  u32 n_copies = 0;
 
   while (n_left_from > 0)
   {
@@ -1711,12 +1743,7 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
           u32 is_host0 = 0;
           u32 is_host1 = 0;
           u8 len0, len1;
-          u8 act1;
-          u8 act0;
-          pppoe_header_t * pppoe0;
-          pppoe_header_t * pppoe1;
-          u8 is_need_policer0 = 0;
-          u8 is_need_policer1 = 0;
+          u32 copy_bi;
 
           bi0 = from[0];
           bi1 = from[1];
@@ -1727,16 +1754,6 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
           b0 = vlib_get_buffer (vm, bi0);
           b1 = vlib_get_buffer (vm, bi1);
 
-          pppoe0 = (pppoe_header_t*)( vlib_buffer_get_current(b0) );
-          if ( pppoe0->code == PPPOE_PADR || pppoe0->code == PPPOE_PADT)
-          {
-              is_need_policer0 = 1;
-          }
-          pppoe1 = (pppoe_header_t*)( vlib_buffer_get_current(b1) );
-          if ( pppoe1->code == PPPOE_PADR || pppoe1->code == PPPOE_PADT)
-          {
-              is_need_policer1 = 1;
-          }
           next0 = next1 = LCP_PPPOE_NEXT_DROP;
 
           sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
@@ -1784,6 +1801,12 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               vlib_buffer_advance (b0, -len0);
           }
 
+          copy_bi = lcp_pppoe_apply_copp (
+            vm, b0, LCP_TRAP_PPPOE_DISCOVERY, LCP_COPP_ACTION_TRAP, next0,
+            LCP_PPPOE_NEXT_DROP, LCP_PPPOE_NEXT_COPP_PUNT, &next0);
+          if (copy_bi != LCP_PUNT_BUFFER_INVALID)
+            copies[n_copies++] = copy_bi;
+
 	      lipi1 = lcp_itf_pair_find_by_phy ( sw_if_index1);
           if (lipi1 == INDEX_INVALID)
           {
@@ -1823,6 +1846,12 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               vlib_buffer_advance (b1, -len1);
           }
 
+          copy_bi = lcp_pppoe_apply_copp (
+            vm, b1, LCP_TRAP_PPPOE_DISCOVERY, LCP_COPP_ACTION_TRAP, next1,
+            LCP_PPPOE_NEXT_DROP, LCP_PPPOE_NEXT_COPP_PUNT, &next1);
+          if (copy_bi != LCP_PUNT_BUFFER_INVALID)
+            copies[n_copies++] = copy_bi;
+
           if (b0->flags & VLIB_BUFFER_IS_TRACED)
           {
               lcp_pppoe_trace_t *t =
@@ -1837,26 +1866,6 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
                   vlib_add_trace (vm, node, b1, sizeof (*t));
 
               t->sw_if_index = sw_if_index1;
-          }
-
-          if ( is_host1 == 0 && is_need_policer1 == 1)
-          {
-              act1 = vnet_policer_police (vm, b1, policer_id, time_in_policer_periods,
-                      POLICE_CONFORM, false);
-              if (PREDICT_FALSE (act1 == QOS_ACTION_DROP))
-              {
-                  next1 = LCP_PPPOE_NEXT_DROP;
-              }
-          }
-
-          if ( is_host0 == 0 && is_need_policer0 == 1)
-          {
-              act0 = vnet_policer_police (vm, b0, policer_id, time_in_policer_periods,
-                      POLICE_CONFORM, false);
-              if (PREDICT_FALSE (act0 == QOS_ACTION_DROP))
-              {
-                  next0 = LCP_PPPOE_NEXT_DROP;
-              }
           }
 
           from += 2;
@@ -1878,21 +1887,13 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
 	      lcp_itf_pair_t *lip0 = NULL;
 	      u32 lipi0 = 0;
           u32 is_host0 = 0;
-          u8 act0;
-          pppoe_header_t * pppoe0;
-          u8 is_need_policer0 = 0;
+          u32 copy_bi;
 	  u8 len0;
 
           bi0 = from[0];
           to_next[0] = bi0;
 
           b0 = vlib_get_buffer (vm, bi0);
-
-          pppoe0 = (pppoe_header_t*)( vlib_buffer_get_current(b0) );
-          if ( pppoe0->code == PPPOE_PADR || pppoe0->code == PPPOE_PADT)
-          {
-              is_need_policer0 = 1;
-          }
 
           next0 = LCP_PPPOE_NEXT_DROP;
 
@@ -1940,6 +1941,11 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               vlib_buffer_advance (b0, -len0);
           }
 
+          copy_bi = lcp_pppoe_apply_copp (
+            vm, b0, LCP_TRAP_PPPOE_DISCOVERY, LCP_COPP_ACTION_TRAP, next0,
+            LCP_PPPOE_NEXT_DROP, LCP_PPPOE_NEXT_COPP_PUNT, &next0);
+          if (copy_bi != LCP_PUNT_BUFFER_INVALID)
+            copies[n_copies++] = copy_bi;
 
           if (b0->flags & VLIB_BUFFER_IS_TRACED)
           {
@@ -1947,15 +1953,6 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
                   vlib_add_trace (vm, node, b0, sizeof (*t));
 
               t->sw_if_index = sw_if_index0;
-          }
-          if ( is_host0 == 0 && is_need_policer0 == 1)
-          {
-              act0 = vnet_policer_police (vm, b0, policer_id, time_in_policer_periods,
-                      POLICE_CONFORM, false);
-              if (PREDICT_FALSE (act0 == QOS_ACTION_DROP))
-              {
-                  next0 = LCP_PPPOE_NEXT_DROP;
-              }
           }
 
           from += 1;
@@ -1970,6 +1967,10 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
 
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
   }
+
+  if (n_copies)
+    vlib_buffer_enqueue_to_single_next (vm, node, copies,
+                                        LCP_PPPOE_NEXT_COPP_PUNT, n_copies);
 
   return frame->n_vectors;
 }
@@ -1991,8 +1992,9 @@ VLIB_REGISTER_NODE(lcp_pppoe_punt_node) = {
   .n_next_nodes = LCP_PPPOE_N_NEXT,
   .next_nodes =
   {
-    [LCP_PPPOE_NEXT_DROP] = "error-drop",
-    [LCP_PPPOE_NEXT_IO] = "interface-output",
+#define _(sym, node) [LCP_PPPOE_NEXT_##sym] = node,
+    foreach_lcp_pppoe
+#undef _
   },
 };
 
@@ -2057,6 +2059,8 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
   pppoe_entry_key_t cached_key;
   pppoe_entry_result_t cached_result;
   u32 stats_sw_if_index, stats_n_packets, stats_n_bytes;
+  u32 copies[VLIB_FRAME_SIZE];
+  u32 n_copies = 0;
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
@@ -2212,8 +2216,16 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
                     }
                 }
               /* control packets */
-              error0 = PPPOE_ERROR_CONTROL_PLANE;
-              next0 = PPPOE_INPUT_NEXT_CP_INPUT;
+              {
+                u32 copy_bi;
+                next0 = PPPOE_INPUT_NEXT_DROP;
+                copy_bi = lcp_pppoe_apply_copp (
+                  vm, b0, LCP_TRAP_PPPOE_CONTROL, LCP_COPP_ACTION_TRAP,
+                  next0, PPPOE_INPUT_NEXT_DROP,
+                  PPPOE_INPUT_NEXT_COPP_PUNT, &next0);
+                if (copy_bi != LCP_PUNT_BUFFER_INVALID)
+                  copies[n_copies++] = copy_bi;
+              }
               goto trace00;
           }
 
@@ -2232,6 +2244,20 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               vlan0 == 0 ? 0: (clib_net_to_host_u16(vlan0->priority_cfi_and_id) & 0x0fff),
 			  &key0, &bucket0, &result0);
 
+          if (PREDICT_FALSE (result0.fields.session_index == ~0))
+          {
+              /* session miss */
+              u32 copy_bi;
+              next0 = PPPOE_INPUT_NEXT_DROP;
+              copy_bi = lcp_pppoe_apply_copp (
+                vm, b0, LCP_TRAP_PPPOE_SESSION_MISS, LCP_COPP_ACTION_TRAP,
+                next0, PPPOE_INPUT_NEXT_DROP, PPPOE_INPUT_NEXT_COPP_PUNT,
+                &next0);
+              if (copy_bi != LCP_PUNT_BUFFER_INVALID)
+                copies[n_copies++] = copy_bi;
+              goto trace00;
+          }
+
           /* Pop Eth and PPPoE header */
           vlan0 == 0 ?
               vlib_buffer_advance(b0, sizeof(*h0)+sizeof(*pppoe0))
@@ -2242,7 +2268,6 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               PPPOE_INPUT_NEXT_IP4_INPUT
               : PPPOE_INPUT_NEXT_IP6_INPUT;
           pkts_decapsulated ++;
-          if (PREDICT_FALSE (result0.fields.session_index != ~0))
           {
               t0 = pool_elt_at_index (pem->sessions,
                       result0.fields.session_index);
@@ -2320,6 +2345,10 @@ trace00:
            + VNET_INTERFACE_COUNTER_RX,
            thread_index, stats_sw_if_index, stats_n_packets, stats_n_bytes);
   }
+
+  if (n_copies)
+    vlib_buffer_enqueue_to_single_next (vm, node, copies,
+                                        PPPOE_INPUT_NEXT_COPP_PUNT, n_copies);
 
   return frame->n_vectors;
 

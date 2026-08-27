@@ -514,7 +514,7 @@ typedef struct
   u32 hqos_guser_id; /* store the hqos user group id */
   u32 actual_tx_sw_if_index;
   u8 tc_index_dpo; /* store the traffic class dpo */
-
+  u8 trap_id; /* store the CoPP trap ID */
   };
 
   u32 unused[8];

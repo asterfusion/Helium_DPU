@@ -1057,15 +1057,22 @@ acl_fa_inner_node_fn (vlib_main_t * vm,
 	    }
 
 	  {
-	    /* speculatively get the next0 */
-	    vnet_feature_next_u16 (&next[0], b[0]);
-	    /* if the action is not deny - then use that next */
-	    next[0] = action ? next[0] : 0;
-
-        if (ACL_ACTION_PUNT == action)
-        {
-            next[0] = ACL_FA_PUNT;
-        }
+	    if (ACL_ACTION_PUNT == action)
+	      {
+		/*
+		 * Leave current_config_index at the ACL feature.  The CoPP
+		 * adapter consumes the continuation only when the policy says
+		 * FORWARD or COPY.
+		 */
+		next[0] = ACL_FA_PUNT;
+	      }
+	    else
+	      {
+		/* speculatively get the next0 */
+		vnet_feature_next_u16 (&next[0], b[0]);
+		/* if the action is not deny - then use that next */
+		next[0] = action ? next[0] : 0;
+	      }
 
         /* Proc action expand */
         acl_action_expand_proc(vm, b[0], &next[0], is_ip6, &fa_5tuple[0], &action_expand);

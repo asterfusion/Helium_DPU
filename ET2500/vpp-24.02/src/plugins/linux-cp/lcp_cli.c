@@ -27,6 +27,9 @@
 #include <vnet/format_fns.h>
 
 #include <plugins/linux-cp/lcp_interface.h>
+#include <plugins/linux-cp/lcp_match.h>
+#include <plugins/linux-cp/lcp_policy.h>
+#include <plugins/linux-cp/lcp_stats.h>
 
 static clib_error_t *
 lcp_itf_pair_create_command_fn (vlib_main_t *vm, unformat_input_t *input,
@@ -335,6 +338,285 @@ VLIB_CLI_COMMAND (lcp_itf_pair_show_cmd_node, static) = {
   .function = lcp_itf_pair_show_cmd,
   .short_help = "show lcp [phy <interface>]",
   .is_mp_safe = 1,
+};
+
+static clib_error_t *
+lcp_copp_traps_show_cmd (vlib_main_t *vm, unformat_input_t *input,
+			 vlib_cli_command_t *cmd)
+{
+  u32 trap_id;
+
+  if (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    return clib_error_return (0, "unknown input '%U'", format_unformat_error,
+			      input);
+
+  vlib_cli_output (vm, "%-7s %-24s %-10s %-8s %-10s %-8s %-8s", "trap_id",
+		   "name", "programmed", "action", "policer", "default",
+		   "priority");
+
+  for (trap_id = LCP_TRAP_INVALID + 1; trap_id < LCP_POLICY_N_TRAPS;
+       trap_id++)
+    {
+      const lcp_trap_desc_t *desc =
+	lcp_trap_desc_get ((vl_api_lcp_trap_type_t) trap_id);
+      const lcp_policy_entry_t *policy;
+
+      policy = lcp_policy_get ((vl_api_lcp_trap_type_t) trap_id);
+      if (policy->policer_index == LCP_POLICY_INDEX_INVALID)
+	vlib_cli_output (
+	  vm, "%-7u %-24s %-10s %-8u %-10s %-8u %-8u", trap_id,
+	  desc->name,
+	  lcp_policy_is_configured ((vl_api_lcp_trap_type_t) trap_id) ?
+	    "yes" :
+	    "no",
+	  policy->action, "none", desc->default_priority, policy->priority);
+      else
+	vlib_cli_output (
+	  vm, "%-7u %-24s %-10s %-8u %-10u %-8u %-8u", trap_id,
+	  desc->name,
+	  lcp_policy_is_configured ((vl_api_lcp_trap_type_t) trap_id) ?
+	    "yes" :
+	    "no",
+	  policy->action, policy->policer_index, desc->default_priority,
+	  policy->priority);
+    }
+
+  return 0;
+}
+
+VLIB_CLI_COMMAND (lcp_copp_traps_show_cmd_node, static) = {
+  .path = "show lcp copp traps",
+  .function = lcp_copp_traps_show_cmd,
+  .short_help = "show lcp copp traps",
+};
+
+static clib_error_t *
+lcp_copp_matchers_show_cmd (vlib_main_t *vm, unformat_input_t *input,
+			    vlib_cli_command_t *cmd)
+{
+  if (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    return clib_error_return (0, "unknown input '%U'", format_unformat_error,
+			      input);
+
+  vlib_cli_output (vm, "%-5s %-30s %-5s %-10s %-10s", "id", "name",
+		   "trap", "contexts", "fields");
+  for (u32 i = 0; i < lcp_match_rule_count (); i++)
+    {
+      const lcp_match_rule_t *rule = lcp_match_rule_get (i);
+
+      vlib_cli_output (vm, "%-5u %-30s %-5u 0x%08x 0x%08x",
+		       rule->rule_id, rule->name, rule->trap_type,
+		       rule->context_mask, rule->required_fields);
+    }
+  return 0;
+}
+
+VLIB_CLI_COMMAND (lcp_copp_matchers_show_cmd_node, static) = {
+  .path = "show lcp copp matchers",
+  .function = lcp_copp_matchers_show_cmd,
+  .short_help = "show lcp copp matchers",
+};
+
+static clib_error_t *
+lcp_copp_stats_show_cmd (vlib_main_t *vm, unformat_input_t *input,
+			 vlib_cli_command_t *cmd)
+{
+  u32 trap_id;
+  static const char *counter_names[] = {
+    [LCP_STATS_TRAP_HIT] = "trap_hit",
+    [LCP_STATS_PUNT_REQUIRED] = "punt_required",
+    [LCP_STATS_PUNT_PASS] = "punt_pass",
+    [LCP_STATS_PUNT_DROP] = "punt_drop",
+    [LCP_STATS_DELIVERY_DROP] = "delivery_drop",
+  };
+
+  if (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    return clib_error_return (0, "unknown input '%U'", format_unformat_error,
+			      input);
+
+  vlib_cli_output (vm, "%-7s %-10s %-10s %-10s %-10s %-10s", "trap_id",
+		   counter_names[LCP_STATS_TRAP_HIT],
+		   counter_names[LCP_STATS_PUNT_REQUIRED],
+		   counter_names[LCP_STATS_PUNT_PASS],
+		   counter_names[LCP_STATS_PUNT_DROP],
+		   counter_names[LCP_STATS_DELIVERY_DROP]);
+
+  for (trap_id = 0; trap_id < LCP_POLICY_N_TRAPS; trap_id++)
+    {
+      vlib_cli_output (
+	vm, "%-7u %-10llu %-10llu %-10llu %-10llu %-10llu", trap_id,
+	(long long) lcp_stats_get ((vl_api_lcp_trap_type_t) trap_id,
+				   LCP_STATS_TRAP_HIT),
+	(long long) lcp_stats_get ((vl_api_lcp_trap_type_t) trap_id,
+				   LCP_STATS_PUNT_REQUIRED),
+	(long long) lcp_stats_get ((vl_api_lcp_trap_type_t) trap_id,
+				   LCP_STATS_PUNT_PASS),
+	(long long) lcp_stats_get ((vl_api_lcp_trap_type_t) trap_id,
+				   LCP_STATS_PUNT_DROP),
+	(long long) lcp_stats_get ((vl_api_lcp_trap_type_t) trap_id,
+				   LCP_STATS_DELIVERY_DROP));
+    }
+
+  return 0;
+}
+
+VLIB_CLI_COMMAND (lcp_copp_stats_show_cmd_node, static) = {
+  .path = "show lcp copp stats",
+  .function = lcp_copp_stats_show_cmd,
+  .short_help = "show lcp copp stats",
+};
+
+static clib_error_t *
+lcp_copp_stats_clear_cmd (vlib_main_t *vm, unformat_input_t *input,
+			  vlib_cli_command_t *cmd)
+{
+  if (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    return clib_error_return (0, "unknown input '%U'", format_unformat_error,
+			      input);
+
+  vlib_worker_thread_barrier_sync (vm);
+  lcp_stats_clear ();
+  vlib_worker_thread_barrier_release (vm);
+
+  return 0;
+}
+
+VLIB_CLI_COMMAND (lcp_copp_stats_clear_cmd_node, static) = {
+  .path = "clear lcp copp stats",
+  .function = lcp_copp_stats_clear_cmd,
+  .short_help = "clear lcp copp stats",
+};
+
+static clib_error_t *
+lcp_copp_trap_set_command_fn (vlib_main_t *vm, unformat_input_t *input,
+			      vlib_cli_command_t *cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  u32 trap_id = ~0;
+  u32 action = ~0;
+  u32 priority = 0;
+  u32 policer_index = ~0;
+  int rv;
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (line_input, "trap_id %u", &trap_id))
+	;
+      else if (unformat (line_input, "action %u", &action))
+	;
+      else if (unformat (line_input, "priority %u", &priority))
+	;
+      else if (unformat (line_input, "policer %u", &policer_index))
+	;
+      else
+	return clib_error_return (0, "unknown input `%U'",
+				  format_unformat_error, line_input);
+    }
+  unformat_free (line_input);
+
+  if (trap_id == ~0)
+    return clib_error_return (0, "trap_id required");
+  if (action == ~0)
+    return clib_error_return (0, "action required");
+
+  vlib_worker_thread_barrier_sync (vm);
+  rv = lcp_policy_add ((vl_api_lcp_trap_type_t) trap_id, (u8) action, priority,
+		       policer_index);
+  vlib_worker_thread_barrier_release (vm);
+
+  if (rv)
+    return clib_error_return (0, "CoPP trap add failed (%d)", rv);
+
+  return 0;
+}
+
+VLIB_CLI_COMMAND (lcp_copp_trap_set_command, static) = {
+  .path = "set lcp copp trap",
+  .short_help = "set lcp copp trap trap_id <id> action <0..3> "
+		"priority <n> policer <index>",
+  .function = lcp_copp_trap_set_command_fn,
+};
+
+static clib_error_t *
+lcp_copp_trap_update_command_fn (vlib_main_t *vm, unformat_input_t *input,
+				 vlib_cli_command_t *cmd)
+{
+  unformat_input_t _line_input, *line_input = &_line_input;
+  u32 trap_id = ~0;
+  u32 action = ~0;
+  u32 priority = 0;
+  u32 policer_index = ~0;
+  int rv;
+
+  if (!unformat_user (input, unformat_line_input, line_input))
+    return 0;
+
+  while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (line_input, "trap_id %u", &trap_id))
+	;
+      else if (unformat (line_input, "action %u", &action))
+	;
+      else if (unformat (line_input, "priority %u", &priority))
+	;
+      else if (unformat (line_input, "policer %u", &policer_index))
+	;
+      else
+	return clib_error_return (0, "unknown input `%U'",
+				  format_unformat_error, line_input);
+    }
+  unformat_free (line_input);
+
+  if (trap_id == ~0)
+    return clib_error_return (0, "trap_id required");
+  if (action == ~0)
+    return clib_error_return (0, "action required");
+
+  vlib_worker_thread_barrier_sync (vm);
+  rv = lcp_policy_update ((vl_api_lcp_trap_type_t) trap_id, (u8) action,
+			  priority, policer_index);
+  vlib_worker_thread_barrier_release (vm);
+
+  if (rv)
+    return clib_error_return (0, "CoPP trap update failed (%d)", rv);
+
+  return 0;
+}
+
+VLIB_CLI_COMMAND (lcp_copp_trap_update_command, static) = {
+  .path = "update lcp copp trap",
+  .short_help = "update lcp copp trap trap_id <id> action <0..3> "
+		"priority <n> policer <index>",
+  .function = lcp_copp_trap_update_command_fn,
+};
+
+static clib_error_t *
+lcp_copp_trap_delete_command_fn (vlib_main_t *vm, unformat_input_t *input,
+				 vlib_cli_command_t *cmd)
+{
+  u32 trap_id = ~0;
+  int rv;
+
+  if (!unformat (input, "trap_id %u", &trap_id))
+    return clib_error_return (0, "trap_id required");
+
+  vlib_worker_thread_barrier_sync (vm);
+  rv = lcp_policy_delete ((vl_api_lcp_trap_type_t) trap_id);
+  vlib_worker_thread_barrier_release (vm);
+
+  if (rv)
+    return clib_error_return (0, "CoPP trap delete failed (%d)", rv);
+
+  return 0;
+}
+
+VLIB_CLI_COMMAND (lcp_copp_trap_delete_command, static) = {
+  .path = "delete lcp copp trap",
+  .short_help = "delete lcp copp trap trap_id <id>",
+  .function = lcp_copp_trap_delete_command_fn,
 };
 
 #ifdef SUPPORT_LCP_VLAN_TAG_ACT

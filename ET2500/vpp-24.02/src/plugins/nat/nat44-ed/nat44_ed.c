@@ -3989,6 +3989,7 @@ VLIB_REGISTER_NODE (nat_default_node) = {
     [NAT_NEXT_IN2OUT_RECLASSIFY] = "nat44-in2out-worker-rehandoff",
     [NAT_NEXT_OUT2IN_RECLASSIFY] = "nat44-out2in-worker-rehandoff",
     [NAT_NEXT_IN2OUT_OUTPUT_RECLASSIFY] = "nat44-in2out-output-worker-rehandoff",
+    [NAT_NEXT_COPP_PUNT] = "linux-cp-nat-miss",
   },
 };
 

@@ -29,6 +29,7 @@
 
 #include <nat/nat44-ed/nat44_ed.h>
 #include <nat/nat44-ed/nat44_ed_inlines.h>
+#include <linux-cp/lcp_punt.h>
 
 static char *nat_out2in_ed_error_strings[] = {
 #define _(sym,string) string,
@@ -195,7 +196,8 @@ icmp_out2in_ed_slow_path (snat_main_t *sm, vlib_buffer_t *b, ip4_header_t *ip,
 				  ip->dst_address.as_u32))
 	    {
 	      b->error = node->errors[NAT_OUT2IN_ED_ERROR_NO_TRANSLATION];
-	      next = NAT_NEXT_DROP;
+	      (void) lcp_buffer_set_trap_id (b, LCP_TRAP_DNAT_MISS);
+	      next = NAT_NEXT_COPP_PUNT;
 	    }
 	}
       else
@@ -1159,7 +1161,10 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
 	  if (!sm->forwarding_enabled)
 	    {
 	      if (!s0)
-		next[0] = NAT_NEXT_DROP;
+		{
+		  (void) lcp_buffer_set_trap_id (b0, LCP_TRAP_DNAT_MISS);
+		  next[0] = NAT_NEXT_COPP_PUNT;
+		}
 	    }
 	  if (NAT_NEXT_DROP != next[0] && s0 &&
 	      NAT_ED_TRNSL_ERR_SUCCESS !=
@@ -1248,7 +1253,8 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
 		{
 		  b0->error =
 		    node->errors[NAT_OUT2IN_ED_ERROR_NO_TRANSLATION];
-		  next[0] = NAT_NEXT_DROP;
+		  (void) lcp_buffer_set_trap_id (b0, LCP_TRAP_DNAT_MISS);
+		  next[0] = NAT_NEXT_COPP_PUNT;
 		}
 	      else
 		{
@@ -1289,7 +1295,8 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
 	    node, thread_index, twice_nat0, lb_nat0, now, m);
 	  if (!s0)
 	    {
-	      next[0] = NAT_NEXT_DROP;
+	      (void) lcp_buffer_set_trap_id (b0, LCP_TRAP_DNAT_MISS);
+	      next[0] = NAT_NEXT_COPP_PUNT;
 	      goto trace0;
 	    }
 	}
@@ -1298,7 +1305,8 @@ nat44_ed_out2in_slow_path_node_fn_inline (vlib_main_t * vm,
 	  (translation_error = nat_6t_flow_buf_translate_o2i (
 	     vm, sm, b0, ip0, &s0->o2i, proto0, 0 /* is_output_feature */)))
 	{
-	  next[0] = NAT_NEXT_DROP;
+	  (void) lcp_buffer_set_trap_id (b0, LCP_TRAP_DNAT_MISS);
+	  next[0] = NAT_NEXT_COPP_PUNT;
 	  goto trace0;
 	}
 

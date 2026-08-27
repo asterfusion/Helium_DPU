@@ -31,6 +31,7 @@
 #include <nat/nat44-ed/nat44_ed.h>
 #include <nat/nat44-ed/nat44_ed_inlines.h>
 #include <nat/nat44-ed/nat44_ed_ha_sync.h>
+#include <linux-cp/lcp_punt.h>
 
 static char *nat_in2out_ed_error_strings[] = {
 #define _(sym,string) string,
@@ -631,7 +632,8 @@ slow_path_ed (vlib_main_t *vm, snat_main_t *sm, vlib_buffer_t *b,
 	  nat_ipfix_logging_max_sessions (thread_index,
 					  sm->max_translations_per_thread);
 	  nat_elog_notice (sm, "maximum sessions exceeded");
-	  return NAT_NEXT_DROP;
+	  (void) lcp_buffer_set_trap_id (b, LCP_TRAP_SNAT_MISS);
+	  return NAT_NEXT_COPP_PUNT;
 	}
     }
 
@@ -711,7 +713,8 @@ slow_path_ed (vlib_main_t *vm, snat_main_t *sm, vlib_buffer_t *b,
 	  //nat_elog_notice (sm, "addresses exhausted");
 	  b->error = node->errors[NAT_IN2OUT_ED_ERROR_OUT_OF_PORTS];
 	  nat_ed_session_delete (sm, s, thread_index, 1);
-	  return NAT_NEXT_DROP;
+	  (void) lcp_buffer_set_trap_id (b, LCP_TRAP_SNAT_MISS);
+	  return NAT_NEXT_COPP_PUNT;
 	}
       s->out2in.addr = outside_addr;
       s->out2in.port = outside_port;
@@ -810,7 +813,8 @@ error:
       nat_ed_session_delete (sm, s, thread_index, 1);
     }
   *sessionp = s = NULL;
-  return NAT_NEXT_DROP;
+  (void) lcp_buffer_set_trap_id (b, LCP_TRAP_SNAT_MISS);
+  return NAT_NEXT_COPP_PUNT;
 }
 
 static_always_inline int
@@ -1513,6 +1517,12 @@ nat44_ed_in2out_fast_path_node_fn_inline (vlib_main_t *vm,
       /* Per-user LRU list maintenance */
       nat44_session_update_lru (sm, s0, thread_index);
 
+      if (PREDICT_FALSE (s0->flags & SNAT_SESSION_FLAG_HAIRPINNING))
+	{
+	  (void) lcp_buffer_set_trap_id (b0, LCP_TRAP_NAT_HAIRPIN);
+	  next[0] = NAT_NEXT_COPP_PUNT;
+	}
+
     trace0:
       if (PREDICT_FALSE
 	  ((node->flags & VLIB_NODE_FLAG_TRACE)
@@ -1784,6 +1794,12 @@ nat44_ed_in2out_slow_path_node_fn_inline (vlib_main_t *vm,
 				     (vm, b0), thread_index);
       /* Per-user LRU list maintenance */
       nat44_session_update_lru (sm, s0, thread_index);
+
+      if (PREDICT_FALSE (s0->flags & SNAT_SESSION_FLAG_HAIRPINNING))
+	{
+	  (void) lcp_buffer_set_trap_id (b0, LCP_TRAP_NAT_HAIRPIN);
+	  next[0] = NAT_NEXT_COPP_PUNT;
+	}
 
     trace0:
       if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE)

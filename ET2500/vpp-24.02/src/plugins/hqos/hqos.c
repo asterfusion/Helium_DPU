@@ -99,7 +99,7 @@ hqos_port_fifo_init(hqos_port_fifo_t *hqos_port_fifo, u32 queue_size)
     hqos_port_fifo->in_fifo = hqos_fifo_alloc(queue_size, sizeof(void *));
     hqos_port_fifo->out_fifo = hqos_fifo_alloc(queue_size, sizeof(void *));
 
-    if (!hqos_port_fifo->in_fifo || !hqos_port_fifo->in_fifo)
+    if (!hqos_port_fifo->in_fifo || !hqos_port_fifo->out_fifo)
     {
         ret = -1;
         goto free;
@@ -1680,7 +1680,7 @@ hqos_init (vlib_main_t * vm)
     vec_zero(hm->hqos_port_ptr_vec);
 
     //port fifo
-    hm->hqos_port_fifo_vec = vec_new(hqos_fifo_t *, hm->hqos_node_port_max);
+    hm->hqos_port_fifo_vec = vec_new(hqos_port_fifo_t *, hm->hqos_node_port_max);
     vec_zero(hm->hqos_port_fifo_vec);
 
     //hqos_node_port refcnt

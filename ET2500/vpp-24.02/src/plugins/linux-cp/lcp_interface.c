@@ -43,6 +43,7 @@
 #ifdef ET2500_LCP_DISTINGUISH_LOOPBACK
 extern vnet_device_class_t ethernet_simulated_device_class;
 #endif
+
 vlib_log_class_t lcp_itf_pair_logger;
 
 /**
@@ -242,6 +243,23 @@ lcp_itf_set_adjs (lcp_itf_pair_t *lip)
   lip->lip_rewrite_len = adj->rewrite_header.data_bytes;
 }
 
+void
+lcp_copp_features_set (u32 phy_sw_if_index, u8 enable)
+{
+  vnet_feature_enable_disable ("ip4-unicast", "linux-cp-ip4-punt",
+			       phy_sw_if_index, enable, NULL, 0);
+  vnet_feature_enable_disable ("ip4-multicast", "linux-cp-ip4-punt",
+			       phy_sw_if_index, enable, NULL, 0);
+  vnet_feature_enable_disable ("ip6-unicast", "linux-cp-ip6-punt",
+			       phy_sw_if_index, enable, NULL, 0);
+  vnet_feature_enable_disable ("ip6-multicast", "linux-cp-ip6-punt",
+			       phy_sw_if_index, enable, NULL, 0);
+  vnet_l2_feature_enable_disable ("l2-input-ip4", "linux-cp-l2-punt",
+				  phy_sw_if_index, enable, NULL, 0);
+  vnet_l2_feature_enable_disable ("l2-input-ip6", "linux-cp-l2-punt",
+				  phy_sw_if_index, enable, NULL, 0);
+}
+
 int
 lcp_itf_pair_add (u32 host_sw_if_index, u32 phy_sw_if_index, u8 *host_name,
 		  u32 host_index, lip_host_type_t host_type, u8 *ns)
@@ -321,68 +339,11 @@ lcp_itf_pair_add (u32 host_sw_if_index, u32 phy_sw_if_index, u8 *host_name,
 
   lcp_itf_set_adjs (lip);
 
-  LCP_ITF_PAIR_INFO("enable ospf for phy %d\n", lip->lip_phy_sw_if_index);
-  /* enable ospf punt for phy interfaces */
-  vnet_feature_enable_disable("ip4-multicast", "linux-cp-ospfv2-phy",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable("ip6-multicast", "linux-cp-ospfv3-phy",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
+  lcp_copp_features_set (lip->lip_phy_sw_if_index, 1);
 
-  /* enable dhcp/dhcpv6 punt for interfaces */
-  vnet_feature_enable_disable("ip4-unicast", "linux-cp-dhcp-phy",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable("ip4-multicast", "linux-cp-dhcp-phy",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable("ip6-unicast", "linux-cp-dhcpv6-phy",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable("ip6-multicast", "linux-cp-dhcpv6-phy",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
 
-  /* enable icmpv6-ndp nd punt for interfaces */
-  vnet_feature_enable_disable("ip6-unicast", "linux-cp-ndp-phy",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable("ip6-multicast", "linux-cp-ndp-phy",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-
-  /* enable bfd/bfdv6 punt for interfaces */
-  vnet_feature_enable_disable("ip4-unicast", "linux-cp-bfd-phy",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable("ip4-multicast", "linux-cp-bfd-phy",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable("ip6-unicast", "linux-cp-bfdv6-phy",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable("ip6-multicast", "linux-cp-bfdv6-phy",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-
-  vnet_feature_enable_disable("ip4-multicast", "linux-cp-vrrp",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable("ip6-multicast", "linux-cp-vrrp6",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-
-  vnet_l2_feature_enable_disable("l2-input-ip4", "linux-cp-l2-vrrp",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-
-  vnet_l2_feature_enable_disable("l2-input-ip6", "linux-cp-l2-vrrp6",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-
-  vnet_feature_enable_disable("ip4-multicast", "linux-cp-igmp",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable("ip6-multicast", "linux-cp-igmp6",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-
-  vnet_l2_feature_enable_disable("l2-input-ip4", "linux-cp-l2-igmp",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-
-  vnet_l2_feature_enable_disable("l2-input-ip6", "linux-cp-l2-igmp6",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-
-  vnet_feature_enable_disable("ip4-local", "linux-cp-igmp-xc",
-          lip->lip_host_sw_if_index, 1, NULL, 0);
-
-  vnet_feature_enable_disable("ip4-multicast", "linux-cp-pim",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable("ip6-multicast", "linux-cp-pim6",
-          lip->lip_phy_sw_if_index, 1, NULL, 0);
+  vnet_feature_enable_disable ("ip4-local", "linux-cp-igmp-xc",
+			       lip->lip_host_sw_if_index, 1, NULL, 0);
           
   /* enable rip/ripng punt for interface */
   vnet_feature_enable_disable("ip4-unicast", "linux-cp-rip-phy",
@@ -393,6 +354,14 @@ lcp_itf_pair_add (u32 host_sw_if_index, u32 phy_sw_if_index, u8 *host_name,
           lip->lip_phy_sw_if_index, 1, NULL, 0);
   vnet_feature_enable_disable("ip6-multicast", "linux-cp-ripv6-phy",
           lip->lip_phy_sw_if_index, 1, NULL, 0);
+
+  if (hash_elts (lip_db_by_vif) == 1)
+    {
+      vnet_feature_enable_disable ("ip4-punt", "linux-cp-local-punt", 0, 1,
+				   NULL, 0);
+      vnet_feature_enable_disable ("ip6-punt", "linux-cp-local-punt", 0, 1,
+				   NULL, 0);
+    }
 
   /* enable ARP feature node for broadcast interfaces */
   if (lip->lip_host_type != LCP_ITF_HOST_TUN)
@@ -530,23 +499,29 @@ lcp_itf_pair_del (u32 phy_sw_if_index)
   ip4_punt_redirect_del (lip->lip_phy_sw_if_index);
   ip6_punt_redirect_del (lip->lip_phy_sw_if_index);
 
-  LCP_ITF_PAIR_INFO("disable ospf for phy %d\n", lip->lip_phy_sw_if_index);
-  /* disable ospf punt for phy interfaces */
-  vnet_feature_enable_disable("ip4-multicast", "linux-cp-ospfv2-phy",
-          lip->lip_phy_sw_if_index, 0, NULL, 0);
-  vnet_feature_enable_disable("ip6-multicast", "linux-cp-ospfv3-phy",
-          lip->lip_phy_sw_if_index, 0, NULL, 0);
+  lcp_copp_features_set (lip->lip_phy_sw_if_index, 0);
 
 
-  /* disable bfd/bfdv6 punt for interfaces */
-  vnet_feature_enable_disable("ip4-unicast", "linux-cp-bfd-phy",
+  vnet_feature_enable_disable ("ip4-local", "linux-cp-igmp-xc",
+			       lip->lip_host_sw_if_index, 0, NULL, 0);
+
+  /* disable legacy RIP paths symmetrically with pair creation */
+  vnet_feature_enable_disable("ip4-unicast", "linux-cp-rip-phy",
           lip->lip_phy_sw_if_index, 0, NULL, 0);
-  vnet_feature_enable_disable("ip4-multicast", "linux-cp-bfd-phy",
+  vnet_feature_enable_disable("ip4-multicast", "linux-cp-rip-phy",
           lip->lip_phy_sw_if_index, 0, NULL, 0);
-  vnet_feature_enable_disable("ip6-unicast", "linux-cp-bfdv6-phy",
+  vnet_feature_enable_disable("ip6-unicast", "linux-cp-ripv6-phy",
           lip->lip_phy_sw_if_index, 0, NULL, 0);
-  vnet_feature_enable_disable("ip6-multicast", "linux-cp-bfdv6-phy",
+  vnet_feature_enable_disable("ip6-multicast", "linux-cp-ripv6-phy",
           lip->lip_phy_sw_if_index, 0, NULL, 0);
+
+  if (hash_elts (lip_db_by_vif) == 1)
+    {
+      vnet_feature_enable_disable ("ip4-punt", "linux-cp-local-punt", 0, 0,
+				   NULL, 0);
+      vnet_feature_enable_disable ("ip6-punt", "linux-cp-local-punt", 0, 0,
+				   NULL, 0);
+    }
 
   /* disable ARP feature node for broadcast interfaces */
   if (lip->lip_host_type != LCP_ITF_HOST_TUN)

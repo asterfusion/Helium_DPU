@@ -21,6 +21,9 @@
 #include <plugins/linux-cp/lcp_interface.h>
 #include <plugins/linux-cp/lcp_adj.h>
 #include <linux-cp/lcp.api_enum.h>
+#include <linux-cp/lcp_match.h>
+#include <linux-cp/lcp_punt.h>
+#include <linux-cp/lcp_stats.h>
 
 #include <vnet/feature/feature.h>
 #include <vnet/ip/ip4_packet.h>
@@ -108,11 +111,109 @@ static_always_inline void lip_punt_vlan_tag_proc(const lcp_itf_pair_t *lip, vlib
 }
 #endif
 
+typedef enum
+{
+  LCP_DELIVERY_CONTEXT_LEGACY,
+  LCP_DELIVERY_CONTEXT_COPP,
+} lcp_delivery_context_t;
+
+/*
+ * Prepare a CPU-bound buffer for LCP delivery.
+ *
+ * This function mutates buffer metadata and packet offset. It MUST NOT be
+ * called for the original buffer of a COPY action; only a TRAP original or a
+ * COPY clone may reach this boundary.
+ */
+static_always_inline u32
+lcp_prepare_cpu_branch (vlib_main_t *vm, vlib_buffer_t *b,
+			lcp_delivery_context_t context, u32 *sw_if_index,
+			const lcp_itf_pair_t **lip)
+{
+  u32 lipi;
+
+  *sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
+  if ((b->flags & VNET_BUFFER_F_TCP_ORIG_RX_SAVED) &&
+      vnet_buffer2 (b)->l2_rx_sw_if_index != ~0)
+    {
+      u32 l2_rx_sw_if_index = vnet_buffer2 (b)->l2_rx_sw_if_index;
+
+      lipi = lcp_itf_pair_find_by_phy (l2_rx_sw_if_index);
+      b->flags &= ~VNET_BUFFER_F_TCP_ORIG_RX_SAVED;
+      vnet_buffer2 (b)->l2_rx_sw_if_index = ~0;
+    }
+  else
+    lipi = lcp_itf_pair_find_by_phy (*sw_if_index);
+
+  if (PREDICT_FALSE (lipi == INDEX_INVALID))
+    {
+      if ((b->flags & VLIB_BUFFER_NOT_PHY_INTF) &&
+	  vnet_buffer2 (b)->l2_rx_sw_if_index != ~0)
+	{
+	  u32 l2_rx_sw_if_index = vnet_buffer2 (b)->l2_rx_sw_if_index;
+	  vnet_sw_interface_t *si =
+	    vnet_get_sw_interface (vnet_get_main (), l2_rx_sw_if_index);
+
+	  if (si && si->type == VNET_SW_INTERFACE_TYPE_SUB)
+	    l2_rx_sw_if_index = si->sup_sw_if_index;
+	  lipi = lcp_itf_pair_find_by_phy (l2_rx_sw_if_index);
+	  vnet_buffer2 (b)->l2_rx_sw_if_index = ~0;
+	}
+      if (lipi == INDEX_INVALID)
+	goto delivery_drop;
+    }
+
+  *lip = lcp_itf_pair_get (lipi);
+  if (PREDICT_FALSE (*lip == 0))
+    {
+      lipi = INDEX_INVALID;
+      goto delivery_drop;
+    }
+
+  vnet_buffer (b)->sw_if_index[VLIB_TX] = (*lip)->lip_host_sw_if_index;
+  if (PREDICT_TRUE ((*lip)->lip_host_type == LCP_ITF_HOST_TAP))
+    {
+      word len = (u8 *) vlib_buffer_get_current (b) -
+		 (u8 *) ethernet_buffer_get_header (b);
+
+      if (PREDICT_FALSE (!(b->flags & VNET_BUFFER_F_L2_HDR_OFFSET_VALID)))
+	{
+	  vnet_main_t *vnm = vnet_get_main ();
+	  vnet_hw_interface_t *hw =
+	    vnet_get_sup_hw_interface (vnm, (*lip)->lip_phy_sw_if_index);
+	  ethernet_header_t *eh;
+
+	  vlib_buffer_advance (b, -sizeof (ethernet_header_t));
+	  eh = vlib_buffer_get_current (b);
+	  clib_memcpy (eh->src_address, hw->hw_address,
+		       sizeof (eh->src_address));
+	  clib_memcpy (eh->dst_address, hw->hw_address,
+		       sizeof (eh->dst_address));
+	  eh->type = (b->flags & VNET_BUFFER_F_IS_IP4) ?
+		       clib_host_to_net_u16 (ETHERNET_TYPE_IP4) :
+		       clib_host_to_net_u16 (ETHERNET_TYPE_IP6);
+	}
+      else
+	vlib_buffer_advance (b, -len);
+    }
+
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+  lip_punt_vlan_tag_proc (*lip, b);
+#endif
+  return lipi;
+
+delivery_drop:
+  if (context == LCP_DELIVERY_CONTEXT_COPP)
+    lcp_stats_increment (vm, vnet_buffer2 (b)->trap_id,
+			 LCP_STATS_DELIVERY_DROP);
+  return INDEX_INVALID;
+}
+
 /**
  * Pass punted packets from the PHY to the HOST.
  */
-VLIB_NODE_FN (lip_punt_node)
-(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+static_always_inline uword
+lip_punt_node_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
+		      vlib_frame_t *frame, u8 is_copp)
 {
   u32 n_left_from, *from, *to_next, n_left_to_next;
   lip_punt_next_t next_index;
@@ -132,7 +233,6 @@ VLIB_NODE_FN (lip_punt_node)
 	  u32 next0 = ~0;
 	  u32 bi0, lipi0;
 	  u32 sw_if_index0;
-	  u8 len0;
 
 	  bi0 = to_next[0] = from[0];
 
@@ -143,72 +243,20 @@ VLIB_NODE_FN (lip_punt_node)
 	  next0 = LIP_PUNT_NEXT_DROP;
 
 	  b0 = vlib_get_buffer (vm, bi0);
-
 	  sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
-	  lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0);
-	  if (PREDICT_FALSE (lipi0 == INDEX_INVALID))
-	  {
-	      if ((b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
-	      {
-              u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
 
-              vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
-              if( si0 && si0->type == VNET_SW_INTERFACE_TYPE_SUB ) {
-                  l2_rx_sw_if_index0 = si0->sup_sw_if_index;
-              }
-		      lipi0 = lcp_itf_pair_find_by_phy (l2_rx_sw_if_index0);
-		      vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
-	      }
-	      if (lipi0 == INDEX_INVALID)
-		      goto trace0;
-	  }
-
-	  lip0 = lcp_itf_pair_get (lipi0);
-	  next0 = LIP_PUNT_NEXT_IO;
-	  vnet_buffer (b0)->sw_if_index[VLIB_TX] = lip0->lip_host_sw_if_index;
-
-	  if (PREDICT_TRUE (lip0->lip_host_type == LCP_ITF_HOST_TAP))
+	  lipi0 = INDEX_INVALID;
+	  /* Account policy/policer success before attempting Linux delivery. */
+	  if (!is_copp || lcp_cpu_branch_pass (vm, b0))
 	    {
-	      /*
-	       * rewind to ethernet header
-	       */
-	      len0 = ((u8 *) vlib_buffer_get_current (b0) -
-		      (u8 *) ethernet_buffer_get_header (b0));
-	      if (PREDICT_FALSE (!(b0->flags & VNET_BUFFER_F_L2_HDR_OFFSET_VALID)))
-              {
-                 vnet_main_t *vnm = vnet_get_main ();
-                 vnet_hw_interface_t *hw =
-                   vnet_get_sup_hw_interface (vnm, lip0->lip_phy_sw_if_index);
-                 ethernet_header_t *eh;
-
-                 /* add ethernet headers */
-                 vlib_buffer_advance (b0, -sizeof (ethernet_header_t));
-                 eh = vlib_buffer_get_current (b0);
-                 clib_memcpy (eh->src_address, hw->hw_address,
-                              sizeof (eh->src_address));
-                 clib_memcpy (eh->dst_address, hw->hw_address,
-                              sizeof (eh->dst_address));
-                 eh->type = (b0->flags & VNET_BUFFER_F_IS_IP4) ?
-                          clib_host_to_net_u16 (ETHERNET_TYPE_IP4) :
-                          clib_host_to_net_u16 (ETHERNET_TYPE_IP6);
-               }
-               else
-               {
-                 vlib_buffer_advance (b0, -len0);
-               }
+	      lipi0 = lcp_prepare_cpu_branch (
+		vm, b0, is_copp ? LCP_DELIVERY_CONTEXT_COPP :
+			    LCP_DELIVERY_CONTEXT_LEGACY,
+		&sw_if_index0, &lip0);
+	      if (lipi0 != INDEX_INVALID)
+		next0 = LIP_PUNT_NEXT_IO;
 	    }
-	  /* Tun packets don't need any special treatment, just need to
-	   * be escorted past the TTL decrement. If we still want to use
-	   * ip[46]-punt-redirect with these, we could just set the
-	   * VNET_BUFFER_F_LOCALLY_ORIGINATED in an 'else {}' here and
-	   * then pass to the next node on the ip[46]-punt feature arc
-	   */
 
-#ifdef SUPPORT_LCP_VLAN_TAG_ACT
-	  lip_punt_vlan_tag_proc(lip0, b0);
-#endif
-
-	trace0:
 	  if (PREDICT_FALSE ((b0->flags & VLIB_BUFFER_IS_TRACED)))
 	    {
 	      lip_punt_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
@@ -227,6 +275,18 @@ VLIB_NODE_FN (lip_punt_node)
   return frame->n_vectors;
 }
 
+VLIB_NODE_FN (lip_punt_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+  return lip_punt_node_inline (vm, node, frame, 0);
+}
+
+VLIB_NODE_FN (lip_copp_punt_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+  return lip_punt_node_inline (vm, node, frame, 1);
+}
+
 VLIB_REGISTER_NODE (lip_punt_node) = {
   .name = "linux-cp-punt",
   .vector_size = sizeof (u32),
@@ -237,6 +297,277 @@ VLIB_REGISTER_NODE (lip_punt_node) = {
   .next_nodes = {
     [LIP_PUNT_NEXT_DROP] = "error-drop",
     [LIP_PUNT_NEXT_IO] = "interface-output",
+  },
+};
+
+VLIB_REGISTER_NODE (lip_copp_punt_node) = {
+  .name = "linux-cp-copp-punt",
+  .vector_size = sizeof (u32),
+  .format_trace = format_lip_punt_trace,
+  .type = VLIB_NODE_TYPE_INTERNAL,
+
+  .n_next_nodes = LIP_PUNT_N_NEXT,
+  .next_nodes = {
+    [LIP_PUNT_NEXT_DROP] = "error-drop",
+    [LIP_PUNT_NEXT_IO] = "interface-output",
+  },
+};
+
+#define LCP_ACL_PUNT_CONTINUE ((u32) ~0)
+
+static u32 lcp_acl_producer_by_arc[256];
+
+#define foreach_lcp_acl_punt_next                                       \
+  _ (DROP, "error-drop")                                                \
+  _ (PUNT, "linux-cp-copp-punt")
+
+typedef enum
+{
+#define _(sym, node) LCP_ACL_PUNT_NEXT_##sym,
+  foreach_lcp_acl_punt_next
+#undef _
+  LCP_ACL_PUNT_N_NEXT,
+} lcp_acl_punt_next_t;
+
+/**
+ * Apply CoPP to packets punted by the ACL plugin.
+ */
+VLIB_NODE_FN (lcp_acl_punt_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+  u32 *from = vlib_frame_vector_args (frame);
+  u32 n_left = frame->n_vectors;
+  u32 next_index = node->cached_next_index;
+  u32 copies[VLIB_FRAME_SIZE];
+  u32 n_copies = 0;
+
+  while (n_left)
+    {
+      u32 *to_next, n_left_to_next;
+
+      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
+      while (n_left && n_left_to_next)
+	{
+	  u32 bi = from[0];
+	  vlib_buffer_t *b = vlib_get_buffer (vm, bi);
+	  u32 next = LCP_ACL_PUNT_CONTINUE;
+	  lcp_action_result_t action_result;
+
+	  if (!lcp_buffer_set_trap_id (b, LCP_TRAP_ACL))
+	    next = LCP_ACL_PUNT_NEXT_DROP;
+	  else
+	    {
+	      action_result = lcp_punt_process_with_default (
+		vm, b, LCP_COPP_ACTION_TRAP);
+	      switch (action_result.disposition)
+		{
+		case LCP_DISPOSITION_DROP:
+		  next = LCP_ACL_PUNT_NEXT_DROP;
+		  break;
+		case LCP_DISPOSITION_FORWARD:
+		case LCP_DISPOSITION_COPY:
+		  /* Consume the ACL feature continuation exactly once below. */
+		  next = LCP_ACL_PUNT_CONTINUE;
+		  break;
+		case LCP_DISPOSITION_TRAP:
+		  next = LCP_ACL_PUNT_NEXT_PUNT;
+		  break;
+		}
+	      if (action_result.cpu_bi != LCP_PUNT_BUFFER_INVALID)
+		copies[n_copies++] = action_result.cpu_bi;
+	    }
+
+	  from++;
+	  n_left--;
+	  if (next == LCP_ACL_PUNT_CONTINUE)
+	    {
+	      u8 arc = vnet_buffer (b)->feature_arc_index;
+	      u32 producer_index = lcp_acl_producer_by_arc[arc];
+	      vlib_node_t *producer =
+		producer_index == ~0 ? 0 : vlib_get_node (vm, producer_index);
+	      u32 producer_next;
+
+	      if (PREDICT_FALSE (producer == 0))
+		next = LCP_ACL_PUNT_NEXT_DROP;
+	      else
+		{
+		  vnet_feature_next (&producer_next, b);
+		  if (PREDICT_FALSE (producer_next >=
+				     vec_len (producer->next_nodes)))
+		    next = LCP_ACL_PUNT_NEXT_DROP;
+		  else
+		    {
+		      u32 continuation = producer->next_nodes[producer_next];
+		      vlib_frame_t *continuation_frame =
+			vlib_get_frame_to_node (vm, continuation);
+		      u32 *continuation_buffers =
+			vlib_frame_vector_args (continuation_frame);
+
+		      continuation_buffers[0] = bi;
+		      continuation_frame->n_vectors = 1;
+		      vlib_put_frame_to_node (vm, continuation,
+					  continuation_frame);
+		    }
+		}
+	    }
+	  if (next != LCP_ACL_PUNT_CONTINUE)
+	    {
+	      to_next[0] = bi;
+	      to_next++;
+	      n_left_to_next--;
+	      vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
+					       n_left_to_next, bi, next);
+	    }
+	}
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+    }
+
+  if (n_copies)
+    vlib_buffer_enqueue_to_single_next (vm, node, copies,
+					LCP_ACL_PUNT_NEXT_PUNT, n_copies);
+  return frame->n_vectors;
+}
+
+VLIB_REGISTER_NODE (lcp_acl_punt_node) = {
+  .name = "linux-cp-acl-punt",
+  .vector_size = sizeof (u32),
+  .type = VLIB_NODE_TYPE_INTERNAL,
+
+  .n_next_nodes = LCP_ACL_PUNT_N_NEXT,
+  .next_nodes = {
+#define _(sym, node) [LCP_ACL_PUNT_NEXT_##sym] = node,
+    foreach_lcp_acl_punt_next
+#undef _
+  },
+};
+
+static clib_error_t *
+lcp_acl_punt_redirect_init (vlib_main_t *vm)
+{
+  static const struct
+  {
+    const char *arc_name;
+    const char *node_name;
+  } acl_producers[] = {
+    { "l2-input-ip6", "acl-plugin-in-ip6-l2" },
+    { "l2-input-ip4", "acl-plugin-in-ip4-l2" },
+    { "l2-output-ip6", "acl-plugin-out-ip6-l2" },
+    { "l2-output-ip4", "acl-plugin-out-ip4-l2" },
+    { "ip6-unicast", "acl-plugin-in-ip6-fa" },
+    { "ip4-unicast", "acl-plugin-in-ip4-fa" },
+    { "ip6-output", "acl-plugin-out-ip6-fa" },
+    { "ip4-output", "acl-plugin-out-ip4-fa" },
+    { "l2-input-nonip", "acl-plugin-in-sai-nonip-l2" },
+    { "l2-output-nonip", "acl-plugin-out-sai-nonip-l2" },
+  };
+
+  clib_memset (lcp_acl_producer_by_arc, 0xff,
+	       sizeof (lcp_acl_producer_by_arc));
+  for (u32 i = 0; i < ARRAY_LEN (acl_producers); i++)
+    {
+      vlib_node_t *acl_node = vlib_get_node_by_name (
+	vm, (u8 *) acl_producers[i].node_name);
+      u8 arc = vnet_get_feature_arc_index (acl_producers[i].arc_name);
+
+      if (acl_node && arc != (u8) ~0)
+	{
+	  lcp_acl_producer_by_arc[arc] = acl_node->index;
+	  vlib_node_add_next_with_slot (vm, acl_node->index,
+					lcp_acl_punt_node.index, 1);
+	}
+    }
+  return 0;
+}
+
+VLIB_INIT_FUNCTION (lcp_acl_punt_redirect_init) = {
+  .runs_after = VLIB_INITS ("lcp_interface_init", "acl_init"),
+};
+
+/**
+ * Adapter for NAT44-ED miss / hairpin events.
+ * The NAT plugin sets vnet_buffer2()->trap_id and sends the packet here;
+ * we apply the CoPP policy and either drop, forward, copy, or punt to the
+ * host via linux-cp-copp-punt.
+ */
+#define foreach_lcp_nat_miss_next                                       \
+  _ (DROP, "error-drop")                                                \
+  _ (PUNT, "linux-cp-copp-punt")
+
+typedef enum
+{
+#define _(sym, node) LCP_NAT_MISS_NEXT_##sym,
+  foreach_lcp_nat_miss_next
+#undef _
+  LCP_NAT_MISS_N_NEXT,
+} lcp_nat_miss_next_t;
+
+VLIB_NODE_FN (lcp_nat_miss_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+  u32 *from = vlib_frame_vector_args (frame);
+  u32 n_left = frame->n_vectors;
+  u32 next_index = node->cached_next_index;
+  u32 copies[VLIB_FRAME_SIZE];
+  u32 n_copies = 0;
+
+  while (n_left)
+    {
+      u32 *to_next, n_left_to_next;
+
+      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
+      while (n_left && n_left_to_next)
+	{
+	  u32 bi = from[0];
+	  vlib_buffer_t *b = vlib_get_buffer (vm, bi);
+	  u32 original_next = LCP_NAT_MISS_NEXT_DROP;
+	  u32 next;
+	  lcp_action_result_t action_result;
+
+	  action_result = lcp_punt_process_with_default (
+	    vm, b, LCP_COPP_ACTION_TRAP);
+	  switch (action_result.disposition)
+	    {
+	    case LCP_DISPOSITION_DROP:
+	      next = LCP_NAT_MISS_NEXT_DROP;
+	      break;
+	    case LCP_DISPOSITION_FORWARD:
+	    case LCP_DISPOSITION_COPY:
+	      next = original_next;
+	      break;
+	    case LCP_DISPOSITION_TRAP:
+	      next = LCP_NAT_MISS_NEXT_PUNT;
+	      break;
+	    }
+	  if (action_result.cpu_bi != LCP_PUNT_BUFFER_INVALID)
+	    copies[n_copies++] = action_result.cpu_bi;
+
+	  to_next[0] = bi;
+	  from++;
+	  to_next++;
+	  n_left--;
+	  n_left_to_next--;
+	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
+					   n_left_to_next, bi, next);
+	}
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+    }
+
+  if (n_copies)
+    vlib_buffer_enqueue_to_single_next (vm, node, copies,
+					LCP_NAT_MISS_NEXT_PUNT, n_copies);
+  return frame->n_vectors;
+}
+
+VLIB_REGISTER_NODE (lcp_nat_miss_node) = {
+  .name = "linux-cp-nat-miss",
+  .vector_size = sizeof (u32),
+  .type = VLIB_NODE_TYPE_INTERNAL,
+
+  .n_next_nodes = LCP_NAT_MISS_N_NEXT,
+  .next_nodes = {
+#define _(sym, node) [LCP_NAT_MISS_NEXT_##sym] = node,
+    foreach_lcp_nat_miss_next
+#undef _
   },
 };
 
@@ -783,17 +1114,36 @@ VNET_FEATURE_INIT (lcp_xc_node_l3_ip6_multicast, static) = {
   .node_name = "linux-cp-xc-l3-ip6",
 };
 
-#define foreach_lcp_arp                                                       \
-  _ (DROP, "error-drop")                                                      \
+#define foreach_lcp_arp_delivery_next                                   \
+  _ (DROP, "error-drop")                                                \
   _ (IO, "interface-output")
 
 typedef enum
 {
-#define _(sym, str) LCP_ARP_NEXT_##sym,
-  foreach_lcp_arp
+#define _(sym, node) LCP_ARP_DELIVERY_NEXT_##sym,
+  foreach_lcp_arp_delivery_next
 #undef _
-    LCP_ARP_N_NEXT,
-} lcp_arp_next_t;
+  LCP_ARP_DELIVERY_N_NEXT,
+} lcp_arp_delivery_next_t;
+
+#define foreach_lcp_arp_phy_next                                        \
+  _ (DROP, "error-drop")                                                \
+  _ (PUNT, "linux-cp-arp-copp-delivery")
+
+typedef enum
+{
+#define _(sym, node) LCP_ARP_PHY_NEXT_##sym,
+  foreach_lcp_arp_phy_next
+#undef _
+  LCP_ARP_PHY_N_NEXT,
+} lcp_arp_phy_next_t;
+
+typedef enum
+{
+  LCP_ARP_HOST_NEXT_DROP,
+  LCP_ARP_HOST_NEXT_IO,
+  LCP_ARP_HOST_N_NEXT,
+} lcp_arp_host_next_t;
 
 typedef struct lcp_arp_trace_t_
 {
@@ -815,263 +1165,172 @@ format_lcp_arp_trace (u8 *s, va_list *args)
   return s;
 }
 
+static_always_inline const lcp_itf_pair_t *
+lcp_arp_phy_pair (vlib_buffer_t *b)
+{
+  u32 lipi = lcp_itf_pair_find_by_phy (
+    vnet_buffer (b)->sw_if_index[VLIB_RX]);
+
+  if (lipi == INDEX_INVALID && (b->flags & VLIB_BUFFER_NOT_PHY_INTF) &&
+      vnet_buffer2 (b)->l2_rx_sw_if_index != ~0)
+    {
+      u32 sw_if_index = vnet_buffer2 (b)->l2_rx_sw_if_index;
+      vnet_sw_interface_t *si =
+	vnet_get_sw_interface (vnet_get_main (), sw_if_index);
+
+      if (si != NULL && si->type == VNET_SW_INTERFACE_TYPE_SUB)
+	sw_if_index = si->sup_sw_if_index;
+
+      lipi = lcp_itf_pair_find_by_phy (sw_if_index);
+      vnet_buffer2 (b)->l2_rx_sw_if_index = ~0;
+    }
+
+  return lcp_itf_pair_get (lipi);
+}
+
+VLIB_NODE_FN (lcp_arp_copp_delivery_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+  u32 *from = vlib_frame_vector_args (frame);
+  u32 n_left_from = frame->n_vectors;
+  u32 next_index = node->cached_next_index;
+
+  while (n_left_from > 0)
+    {
+      u32 *to_next, n_left_to_next;
+
+      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
+      while (n_left_from > 0 && n_left_to_next > 0)
+	{
+	  u32 bi0 = from[0];
+	  vlib_buffer_t *b0 = vlib_get_buffer (vm, bi0);
+	  const lcp_itf_pair_t *lip0 = lcp_arp_phy_pair (b0);
+	  u32 next0 = LCP_ARP_DELIVERY_NEXT_DROP;
+
+	  if (PREDICT_TRUE (lip0 != NULL))
+	    {
+	      word len0 = (u8 *) vlib_buffer_get_current (b0) -
+			  (u8 *) ethernet_buffer_get_header (b0);
+
+	      vnet_buffer (b0)->sw_if_index[VLIB_TX] =
+		lip0->lip_host_sw_if_index;
+	      vlib_buffer_advance (b0, -len0);
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+	      lip_punt_vlan_tag_proc (lip0, b0);
+#endif
+	      if (lcp_cpu_branch_pass (vm, b0))
+		next0 = LCP_ARP_DELIVERY_NEXT_IO;
+	    }
+	  else
+	    lcp_stats_increment (vm, vnet_buffer2 (b0)->trap_id,
+				 LCP_STATS_DELIVERY_DROP);
+
+	  to_next[0] = bi0;
+	  from += 1;
+	  to_next += 1;
+	  n_left_from -= 1;
+	  n_left_to_next -= 1;
+	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
+					   n_left_to_next, bi0, next0);
+	}
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+    }
+
+  return frame->n_vectors;
+}
+
+VLIB_REGISTER_NODE (lcp_arp_copp_delivery_node) = {
+  .name = "linux-cp-arp-copp-delivery",
+  .vector_size = sizeof (u32),
+  .type = VLIB_NODE_TYPE_INTERNAL,
+  .n_next_nodes = LCP_ARP_DELIVERY_N_NEXT,
+  .next_nodes = {
+#define _(sym, node) [LCP_ARP_DELIVERY_NEXT_##sym] = node,
+    foreach_lcp_arp_delivery_next
+#undef _
+  },
+};
+
 /**
- * punt ARP replies to the host
+ * Apply CoPP to ARP requests and replies received from the PHY.
  */
 VLIB_NODE_FN (lcp_arp_phy_node)
 (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
 {
-  u32 n_left_from, *from, *to_next, n_left_to_next;
-  lcp_arp_next_t next_index;
-  u32 reply_copies[VLIB_FRAME_SIZE];
+  u32 *from = vlib_frame_vector_args (frame);
+  u32 n_left_from = frame->n_vectors;
+  u32 next_index = node->cached_next_index;
+  u32 copies[VLIB_FRAME_SIZE];
   u32 n_copies = 0;
-
-  next_index = node->cached_next_index;
-  n_left_from = frame->n_vectors;
-  from = vlib_frame_vector_args (frame);
 
   while (n_left_from > 0)
     {
+      u32 *to_next, n_left_to_next;
+
       vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
-
-      while (n_left_from >= 2 && n_left_to_next >= 2)
-	{
-	  u32 next0, next1, bi0, bi1;
-	  vlib_buffer_t *b0, *b1;
-	  ethernet_arp_header_t *arp0, *arp1;
-
-	  bi0 = to_next[0] = from[0];
-	  bi1 = to_next[1] = from[1];
-
-	  from += 2;
-	  n_left_from -= 2;
-	  to_next += 2;
-	  n_left_to_next -= 2;
-
-	  next0 = next1 = LCP_ARP_NEXT_DROP;
-
-	  b0 = vlib_get_buffer (vm, bi0);
-	  b1 = vlib_get_buffer (vm, bi1);
-
-	  arp0 = vlib_buffer_get_current (b0);
-	  arp1 = vlib_buffer_get_current (b1);
-
-	  vnet_feature_next (&next0, b0);
-	  vnet_feature_next (&next1, b1);
-
-	  /*
-	   * Replies might need to be received by the host, so we
-	   * make a copy of them.
-	   */
-	  //if (arp0->opcode == clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_reply))
-	    {
-	      lcp_itf_pair_t *lip0 = 0;
-	      u32 lipi0;
-	      vlib_buffer_t *c0;
-	      u8 len0;
-
-	      lipi0 = lcp_itf_pair_find_by_phy (
-		vnet_buffer (b0)->sw_if_index[VLIB_RX]);
-	      lip0 = lcp_itf_pair_get (lipi0);
-
-	      if (lip0 == NULL && (b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
-	      {
-              u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
-              vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
-              if( si0 && si0->type == VNET_SW_INTERFACE_TYPE_SUB ) {
-                  l2_rx_sw_if_index0 = si0->sup_sw_if_index;
-              }
-
-		      lipi0 = lcp_itf_pair_find_by_phy (
-				          l2_rx_sw_if_index0);
-		      lip0 = lcp_itf_pair_get (lipi0);
-		      vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
-	      }
-
-	      if (lip0)
-		{
-		  /*
-		   * rewind to eth header, copy, advance back to current
-		   */
-		  len0 = ((u8 *) vlib_buffer_get_current (b0) -
-			  (u8 *) ethernet_buffer_get_header (b0));
-		  vlib_buffer_advance (b0, -len0);
-		  c0 = vlib_buffer_copy (vm, b0);
-		  vlib_buffer_advance (b0, len0);
-
-		  if (c0)
-		    {
-		      /* Send to the host */
-		      vnet_buffer (c0)->sw_if_index[VLIB_TX] =
-			lip0->lip_host_sw_if_index;
-		      reply_copies[n_copies++] =
-			vlib_get_buffer_index (vm, c0);
-#ifdef SUPPORT_LCP_VLAN_TAG_ACT
-		      lip_punt_vlan_tag_proc(lip0, c0);
-#endif
-		    }
-		}
-	    }
-	  //if (arp1->opcode == clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_reply))
-	    {
-	      lcp_itf_pair_t *lip1 = 0;
-	      u32 lipi1;
-	      vlib_buffer_t *c1;
-	      u8 len1;
-
-	      lipi1 = lcp_itf_pair_find_by_phy (
-		vnet_buffer (b1)->sw_if_index[VLIB_RX]);
-	      lip1 = lcp_itf_pair_get (lipi1);
-
-	      if (lip1 == NULL && (b1->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b1)->l2_rx_sw_if_index != ~0)
-	      {
-              u32 l2_rx_sw_if_index1 = vnet_buffer2(b1)->l2_rx_sw_if_index;
-              vnet_sw_interface_t *si1 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index1);
-              if( si1 && si1->type == VNET_SW_INTERFACE_TYPE_SUB ) {
-                  l2_rx_sw_if_index1 = si1->sup_sw_if_index;
-              }
-
-		      lipi1 = lcp_itf_pair_find_by_phy (
-				         l2_rx_sw_if_index1);
-		      lip1 = lcp_itf_pair_get (lipi1);
-		      vnet_buffer2(b1)->l2_rx_sw_if_index = ~0;
-	      }
-	      if (lip1)
-		{
-		  /*
-		   * rewind to reveal the ethernet header
-		   */
-		  len1 = ((u8 *) vlib_buffer_get_current (b1) -
-			  (u8 *) ethernet_buffer_get_header (b1));
-		  vlib_buffer_advance (b1, -len1);
-		  c1 = vlib_buffer_copy (vm, b1);
-		  vlib_buffer_advance (b1, len1);
-
-		  if (c1)
-		    {
-		      /* Send to the host */
-		      vnet_buffer (c1)->sw_if_index[VLIB_TX] =
-			lip1->lip_host_sw_if_index;
-		      reply_copies[n_copies++] =
-			vlib_get_buffer_index (vm, c1);
-#ifdef SUPPORT_LCP_VLAN_TAG_ACT
-		      lip_punt_vlan_tag_proc(lip1, c1);
-#endif
-		    }
-		}
-	    }
-
-	  if (PREDICT_FALSE ((b0->flags & VLIB_BUFFER_IS_TRACED)))
-	    {
-	      lcp_arp_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
-	      t->rx_sw_if_index = vnet_buffer (b0)->sw_if_index[VLIB_RX];
-	      t->arp_opcode = arp0->opcode;
-	    }
-	  if (PREDICT_FALSE ((b1->flags & VLIB_BUFFER_IS_TRACED)))
-	    {
-	      lcp_arp_trace_t *t = vlib_add_trace (vm, node, b1, sizeof (*t));
-	      t->rx_sw_if_index = vnet_buffer (b1)->sw_if_index[VLIB_RX];
-	      t->arp_opcode = arp1->opcode;
-	    }
-
-	  vlib_validate_buffer_enqueue_x2 (vm, node, next_index, to_next,
-					   n_left_to_next, bi0, bi1, next0,
-					   next1);
-	}
-
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
-	  u32 next0, bi0;
-	  vlib_buffer_t *b0;
-	  ethernet_arp_header_t *arp0;
-	  u16 arp_opcode;
+	  u32 bi0 = from[0];
+	  vlib_buffer_t *b0 = vlib_get_buffer (vm, bi0);
+	  u32 next0, original_next;
+	  lcp_action_result_t action_result;
+	  lcp_packet_view_t view = { 0 };
+	  lcp_match_result_t result = { 0 };
 
-	  bi0 = to_next[0] = from[0];
-
-	  from += 1;
-	  n_left_from -= 1;
-	  to_next += 1;
-	  n_left_to_next -= 1;
-	  next0 = LCP_ARP_NEXT_DROP;
-
-	  b0 = vlib_get_buffer (vm, bi0);
-	  arp0 = vlib_buffer_get_current (b0);
-
-	  vnet_feature_next (&next0, b0);
-
-	  /*
-	   * Replies might need to be received by the host, so we
-	   * make a copy of them.
-	   */
-	  arp_opcode = clib_host_to_net_u16 (arp0->opcode);
-
-	  //if (arp_opcode == ETHERNET_ARP_OPCODE_reply)
+	  vnet_feature_next (&original_next, b0);
+	  next0 = original_next;
+	  if (lcp_packet_parse (vm, b0, LCP_MATCH_CTX_ARP, &view) &&
+	      lcp_match_select (&view, &result))
 	    {
-	      lcp_itf_pair_t *lip0 = 0;
-	      vlib_buffer_t *c0;
-	      u32 lipi0;
-	      u8 len0;
-
-	      lipi0 = lcp_itf_pair_find_by_phy (
-		vnet_buffer (b0)->sw_if_index[VLIB_RX]);
-	      lip0 = lcp_itf_pair_get (lipi0);
-
-	      if (lip0 == NULL && (b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && vnet_buffer2(b0)->l2_rx_sw_if_index != ~0)
-	      {
-              u32 l2_rx_sw_if_index0 = vnet_buffer2(b0)->l2_rx_sw_if_index;
-              vnet_sw_interface_t *si0 = vnet_get_sw_interface(vnet_get_main (), l2_rx_sw_if_index0);
-              if( si0 && si0->type == VNET_SW_INTERFACE_TYPE_SUB ) {
-                  l2_rx_sw_if_index0 = si0->sup_sw_if_index;
-              }
-
-		      lipi0 = lcp_itf_pair_find_by_phy (
-				        l2_rx_sw_if_index0);
-		      lip0 = lcp_itf_pair_get (lipi0);
-		      vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
-	      }
-	      if (lip0)
+	      if (!lcp_buffer_set_trap_id (b0, result.trap_type))
+		next0 = LCP_ARP_PHY_NEXT_DROP;
+	      else
 		{
-
-		  /*
-		   * rewind to reveal the ethernet header
-		   */
-		  len0 = ((u8 *) vlib_buffer_get_current (b0) -
-			  (u8 *) ethernet_buffer_get_header (b0));
-		  vlib_buffer_advance (b0, -len0);
-		  c0 = vlib_buffer_copy (vm, b0);
-		  vlib_buffer_advance (b0, len0);
-
-		  if (c0)
+		  action_result = lcp_punt_process_with_default (
+		    vm, b0, LCP_COPP_ACTION_COPY);
+		  switch (action_result.disposition)
 		    {
-		      /* Send to the host */
-		      vnet_buffer (c0)->sw_if_index[VLIB_TX] =
-			lip0->lip_host_sw_if_index;
-		      reply_copies[n_copies++] =
-			vlib_get_buffer_index (vm, c0);
-#ifdef SUPPORT_LCP_VLAN_TAG_ACT
-		      lip_punt_vlan_tag_proc(lip0, c0);
-#endif
+		    case LCP_DISPOSITION_DROP:
+		      next0 = LCP_ARP_PHY_NEXT_DROP;
+		      break;
+		    case LCP_DISPOSITION_FORWARD:
+		    case LCP_DISPOSITION_COPY:
+		      next0 = original_next;
+		      /* The CPU copy carries the trap id; the original must continue
+		       * through the ARP feature arc without a stale punt marker. */
+		      vnet_buffer2 (b0)->trap_id = LCP_TRAP_INVALID;
+		      break;
+		    case LCP_DISPOSITION_TRAP:
+		      next0 = LCP_ARP_PHY_NEXT_PUNT;
+		      break;
 		    }
+		  if (action_result.cpu_bi != LCP_PUNT_BUFFER_INVALID)
+		    copies[n_copies++] = action_result.cpu_bi;
 		}
 	    }
 
-	  if (PREDICT_FALSE ((b0->flags & VLIB_BUFFER_IS_TRACED)))
+	  if (PREDICT_FALSE (b0->flags & VLIB_BUFFER_IS_TRACED))
 	    {
-	      lcp_arp_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
+	      lcp_arp_trace_t *t =
+		vlib_add_trace (vm, node, b0, sizeof (*t));
 	      t->rx_sw_if_index = vnet_buffer (b0)->sw_if_index[VLIB_RX];
-	      t->arp_opcode = arp_opcode;
+	      t->arp_opcode = view.arp_opcode;
 	    }
 
+	  to_next[0] = bi0;
+	  from += 1;
+	  to_next += 1;
+	  n_left_from -= 1;
+	  n_left_to_next -= 1;
 	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
 					   n_left_to_next, bi0, next0);
 	}
-
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
     }
 
-  if (n_copies)
-    vlib_buffer_enqueue_to_single_next (vm, node, reply_copies,
-					LCP_ARP_NEXT_IO, n_copies);
+  if (PREDICT_FALSE (n_copies != 0))
+    vlib_buffer_enqueue_to_single_next (vm, node, copies,
+					LCP_ARP_PHY_NEXT_PUNT, n_copies);
 
   return frame->n_vectors;
 }
@@ -1085,10 +1344,11 @@ VLIB_REGISTER_NODE (lcp_arp_phy_node) = {
   .n_errors = LINUXCP_N_ERROR,
   .error_counters = linuxcp_error_counters,
 
-  .n_next_nodes = LCP_ARP_N_NEXT,
+  .n_next_nodes = LCP_ARP_PHY_N_NEXT,
   .next_nodes = {
-    [LCP_ARP_NEXT_DROP] = "error-drop",
-    [LCP_ARP_NEXT_IO] = "interface-output",
+#define _(sym, node) [LCP_ARP_PHY_NEXT_##sym] = node,
+    foreach_lcp_arp_phy_next
+#undef _
   },
 };
 
@@ -1105,7 +1365,7 @@ VLIB_NODE_FN (lcp_arp_host_node)
 (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
 {
   u32 n_left_from, *from, *to_next, n_left_to_next;
-  lcp_arp_next_t next_index;
+  lcp_arp_host_next_t next_index;
 
   next_index = node->cached_next_index;
   n_left_from = frame->n_vectors;
@@ -1118,7 +1378,7 @@ VLIB_NODE_FN (lcp_arp_host_node)
       while (n_left_from > 0 && n_left_to_next > 0)
 	{
 	  const lcp_itf_pair_t *lip0;
-	  lcp_arp_next_t next0;
+	  lcp_arp_host_next_t next0;
 	  vlib_buffer_t *b0;
 	  u32 bi0, lipi0;
 	  u8 len0;
@@ -1129,15 +1389,18 @@ VLIB_NODE_FN (lcp_arp_host_node)
 	  n_left_from -= 1;
 	  to_next += 1;
 	  n_left_to_next -= 1;
-	  next0 = LCP_ARP_NEXT_IO;
+	  next0 = LCP_ARP_HOST_NEXT_DROP;
 
 	  b0 = vlib_get_buffer (vm, bi0);
 
 	  lipi0 =
 	    lcp_itf_pair_find_by_host (vnet_buffer (b0)->sw_if_index[VLIB_RX]);
 	  lip0 = lcp_itf_pair_get (lipi0);
+	  if (PREDICT_FALSE (lip0 == NULL))
+	    goto trace0;
 
 	  /* Send to the phy */
+	  next0 = LCP_ARP_HOST_NEXT_IO;
 	  vnet_buffer (b0)->sw_if_index[VLIB_TX] = lip0->lip_phy_sw_if_index;
 
 	  //set max tc priority
@@ -1147,10 +1410,12 @@ VLIB_NODE_FN (lcp_arp_host_node)
 		  (u8 *) ethernet_buffer_get_header (b0));
 	  vlib_buffer_advance (b0, -len0);
 
+	trace0:
 	  if (PREDICT_FALSE ((b0->flags & VLIB_BUFFER_IS_TRACED)))
 	    {
 	      lcp_arp_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
 	      t->rx_sw_if_index = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+	      t->arp_opcode = 0;
 	    }
 
 	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
@@ -1172,10 +1437,10 @@ VLIB_REGISTER_NODE (lcp_arp_host_node) = {
   .n_errors = LINUXCP_N_ERROR,
   .error_counters = linuxcp_error_counters,
 
-  .n_next_nodes = LCP_ARP_N_NEXT,
+  .n_next_nodes = LCP_ARP_HOST_N_NEXT,
   .next_nodes = {
-    [LCP_ARP_NEXT_DROP] = "error-drop",
-    [LCP_ARP_NEXT_IO] = "interface-output",
+    [LCP_ARP_HOST_NEXT_DROP] = "error-drop",
+    [LCP_ARP_HOST_NEXT_IO] = "interface-output",
   },
 };
 

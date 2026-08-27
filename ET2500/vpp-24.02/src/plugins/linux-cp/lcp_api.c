@@ -16,6 +16,8 @@
 #include <vnet/format_fns.h>
 
 #include <linux-cp/lcp_interface.h>
+#include <linux-cp/lcp_policy.h>
+#include <linux-cp/lcp_stats.h>
 #include <linux-cp/lcp.api_enum.h>
 #include <linux-cp/lcp.api_types.h>
 
@@ -289,34 +291,10 @@ vl_api_lcp_set_interface_punt_feature_t_handler (
 
   VALIDATE_SW_IF_INDEX (mp);
 
-  /* ospf punt for phy interfaces */
-  vnet_feature_enable_disable("ip4-multicast", "linux-cp-ospfv2-phy",
-          sw_if_index, punt_on, NULL, 0);
-  vnet_feature_enable_disable("ip6-multicast", "linux-cp-ospfv3-phy",
-          sw_if_index, punt_on, NULL, 0);
+  lcp_copp_features_set (sw_if_index, punt_on);
+  vnet_feature_enable_disable ("arp", "linux-cp-arp-phy", sw_if_index,
+			       punt_on, NULL, 0);
 
-  /* dhcp/dhcpv6 punt for interfaces */
-  vnet_feature_enable_disable("ip4-unicast", "linux-cp-dhcp-phy",
-          sw_if_index, punt_on, NULL, 0);
-  vnet_feature_enable_disable("ip4-multicast", "linux-cp-dhcp-phy",
-          sw_if_index, punt_on, NULL, 0);
-  vnet_feature_enable_disable("ip6-unicast", "linux-cp-dhcpv6-phy",
-          sw_if_index, punt_on, NULL, 0);
-  vnet_feature_enable_disable("ip6-multicast", "linux-cp-dhcpv6-phy",
-          sw_if_index, punt_on, NULL, 0);
-
-  /* icmpv6-ndp nd punt for interfaces */
-  vnet_feature_enable_disable("ip6-unicast", "linux-cp-ndp-phy",
-          sw_if_index, punt_on, NULL, 0);
-  vnet_feature_enable_disable("ip6-multicast", "linux-cp-ndp-phy",
-          sw_if_index, punt_on, NULL, 0);
-  vnet_feature_enable_disable ("arp", "linux-cp-arp-phy",
-		  sw_if_index, punt_on, NULL, 0);
-
-  //vnet_feature_enable_disable("ip4-multicast", "linux-cp-vrrp",
-  //        sw_if_index, punt_on, NULL, 0);
-  //vnet_feature_enable_disable("ip6-multicast", "linux-cp-vrrp6",
-  //        sw_if_index, punt_on, NULL, 0);
 
   vnet_feature_enable_disable("ip4-unicast", "linux-cp-rip-phy",
           sw_if_index, punt_on, NULL, 0);
@@ -400,6 +378,97 @@ vl_api_lcp_set_interface_pvlan_t_handler (
   REPLY_MACRO (VL_API_LCP_SET_INTERFACE_VLAN_TAG_REPLY);
 }
 
+static void
+vl_api_lcp_copp_trap_add_t_handler (vl_api_lcp_copp_trap_add_t *mp)
+{
+  vl_api_lcp_copp_trap_add_reply_t *rmp;
+  vlib_main_t *vm = vlib_get_main ();
+  int rv;
+
+  vlib_worker_thread_barrier_sync (vm);
+  rv = lcp_policy_add (mp->trap_id, mp->action, mp->priority,
+		       mp->policer_index);
+  vlib_worker_thread_barrier_release (vm);
+
+  REPLY_MACRO_END (VL_API_LCP_COPP_TRAP_ADD_REPLY);
+}
+
+static void
+vl_api_lcp_copp_trap_update_t_handler (vl_api_lcp_copp_trap_update_t *mp)
+{
+  vl_api_lcp_copp_trap_update_reply_t *rmp;
+  vlib_main_t *vm = vlib_get_main ();
+  int rv;
+
+  vlib_worker_thread_barrier_sync (vm);
+  rv = lcp_policy_update (mp->trap_id, mp->action, mp->priority,
+			  mp->policer_index);
+  vlib_worker_thread_barrier_release (vm);
+
+  REPLY_MACRO_END (VL_API_LCP_COPP_TRAP_UPDATE_REPLY);
+}
+
+static void
+vl_api_lcp_copp_trap_del_t_handler (vl_api_lcp_copp_trap_del_t *mp)
+{
+  vl_api_lcp_copp_trap_del_reply_t *rmp;
+  vlib_main_t *vm = vlib_get_main ();
+  int rv;
+
+  vlib_worker_thread_barrier_sync (vm);
+  rv = lcp_policy_delete (mp->trap_id);
+  vlib_worker_thread_barrier_release (vm);
+
+  REPLY_MACRO_END (VL_API_LCP_COPP_TRAP_DEL_REPLY);
+}
+
+static void
+send_lcp_copp_trap_details (vl_api_lcp_trap_type_t trap_id,
+			    vl_api_registration_t *reg,
+			    u32 context)
+{
+  const lcp_policy_entry_t *policy = lcp_policy_get (trap_id);
+  vl_api_lcp_copp_trap_details_t *rmp;
+
+  REPLY_MACRO_DETAILS4_END (
+    VL_API_LCP_COPP_TRAP_DETAILS, reg, context, ({
+      rmp->trap_id = trap_id;
+      rmp->action = policy->action;
+      rmp->priority = policy->priority;
+      rmp->policer_index = policy->policer_index;
+    }));
+}
+
+static void
+vl_api_lcp_copp_trap_dump_t_handler (vl_api_lcp_copp_trap_dump_t *mp)
+{
+  vl_api_registration_t *reg;
+  u32 trap_id;
+
+  reg = vl_api_client_index_to_registration (mp->client_index);
+  if (reg == 0)
+    return;
+
+  for (trap_id = 0; trap_id < LCP_POLICY_N_TRAPS; trap_id++)
+    if (lcp_policy_is_configured ((vl_api_lcp_trap_type_t) trap_id))
+      send_lcp_copp_trap_details ((vl_api_lcp_trap_type_t) trap_id, reg,
+				  mp->context);
+}
+
+static void
+vl_api_lcp_copp_stats_clear_t_handler (vl_api_lcp_copp_stats_clear_t *mp)
+{
+  vl_api_lcp_copp_stats_clear_reply_t *rmp;
+  vlib_main_t *vm = vlib_get_main ();
+  int rv = 0;
+
+  vlib_worker_thread_barrier_sync (vm);
+  lcp_stats_clear ();
+  vlib_worker_thread_barrier_release (vm);
+
+  REPLY_MACRO_END (VL_API_LCP_COPP_STATS_CLEAR_REPLY);
+}
+
 /*
  * Set up the API message handling tables
  */
@@ -430,4 +499,3 @@ VLIB_PLUGIN_REGISTER () = {
  * eval: (c-set-style "gnu")
  * End:
  */
-

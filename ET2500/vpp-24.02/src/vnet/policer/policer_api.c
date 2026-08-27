@@ -517,7 +517,7 @@ vl_api_policer_dump_v2_t_handler (vl_api_policer_dump_v2_t *mp)
   vl_api_registration_t *reg;
   vnet_policer_main_t *pm = &vnet_policer_main;
   qos_pol_cfg_params_st *config;
-  u32 policer_index, pool_index;
+  u32 policer_index, pool_index, current_index;
   policer_t *policer;
   uword *p;
 
@@ -531,10 +531,14 @@ vl_api_policer_dump_v2_t_handler (vl_api_policer_dump_v2_t *mp)
     {
       pool_foreach (policer, pm->policers)
 	{
+	  current_index = policer - pm->policers;
 	  p = hash_get_mem (pm->policer_config_by_name, policer->name);
+	  if (p == 0)
+	    continue;
+
 	  pool_index = p[0];
 	  config = pool_elt_at_index (pm->configs, pool_index);
-	  send_policer_details_v2 (config, policer, policer_index, reg, mp->context);
+	  send_policer_details_v2 (config, policer, current_index, reg, mp->context);
 	};
     }
   else
