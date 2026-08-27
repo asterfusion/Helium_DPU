@@ -1047,7 +1047,7 @@ cgnat_instance_add_del (u32 *instance_id, u8 *label, u32 inside_vrf_id,
   cgnat_instance_clear_acls_inline (cm, instance);
   cgnat_instance_cleanup_resources (cm, instance);
 
-  /* Cascade delete all pools owned by this instance. */
+  /* Detach pools owned by this instance, but keep pool configuration. */
   {
     u32 *owned_pool_indices = 0;
     u32 *pi;
@@ -1061,10 +1061,9 @@ cgnat_instance_add_del (u32 *instance_id, u8 *label, u32 inside_vrf_id,
 	if (!pool)
 	  continue;
 	cgnat_pool_runtime_reset (pool);
-	hash_unset (cm->pool_index_by_id, pool->pool_id);
 	cgnat_del_pool_fib_entries (cm, pool);
 	cgnat_pool_free_runtime (pool);
-	clib_memset (pool, 0, sizeof (*pool));
+	pool->owner_instance_index = CGNAT_INVALID_INDEX;
       }
     vec_free (owned_pool_indices);
   }
