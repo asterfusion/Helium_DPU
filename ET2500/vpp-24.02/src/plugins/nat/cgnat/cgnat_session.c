@@ -2521,6 +2521,9 @@ cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings)
   if (cm->session_tables_initialized)
     return;
 
+  max_sessions = max_sessions > 0 ? max_sessions : CGNAT_SESSION_POOL_INITIAL_SIZE;
+  max_mappings = max_mappings > 0 ? max_mappings : CGNAT_MAPPING_POOL_INITIAL_SIZE;
+
   u32 sessions_buckets = cgnat_calc_bihash_buckets(max_sessions > 0 ? max_sessions : CGNAT_SESSION_POOL_INITIAL_SIZE);
   u32 mappings_buckets = cgnat_calc_bihash_buckets(max_mappings > 0 ? max_mappings : CGNAT_MAPPING_POOL_INITIAL_SIZE);
 
@@ -2637,14 +2640,12 @@ void
 cgnat_session_expire_timers (f64 now)
 {
   cgnat_main_t *cm = &cgnat_main;
-  u32 *expired = 0;
 
   if (!cm->session_timer_initialized)
     return;
 
-  /* Collect expired timers directly instead of via a wheel callback. */
-  expired = tw_timer_expire_timers_vec_2t_1w_2048sl (&cm->session_timer_wheel,
-						     now, expired);
+  u32 *expired = vec_new(u32, CGNAT_COOLING_TIMER_MAX_EXPIRATIONS);
+  expired = tw_timer_expire_timers_vec_2t_1w_2048sl (&cm->session_timer_wheel, now, expired);
   cgnat_session_process_expired_timers (expired);
   vec_free (expired);
   cgnat_dynamic_mapping_reap (cm);

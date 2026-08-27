@@ -991,17 +991,14 @@ void
 cgnat_pba_expire_timers (f64 now)
 {
   cgnat_main_t *cm = &cgnat_main;
-  u32 *expired = 0;
 
-  /* The shared timer process holds the worker barrier for both wheels.
-   * Collect expired timers directly instead of via a wheel callback. */
-  if (cm->cooling_timer_initialized)
-    {
-      expired = tw_timer_expire_timers_vec_2t_1w_2048sl (
-	&cm->cooling_timer_wheel, now, expired);
-      cgnat_cooling_process_expired (expired);
-      vec_free (expired);
-    }
+  if (!cm->cooling_timer_initialized)
+    return;
+
+  u32 *expired = vec_new(u32, CGNAT_COOLING_TIMER_MAX_EXPIRATIONS);
+  expired = tw_timer_expire_timers_vec_2t_1w_2048sl ( &cm->cooling_timer_wheel, now, expired);
+  cgnat_cooling_process_expired (expired);
+  vec_free (expired);
 }
 
 static cgnat_user_t *
