@@ -2708,6 +2708,9 @@ dns_cache_add_del_command_fn (vlib_main_t * vm,
     {
       if (unformat (input, "%v", &name))
 	{
+	  /* The cache hash uses strlen/strcmp, so the key must be
+	   * a NULL-terminated C string */
+	  dns_terminate_c_string (&name);
 	  rv = dns_delete_by_name (dm, name);
 	  switch (rv)
 	    {
@@ -2739,13 +2742,17 @@ dns_cache_add_del_command_fn (vlib_main_t * vm,
   /* Note: dns_add_static_entry consumes the name vector if OK... */
   if (unformat (input, "%U", unformat_dns_reply, &dns_reply_data, &name))
     {
+      /* The cache hash uses strlen/strcmp, so the key must be
+       * a NULL-terminated C string */
+      dns_terminate_c_string (&name);
       rv = dns_add_static_entry (dm, name, dns_reply_data);
       switch (rv)
 	{
 	case VNET_API_ERROR_ENTRY_ALREADY_EXISTS:
+	  error = clib_error_return (0, "%v already in the cache...", name);
 	  vec_free (name);
 	  vec_free (dns_reply_data);
-	  return clib_error_return (0, "%v already in the cache...", name);
+	  return error;
 	case 0:
 	  return 0;
 
