@@ -14,7 +14,7 @@ static clib_error_t *
 cgnat_enable_command_fn (vlib_main_t *vm, unformat_input_t *input,
 			 vlib_cli_command_t *cmd)
 {
-  int rv = cgnat_plugin_enable_disable (1);
+  int rv = cgnat_plugin_enable_disable (1, 0, 0);
   return rv ? clib_error_return (0, "cgnat enable returned %d", rv) : 0;
 }
 
@@ -22,7 +22,7 @@ static clib_error_t *
 cgnat_disable_command_fn (vlib_main_t *vm, unformat_input_t *input,
 			  vlib_cli_command_t *cmd)
 {
-  int rv = cgnat_plugin_enable_disable (0);
+  int rv = cgnat_plugin_enable_disable (0, 0, 0);
   return rv ? clib_error_return (0, "cgnat disable returned %d", rv) : 0;
 }
 
@@ -1263,15 +1263,10 @@ cgnat_show_instance_stat_one (vlib_main_t *vm, cgnat_instance_t *instance)
   cgnat_main_t *cm = &cgnat_main;
   cgnat_pool_t *pool;
   u32 *pool_index;
-  u32 current_user;
-  u32 current_session;
   u32 max_block = 0;
   u32 used_block = 0;
 
-  vlib_worker_thread_barrier_sync (cm->vlib_main);
   cgnat_recalculate_instance (cm, instance);
-  current_user = clib_atomic_load_relax_n (&instance->active_users);
-  current_session = clib_atomic_load_relax_n (&instance->active_sessions);
   vec_foreach (pool_index, instance->pool_indices)
     {
       pool = cgnat_pool_get_by_index (cm, *pool_index);
@@ -1281,12 +1276,11 @@ cgnat_show_instance_stat_one (vlib_main_t *vm, cgnat_instance_t *instance)
 	  used_block += pool->allocated_blocks;
 	}
     }
-  vlib_worker_thread_barrier_release (cm->vlib_main);
 
   vlib_cli_output (vm, "Instance %s:",
 		   instance->label[0] ? (char *) instance->label : "-");
-  vlib_cli_output (vm, "    current-user : %u", current_user);
-  vlib_cli_output (vm, "    current-session : %u", current_session);
+  vlib_cli_output (vm, "    current-user : %u", instance->active_users);
+  vlib_cli_output (vm, "    current-session : %u", instance->active_sessions);
   vlib_cli_output (vm, "    max-block-num : %u", max_block);
   vlib_cli_output (vm, "    used-block-num : %u", used_block);
   vlib_cli_output (vm, "    avail-block-num : %u", max_block - used_block);
@@ -1412,20 +1406,11 @@ cgnat_show_pool_config_command_fn (vlib_main_t *vm, unformat_input_t *input,
 static void
 cgnat_show_pool_stat_one (vlib_main_t *vm, cgnat_pool_t *pool)
 {
-  cgnat_main_t *cm = &cgnat_main;
-  u32 current_session;
-
-  vlib_worker_thread_barrier_sync (cm->vlib_main);
-  current_session = clib_atomic_load_relax_n (&pool->active_sessions);
-  vlib_worker_thread_barrier_release (cm->vlib_main);
-
-  vlib_cli_output (vm, "Addresses Pool %s:",
-		   pool->label[0] ? (char *) pool->label : "-");
-  vlib_cli_output (vm, "    current-session : %u", current_session);
+  vlib_cli_output (vm, "Addresses Pool %s:", pool->label[0] ? (char *) pool->label : "-");
+  vlib_cli_output (vm, "    current-session : %u", pool->active_sessions);
   vlib_cli_output (vm, "    max-block-num : %u", pool->total_blocks);
   vlib_cli_output (vm, "    used-block-num : %u", pool->allocated_blocks);
-  vlib_cli_output (vm, "    avail-block-num : %u",
-		   pool->total_blocks - pool->allocated_blocks);
+  vlib_cli_output (vm, "    avail-block-num : %u", pool->total_blocks - pool->allocated_blocks);
 }
 
 static clib_error_t *

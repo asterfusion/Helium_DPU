@@ -113,8 +113,6 @@ cgnat_init (vlib_main_t *vm)
   error = acl_plugin_exports_init (&cgnat_acl_plugin);
   if (error)
     return error;
-  cgnat_pba_init (cm);
-  cgnat_session_init (cm);
 
   node = vlib_get_node_by_name (vm, (u8 *) "cgnat-in2out-policy");
   cm->in2out_policy_node_index = node->index;

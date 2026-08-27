@@ -124,88 +124,31 @@ cgnat_log_emit (cgnat_log_event_t *event)
 	      cgnat_log_mapping_type (event->session.mapping_type));
 }
 
+/* Producer side: any vlib thread (workers and main-thread timer paths)
+ * pushes a fixed-size POD event.  When the fifo is full the event is
+ * emitted synchronously via cgnat_log_emit instead of being dropped.
+ * Note: on a worker thread that fallback calls vlib_log off the main
+ * thread (debug images assert on this). */
 void
 cgnat_log_enqueue (cgnat_log_event_t *event)
 {
   cgnat_main_t *cm = &cgnat_main;
-  cgnat_log_queue_t *queue;
-  u64 head, tail, used;
-  u32 thread_index = vlib_get_thread_index ();
 
-  if (PREDICT_FALSE (thread_index >= vec_len (cm->log_queues)))
+  if (PREDICT_FALSE (lf_fifo_enqueue_mp (cm->log_fifo, 1, event) == 0))
     {
+      clib_atomic_fetch_add_relax (&cm->log_full, 1);
       cgnat_log_emit (event);
       return;
     }
-
-  queue = vec_elt_at_index (cm->log_queues, thread_index);
-  head = queue->head;
-  tail = clib_atomic_load_acq_n (&queue->tail);
-  used = head - tail;
-
-  if (PREDICT_FALSE (used >= queue->size))
-    {
-      clib_atomic_fetch_add_relax (&queue->full, 1);
-      clib_atomic_fetch_add_relax (&queue->direct, 1);
-      cgnat_log_emit (event);
-      return;
-    }
-
-  queue->events[head & queue->mask] = *event;
-  clib_atomic_store_rel_n (&queue->head, head + 1);
-  clib_atomic_fetch_add_relax (&queue->enqueued, 1);
-
-  used++;
-  if (used > clib_atomic_load_relax_n (&queue->max_used))
-    {
-      u64 old = clib_atomic_load_relax_n (&queue->max_used);
-      while (used > old &&
-	     !clib_atomic_cmp_and_swap_acq_relax_n (&queue->max_used, &old,
-						   used, 0))
-	;
-    }
-}
-
-static u32
-cgnat_log_drain_queue (cgnat_log_queue_t *queue)
-{
-  cgnat_log_event_t event;
-  u64 head, tail;
-  u32 drained = 0;
-
-  tail = queue->tail;
-  head = clib_atomic_load_acq_n (&queue->head);
-  while (tail != head)
-    {
-      event = queue->events[tail & queue->mask];
-      clib_atomic_store_rel_n (&queue->tail, tail + 1);
-      tail++;
-      cgnat_log_emit (&event);
-      clib_atomic_fetch_add_relax (&queue->sent, 1);
-      drained++;
-    }
-
-  return drained;
+  clib_atomic_fetch_add_relax (&cm->log_enqueued, 1);
 }
 
 void
 cgnat_log_init (cgnat_main_t *cm)
 {
-  vlib_thread_main_t *tm = vlib_get_thread_main ();
-  u32 i;
-
   cm->log_poll_interval = CGNAT_LOG_POLL_INTERVAL_DEFAULT;
-  vec_validate_aligned (cm->log_queues, tm->n_vlib_mains - 1,
-			CLIB_CACHE_LINE_BYTES);
-
-  vec_foreach_index (i, cm->log_queues)
-    {
-      cgnat_log_queue_t *queue = vec_elt_at_index (cm->log_queues, i);
-      queue->size = CGNAT_LOG_QUEUE_SIZE;
-      queue->mask = CGNAT_LOG_QUEUE_SIZE - 1;
-      vec_validate_aligned (queue->events, queue->size - 1,
-			    CLIB_CACHE_LINE_BYTES);
-    }
+  cm->log_fifo =
+    lf_fifo_alloc (CGNAT_LOG_FIFO_SIZE, sizeof (cgnat_log_event_t));
 }
 
 static uword
@@ -218,16 +161,18 @@ cgnat_log_process (vlib_main_t *vm, vlib_node_runtime_t *rt, vlib_frame_t *f)
       f64 poll_interval = cm->log_poll_interval ?
 			    cm->log_poll_interval :
 			    CGNAT_LOG_POLL_INTERVAL_DEFAULT;
-      u32 i;
+      cgnat_log_event_t events[256];
+      u32 n, i;
 
       vlib_process_wait_for_event_or_clock (vm, poll_interval);
       vlib_process_get_events (vm, 0);
 
-      vec_foreach_index (i, cm->log_queues)
-	{
-	  cgnat_log_queue_t *queue = vec_elt_at_index (cm->log_queues, i);
-	  cgnat_log_drain_queue (queue);
-	}
+      while ((n = lf_fifo_dequeue_sc (cm->log_fifo, 256, events)) > 0)
+	for (i = 0; i < n; i++)
+	  {
+	    cgnat_log_emit (&events[i]);
+	    cm->log_sent++;
+	  }
     }
 
   return 0;

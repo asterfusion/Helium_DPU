@@ -116,6 +116,26 @@ cgnat_make_flow_key (clib_bihash_kv_24_8_t *kv, u32 instance_index,
 	       (u64) protocol << 24;
 }
 
+/* Reverse flow key, stored in the SAME session table: the 5-tuple as seen
+ * on the outside after translation.  Bit 63 of key[0] tags the direction so
+ * a reverse key can never alias a forward key.  The outside 5-tuple
+ * (outside_fib, nat_ip, nat_port, proto, remote) is globally unique across
+ * instances, so the key needs no instance index and can be built on the
+ * out2in side without knowing one. */
+#define CGNAT_SESSION_KEY_FLAG_REVERSE (1ULL << 63)
+
+static_always_inline void
+cgnat_make_reverse_flow_key (clib_bihash_kv_24_8_t *kv, u32 outside_fib_index,
+			     ip4_address_t nat_ip, ip4_address_t remote_ip,
+			     u16 nat_port, u16 remote_port, u8 protocol)
+{
+  clib_memset (kv, 0, sizeof (*kv));
+  kv->key[0] = CGNAT_SESSION_KEY_FLAG_REVERSE | outside_fib_index;
+  kv->key[1] = (u64) nat_ip.as_u32 << 32 | remote_ip.as_u32;
+  kv->key[2] = (u64) nat_port << 48 | (u64) remote_port << 32 |
+	       (u64) protocol << 24;
+}
+
 static_always_inline u32
 cgnat_kv16_lock_index (clib_bihash_kv_16_8_t *kv, u32 buckets)
 {
@@ -219,35 +239,51 @@ cgnat_session_table_unlock (cgnat_main_t *cm, clib_bihash_kv_24_8_t *kv)
       kv, CGNAT_SESSION_TABLE_LOCK_BUCKETS)]);
 }
 
-/* Reverse session key: the 5-tuple as seen on the outside after
- * translation.  Used by the out2in fast path to find the session directly. */
+/* Lock the hash buckets of two keys in one go, in bucket-index order to
+ * avoid lock-order cycles (used when a session's forward and reverse keys
+ * are inserted/removed together). */
 static_always_inline void
-cgnat_make_reverse_flow_key (clib_bihash_kv_24_8_t *kv, u32 outside_fib_index,
-			     ip4_address_t nat_ip, ip4_address_t remote_ip,
-			     u16 nat_port, u16 remote_port, u8 protocol)
+cgnat_session_table_lock2 (cgnat_main_t *cm, clib_bihash_kv_24_8_t *a,
+			   clib_bihash_kv_24_8_t *b)
 {
-  clib_memset (kv, 0, sizeof (*kv));
-  kv->key[0] = (u64) outside_fib_index << 32 | nat_ip.as_u32;
-  kv->key[1] = (u64) remote_ip.as_u32 << 32 | (u64) nat_port << 16 |
-	       protocol;
-  kv->key[2] = (u64) remote_port << 48;
+  u32 ai = cgnat_kv24_lock_index (a, CGNAT_SESSION_TABLE_LOCK_BUCKETS);
+  u32 bi = cgnat_kv24_lock_index (b, CGNAT_SESSION_TABLE_LOCK_BUCKETS);
+
+  if (ai == bi)
+    {
+      clib_spinlock_lock (&cm->session_table_locks[ai]);
+      return;
+    }
+  if (ai > bi)
+    {
+      u32 tmp = ai;
+      ai = bi;
+      bi = tmp;
+    }
+  clib_spinlock_lock (&cm->session_table_locks[ai]);
+  clib_spinlock_lock (&cm->session_table_locks[bi]);
 }
 
 static_always_inline void
-cgnat_reverse_session_table_lock (cgnat_main_t *cm, clib_bihash_kv_24_8_t *kv)
+cgnat_session_table_unlock2 (cgnat_main_t *cm, clib_bihash_kv_24_8_t *a,
+			     clib_bihash_kv_24_8_t *b)
 {
-  clib_spinlock_lock (
-    &cm->reverse_session_table_locks[cgnat_kv24_lock_index (
-      kv, CGNAT_SESSION_TABLE_LOCK_BUCKETS)]);
-}
+  u32 ai = cgnat_kv24_lock_index (a, CGNAT_SESSION_TABLE_LOCK_BUCKETS);
+  u32 bi = cgnat_kv24_lock_index (b, CGNAT_SESSION_TABLE_LOCK_BUCKETS);
 
-static_always_inline void
-cgnat_reverse_session_table_unlock (cgnat_main_t *cm,
-				    clib_bihash_kv_24_8_t *kv)
-{
-  clib_spinlock_unlock (
-    &cm->reverse_session_table_locks[cgnat_kv24_lock_index (
-      kv, CGNAT_SESSION_TABLE_LOCK_BUCKETS)]);
+  if (ai == bi)
+    {
+      clib_spinlock_unlock (&cm->session_table_locks[ai]);
+      return;
+    }
+  if (ai > bi)
+    {
+      u32 tmp = ai;
+      ai = bi;
+      bi = tmp;
+    }
+  clib_spinlock_unlock (&cm->session_table_locks[bi]);
+  clib_spinlock_unlock (&cm->session_table_locks[ai]);
 }
 
 static_always_inline int
@@ -322,6 +358,66 @@ static_always_inline u16
 cgnat_session_remote_port (u8 protocol, u16 remote_port)
 {
   return protocol == IP_PROTOCOL_ICMP ? 0 : remote_port;
+}
+
+/* Stage-ahead prefetch: hash the packet's forward flow key and prefetch the
+ * session-table bucket and KV page.  Called for the *next* packet while the
+ * current one is processed, hiding the longest dependent cache miss in the
+ * lookup chain.  Read-only; packets that can't be keyed simply skip. */
+static_always_inline void
+cgnat_prefetch_session_in2out (cgnat_main_t *cm, vlib_buffer_t *b)
+{
+  ip4_header_t *ip = vlib_buffer_get_current (b);
+  clib_bihash_kv_24_8_t kv;
+  tcp_header_t *tcp;
+  udp_header_t *udp;
+  u32 instance_index = cgnat_buffer_instance_index (b);
+  u16 inside_port, remote_port;
+  u64 hash;
+
+  if (PREDICT_FALSE (instance_index == CGNAT_INVALID_INDEX))
+    return;
+  if (PREDICT_FALSE (cgnat_extract_l4 (b, ip, &inside_port, &remote_port,
+				       &tcp, &udp)))
+    return;
+
+  cgnat_make_flow_key (&kv, instance_index, cgnat_buffer_inside_fib_index (b),
+		       ip->src_address, ip->dst_address, inside_port,
+		       cgnat_session_remote_port (ip->protocol, remote_port),
+		       ip->protocol);
+  hash = clib_bihash_hash_24_8 (&kv);
+  clib_bihash_prefetch_bucket_24_8 (&cm->session_table, hash);
+  clib_bihash_prefetch_data_24_8 (&cm->session_table, hash);
+}
+
+/* Same for the out2in direction: hash the reverse flow key and prefetch the
+ * session-table bucket and KV page (the out2in fast path looks the session
+ * up by its reverse key first). */
+static_always_inline void
+cgnat_prefetch_session_out2in (cgnat_main_t *cm, vlib_buffer_t *b)
+{
+  ip4_header_t *ip = vlib_buffer_get_current (b);
+  clib_bihash_kv_24_8_t kv;
+  tcp_header_t *tcp;
+  udp_header_t *udp;
+  u16 remote_port, nat_port;
+  u32 outside_fib_index;
+  u64 hash;
+
+  if (PREDICT_FALSE (cgnat_extract_l4 (b, ip, &remote_port, &nat_port,
+				       &tcp, &udp)))
+    return;
+
+  outside_fib_index = fib_table_get_index_for_sw_if_index (
+    FIB_PROTOCOL_IP4, vnet_buffer (b)->sw_if_index[VLIB_RX]);
+  cgnat_make_reverse_flow_key (&kv, outside_fib_index, ip->dst_address,
+			       ip->src_address, nat_port,
+			       cgnat_session_remote_port (ip->protocol,
+							  remote_port),
+			       ip->protocol);
+  hash = clib_bihash_hash_24_8 (&kv);
+  clib_bihash_prefetch_bucket_24_8 (&cm->session_table, hash);
+  clib_bihash_prefetch_data_24_8 (&cm->session_table, hash);
 }
 
 static_always_inline u8
@@ -688,10 +784,11 @@ cgnat_in2out_session_fast_path (cgnat_main_t *cm, cgnat_instance_t *instance,
   return mapping;
 }
 
-/* Reverse fast path for the out2in direction: the reverse session table is
- * keyed by the translated 5-tuple, so one lookup finds the session and its
- * mapping.  A session only exists if the flow was admitted by the instance
- * filter mode at creation, so no filter re-check is needed here. */
+/* Fast path for the out2in direction: the session table also carries a
+ * reverse key per session (the translated 5-tuple), so one lookup finds the
+ * session and its mapping.  A session only exists if the flow was admitted
+ * by the instance filter mode at creation, so no filter re-check is needed
+ * here. */
 static_always_inline cgnat_mapping_t *
 cgnat_out2in_session_fast_path (cgnat_main_t *cm, clib_bihash_kv_24_8_t *rkv,
 				tcp_header_t *tcp, f64 now)
@@ -702,20 +799,20 @@ cgnat_out2in_session_fast_path (cgnat_main_t *cm, clib_bihash_kv_24_8_t *rkv,
   cgnat_instance_t *instance;
   int rv;
 
-  cgnat_reverse_session_table_lock (cm, rkv);
-  if (clib_bihash_search_24_8 (&cm->reverse_session_table, rkv, &value))
+  cgnat_session_table_lock (cm, rkv);
+  if (clib_bihash_search_24_8 (&cm->session_table, rkv, &value))
     {
-      cgnat_reverse_session_table_unlock (cm, rkv);
+      cgnat_session_table_unlock (cm, rkv);
       return 0;
     }
   session = cgnat_session_get_if_valid (cm, value.value);
   if (PREDICT_FALSE (!session))
     {
-      cgnat_reverse_session_table_unlock (cm, rkv);
+      cgnat_session_table_unlock (cm, rkv);
       return 0;
     }
   clib_spinlock_lock (&session->lock);
-  cgnat_reverse_session_table_unlock (cm, rkv);
+  cgnat_session_table_unlock (cm, rkv);
 
   if (PREDICT_FALSE (session->flags & CGNAT_SESSION_FLAG_DELETING))
     {
@@ -986,10 +1083,10 @@ cgnat_session_out2in (vlib_main_t *vm, vlib_buffer_t *b, f64 now)
   outside_fib_index = fib_table_get_index_for_sw_if_index (
     FIB_PROTOCOL_IP4, vnet_buffer (b)->sw_if_index[VLIB_RX]);
 
-  /* Fast path: the reverse session table is keyed by the translated
-   * 5-tuple, so a hit skips both the mapping lookup and the admission
-   * checks - a session only exists if the flow passed the filter mode at
-   * creation. */
+  /* Fast path: the session table also carries a reverse key per session
+   * (the translated 5-tuple), so a hit skips both the mapping lookup and
+   * the admission checks - a session only exists if the flow passed the
+   * filter mode at creation. */
   {
     clib_bihash_kv_24_8_t rkv;
 

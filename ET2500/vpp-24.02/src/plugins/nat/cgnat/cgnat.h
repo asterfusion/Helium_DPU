@@ -19,6 +19,7 @@
 #include <vppinfra/bihash_16_8.h>
 #include <vppinfra/bihash_24_8.h>
 #include <vppinfra/hash.h>
+#include <vppinfra/lffifo.h>
 #include <vppinfra/random.h>
 #include <vppinfra/time.h>
 #include <vppinfra/tw_timer_2t_1w_2048sl.h>
@@ -33,16 +34,14 @@
 #define CGNAT_DEFAULT_MAX_USER_PORTS 2048
 #define CGNAT_DEFAULT_TCP_MSS 0
 #define CGNAT_DEFAULT_UTIL_THRESHOLD 80
-#define CGNAT_SESSION_POOL_INITIAL_SIZE (100 * 1000)
-#define CGNAT_MAPPING_POOL_INITIAL_SIZE (10 * 1000)
-#define CGNAT_MAPPING_HASH_BUCKETS (64 * 1024)
-#define CGNAT_MAPPING_HASH_MEMORY (256 << 20)
-#define CGNAT_SESSION_HASH_BUCKETS (128 * 1024)
-#define CGNAT_SESSION_HASH_MEMORY (512 << 20)
-#define CGNAT_STATIC_RULE_HASH_BUCKETS (64 * 1024)
-#define CGNAT_STATIC_RULE_HASH_MEMORY (64 << 20)
+#define CGNAT_SESSION_POOL_INITIAL_SIZE (512 * 1024)
+#define CGNAT_MAPPING_POOL_INITIAL_SIZE (512 * 1024)
+#define CGNAT_STATIC_MAPPING_HASH_BUCKETS (64 * 1024)
+#define CGNAT_STATIC_MAPPING_HASH_MEMORY (0)
+#define CGNAT_STATIC_RULE_HASH_BUCKETS (16 * 1024)
+#define CGNAT_STATIC_RULE_HASH_MEMORY (0)
 #define CGNAT_ADF_REMOTE_HASH_BUCKETS (128 * 1024)
-#define CGNAT_ADF_REMOTE_HASH_MEMORY (128 << 20)
+#define CGNAT_ADF_REMOTE_HASH_MEMORY (0)
 #define CGNAT_TCP_SYN_TIMEOUT 75
 #define CGNAT_TCP_ESTABLISHED_TIMEOUT 7440
 #define CGNAT_TCP_FIN_RST_TIMEOUT 60
@@ -52,8 +51,8 @@
 #define CGNAT_TIMER_MAX_DELAY 2047
 #define CGNAT_SESSION_TIMER_MAX_EXPIRATIONS 1024
 #define CGNAT_COOLING_TIMER_MAX_EXPIRATIONS 1024
-#define CGNAT_LOG_QUEUE_SIZE (64 * 1024)
-#define CGNAT_LOG_POLL_INTERVAL_DEFAULT 0.1
+#define CGNAT_LOG_FIFO_SIZE (64 * 1024)
+#define CGNAT_LOG_POLL_INTERVAL_DEFAULT (0.01)
 #define CGNAT_LOG_EVENT_STR_LEN 24
 #define CGNAT_LOG_REASON_STR_LEN 32
 #define CGNAT_LOG_INSTANCE_LABEL_LEN 64
@@ -166,20 +165,6 @@ typedef struct
     } session;
   };
 } cgnat_log_event_t;
-
-typedef struct
-{
-  cgnat_log_event_t *events;
-  u32 size;
-  u32 mask;
-  u64 head;
-  u64 tail;
-  u64 enqueued;
-  u64 sent;
-  u64 full;
-  u64 direct;
-  u64 max_used;
-} cgnat_log_queue_t;
 
 typedef enum
 {
@@ -691,10 +676,6 @@ typedef struct
   clib_bihash_16_8_t static_addr_out2in_table;
   clib_bihash_24_8_t static_rule_table;
   clib_bihash_24_8_t session_table;
-  /* Reverse session table: (outside_fib, nat_ip, remote_ip, nat_port,
-   * remote_port, proto) -> session, giving the out2in fast path a single
-   * lookup.  Entries are added/removed together with the forward key. */
-  clib_bihash_24_8_t reverse_session_table;
   clib_bihash_24_8_t adf_remote_table;
   u8 session_tables_initialized;
 
@@ -711,7 +692,6 @@ typedef struct
   cgnat_session_counters_t *session_counters_per_thread;
   clib_spinlock_t mapping_table_locks[CGNAT_MAPPING_TABLE_LOCK_BUCKETS];
   clib_spinlock_t session_table_locks[CGNAT_SESSION_TABLE_LOCK_BUCKETS];
-  clib_spinlock_t reverse_session_table_locks[CGNAT_SESSION_TABLE_LOCK_BUCKETS];
   clib_spinlock_t adf_remote_locks[CGNAT_ADF_REMOTE_LOCK_BUCKETS];
   clib_spinlock_t mapping_pool_lock;
   clib_spinlock_t adf_remote_pool_lock;
@@ -736,7 +716,15 @@ typedef struct
   u16 msg_id_base;
   vlib_log_class_t log_class_dynamic;
   vlib_log_class_t log_class_deterministic;
-  cgnat_log_queue_t *log_queues;
+
+  /* Single MPSC lock-free fifo: workers (and main-thread timer paths) push
+   * fixed-size events; the cgnat-log-process node on the main thread drains
+   * it and calls vlib_log.  Counters: enqueued/full are atomic (written
+   * by any thread), sent is written by the main thread only. */
+  lf_fifo_t *log_fifo;
+  u64 log_enqueued;
+  u64 log_full;
+  u64 log_sent;
   f64 log_poll_interval;
 
   vlib_main_t *vlib_main;
@@ -952,7 +940,7 @@ extern vlib_node_registration_t cgnat_in2out_node;
 extern vlib_node_registration_t cgnat_in2out_policy_node;
 extern vlib_node_registration_t cgnat_out2in_node;
 
-int cgnat_plugin_enable_disable (u8 enable);
+int cgnat_plugin_enable_disable (u8 enable, u32 max_sessions, u32 max_mappings);
 int cgnat_pool_add_del (u32 *pool_id, cgnat_pool_config_t *config, u8 is_add);
 int cgnat_pool_set_cooling_time (u32 pool_id, u16 cooling_time);
 int cgnat_pool_set_label (u32 pool_id, u8 *label);
@@ -997,7 +985,7 @@ int cgnat_pool_runtime_init (cgnat_pool_t *pool, u8 create_blocks);
 void cgnat_pool_runtime_reset (cgnat_pool_t *pool);
 void cgnat_pba_reset (cgnat_main_t *cm);
 void cgnat_pba_expire_timers (f64 now);
-void cgnat_session_init (cgnat_main_t *cm);
+void cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings);
 void cgnat_session_reset (cgnat_main_t *cm);
 void cgnat_session_expire_timers (f64 now);
 void cgnat_session_counts (cgnat_main_t *cm, u64 *total, u64 *tcp, u64 *udp,

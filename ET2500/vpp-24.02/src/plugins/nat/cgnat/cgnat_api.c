@@ -23,7 +23,9 @@ vl_api_cgnat_plugin_enable_disable_t_handler (
 {
   cgnat_main_t *cm = &cgnat_main;
   vl_api_cgnat_plugin_enable_disable_reply_t *rmp;
-  int rv = cgnat_plugin_enable_disable (mp->enable);
+  int rv = cgnat_plugin_enable_disable (mp->enable,
+                                        ntohl(mp->max_sessions),
+                                        ntohl(mp->max_mappings));
   REPLY_MACRO (VL_API_CGNAT_PLUGIN_ENABLE_DISABLE_REPLY);
 }
 
@@ -208,12 +210,9 @@ vl_api_cgnat_pool_stats_get_t_handler (vl_api_cgnat_pool_stats_get_t *mp)
 	  rmp->owner_instance_id =
 	    htonl (instance ? instance->instance_id : CGNAT_INVALID_INDEX);
 	  rmp->total_blocks = htonl (pool->total_blocks);
-	  rmp->allocated_blocks =
-	    htonl (clib_atomic_load_relax_n (&pool->allocated_blocks));
-	  rmp->cooling_blocks =
-	    htonl (clib_atomic_load_relax_n (&pool->cooling_blocks));
-	  rmp->active_users =
-	    htonl (clib_atomic_load_relax_n (&pool->active_users));
+	  rmp->allocated_blocks = htonl (pool->allocated_blocks);
+	  rmp->cooling_blocks = htonl (pool->cooling_blocks);
+	  rmp->active_users = htonl (pool->active_users);
 	}
     }
 
@@ -416,8 +415,7 @@ vl_api_cgnat_instance_stats_get_t_handler (
 	  rmp->allocated_blocks = htonl (instance->allocated_blocks);
 	  rmp->cooling_blocks = htonl (instance->cooling_blocks);
 	  rmp->active_users = htonl (instance->active_users);
-	  rmp->active_sessions =
-	    htonl (clib_atomic_load_relax_n (&instance->active_sessions));
+	  rmp->active_sessions = htonl (instance->active_sessions);
 	}
     }
 

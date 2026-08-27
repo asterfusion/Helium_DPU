@@ -802,7 +802,7 @@ cgnat_start_prealloc_user_cooling (cgnat_main_t *cm,
 }
 
 static void
-cgnat_timer_expired_cb (u32 *expired_timers)
+cgnat_cooling_process_expired (u32 *expired_timers)
 {
   cgnat_main_t *cm = &cgnat_main;
   cgnat_cooling_timer_t *entry;
@@ -967,8 +967,9 @@ cgnat_pba_init (cgnat_main_t *cm)
   if (cm->cooling_timer_initialized)
     return;
 
-  tw_timer_wheel_init_2t_1w_2048sl (&cm->cooling_timer_wheel,
-				    cgnat_timer_expired_cb, 1.0,
+  /* No wheel callback: expired timers are collected directly with
+   * tw_timer_expire_timers_vec_2t_1w_2048sl(). */
+  tw_timer_wheel_init_2t_1w_2048sl (&cm->cooling_timer_wheel, 0, 1.0,
 				    CGNAT_COOLING_TIMER_MAX_EXPIRATIONS);
   cm->cooling_timer_initialized = 1;
 }
@@ -990,11 +991,16 @@ void
 cgnat_pba_expire_timers (f64 now)
 {
   cgnat_main_t *cm = &cgnat_main;
+  u32 *expired = 0;
 
-  /* The shared timer process holds the worker barrier for both wheels. */
+  /* The shared timer process holds the worker barrier for both wheels.
+   * Collect expired timers directly instead of via a wheel callback. */
   if (cm->cooling_timer_initialized)
     {
-      tw_timer_expire_timers_2t_1w_2048sl (&cm->cooling_timer_wheel, now);
+      expired = tw_timer_expire_timers_vec_2t_1w_2048sl (
+	&cm->cooling_timer_wheel, now, expired);
+      cgnat_cooling_process_expired (expired);
+      vec_free (expired);
     }
 }
 

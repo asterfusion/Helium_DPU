@@ -71,6 +71,110 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
   u32 pkts_processed = 0;
   f64 now = vlib_time_now (vm);
 
+  if (PREDICT_FALSE (!cm->enabled))
+    {
+      u32 i;
+
+      for (i = 0; i < frame->n_vectors; i++)
+	nexts[i] = CGNAT_IN2OUT_NEXT_LOOKUP;
+      vlib_buffer_enqueue_to_next (vm, node, from, nexts,
+				   frame->n_vectors);
+      vlib_node_increment_counter (vm, cm->in2out_node_index,
+				   CGNAT_IN2OUT_ERROR_IN2OUT_PACKETS,
+				   frame->n_vectors);
+      return frame->n_vectors;
+    }
+
+  while (n_left >= 6)
+    {
+      vlib_buffer_t *b0, *b1, *bp;
+      u32 next0 = CGNAT_IN2OUT_NEXT_LOOKUP, next1 = CGNAT_IN2OUT_NEXT_LOOKUP;
+      u32 sw_if_index0, sw_if_index1;
+      u32 instance_index0 = CGNAT_INVALID_INDEX;
+      u32 instance_index1 = CGNAT_INVALID_INDEX;
+      u32 inside_fib_index0 = CGNAT_INVALID_INDEX;
+      u32 inside_fib_index1 = CGNAT_INVALID_INDEX;
+      u32 acl_index0 = CGNAT_INVALID_INDEX, acl_index1 = CGNAT_INVALID_INDEX;
+      u8 context_valid0 = 0, context_valid1 = 0;
+      int rv;
+
+      bp = vlib_get_buffer (vm, from[4]);
+      vlib_prefetch_buffer_header (bp, LOAD);
+      clib_prefetch_load (vlib_buffer_get_current (bp));
+      bp = vlib_get_buffer (vm, from[5]);
+      vlib_prefetch_buffer_header (bp, LOAD);
+      clib_prefetch_load (vlib_buffer_get_current (bp));
+
+      cgnat_prefetch_session_in2out (cm, vlib_get_buffer (vm, from[2]));
+      cgnat_prefetch_session_in2out (cm, vlib_get_buffer (vm, from[3]));
+
+      b0 = vlib_get_buffer (vm, from[0]);
+      b1 = vlib_get_buffer (vm, from[1]);
+      sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+      sw_if_index1 = vnet_buffer (b1)->sw_if_index[VLIB_RX];
+
+      /* The policy node (our only upstream) already resolved the instance
+       * and the inside FIB and stashed them in opaque2. */
+      instance_index0 = cgnat_buffer_instance_index (b0);
+      instance_index1 = cgnat_buffer_instance_index (b1);
+
+      if (PREDICT_TRUE (instance_index0 != CGNAT_INVALID_INDEX))
+	{
+	  inside_fib_index0 = cgnat_buffer_inside_fib_index (b0);
+	  acl_index0 = b0->acl_index;
+	  context_valid0 = 1;
+	  rv = cgnat_session_in2out (vm, b0, instance_index0,
+				     inside_fib_index0, now);
+	  if (PREDICT_FALSE (rv && rv != VNET_API_ERROR_UNSUPPORTED))
+	    next0 = CGNAT_IN2OUT_NEXT_DROP;
+	}
+      if (PREDICT_TRUE (instance_index1 != CGNAT_INVALID_INDEX))
+	{
+	  inside_fib_index1 = cgnat_buffer_inside_fib_index (b1);
+	  acl_index1 = b1->acl_index;
+	  context_valid1 = 1;
+	  rv = cgnat_session_in2out (vm, b1, instance_index1,
+				     inside_fib_index1, now);
+	  if (PREDICT_FALSE (rv && rv != VNET_API_ERROR_UNSUPPORTED))
+	    next1 = CGNAT_IN2OUT_NEXT_DROP;
+	}
+
+      if (PREDICT_FALSE (node->flags & VLIB_NODE_FLAG_TRACE))
+	{
+	  if (b0->flags & VLIB_BUFFER_IS_TRACED)
+	    {
+	      cgnat_in2out_trace_t *t =
+		vlib_add_trace (vm, node, b0, sizeof (*t));
+	      t->sw_if_index = sw_if_index0;
+	      t->instance_index = instance_index0;
+	      t->inside_fib_index = inside_fib_index0;
+	      t->acl_index = acl_index0;
+	      t->context_valid = context_valid0;
+	      t->next_index = next0;
+	    }
+	  if (b1->flags & VLIB_BUFFER_IS_TRACED)
+	    {
+	      cgnat_in2out_trace_t *t =
+		vlib_add_trace (vm, node, b1, sizeof (*t));
+	      t->sw_if_index = sw_if_index1;
+	      t->instance_index = instance_index1;
+	      t->inside_fib_index = inside_fib_index1;
+	      t->acl_index = acl_index1;
+	      t->context_valid = context_valid1;
+	      t->next_index = next1;
+	    }
+	}
+
+      pkts_processed += (next0 != CGNAT_IN2OUT_NEXT_DROP) +
+			(next1 != CGNAT_IN2OUT_NEXT_DROP);
+      next[0] = next0;
+      next[1] = next1;
+      from += 2;
+      next += 2;
+      n_left -= 2;
+    }
+
+  /* Scalar tail (also covers the last prefetched pairs). */
   while (n_left > 0)
     {
       vlib_buffer_t *b0;
@@ -83,35 +187,21 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
       u8 context_valid0 = 0;
       int rv;
 
-      /* Prefetch the next packet's buffer header and IP header so the
-       * current packet's dependent loads (buffer -> ip -> bihash bucket)
-       * overlap with the next packet's misses. */
-      if (PREDICT_TRUE (n_left > 1))
-	{
-	  vlib_buffer_t *b1 = vlib_get_buffer (vm, from[1]);
-	  vlib_prefetch_buffer_header (b1, LOAD);
-	  clib_prefetch_load (vlib_buffer_get_current (b1));
-	}
-
       b0 = vlib_get_buffer (vm, bi0);
       sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
 
-      /* The policy node (our only upstream) already resolved the instance
-       * and the inside FIB and stashed them in opaque2. */
       instance_index0 = cgnat_buffer_instance_index (b0);
-      if (PREDICT_FALSE (instance_index0 == CGNAT_INVALID_INDEX))
-	goto trace;
-      inside_fib_index0 = cgnat_buffer_inside_fib_index (b0);
-      acl_index0 = b0->acl_index;
-
-      context_valid0 = 1;
-
-      rv = cgnat_session_in2out (vm, b0, instance_index0, inside_fib_index0,
-				 now);
-      if (PREDICT_FALSE (rv && rv != VNET_API_ERROR_UNSUPPORTED))
+      if (PREDICT_TRUE (instance_index0 != CGNAT_INVALID_INDEX))
+	{
+	  inside_fib_index0 = cgnat_buffer_inside_fib_index (b0);
+	  acl_index0 = b0->acl_index;
+	  context_valid0 = 1;
+	  rv = cgnat_session_in2out (vm, b0, instance_index0, inside_fib_index0,
+				     now);
+	  if (PREDICT_FALSE (rv && rv != VNET_API_ERROR_UNSUPPORTED))
 	    next0 = CGNAT_IN2OUT_NEXT_DROP;
+	}
 
-    trace:
       if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
 			 (b0->flags & VLIB_BUFFER_IS_TRACED)))
 	{

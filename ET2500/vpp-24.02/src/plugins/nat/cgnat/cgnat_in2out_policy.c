@@ -95,9 +95,6 @@ cgnat_in2out_policy_inline (cgnat_main_t *cm, vlib_buffer_t *b0, u16 *next0,
   vnet_feature_next_u16 (arc_next0, b0);
   *next0 = *arc_next0;
 
-  if (PREDICT_FALSE (!clib_atomic_load_acq_n (&cm->enabled)))
-    return CGNAT_IN2OUT_POLICY_ERROR_BYPASS_DISABLED;
-
   i = cgnat_get_interface (cm, sw_if_index);
   if (PREDICT_FALSE (!i || !cgnat_interface_is_inside (i)))
     return CGNAT_IN2OUT_POLICY_ERROR_BYPASS_NO_INTERFACE;
@@ -175,6 +172,23 @@ VLIB_NODE_FN (cgnat_in2out_policy_node) (vlib_main_t *vm,
   u32 n_left = frame->n_vectors;
   u16 nexts[VLIB_FRAME_SIZE], *next = nexts;
   u32 counters[CGNAT_IN2OUT_POLICY_N_ERROR] = { 0 };
+
+  if (PREDICT_FALSE (!cm->enabled))
+    {
+      u32 i;
+
+      for (i = 0; i < frame->n_vectors; i++)
+	{
+	  vlib_buffer_t *b = vlib_get_buffer (vm, from[i]);
+	  vnet_feature_next_u16 (&nexts[i], b);
+	}
+      vlib_buffer_enqueue_to_next (vm, node, from, nexts,
+				   frame->n_vectors);
+      vlib_node_increment_counter (vm, cm->in2out_policy_node_index,
+				   CGNAT_IN2OUT_POLICY_ERROR_BYPASS_DISABLED,
+				   frame->n_vectors);
+      return frame->n_vectors;
+    }
 
   while (n_left >= 4)
     {

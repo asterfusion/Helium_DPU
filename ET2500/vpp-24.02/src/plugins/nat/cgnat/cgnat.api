@@ -104,6 +104,8 @@ autoreply define cgnat_plugin_enable_disable
   u32 client_index;
   u32 context;
   bool enable;
+  u32 max_sessions;
+  u32 max_mappings;
 };
 
 define cgnat_plugin_get

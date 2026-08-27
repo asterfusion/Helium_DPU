@@ -178,6 +178,26 @@ cgnat_recalculate_instance (cgnat_main_t *cm, cgnat_instance_t *instance)
   instance->pool_addr_max.as_u32 = clib_host_to_net_u32 (addr_max);
 }
 
+/* Pre-reserve an instance's user pool so it never reallocs at runtime and
+ * readers holding a user pointer outside users_lock never see the pool move.
+ * A dynamic user always owns at least one port block, so total_blocks bounds
+ * the user count; a deterministic instance has at most one user per inside
+ * host, bounded by det.inside_count.  Callers must invoke this on an empty
+ * users pool. */
+static void
+cgnat_instance_reserve_users (cgnat_instance_t *instance)
+{
+  u32 reserve;
+
+  if (instance->mode == CGNAT_INSTANCE_MODE_DETERMINISTIC)
+    reserve = instance->det.inside_count;
+  else
+    reserve = instance->total_blocks;
+
+  if (reserve)
+    pool_alloc_aligned (instance->users, reserve, CLIB_CACHE_LINE_BYTES);
+}
+
 static int
 cgnat_pool_config_validate (cgnat_pool_config_t *config)
 {
@@ -612,6 +632,11 @@ int
 cgnat_pool_add_del (u32 *pool_id, cgnat_pool_config_t *config, u8 is_add)
 {
   cgnat_main_t *cm = &cgnat_main;
+
+  /* Runtime tables exist only after the plugin is enabled; reject all
+   * configuration changes before that point. */
+  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
+    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
   cgnat_pool_t *pool;
   cgnat_instance_t *instance = 0;
   u32 pool_index;
@@ -697,6 +722,11 @@ int
 cgnat_pool_set_cooling_time (u32 pool_id, u16 cooling_time)
 {
   cgnat_main_t *cm = &cgnat_main;
+
+  /* Runtime tables exist only after the plugin is enabled; reject all
+   * configuration changes before that point. */
+  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
+    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
   cgnat_pool_t *pool;
   u32 pool_index;
 
@@ -714,6 +744,11 @@ int
 cgnat_pool_set_label (u32 pool_id, u8 *label)
 {
   cgnat_main_t *cm = &cgnat_main;
+
+  /* Runtime tables exist only after the plugin is enabled; reject all
+   * configuration changes before that point. */
+  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
+    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
   cgnat_pool_t *pool;
   u32 pool_index;
 
@@ -836,6 +871,11 @@ cgnat_instance_add_del (u32 *instance_id, u8 *label, u32 inside_vrf_id,
 			u32 inside_address_count, u8 is_add)
 {
   cgnat_main_t *cm = &cgnat_main;
+
+  /* Runtime tables exist only after the plugin is enabled; reject all
+   * configuration changes before that point. */
+  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
+    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
   cgnat_instance_t *instance;
   cgnat_pool_t *pool;
   u32 instance_index, inside_fib_index, outside_fib_index, *pool_indices = 0;
@@ -1033,6 +1073,9 @@ cgnat_instance_add_del (u32 *instance_id, u8 *label, u32 inside_vrf_id,
       cgnat_add_all_pool_fib_entries (cm);
 
       cgnat_recalculate_instance (cm, instance);
+
+      cgnat_instance_reserve_users (instance);
+
       hash_set (cm->instance_index_by_id, *instance_id, slot);
       vlib_worker_thread_barrier_release (cm->vlib_main);
       return 0;
@@ -1078,6 +1121,11 @@ int
 cgnat_instance_set (u32 instance_id, cgnat_instance_config_t *config)
 {
   cgnat_main_t *cm = &cgnat_main;
+
+  /* Runtime tables exist only after the plugin is enabled; reject all
+   * configuration changes before that point. */
+  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
+    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
   cgnat_instance_t *instance;
   u32 instance_index;
 
@@ -1159,7 +1207,7 @@ cgnat_instance_set (u32 instance_id, cgnat_instance_config_t *config)
 }
 
 int
-cgnat_plugin_enable_disable (u8 enable)
+cgnat_plugin_enable_disable (u8 enable, u32 max_sessions, u32 max_mappings)
 {
   cgnat_main_t *cm = &cgnat_main;
   cgnat_interface_t *saved_interfaces = 0;
@@ -1181,6 +1229,9 @@ cgnat_plugin_enable_disable (u8 enable)
 
   if (enable)
     {
+      cgnat_pba_init (cm);
+      cgnat_session_init (cm, max_sessions, max_mappings);
+
       vlib_worker_thread_barrier_sync (cm->vlib_main);
 
       /* Re-create pool runtime state from preserved configuration.
@@ -1220,11 +1271,15 @@ cgnat_plugin_enable_disable (u8 enable)
 	}
       vec_free (pools_inited);
 
-      /* Recalculate instance-level block/user totals. */
+      /* Recalculate instance-level block/user totals, then re-reserve the
+       * user pools torn down by the disable path. */
       vec_foreach (instance, cm->instances)
 	{
 	  if (instance->configured)
-	    cgnat_recalculate_instance (cm, instance);
+	    {
+	      cgnat_recalculate_instance (cm, instance);
+	      cgnat_instance_reserve_users (instance);
+	    }
 	}
 
       /* Re-register /32 local receive entries so VPP answers ARP for pool
@@ -1341,6 +1396,11 @@ int
 cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
 {
   cgnat_main_t *cm = &cgnat_main;
+
+  /* Runtime tables exist only after the plugin is enabled; reject all
+   * configuration changes before that point. */
+  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
+    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
   cgnat_interface_t *match = 0;
   u8 flag = is_inside ? CGNAT_INTERFACE_FLAG_IS_INSIDE :
 				CGNAT_INTERFACE_FLAG_IS_OUTSIDE;
@@ -1439,6 +1499,11 @@ int
 cgnat_interface_zone_set (u32 sw_if_index, cgnat_interface_role_t role)
 {
   cgnat_main_t *cm = &cgnat_main;
+
+  /* Runtime tables exist only after the plugin is enabled; reject all
+   * configuration changes before that point. */
+  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
+    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
   cgnat_interface_t *match;
   u8 old_flags;
   int rv;
@@ -1496,6 +1561,11 @@ int
 cgnat_instance_set_acl (u32 instance_index, u32 acl_index, u8 is_add)
 {
   cgnat_main_t *cm = &cgnat_main;
+
+  /* Runtime tables exist only after the plugin is enabled; reject all
+   * configuration changes before that point. */
+  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
+    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
   cgnat_instance_t *instance;
   u32 *p;
   int rv;
@@ -1570,6 +1640,11 @@ cgnat_instance_syslog_server_add_del (u32 instance_index,
 				      u8 is_add)
 {
   cgnat_main_t *cm = &cgnat_main;
+
+  /* Runtime tables exist only after the plugin is enabled; reject all
+   * configuration changes before that point. */
+  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
+    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
   cgnat_instance_t *instance;
   cgnat_syslog_server_t *server;
 
@@ -1608,6 +1683,11 @@ cgnat_instance_ipfix_exporter_add_del (
   ip4_address_t src_address, u16 src_port, u8 is_add)
 {
   cgnat_main_t *cm = &cgnat_main;
+
+  /* Runtime tables exist only after the plugin is enabled; reject all
+   * configuration changes before that point. */
+  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
+    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
   cgnat_instance_t *instance;
   cgnat_ipfix_exporter_t *exporter;
 

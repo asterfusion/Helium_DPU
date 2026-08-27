@@ -19,6 +19,25 @@
 #include <nat/cgnat/cgnat.h>
 #include <nat/cgnat/cgnat_session_inlines.h>
 
+static_always_inline u32
+cgnat_calc_bihash_buckets (u32 n_elts)
+{
+  n_elts = n_elts / 2.5;
+  u64 lower_pow2 = 1;
+  while (lower_pow2 * 2 < n_elts)
+    {
+      lower_pow2 = 2 * lower_pow2;
+    }
+  u64 upper_pow2 = 2 * lower_pow2;
+  if ((upper_pow2 - n_elts) < (n_elts - lower_pow2))
+    {
+      if (upper_pow2 <= UINT32_MAX)
+	{
+	  return upper_pow2;
+	}
+    }
+  return lower_pow2;
+}
 
 static_always_inline void
 cgnat_make_static_rule_key (clib_bihash_kv_24_8_t *kv,
@@ -543,9 +562,11 @@ cgnat_mapping_alloc (cgnat_main_t *cm, u32 *mapping_index)
   pool_get_zero (cm->mappings, mapping);
   *mapping_index = mapping - cm->mappings;
   vec_validate (cm->mapping_generation_by_index, *mapping_index);
-  clib_spinlock_init (&mapping->lock);
   mapping->generation = ++cm->mapping_generation_by_index[*mapping_index];
   clib_spinlock_unlock (&cm->mapping_pool_lock);
+
+  /* Element-local init does not need the pool lock. */
+  clib_spinlock_init (&mapping->lock);
 
   return mapping;
 }
@@ -560,8 +581,10 @@ cgnat_session_alloc (cgnat_main_t *cm, u32 *session_index)
   *session_index = session - cm->sessions;
   vec_validate (cm->session_generation_by_index, *session_index);
   session->generation = ++cm->session_generation_by_index[*session_index];
-  clib_spinlock_init (&session->lock);
   clib_spinlock_unlock (&cm->session_pool_lock);
+
+  /* Element-local init does not need the pool lock. */
+  clib_spinlock_init (&session->lock);
 
   return session;
 }
@@ -571,6 +594,7 @@ cgnat_mapping_get_user (cgnat_main_t *cm, cgnat_mapping_t *mapping,
 			cgnat_instance_t **instancep)
 {
   cgnat_instance_t *instance;
+  cgnat_user_t *user;
 
   if (mapping->user_index == CGNAT_INVALID_INDEX)
     return 0;
@@ -578,13 +602,18 @@ cgnat_mapping_get_user (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   instance = cgnat_instance_get_by_index (cm, mapping->instance_index);
   if (!instance)
     return 0;
+
   if (mapping->user_index >= pool_len (instance->users) ||
       pool_is_free_index (instance->users, mapping->user_index))
-    return 0;
+    {
+      clib_spinlock_unlock (&instance->users_lock);
+      return 0;
+    }
+  user = pool_elt_at_index (instance->users, mapping->user_index);
 
   if (instancep)
     *instancep = instance;
-  return pool_elt_at_index (instance->users, mapping->user_index);
+  return user;
 }
 
 static int
@@ -628,9 +657,11 @@ cgnat_adf_remote_ref (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   remote->generation = ++cm->adf_remote_generation_by_index[remote_index];
   if (!remote->generation)
     remote->generation = ++cm->adf_remote_generation_by_index[remote_index];
+  clib_spinlock_unlock (&cm->adf_remote_pool_lock);
+
+  /* Element-local init does not need the pool lock. */
   remote->refcnt = 1;
   remote->kv = kv;
-  clib_spinlock_unlock (&cm->adf_remote_pool_lock);
 
   kv.value = cgnat_index_to_value (remote_index, remote->generation);
   if (clib_bihash_add_del_24_8 (&cm->adf_remote_table, &kv, 1))
@@ -846,37 +877,27 @@ cgnat_log_session (cgnat_main_t *cm, char *event, char *reason,
 		   cgnat_session_t *session)
 {
   cgnat_instance_t *instance;
-  char *mapping_type;
+  cgnat_log_event_t log_event;
 
   instance = cgnat_instance_get_by_index (cm, session->instance_index);
   if (!instance || !instance->syslog_enabled ||
       instance->log_mode != CGNAT_LOG_MODE_SESSION)
     return;
 
-  if (session->mapping_type == CGNAT_MAPPING_STATIC)
-    mapping_type = "static";
-  else if (session->mapping_type == CGNAT_MAPPING_DETERMINISTIC)
-    mapping_type = "deterministic";
-  else
-    mapping_type = "dynamic";
-  if (reason)
-    cgnat_log_notice (
-      "event=%s instance=%U protocol=%u "
-      "private_ip=%U private_port=%u public_ip=%U public_port=%u "
-      "remote_ip=%U remote_port=%u type=%s reason=%s",
-      event, format_cgnat_instance_name, instance, session->protocol, format_ip4_address,
-      &session->inside_ip, session->inside_port, format_ip4_address, &session->nat_ip,
-      session->nat_port, format_ip4_address, &session->remote_ip,
-      session->remote_port, mapping_type, reason);
-  else
-    cgnat_log_notice (
-      "event=%s instance=%U protocol=%u "
-      "private_ip=%U private_port=%u public_ip=%U public_port=%u "
-      "remote_ip=%U remote_port=%u type=%s",
-      event, format_cgnat_instance_name, instance, session->protocol, format_ip4_address,
-      &session->inside_ip, session->inside_port, format_ip4_address, &session->nat_ip,
-      session->nat_port, format_ip4_address, &session->remote_ip,
-      session->remote_port, mapping_type);
+  /* May run on a worker thread: vlib_log is main-thread only, so snapshot a
+   * fixed-size event and hand it to the main-thread log process. */
+  clib_memset (&log_event, 0, sizeof (log_event));
+  log_event.kind = CGNAT_LOG_EVENT_KIND_SESSION;
+  cgnat_log_event_set_common (&log_event, instance, event, reason);
+  log_event.session.private_ip = session->inside_ip;
+  log_event.session.private_port = session->inside_port;
+  log_event.session.public_ip = session->nat_ip;
+  log_event.session.public_port = session->nat_port;
+  log_event.session.remote_ip = session->remote_ip;
+  log_event.session.remote_port = session->remote_port;
+  log_event.session.protocol = session->protocol;
+  log_event.session.mapping_type = session->mapping_type;
+  cgnat_log_enqueue (&log_event);
 }
 
 static void cgnat_static_addr_mapping_schedule_delete (cgnat_main_t *cm,
@@ -902,8 +923,9 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
     {
       clib_spinlock_unlock (&session->lock);
       if (rkv)
-	cgnat_reverse_session_table_unlock (cm, rkv);
-      cgnat_session_table_unlock (cm, kv);
+	cgnat_session_table_unlock2 (cm, kv, rkv);
+      else
+	cgnat_session_table_unlock (cm, kv);
       return;
     }
 
@@ -919,13 +941,14 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
     {
       clib_bihash_kv_24_8_t rcur;
 
-      if (!clib_bihash_search_24_8 (&cm->reverse_session_table, rkv, &rcur) &&
+      if (!clib_bihash_search_24_8 (&cm->session_table, rkv, &rcur) &&
 	  rcur.value == cgnat_index_to_value (session - cm->sessions,
 					      session->generation))
-	clib_bihash_add_del_24_8 (&cm->reverse_session_table, rkv, 0);
-      cgnat_reverse_session_table_unlock (cm, rkv);
+	clib_bihash_add_del_24_8 (&cm->session_table, rkv, 0);
+      cgnat_session_table_unlock2 (cm, kv, rkv);
     }
-  cgnat_session_table_unlock (cm, kv);
+  else
+    cgnat_session_table_unlock (cm, kv);
 
   mapping = cgnat_mapping_get_for_session_delete (
     cm, cgnat_index_to_value (session->mapping_index, session->mapping_generation));
@@ -1013,10 +1036,9 @@ cgnat_session_delete (cgnat_main_t *cm, cgnat_session_t *session, char *reason)
   u8 have_reverse = 0;
 
   cgnat_make_flow_key_from_flow (&kv, session);
-  cgnat_session_table_lock (cm, &kv);
 
-  /* Lock order: forward table -> reverse table -> session->lock.  The
-   * session's identity fields are immutable after creation, so reading
+  /* Lock order: forward+reverse buckets (bucket-index order) -> session->lock.
+   * The session's identity fields are immutable after creation, so reading
    * them unlocked here is safe. */
   instance = cgnat_instance_get_by_index (cm, session->instance_index);
   if (instance)
@@ -1025,10 +1047,12 @@ cgnat_session_delete (cgnat_main_t *cm, cgnat_session_t *session, char *reason)
 				   session->nat_ip, session->remote_ip,
 				   session->nat_port, session->remote_port,
 				   session->protocol);
-      cgnat_reverse_session_table_lock (cm, &rkv);
       have_reverse = 1;
     }
-
+  if (have_reverse)
+    cgnat_session_table_lock2 (cm, &kv, &rkv);
+  else
+    cgnat_session_table_lock (cm, &kv);
   clib_spinlock_lock (&session->lock);
   cgnat_session_delete_with_locks (cm, session, &kv,
 				   have_reverse ? &rkv : 0, reason);
@@ -1101,7 +1125,7 @@ cgnat_session_delete_matching (cgnat_session_filter_t *filter)
 }
 
 static void
-cgnat_session_timer_expired_cb (u32 *expired_timers)
+cgnat_session_process_expired_timers (u32 *expired_timers)
 {
   cgnat_main_t *cm = &cgnat_main;
   f64 now = vlib_time_now (cm->vlib_main);
@@ -1136,9 +1160,9 @@ cgnat_session_timer_expired_cb (u32 *expired_timers)
 
       session = pool_elt_at_index (cm->sessions, entry->session_index);
       cgnat_make_flow_key_from_flow (&kv, session);
-      cgnat_session_table_lock (cm, &kv);
 
-      /* Lock order: forward table -> reverse table -> session->lock. */
+      /* Lock order: forward+reverse buckets (bucket-index order) ->
+       * session->lock. */
       instance = cgnat_instance_get_by_index (cm, session->instance_index);
       if (instance)
 	{
@@ -1146,9 +1170,12 @@ cgnat_session_timer_expired_cb (u32 *expired_timers)
 				       session->nat_ip, session->remote_ip,
 				       session->nat_port, session->remote_port,
 				       session->protocol);
-	  cgnat_reverse_session_table_lock (cm, &rkv);
 	  have_reverse = 1;
 	}
+      if (have_reverse)
+	cgnat_session_table_lock2 (cm, &kv, &rkv);
+      else
+	cgnat_session_table_lock (cm, &kv);
 
       session_value =
 	cgnat_index_to_value (entry->session_index, entry->session_generation);
@@ -1156,8 +1183,9 @@ cgnat_session_timer_expired_cb (u32 *expired_timers)
 	  current.value != session_value)
 	{
 	  if (have_reverse)
-	    cgnat_reverse_session_table_unlock (cm, &rkv);
-	  cgnat_session_table_unlock (cm, &kv);
+	    cgnat_session_table_unlock2 (cm, &kv, &rkv);
+	  else
+	    cgnat_session_table_unlock (cm, &kv);
 	  goto done;
 	}
       clib_spinlock_lock (&session->lock);
@@ -1167,8 +1195,9 @@ cgnat_session_timer_expired_cb (u32 *expired_timers)
 	{
 	  clib_spinlock_unlock (&session->lock);
 	  if (have_reverse)
-	    cgnat_reverse_session_table_unlock (cm, &rkv);
-	  cgnat_session_table_unlock (cm, &kv);
+	    cgnat_session_table_unlock2 (cm, &kv, &rkv);
+	  else
+	    cgnat_session_table_unlock (cm, &kv);
 	  goto done;
 	}
 
@@ -1186,8 +1215,9 @@ cgnat_session_timer_expired_cb (u32 *expired_timers)
 	  cgnat_session_start_timer (cm, session, now);
 	  clib_spinlock_unlock (&session->lock);
 	  if (have_reverse)
-	    cgnat_reverse_session_table_unlock (cm, &rkv);
-	  cgnat_session_table_unlock (cm, &kv);
+	    cgnat_session_table_unlock2 (cm, &kv, &rkv);
+	  else
+	    cgnat_session_table_unlock (cm, &kv);
 	  goto done;
 	}
 
@@ -1256,7 +1286,14 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
 
   // no hit, create a session
   clib_spinlock_lock (&mapping->lock);
-  cgnat_session_table_lock (cm, &kv);
+
+  /* The session is stored under both the forward and the reverse
+   * (translated) 5-tuple in the same table; lock both hash buckets in
+   * bucket-index order. */
+  cgnat_make_reverse_flow_key (&rkv, mapping->outside_fib_index,
+			       mapping->nat_ip, remote_ip, mapping->nat_port,
+			       remote_port, mapping->protocol);
+  cgnat_session_table_lock2 (cm, &kv, &rkv);
   // check whether session already create
   if (!clib_bihash_search_24_8 (&cm->session_table, &kv, &value))
   {
@@ -1265,7 +1302,7 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
 	    {
 	      clib_spinlock_unlock (&mapping->lock);
 	      clib_spinlock_lock (&session->lock);
-	      cgnat_session_table_unlock (cm, &kv);
+	      cgnat_session_table_unlock2 (cm, &kv, &rkv);
 	      if (PREDICT_FALSE (session->flags & CGNAT_SESSION_FLAG_DELETING))
 		{
 		  clib_spinlock_unlock (&session->lock);
@@ -1293,7 +1330,7 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   // check mapping status, if apping is deleting
   if (PREDICT_FALSE (mapping->flags & CGNAT_MAPPING_FLAG_DELETING))
     {
-      cgnat_session_table_unlock (cm, &kv);
+      cgnat_session_table_unlock2 (cm, &kv, &rkv);
       clib_spinlock_unlock (&mapping->lock);
       return VNET_API_ERROR_NO_SUCH_ENTRY;
     }
@@ -1306,7 +1343,7 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
     user = cgnat_mapping_get_user (cm, mapping, &instance);
     if (PREDICT_FALSE (!user || !instance))
     {
-      cgnat_session_table_unlock (cm, &kv);
+      cgnat_session_table_unlock2 (cm, &kv, &rkv);
       clib_spinlock_unlock (&mapping->lock);
       return VNET_API_ERROR_NO_SUCH_ENTRY;
     }
@@ -1314,7 +1351,7 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
     rv = cgnat_user_session_reserve (instance, user, now);
     if (rv)
     {
-      cgnat_session_table_unlock (cm, &kv);
+      cgnat_session_table_unlock2 (cm, &kv, &rkv);
       clib_spinlock_unlock (&mapping->lock);
       return rv;
     }
@@ -1340,24 +1377,15 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   cgnat_update_tcp_state (session, tcp);
 
   kv.value = cgnat_index_to_value (session_index, session->generation);
-
-  /* Insert the reverse key (the translated 5-tuple) together with the
-   * forward key so the out2in fast path finds the session with a single
-   * lookup.  Lock order: forward table -> reverse table -> session->lock. */
-  cgnat_make_reverse_flow_key (&rkv, mapping->outside_fib_index,
-			       mapping->nat_ip, remote_ip, mapping->nat_port,
-			       remote_port, mapping->protocol);
   rkv.value = kv.value;
 
-  cgnat_reverse_session_table_lock (cm, &rkv);
   clib_spinlock_lock (&session->lock);
   if (clib_bihash_add_del_24_8 (&cm->session_table, &kv, 1))
   {
-    clib_spinlock_unlock (&session->lock);
-    cgnat_reverse_session_table_unlock (cm, &rkv);
-    cgnat_session_table_unlock (cm, &kv);
+    cgnat_session_table_unlock2 (cm, &kv, &rkv);
     if (user)
       cgnat_user_session_unreserve (user);
+    clib_spinlock_unlock (&session->lock);
     clib_spinlock_free (&session->lock);
     clib_spinlock_lock (&cm->session_pool_lock);
     pool_put (cm->sessions, session);
@@ -1365,14 +1393,13 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
     clib_spinlock_unlock (&mapping->lock);
     return VNET_API_ERROR_BUG;
   }
-  if (clib_bihash_add_del_24_8 (&cm->reverse_session_table, &rkv, 1))
+  if (clib_bihash_add_del_24_8 (&cm->session_table, &rkv, 1))
   {
     clib_bihash_add_del_24_8 (&cm->session_table, &kv, 0);
-    clib_spinlock_unlock (&session->lock);
-    cgnat_reverse_session_table_unlock (cm, &rkv);
-    cgnat_session_table_unlock (cm, &kv);
+    cgnat_session_table_unlock2 (cm, &kv, &rkv);
     if (user)
       cgnat_user_session_unreserve (user);
+    clib_spinlock_unlock (&session->lock);
     clib_spinlock_free (&session->lock);
     clib_spinlock_lock (&cm->session_pool_lock);
     pool_put (cm->sessions, session);
@@ -1380,8 +1407,7 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
     clib_spinlock_unlock (&mapping->lock);
     return VNET_API_ERROR_BUG;
   }
-  cgnat_reverse_session_table_unlock (cm, &rkv);
-  cgnat_session_table_unlock (cm, &kv);
+  cgnat_session_table_unlock2 (cm, &kv, &rkv);
 
   clib_atomic_fetch_add (&mapping->active_sessions, 1);
   cgnat_session_counter_inc (cm, mapping);
@@ -1615,6 +1641,12 @@ cgnat_dynamic_mapping_reap (cgnat_main_t *cm)
   clib_spinlock_lock (&cm->mapping_reap_lock);
   pending = cm->mapping_reap_queue;
   cm->mapping_reap_queue = 0;
+  /* Retry quarantined mappings every round: their sessions may have aged
+   * out (or a transient PBA release failure may have cleared) since they
+   * were parked here.  Without this, quarantined mappings and their ports
+   * would leak permanently. */
+  vec_append (pending, cm->mapping_reap_quarantine);
+  vec_reset_length (cm->mapping_reap_quarantine);
   clib_spinlock_unlock (&cm->mapping_reap_lock);
 
   vec_foreach (value, pending)
@@ -1987,6 +2019,11 @@ cgnat_static_mapping_add_del (u32 instance_index, ip4_address_t outside_ip,
   u32 mapping_index = CGNAT_INVALID_INDEX;
   u32 inside_fib_index = CGNAT_INVALID_INDEX;
   int rv = 0;
+
+  /* Runtime tables exist only after the plugin is enabled; reject all
+   * configuration changes before that point. */
+  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
+    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
 
   instance = cgnat_instance_get_by_index (cm, instance_index);
   if (!instance)
@@ -2477,59 +2514,58 @@ cgnat_instance_cleanup_resources (cgnat_main_t *cm,
 }
 
 void
-cgnat_session_init (cgnat_main_t *cm)
+cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings)
 {
   u32 i;
 
   if (cm->session_tables_initialized)
     return;
 
+  u32 sessions_buckets = cgnat_calc_bihash_buckets(max_sessions > 0 ? max_sessions : CGNAT_SESSION_POOL_INITIAL_SIZE);
+  u32 mappings_buckets = cgnat_calc_bihash_buckets(max_mappings > 0 ? max_mappings : CGNAT_MAPPING_POOL_INITIAL_SIZE);
+
   /* Keep a modest initial reserve to reduce early pool growth without
    * requiring a large VPP main heap on small test machines. */
-  pool_alloc_aligned (cm->sessions, CGNAT_SESSION_POOL_INITIAL_SIZE,
-		      CLIB_CACHE_LINE_BYTES);
-  pool_alloc_aligned (cm->mappings, CGNAT_MAPPING_POOL_INITIAL_SIZE,
-		      CLIB_CACHE_LINE_BYTES);
-  vec_validate (cm->session_generation_by_index,
-		CGNAT_SESSION_POOL_INITIAL_SIZE - 1);
-  vec_validate (cm->mapping_generation_by_index,
-		CGNAT_MAPPING_POOL_INITIAL_SIZE - 1);
+  pool_alloc_aligned (cm->sessions, max_sessions, CLIB_CACHE_LINE_BYTES);
+  pool_alloc_aligned (cm->mappings, max_mappings, CLIB_CACHE_LINE_BYTES);
+  vec_validate (cm->session_generation_by_index, max_sessions - 1);
+  vec_validate (cm->mapping_generation_by_index, max_sessions - 1);
 
   /* One cache line of session counters per vlib thread. */
   vec_validate_aligned (cm->session_counters_per_thread,
 			vlib_get_thread_main ()->n_vlib_mains - 1,
 			CLIB_CACHE_LINE_BYTES);
 
+  /* BIHASH_USE_HEAP=1 in this tree: the memory_size argument is ignored,
+   * so pass 0 (same as the static/adf tables). */
   clib_bihash_init_16_8 (&cm->in2out_mapping_table, "cgnat-in2out-mapping",
-			 CGNAT_MAPPING_HASH_BUCKETS, CGNAT_MAPPING_HASH_MEMORY);
+			 mappings_buckets, 0);
   clib_bihash_init_16_8 (&cm->out2in_mapping_table, "cgnat-out2in-mapping",
-			 CGNAT_MAPPING_HASH_BUCKETS, CGNAT_MAPPING_HASH_MEMORY);
+			 mappings_buckets, 0);
+
   clib_bihash_init_16_8 (&cm->static_addr_in2out_table,
 			 "cgnat-static-addr-in2out",
-			 CGNAT_MAPPING_HASH_BUCKETS, CGNAT_MAPPING_HASH_MEMORY);
+			 CGNAT_STATIC_MAPPING_HASH_BUCKETS, CGNAT_STATIC_MAPPING_HASH_MEMORY);
   clib_bihash_init_16_8 (&cm->static_addr_out2in_table,
 			 "cgnat-static-addr-out2in",
-			 CGNAT_MAPPING_HASH_BUCKETS, CGNAT_MAPPING_HASH_MEMORY);
+			 CGNAT_STATIC_MAPPING_HASH_BUCKETS, CGNAT_STATIC_MAPPING_HASH_MEMORY);
   clib_bihash_init_24_8 (&cm->static_rule_table, "cgnat-static-rule",
 			 CGNAT_STATIC_RULE_HASH_BUCKETS,
 			 CGNAT_STATIC_RULE_HASH_MEMORY);
+
   clib_bihash_init_24_8 (&cm->session_table, "cgnat-session",
-				 CGNAT_SESSION_HASH_BUCKETS, CGNAT_SESSION_HASH_MEMORY);
-  clib_bihash_init_24_8 (&cm->reverse_session_table, "cgnat-reverse-session",
-			 CGNAT_SESSION_HASH_BUCKETS, CGNAT_SESSION_HASH_MEMORY);
+		     sessions_buckets, 0);
   clib_bihash_init_24_8 (&cm->adf_remote_table, "cgnat-adf-remote",
 			 CGNAT_ADF_REMOTE_HASH_BUCKETS,
 			 CGNAT_ADF_REMOTE_HASH_MEMORY);
-  tw_timer_wheel_init_2t_1w_2048sl (&cm->session_timer_wheel,
-				    cgnat_session_timer_expired_cb, 1.0,
+  /* No wheel callback: expired timers are collected directly with
+   * tw_timer_expire_timers_vec_2t_1w_2048sl(). */
+  tw_timer_wheel_init_2t_1w_2048sl (&cm->session_timer_wheel, 0, 1.0,
 				    CGNAT_SESSION_TIMER_MAX_EXPIRATIONS);
   for (i = 0; i < CGNAT_MAPPING_TABLE_LOCK_BUCKETS; i++)
     clib_spinlock_init (&cm->mapping_table_locks[i]);
   for (i = 0; i < CGNAT_SESSION_TABLE_LOCK_BUCKETS; i++)
-    {
-      clib_spinlock_init (&cm->session_table_locks[i]);
-      clib_spinlock_init (&cm->reverse_session_table_locks[i]);
-    }
+    clib_spinlock_init (&cm->session_table_locks[i]);
   for (i = 0; i < CGNAT_ADF_REMOTE_LOCK_BUCKETS; i++)
     clib_spinlock_init (&cm->adf_remote_locks[i]);
   clib_spinlock_init (&cm->mapping_pool_lock);
@@ -2572,7 +2608,6 @@ cgnat_session_reset (cgnat_main_t *cm)
   clib_bihash_free_16_8 (&cm->static_addr_out2in_table);
   clib_bihash_free_24_8 (&cm->static_rule_table);
   clib_bihash_free_24_8 (&cm->session_table);
-  clib_bihash_free_24_8 (&cm->reverse_session_table);
   clib_bihash_free_24_8 (&cm->adf_remote_table);
 
   if (cm->session_timer_initialized)
@@ -2584,10 +2619,7 @@ cgnat_session_reset (cgnat_main_t *cm)
   for (i = 0; i < CGNAT_MAPPING_TABLE_LOCK_BUCKETS; i++)
     clib_spinlock_free (&cm->mapping_table_locks[i]);
   for (i = 0; i < CGNAT_SESSION_TABLE_LOCK_BUCKETS; i++)
-    {
-      clib_spinlock_free (&cm->session_table_locks[i]);
-      clib_spinlock_free (&cm->reverse_session_table_locks[i]);
-    }
+    clib_spinlock_free (&cm->session_table_locks[i]);
   for (i = 0; i < CGNAT_ADF_REMOTE_LOCK_BUCKETS; i++)
     clib_spinlock_free (&cm->adf_remote_locks[i]);
   clib_spinlock_free (&cm->mapping_pool_lock);
@@ -2599,19 +2631,22 @@ cgnat_session_reset (cgnat_main_t *cm)
   cm->session_tables_initialized = 0;
 
   vec_free (cm->session_counters_per_thread);
-
-  cgnat_session_init (cm);
 }
 
 void
 cgnat_session_expire_timers (f64 now)
 {
   cgnat_main_t *cm = &cgnat_main;
+  u32 *expired = 0;
 
   if (!cm->session_timer_initialized)
     return;
 
-  tw_timer_expire_timers_2t_1w_2048sl (&cm->session_timer_wheel, now);
+  /* Collect expired timers directly instead of via a wheel callback. */
+  expired = tw_timer_expire_timers_vec_2t_1w_2048sl (&cm->session_timer_wheel,
+						     now, expired);
+  cgnat_session_process_expired_timers (expired);
+  vec_free (expired);
   cgnat_dynamic_mapping_reap (cm);
 }
 
