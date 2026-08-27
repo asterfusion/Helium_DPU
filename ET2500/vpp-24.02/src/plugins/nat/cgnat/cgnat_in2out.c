@@ -10,6 +10,7 @@
 #include <vnet/ip/ip.h>
 
 #include <nat/cgnat/cgnat.h>
+#include <nat/cgnat/cgnat_session_inlines.h>
 
 typedef enum
 {
@@ -68,6 +69,7 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
   u32 n_left = frame->n_vectors;
   u16 nexts[VLIB_FRAME_SIZE], *next = nexts;
   u32 pkts_processed = 0;
+  f64 now = vlib_time_now (vm);
 
   while (n_left > 0)
     {
@@ -81,18 +83,31 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
       u8 context_valid0 = 0;
       int rv;
 
+      /* Prefetch the next packet's buffer header and IP header so the
+       * current packet's dependent loads (buffer -> ip -> bihash bucket)
+       * overlap with the next packet's misses. */
+      if (PREDICT_TRUE (n_left > 1))
+	{
+	  vlib_buffer_t *b1 = vlib_get_buffer (vm, from[1]);
+	  vlib_prefetch_buffer_header (b1, LOAD);
+	  clib_prefetch_load (vlib_buffer_get_current (b1));
+	}
+
       b0 = vlib_get_buffer (vm, bi0);
       sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
 
-      acl_index0 = b0->acl_index;
-      instance_index0 = cgnat_instance_index_by_acl (cm, acl_index0);
+      /* The policy node (our only upstream) already resolved the instance
+       * and the inside FIB and stashed them in opaque2. */
+      instance_index0 = cgnat_buffer_instance_index (b0);
       if (PREDICT_FALSE (instance_index0 == CGNAT_INVALID_INDEX))
 	goto trace;
+      inside_fib_index0 = cgnat_buffer_inside_fib_index (b0);
+      acl_index0 = b0->acl_index;
 
       context_valid0 = 1;
-      inside_fib_index0 = cgnat_packet_inside_fib_index (b0);
 
-      rv = cgnat_session_in2out (vm, b0, instance_index0, inside_fib_index0);
+      rv = cgnat_session_in2out (vm, b0, instance_index0, inside_fib_index0,
+				 now);
       if (PREDICT_FALSE (rv && rv != VNET_API_ERROR_UNSUPPORTED))
 	    next0 = CGNAT_IN2OUT_NEXT_DROP;
 
@@ -140,6 +155,7 @@ VLIB_REGISTER_NODE (cgnat_in2out_node) = {
   },
 };
 /* *INDENT-ON* */
+
 
 /*
  * fd.io coding-style-patch-verification: ON

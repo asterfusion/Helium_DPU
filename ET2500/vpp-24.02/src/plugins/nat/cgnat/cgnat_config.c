@@ -150,6 +150,7 @@ void
 cgnat_recalculate_instance (cgnat_main_t *cm, cgnat_instance_t *instance)
 {
   u32 *pool_index;
+  u32 addr_min = ~0u, addr_max = 0;
 
   instance->total_blocks = 0;
   instance->allocated_blocks = 0;
@@ -165,7 +166,16 @@ cgnat_recalculate_instance (cgnat_main_t *cm, cgnat_instance_t *instance)
 	clib_atomic_load_relax_n (&pool->allocated_blocks);
       instance->cooling_blocks += clib_atomic_load_relax_n (&pool->cooling_blocks);
       instance->active_users += clib_atomic_load_relax_n (&pool->active_users);
+      addr_min =
+	clib_min (addr_min, clib_net_to_host_u32 (pool->first_ip.as_u32));
+      addr_max =
+	clib_max (addr_max, clib_net_to_host_u32 (pool->last_ip.as_u32));
     }
+
+  /* Public-address envelope used by the hairpin pre-filter in
+   * cgnat_session_in2out(). */
+  instance->pool_addr_min.as_u32 = clib_host_to_net_u32 (addr_min);
+  instance->pool_addr_max.as_u32 = clib_host_to_net_u32 (addr_max);
 }
 
 static int
@@ -292,7 +302,6 @@ cgnat_instance_free_runtime (cgnat_instance_t *instance)
   for (i = 0; i < CGNAT_USER_LOCK_BUCKETS; i++)
     clib_spinlock_free (&instance->user_locks[i]);
   clib_spinlock_free (&instance->users_lock);
-  clib_spinlock_free (&instance->random_lock);
 
   clib_memset (instance, 0, sizeof (*instance));
 }
@@ -308,9 +317,6 @@ cgnat_instance_runtime_init (cgnat_main_t *cm, cgnat_instance_t *instance,
   for (i = 0; i < CGNAT_USER_LOCK_BUCKETS; i++)
     clib_spinlock_init (&instance->user_locks[i]);
   clib_spinlock_init (&instance->users_lock);
-  clib_spinlock_init (&instance->random_lock);
-  instance->random_seed =
-    random_default_seed () ^ instance->instance_id ^ instance_index;
 
   instance->users = 0;
   instance->user_index_by_key =
@@ -331,7 +337,6 @@ cgnat_instance_runtime_fini (cgnat_instance_t *instance)
   for (i = 0; i < CGNAT_USER_LOCK_BUCKETS; i++)
     clib_spinlock_free (&instance->user_locks[i]);
   clib_spinlock_free (&instance->users_lock);
-  clib_spinlock_free (&instance->random_lock);
 
   if (instance->users)
     pool_free (instance->users);

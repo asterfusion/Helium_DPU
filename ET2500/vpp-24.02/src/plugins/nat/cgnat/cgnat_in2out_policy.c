@@ -127,6 +127,10 @@ cgnat_in2out_policy_inline (cgnat_main_t *cm, vlib_buffer_t *b0, u16 *next0,
     return CGNAT_IN2OUT_POLICY_ERROR_BYPASS_FIB_MISMATCH;
 
   *next0 = CGNAT_IN2OUT_POLICY_NEXT_IN2OUT;
+
+  /* Hand the resolved instance and inside FIB to the cgnat-in2out node. */
+  cgnat_buffer_instance_index (b0) = instance_index;
+  cgnat_buffer_inside_fib_index (b0) = packet_fib_index;
   return CGNAT_IN2OUT_POLICY_ERROR_PERMIT;
 }
 

@@ -498,6 +498,7 @@ typedef struct
     i16 outer_l4_hdr_offset;
   };
 
+  union {
   struct
   {
     u32 arc_next;
@@ -507,6 +508,13 @@ typedef struct
       u32 cached_dst_nat_session_index;
     };
   } nat;
+
+  struct
+  {
+    u32 instance_index;
+    u32 inside_fib_index;
+  } cgnat;
+  };
 
   union {
   struct{

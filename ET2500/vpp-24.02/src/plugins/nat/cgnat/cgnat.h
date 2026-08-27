@@ -594,8 +594,6 @@ typedef struct
   u16 tcp_mss;
   clib_spinlock_t user_locks[CGNAT_USER_LOCK_BUCKETS];
   clib_spinlock_t users_lock;
-  clib_spinlock_t random_lock;
-  u32 random_seed;
 
   u16 per_user_max_blocks;
   u16 per_user_max_ports;
@@ -604,6 +602,13 @@ typedef struct
 
   /* Global pool indices. Configuration updates run under a worker barrier. */
   u32 *pool_indices;
+
+  /* Envelope [min,max] over all attached pools' public address ranges,
+   * maintained by cgnat_recalculate_instance().  Used to cheaply skip the
+   * hairpin destination lookup for packets whose destination cannot be one
+   * of our own public addresses.  min > max means "no pool attached". */
+  ip4_address_t pool_addr_min;
+  ip4_address_t pool_addr_max;
 
   u32 tcp_syn_timeout;
   u32 tcp_established_timeout;
@@ -654,6 +659,18 @@ typedef struct
   u32 count;
 } cgnat_fib_entry_reg_t;
 
+/* Active session counters for one thread; one cache line per thread so the
+ * data-plane create/delete path never bounces a shared line between cores.
+ * Readers must aggregate with cgnat_session_counts(). */
+typedef struct
+{
+  CLIB_CACHE_LINE_ALIGN_MARK (pad0);
+  u64 total;
+  u64 tcp;
+  u64 udp;
+  u64 icmp;
+} cgnat_session_counters_t;
+
 typedef struct
 {
   u8 enabled;
@@ -674,6 +691,10 @@ typedef struct
   clib_bihash_16_8_t static_addr_out2in_table;
   clib_bihash_24_8_t static_rule_table;
   clib_bihash_24_8_t session_table;
+  /* Reverse session table: (outside_fib, nat_ip, remote_ip, nat_port,
+   * remote_port, proto) -> session, giving the out2in fast path a single
+   * lookup.  Entries are added/removed together with the forward key. */
+  clib_bihash_24_8_t reverse_session_table;
   clib_bihash_24_8_t adf_remote_table;
   u8 session_tables_initialized;
 
@@ -684,13 +705,13 @@ typedef struct
   u32 *session_generation_by_index;
   u32 *adf_remote_generation_by_index;
 
-  /* Active session counters maintained atomically (data plane hot path). */
-  u32 active_sessions_tcp;
-  u32 active_sessions_udp;
-  u32 active_sessions_icmp;
-  u32 active_sessions_total;
+  /* Active session counters, one cache line per vlib thread.  Data-plane
+   * writes are plain (non-atomic) increments of the calling thread's slot;
+   * readers aggregate via cgnat_session_counts(). */
+  cgnat_session_counters_t *session_counters_per_thread;
   clib_spinlock_t mapping_table_locks[CGNAT_MAPPING_TABLE_LOCK_BUCKETS];
   clib_spinlock_t session_table_locks[CGNAT_SESSION_TABLE_LOCK_BUCKETS];
+  clib_spinlock_t reverse_session_table_locks[CGNAT_SESSION_TABLE_LOCK_BUCKETS];
   clib_spinlock_t adf_remote_locks[CGNAT_ADF_REMOTE_LOCK_BUCKETS];
   clib_spinlock_t mapping_pool_lock;
   clib_spinlock_t adf_remote_pool_lock;
@@ -858,6 +879,14 @@ cgnat_packet_inside_fib_index (vlib_buffer_t *b)
     vnet_buffer (b)->sw_if_index[VLIB_RX]);
 }
 
+/* The policy node (the only upstream of cgnat-in2out) hands the resolved
+ * instance index and inside FIB to the in2out node through the opaque2
+ * cgnat slot, avoiding a second ACL->instance translation and inside-FIB
+ * derivation per packet. */
+#define cgnat_buffer_instance_index(b) (vnet_buffer2 (b)->cgnat.instance_index)
+#define cgnat_buffer_inside_fib_index(b)                                   \
+  (vnet_buffer2 (b)->cgnat.inside_fib_index)
+
 static_always_inline u8
 cgnat_instance_inside_fib_matches (cgnat_instance_t *instance,
 				   u32 packet_inside_fib_index)
@@ -896,13 +925,17 @@ cgnat_user_unlock (cgnat_instance_t *instance, u32 fib_index,
 }
 
 static_always_inline u32
-cgnat_instance_random_u32 (cgnat_instance_t *instance)
+cgnat_instance_random_u32 (CLIB_UNUSED (cgnat_instance_t *instance))
 {
-  u32 rv;
+  /* Draw from the per-thread seed instead of the shared instance seed: the
+   * port allocator calls this on the new-mapping path and the instance-wide
+   * random_lock would otherwise serialize all workers.  The port bitmap
+   * handles collisions, so per-thread sequences are safe here. */
+  vlib_main_t *vm = vlib_get_main ();
+  u32 seed = (u32) vm->random_seed;
+  u32 rv = random_u32 (&seed);
 
-  clib_spinlock_lock (&instance->random_lock);
-  rv = random_u32 (&instance->random_seed);
-  clib_spinlock_unlock (&instance->random_lock);
+  vm->random_seed = seed;
   return rv;
 }
 
@@ -967,6 +1000,8 @@ void cgnat_pba_expire_timers (f64 now);
 void cgnat_session_init (cgnat_main_t *cm);
 void cgnat_session_reset (cgnat_main_t *cm);
 void cgnat_session_expire_timers (f64 now);
+void cgnat_session_counts (cgnat_main_t *cm, u64 *total, u64 *tcp, u64 *udp,
+			   u64 *icmp);
 cgnat_session_t *cgnat_session_snapshot (cgnat_session_filter_t *filter);
 u32 cgnat_session_delete_matching (cgnat_session_filter_t *filter);
 
@@ -998,10 +1033,6 @@ cgnat_block_user_summary_t *
 cgnat_block_user_snapshot (ip4_address_t inside_ip);
 cgnat_block_public_detail_t *
 cgnat_block_public_snapshot (ip4_address_t public_ip);
-
-int cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
-			  u32 instance_index, u32 inside_fib_index);
-int cgnat_session_out2in (vlib_main_t *vm, vlib_buffer_t *b);
 
 clib_error_t *cgnat_api_hookup (vlib_main_t *vm);
 

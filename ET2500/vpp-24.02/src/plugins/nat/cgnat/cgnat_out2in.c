@@ -10,6 +10,7 @@
 #include <vnet/ip/ip.h>
 
 #include <nat/cgnat/cgnat.h>
+#include <nat/cgnat/cgnat_session_inlines.h>
 
 typedef enum
 {
@@ -62,6 +63,7 @@ VLIB_NODE_FN (cgnat_out2in_node) (vlib_main_t *vm,
   u32 n_left = frame->n_vectors;
   u16 nexts[VLIB_FRAME_SIZE], *next = nexts;
   u32 pkts_processed = 0;
+  f64 now = vlib_time_now (vm);
 
   while (n_left > 0)
     {
@@ -71,6 +73,16 @@ VLIB_NODE_FN (cgnat_out2in_node) (vlib_main_t *vm,
       u32 next0 = CGNAT_OUT2IN_NEXT_LOOKUP;
       u32 sw_if_index0;
       int rv;
+
+      /* Prefetch the next packet's buffer header and IP header so the
+       * current packet's dependent loads (buffer -> ip -> bihash bucket)
+       * overlap with the next packet's misses. */
+      if (PREDICT_TRUE (n_left > 1))
+	{
+	  vlib_buffer_t *b1 = vlib_get_buffer (vm, from[1]);
+	  vlib_prefetch_buffer_header (b1, LOAD);
+	  clib_prefetch_load (vlib_buffer_get_current (b1));
+	}
 
       b0 = vlib_get_buffer (vm, bi0);
       sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
@@ -82,7 +94,7 @@ VLIB_NODE_FN (cgnat_out2in_node) (vlib_main_t *vm,
 	  interface0 = cgnat_get_interface (cm, sw_if_index0);
 	  if (PREDICT_TRUE (interface0 && cgnat_interface_is_outside (interface0)))
 	    {
-	      rv = cgnat_session_out2in (vm, b0);
+	      rv = cgnat_session_out2in (vm, b0, now);
 	      if (PREDICT_FALSE (rv != 0 &&
 				 rv != VNET_API_ERROR_NO_SUCH_ENTRY &&
 				 rv != VNET_API_ERROR_UNSUPPORTED))
@@ -130,6 +142,7 @@ VLIB_REGISTER_NODE (cgnat_out2in_node) = {
   },
 };
 /* *INDENT-ON* */
+
 
 /*
  * fd.io coding-style-patch-verification: ON
