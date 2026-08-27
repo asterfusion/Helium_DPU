@@ -52,23 +52,17 @@ add_vpp_plugin(linux_cp
   SOURCES
   lcp_api.c
   lcp_cli.c
+  lcp_policy.c
+  lcp_policer.c
+  lcp_stats.c
+  lcp_punt.c
+  lcp_match.c
+  lcp_producer.c
   lcp_node.c
-  lcp_ospf.c
-  lcp_lldp.c
-  lcp_lacp.c
-  lcp_dhcp.c
-  lcp_ndp.c
   lcp_pppoe.c
   lcp_pppoe_api.c
-  lcp_bfd.c
-  lcp_bpdu.c
-  lcp_vrrp.c
   lcp_mvrp.c
-  lcp_igmp.c
-  lcp_pim.c
   lcp_rip.c
-  lcp_ldp.c
-  lcp_isis.c
 
   API_FILES
   lcp.api
@@ -81,10 +75,17 @@ add_vpp_plugin(linux_cp
 add_vpp_plugin(linux_cp_unittest
   SOURCES
   test/lcp_unittest.c
+  test/lcp_punt_unittest.c
+  lcp_match.c
+  lcp_punt.c
+  lcp_policy.c
+  lcp_policer.c
 
   LINK_LIBRARIES
   lcp
 )
+target_compile_definitions(linux_cp_unittest_plugin PRIVATE LCP_COPP_UNIT_TEST)
+add_dependencies(linux_cp_unittest_plugin linux_cp_plugin_api_headers)
 
 add_vpp_plugin(linux_nl
   SOURCES
