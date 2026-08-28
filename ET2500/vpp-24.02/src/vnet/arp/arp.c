@@ -399,6 +399,7 @@ arp_reply (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	  const ip4_address_t *if_addr0;
 	  u32 pi0, error0, next0, sw_if_index0, conn_sw_if_index0, fib_index0;
 	  u8 dst_is_local0, is_vrrp_reply0, is_unnumbered0;
+	  u8 dst_is_interface_addr0,
 	  fib_node_index_t dst_fei, src_fei;
 	  const fib_prefix_t *pfx0;
 	  fib_entry_flag_t src_flags, dst_flags;
@@ -569,6 +570,13 @@ arp_reply (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	    }
 
 	  dst_is_local0 = (FIB_ENTRY_FLAG_LOCAL & dst_flags);
+	  dst_is_interface_addr0 =
+	    ((FIB_ENTRY_FLAG_LOCAL &
+	      fib_entry_get_flags_for_source (dst_fei,
+					FIB_SOURCE_INTERFACE)) &&
+	     sw_if_index0 ==
+	       fib_entry_get_resolving_interface_for_source (
+		 dst_fei, FIB_SOURCE_INTERFACE));
 	  pfx0 = fib_entry_get_prefix (dst_fei);
 	  if_addr0 = &pfx0->fp_addr.ip4;
 
@@ -650,32 +658,35 @@ arp_reply (vlib_main_t * vm, vlib_node_runtime_t * node, vlib_frame_t * frame)
 	      goto drop;
 	    }
 
-/*
- * AsterNOS uses Linux as the ARP Reply owner for ordinary local
- * addresses on LCP-enabled interfaces.
- *
- * Suppress the VPP Reply only after all of the following have
- * already been validated:
- *
- *  - the packet is an ARP Request;
- *  - the target address is a VPP local address;
- *  - source and destination interface checks passed;
- *  - this is not a gratuitous ARP;
- *  - this is not an unnumbered fallback case;
- *  - linux-cp-arp-phy successfully copied the Request to Linux.
- *
- * If the Linux copy was not created, keep the original VPP Reply
- * path as a fail-open fallback.
- */
-if (arp0->opcode ==
-      clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_request) &&
-    dst_is_local0 &&
-    !is_unnumbered0 &&
-    vnet_buffer2 (p0)->lcp_host_copy_done)
-  {
-    error0 = ARP_ERROR_REPLY_SUPPRESSED_LINUX_OWNER;
-    goto drop;
-  }
+	  /*
+	   * AsterNOS uses Linux as the ARP Reply owner for interface
+	   * addresses on LCP-enabled interfaces.
+	   *
+	   * Suppress the VPP Reply only after all of the following have
+	   * already been validated:
+	   *
+	   *  - the packet is an ARP Request;
+	   *  - the target is a VPP interface address on the RX interface;
+	   *  - source and destination interface checks passed;
+	   *  - this is not a gratuitous ARP;
+	   *  - this is not an unnumbered fallback case;
+	   *  - linux-cp-arp-phy successfully copied the Request to Linux.
+	   *
+	   * Local receive routes installed by features such as CGNAT or
+	   * NAT44-ED are not sourced by FIB_SOURCE_INTERFACE, so VPP remains
+	   * the ARP Reply owner for those addresses.
+	   *
+	   * If the Linux copy was not created, keep the original VPP Reply
+	   * path as a fail-open fallback.
+	   */
+	  if (arp0->opcode ==
+		clib_host_to_net_u16 (ETHERNET_ARP_OPCODE_request) &&
+	      dst_is_local0 && dst_is_interface_addr0 && !is_unnumbered0 &&
+	      vnet_buffer2 (p0)->lcp_host_copy_done)
+	    {
+	      error0 = ARP_ERROR_REPLY_SUPPRESSED_LINUX_OWNER;
+	      goto drop;
+	    }
 
 
 	  next0 = arp_mk_reply (vnm, p0, sw_if_index0,
