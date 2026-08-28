@@ -137,7 +137,6 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
           {
             if(PREDICT_FALSE(
               ICMP6_neighbor_solicitation == icmp0->type ||
-              ICMP6_neighbor_advertisement == icmp0->type ||
               ICMP6_router_solicitation == icmp0->type ||
               ICMP6_router_advertisement == icmp0->type ||
               ICMP6_redirect == icmp0->type
@@ -168,7 +167,6 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
           {
             if(PREDICT_FALSE(
               ICMP6_neighbor_solicitation == icmp1->type ||
-              ICMP6_neighbor_advertisement == icmp1->type ||
               ICMP6_router_solicitation == icmp1->type ||
               ICMP6_router_advertisement == icmp1->type ||
               ICMP6_redirect == icmp1->type
@@ -245,7 +243,6 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
           {
             if(PREDICT_FALSE(
               ICMP6_neighbor_solicitation == icmp->type ||
-              ICMP6_neighbor_advertisement == icmp->type ||
               ICMP6_router_solicitation == icmp->type ||
               ICMP6_router_advertisement == icmp->type ||
               ICMP6_redirect == icmp->type
