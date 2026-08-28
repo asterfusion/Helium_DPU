@@ -819,9 +819,11 @@ cgnat_cooling_process_expired (u32 *expired_timers)
       entry_index = expired_timers[i] & 0x7FFFFFFF;
       if (processed >= CGNAT_COOLING_TIMER_MAX_EXPIRATIONS)
 	{
+	  clib_spinlock_lock (&cm->cooling_timer_lock);
 	  if (!pool_is_free_index (cm->cooling_timers, entry_index))
 	    tw_timer_start_2t_1w_2048sl (&cm->cooling_timer_wheel,
 					 entry_index, 0, 1);
+	  clib_spinlock_unlock (&cm->cooling_timer_lock);
 	  continue;
 	}
 
@@ -858,8 +860,10 @@ cgnat_cooling_process_expired (u32 *expired_timers)
 		  u16 delay = clib_min (entry->remaining_time,
 					CGNAT_TIMER_MAX_DELAY);
 		  entry->remaining_time -= delay;
+		  clib_spinlock_lock (&cm->cooling_timer_lock);
 		  tw_timer_start_2t_1w_2048sl (&cm->cooling_timer_wheel,
 					       entry_index, 0, delay);
+		  clib_spinlock_unlock (&cm->cooling_timer_lock);
 		  clib_spinlock_unlock (&ip->lock);
 		  if (have_owner_key)
 		    cgnat_user_unlock (instance, entry->inside_fib_index,
@@ -886,7 +890,9 @@ cgnat_cooling_process_expired (u32 *expired_timers)
 	cgnat_user_unlock (instance, entry->inside_fib_index, entry->private_ip);
 
     done:
+      clib_spinlock_lock (&cm->cooling_timer_lock);
       pool_put_index (cm->cooling_timers, entry_index);
+      clib_spinlock_unlock (&cm->cooling_timer_lock);
     }
 }
 
@@ -935,6 +941,7 @@ cgnat_start_block_cooling (cgnat_main_t *cm, u32 instance_index,
   cgnat_log_pba_block (cgnat_instance_get_by_index (cm, instance_index),
 		       "PBA_BLOCK_RELEASE", "idle", private_ip, ip->addr,
 		       pool, block, pool_index);
+  clib_spinlock_lock (&cm->cooling_timer_lock);
   pool_get_zero (cm->cooling_timers, entry);
   entry_index = entry - cm->cooling_timers;
   entry->instance_index = instance_index;
@@ -964,6 +971,7 @@ cgnat_start_block_cooling (cgnat_main_t *cm, u32 instance_index,
   tw_timer_start_2t_1w_2048sl (&cm->cooling_timer_wheel, entry_index, 0,
 			       clib_min (pool->cooling_time,
 				 CGNAT_TIMER_MAX_DELAY));
+  clib_spinlock_unlock (&cm->cooling_timer_lock);
 }
 
 void
@@ -977,6 +985,7 @@ cgnat_pba_init (cgnat_main_t *cm)
   tw_timer_wheel_init_2t_1w_2048sl (&cm->cooling_timer_wheel, 0, 1.0,
 				    CGNAT_COOLING_TIMER_MAX_EXPIRATIONS);
   vec_prealloc(cm->cooling_expired, CGNAT_COOLING_TIMER_VEC);
+  clib_spinlock_init (&cm->cooling_timer_lock);
   cm->cooling_timer_initialized = 1;
 }
 
@@ -988,10 +997,37 @@ cgnat_pba_reset (cgnat_main_t *cm)
     {
       tw_timer_wheel_free_2t_1w_2048sl (&cm->cooling_timer_wheel);
       vec_free(cm->cooling_expired);
+      clib_spinlock_free (&cm->cooling_timer_lock);
       cm->cooling_timer_initialized = 0;
     }
 
   cgnat_pba_init (cm);
+}
+
+/* Drop every cooling timer of the given pool (CGNAT_INVALID_INDEX = all
+ * pools of the instance).  Called with a worker barrier held during
+ * teardown.  The wheel keeps stale references until they naturally expire,
+ * which is harmless: the expiry path skips pool-free indices. */
+void
+cgnat_pba_purge_cooling_timers (cgnat_main_t *cm, u32 instance_index,
+				u32 pool_index)
+{
+  cgnat_cooling_timer_t *t;
+  u32 *indices = 0, *pi;
+
+  clib_spinlock_lock (&cm->cooling_timer_lock);
+  pool_foreach (t, cm->cooling_timers)
+    {
+      if (t->instance_index != instance_index)
+	continue;
+      if (pool_index != CGNAT_INVALID_INDEX && t->pool_index != pool_index)
+	continue;
+      vec_add1 (indices, t - cm->cooling_timers);
+    }
+  vec_foreach (pi, indices)
+    pool_put_index (cm->cooling_timers, *pi);
+  clib_spinlock_unlock (&cm->cooling_timer_lock);
+  vec_free (indices);
 }
 
 void
@@ -1002,7 +1038,11 @@ cgnat_pba_expire_timers (f64 now)
   if (!cm->cooling_timer_initialized)
     return;
 
+  /* Lock-synchronized with workers arming cooling timers from the datapath
+   * (cgnat_start_block_cooling); no worker barrier is taken here. */
+  clib_spinlock_lock (&cm->cooling_timer_lock);
   cm->cooling_expired = tw_timer_expire_timers_vec_2t_1w_2048sl ( &cm->cooling_timer_wheel, now, cm->cooling_expired);
+  clib_spinlock_unlock (&cm->cooling_timer_lock);
   cgnat_cooling_process_expired (cm->cooling_expired);
   vec_reset_length (cm->cooling_expired);
 }

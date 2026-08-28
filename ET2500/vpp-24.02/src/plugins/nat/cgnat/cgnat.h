@@ -144,34 +144,34 @@ typedef enum
 typedef struct
 {
   u8 kind;
+  u32 instance_id;
   u8 event[CGNAT_LOG_EVENT_STR_LEN];
   u8 reason[CGNAT_LOG_REASON_STR_LEN];
   u8 instance_label[CGNAT_LOG_INSTANCE_LABEL_LEN];
-  u32 instance_id;
 
-	  union
-	  {
-	    struct
-	    {
-	      ip4_address_t private_ip;
-	      ip4_address_t public_ip;
-	      u16 public_port_start;
-	      u16 public_port_end;
-	    } block;
+  union
+  {
+      struct
+      {
+          ip4_address_t private_ip;
+          ip4_address_t public_ip;
+          u16 public_port_start;
+          u16 public_port_end;
+      } block;
 
-    struct
-    {
-      ip4_address_t private_ip;
-      ip4_address_t public_ip;
-      ip4_address_t remote_ip;
-      u16 private_port;
-      u16 public_port;
-      u16 remote_port;
-      u8 protocol;
-      u8 mapping_type;
-    } session;
+      struct
+      {
+          ip4_address_t private_ip;
+          ip4_address_t public_ip;
+          ip4_address_t remote_ip;
+          u16 private_port;
+          u16 public_port;
+          u16 remote_port;
+          u8 protocol;
+          u8 mapping_type;
+      } session;
   };
-} cgnat_log_event_t;
+} __clib_aligned(256) cgnat_log_event_t;
 
 typedef enum
 {
@@ -229,10 +229,10 @@ typedef enum
 
 typedef enum
 {
+  CGNAT_STATIC_PROTO_ALL = 0x0,
   CGNAT_STATIC_PROTO_TCP = IP_PROTOCOL_TCP,
   CGNAT_STATIC_PROTO_UDP = IP_PROTOCOL_UDP,
   CGNAT_STATIC_PROTO_ICMP = IP_PROTOCOL_ICMP,
-  CGNAT_STATIC_PROTO_ALL = 0xff,
 } cgnat_static_proto_t;
 
 typedef enum
@@ -391,7 +391,6 @@ typedef struct
   CLIB_CACHE_LINE_ALIGN_MARK (cacheline0);
   u32 generation;
   u32 active_sessions;
-  clib_spinlock_t lock;
 
   ip4_address_t inside_ip;
   ip4_address_t nat_ip;
@@ -719,11 +718,17 @@ typedef struct
   cgnat_cooling_timer_t *cooling_timers;
   u8 cooling_timer_initialized;
   u32 *cooling_expired;
+  /* Serializes every touch of cooling_timer_wheel and the cooling_timers
+   * pool: workers arm timers from the datapath while the main thread
+   * expires them, with no worker barrier in between. */
+  clib_spinlock_t cooling_timer_lock;
 
   tw_timer_wheel_2t_1w_2048sl_t session_timer_wheel;
   cgnat_session_timer_t *session_timers;
   u8 session_timer_initialized;
   u32 *session_expired;
+  /* Same role for session_timer_wheel/session_timers: covers both the
+   * worker-side arm and the main-thread expire paths. */
   clib_spinlock_t session_timer_lock;
 
   u32 in2out_policy_node_index;
@@ -1003,10 +1008,13 @@ void cgnat_pba_init (cgnat_main_t *cm);
 int cgnat_pool_runtime_init (cgnat_pool_t *pool, u8 create_blocks);
 void cgnat_pool_runtime_reset (cgnat_pool_t *pool);
 void cgnat_pba_reset (cgnat_main_t *cm);
+void cgnat_pba_purge_cooling_timers (cgnat_main_t *cm, u32 instance_index,
+				     u32 pool_index);
 void cgnat_pba_expire_timers (f64 now);
 void cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings);
 void cgnat_session_reset (cgnat_main_t *cm);
 void cgnat_session_expire_timers (f64 now);
+void cgnat_reap (cgnat_main_t *cm);
 void cgnat_session_counts (cgnat_main_t *cm, u64 *total, u64 *tcp, u64 *udp,
 			   u64 *icmp);
 cgnat_session_t *cgnat_session_snapshot (cgnat_session_filter_t *filter);

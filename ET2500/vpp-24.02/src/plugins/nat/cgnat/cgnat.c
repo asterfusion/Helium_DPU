@@ -59,8 +59,20 @@ cgnat_timer_process (vlib_main_t *vm, vlib_node_runtime_t *rt,
             break;
       }
 
+      /* Expire is lock-synchronized with the datapath (session/cooling timer
+       * locks, striped table locks, atomic flags), so it needs no worker
+       * barrier even with millions of sessions in flight. */
       cgnat_pba_expire_timers (now);
       cgnat_session_expire_timers (now);
+
+      /* Slot reclamation is different: datapath readers resolve session and
+       * mapping pool pointers without any lock, so deleted entries may only
+       * return to their pools once every worker has passed a barrier.  Keep
+       * the barrier section this small so the worker pause stays O(reaped
+       * count), independent of the expire workload. */
+      vlib_worker_thread_barrier_sync (vm);
+      cgnat_reap (cm);
+      vlib_worker_thread_barrier_release (vm);
 
       vec_reset_length (event_data);
     }

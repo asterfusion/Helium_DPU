@@ -224,6 +224,26 @@ cgnat_mapping_table_search (CLIB_UNUSED (cgnat_main_t *cm),
 }
 
 static_always_inline void
+cgnat_mapping_pool_put (cgnat_main_t *cm, cgnat_mapping_t *mapping)
+{
+  clib_spinlock_lock (&cm->mapping_pool_lock);
+  pool_put (cm->mappings, mapping);
+  clib_spinlock_unlock (&cm->mapping_pool_lock);
+}
+
+/* Free a mapping that was allocated but never published to the lookup
+ * tables: no reader can hold a reference to it, so it goes straight back to
+ * the pool without the reap queue.  Only valid before any port resource is
+ * attached (port-bearing mappings must go through schedule_delete + reap). */
+static_always_inline void
+cgnat_mapping_free_unpublished (cgnat_main_t *cm, cgnat_mapping_t *mapping)
+{
+  clib_spinlock_lock (&cm->mapping_pool_lock);
+  pool_put (cm->mappings, mapping);
+  clib_spinlock_unlock (&cm->mapping_pool_lock);
+}
+
+static_always_inline void
 cgnat_session_table_lock (cgnat_main_t *cm, clib_bihash_kv_24_8_t *kv)
 {
   clib_spinlock_lock (
@@ -461,14 +481,23 @@ static_always_inline u8
 cgnat_session_touch (cgnat_session_t *session, f64 now, u8 direction_flag,
 		  tcp_header_t *tcp)
 {
+  u8 rv;
+
+  clib_spinlock_lock (&session->lock);
   if (now - session->last_active >= 1.0)
     session->last_active = now;
 
-  /* Conditional write: keep the session line clean once both directions
-   * have been seen. */
+  /* Conditional atomic set: session->flags is also written by the delete
+   * path (DELETING) and the ADF path (RECORDED) via atomic RMW, so a plain
+   * |= here could lose those bits.  The pre-check keeps the common case
+   * (already set) a plain read. */
   if (!(session->flags & direction_flag))
-    session->flags |= direction_flag;
-  return cgnat_update_tcp_state (session, tcp);
+    clib_atomic_fetch_or (&session->flags, direction_flag);
+
+  rv = cgnat_update_tcp_state (session, tcp);
+
+  clib_spinlock_unlock (&session->lock);
+  return rv;
 }
 
 static_always_inline cgnat_mapping_t *
@@ -483,12 +512,12 @@ cgnat_mapping_get_if_valid (cgnat_main_t *cm, u64 value)
    * (reused).  Avoid pool_is_free_index() here - the pool free bitmap is a
    * hot, frequently dirtied cache line shared across all workers. */
   if (PREDICT_FALSE (mapping_index >= pool_len (cm->mappings)))
-    return 0;
+    return NULL;
 
   mapping = pool_elt_at_index (cm->mappings, mapping_index);
   if (PREDICT_FALSE (mapping->generation != generation ||
 		     (mapping->flags & CGNAT_MAPPING_FLAG_DELETING)))
-    return 0;
+    return NULL;
 
   return mapping;
 }
@@ -504,12 +533,12 @@ cgnat_session_get_if_valid (cgnat_main_t *cm, u64 value)
    * DELETING are sufficient, and skipping the pool free bitmap avoids a
    * dependency on a cache line dirtied by every create/delete. */
   if (PREDICT_FALSE (session_index >= pool_len (cm->sessions)))
-    return 0;
+    return NULL;
 
   session = pool_elt_at_index (cm->sessions, session_index);
   if (PREDICT_FALSE (session->generation != generation ||
 		     (session->flags & CGNAT_SESSION_FLAG_DELETING)))
-    return 0;
+    return NULL;
 
   return session;
 }
@@ -744,26 +773,18 @@ cgnat_in2out_session_fast_path (cgnat_main_t *cm, cgnat_instance_t *instance,
   session = cgnat_session_get_if_valid (cm, value.value);
   if (PREDICT_FALSE (!session))
     return 0;
-  clib_spinlock_lock (&session->lock);
-  if (PREDICT_FALSE (session->generation !=
-		       cgnat_value_get_generation (value.value) ||
+  if (PREDICT_FALSE (session->generation != cgnat_value_get_generation (value.value) ||
 		     (session->flags & CGNAT_SESSION_FLAG_DELETING)))
     {
-      clib_spinlock_unlock (&session->lock);
       return 0;
     }
 
-  if (cgnat_session_touch (session, now, CGNAT_SESSION_FLAG_SEEN_IN2OUT,
-			   tcp) &&
-      session->tcp_state == CGNAT_TCP_FIN_RST)
+  if (cgnat_session_touch (session, now, CGNAT_SESSION_FLAG_SEEN_IN2OUT, tcp) && session->tcp_state == CGNAT_TCP_FIN_RST)
     cgnat_session_start_timer (cm, session, now);
 
-  mapping = cgnat_mapping_get_if_valid (
-    cm, cgnat_index_to_value (session->mapping_index,
-			      session->mapping_generation));
+  mapping = cgnat_mapping_get_if_valid (cm, cgnat_index_to_value (session->mapping_index, session->mapping_generation));
   if (PREDICT_FALSE (!mapping))
     {
-      clib_spinlock_unlock (&session->lock);
       return 0;
     }
 
@@ -773,12 +794,10 @@ cgnat_in2out_session_fast_path (cgnat_main_t *cm, cgnat_instance_t *instance,
       rv = cgnat_session_ensure_adf_remote (cm, mapping, session);
       if (PREDICT_FALSE (rv))
 	{
-	  clib_spinlock_unlock (&session->lock);
 	  return 0;
 	}
     }
 
-  clib_spinlock_unlock (&session->lock);
   return mapping;
 }
 
@@ -803,26 +822,18 @@ cgnat_out2in_session_fast_path (cgnat_main_t *cm, clib_bihash_kv_24_8_t *rkv,
   session = cgnat_session_get_if_valid (cm, value.value);
   if (PREDICT_FALSE (!session))
     return 0;
-  clib_spinlock_lock (&session->lock);
-  if (PREDICT_FALSE (session->generation !=
-		       cgnat_value_get_generation (value.value) ||
+  if (PREDICT_FALSE (session->generation != cgnat_value_get_generation (value.value) ||
 		     (session->flags & CGNAT_SESSION_FLAG_DELETING)))
     {
-      clib_spinlock_unlock (&session->lock);
       return 0;
     }
 
-  if (cgnat_session_touch (session, now, CGNAT_SESSION_FLAG_SEEN_OUT2IN,
-			   tcp) &&
-      session->tcp_state == CGNAT_TCP_FIN_RST)
+  if (cgnat_session_touch (session, now, CGNAT_SESSION_FLAG_SEEN_OUT2IN, tcp) && session->tcp_state == CGNAT_TCP_FIN_RST)
     cgnat_session_start_timer (cm, session, now);
 
-  mapping = cgnat_mapping_get_if_valid (
-    cm, cgnat_index_to_value (session->mapping_index,
-			      session->mapping_generation));
+  mapping = cgnat_mapping_get_if_valid (cm, cgnat_index_to_value (session->mapping_index, session->mapping_generation));
   if (PREDICT_FALSE (!mapping))
     {
-      clib_spinlock_unlock (&session->lock);
       return 0;
     }
 
@@ -834,12 +845,10 @@ cgnat_out2in_session_fast_path (cgnat_main_t *cm, clib_bihash_kv_24_8_t *rkv,
       rv = cgnat_session_ensure_adf_remote (cm, mapping, session);
       if (PREDICT_FALSE (rv))
 	{
-	  clib_spinlock_unlock (&session->lock);
 	  return 0;
 	}
     }
 
-  clib_spinlock_unlock (&session->lock);
   return mapping;
 }
 
@@ -870,7 +879,12 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
     {
       icmp46_header_t *icmp =
 	(icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
-      if (icmp_type_is_error_message (icmp->type))
+
+      /* The buffer must actually carry the ICMP header before we read the
+       * type: truncated packets must not be dereferenced past the segment. */
+      if ((u8 *) (icmp + 1) <=
+	    (u8 *) vlib_buffer_get_current (b) + b->current_length &&
+	  icmp_type_is_error_message (icmp->type))
 	return cgnat_icmp_error_translate_in2out (cm, vm, b, ip,
 						  instance_index,
 						  inside_fib_index);
@@ -922,10 +936,26 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
   // not hit static rule, begin dynamic/deterministic allocation
   if (!mapping)
     {
+      cgnat_mapping_t *new_mapping;
+
+      /* Pre-allocate the mapping outside the stripe lock: it only needs the
+       * global mapping pool, so the global mapping_pool_lock stays out of
+       * the stripe critical section.  If the re-search below hits (a
+       * concurrent worker created the mapping) or the port allocation fails,
+       * the pre-allocated mapping is freed unpublished - in both cases no
+       * port resource has been attached to it yet. */
+      new_mapping = cgnat_mapping_alloc (cm, &mapping_index);
+      if (PREDICT_FALSE (!new_mapping))
+	return VNET_API_ERROR_LIMIT_EXCEEDED;
+
       cgnat_user_lock (instance, inside_fib_index, ip->src_address);
       if (!cgnat_mapping_table_search (cm, &cm->in2out_mapping_table, &kv,
 				       &value))
 	mapping = cgnat_mapping_get_if_valid (cm, value.value);
+
+      if (mapping)
+	/* A concurrent worker won the creation race. */
+	cgnat_mapping_free_unpublished (cm, new_mapping);
 
       if (!mapping)
 	{
@@ -940,11 +970,12 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
 
 	  if (rv)
 	    {
+	      cgnat_mapping_free_unpublished (cm, new_mapping);
 	      cgnat_user_unlock (instance, inside_fib_index, ip->src_address);
 	      return rv;
 	    }
 
-	  mapping = cgnat_mapping_alloc (cm, &mapping_index);
+	  mapping = new_mapping;
 	  mapping->inside_ip = ip->src_address;
 	  mapping->nat_ip = result.public_ip;
 	  mapping->inside_port = inside_port;
@@ -1063,7 +1094,11 @@ cgnat_session_out2in (vlib_main_t *vm, vlib_buffer_t *b, f64 now)
     {
       icmp46_header_t *icmp =
 	(icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
-      if (icmp_type_is_error_message (icmp->type))
+
+      /* Same truncated-packet guard as the in2out side. */
+      if ((u8 *) (icmp + 1) <=
+	    (u8 *) vlib_buffer_get_current (b) + b->current_length &&
+	  icmp_type_is_error_message (icmp->type))
 	return cgnat_icmp_error_translate_out2in (cm, vm, b, ip);
     }
 

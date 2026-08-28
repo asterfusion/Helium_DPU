@@ -156,8 +156,10 @@ cgnat_log_process (vlib_main_t *vm, vlib_node_runtime_t *rt, vlib_frame_t *f)
 {
   cgnat_main_t *cm = &cgnat_main;
   uword event_type = 0, *event_data = NULL;
-  cgnat_log_event_t events[256];
+  cgnat_log_event_t *events = NULL;
   u32 n, i;
+
+  vec_prealloc(events, 256);
 
   while (1)
     {
@@ -194,6 +196,7 @@ cgnat_log_process (vlib_main_t *vm, vlib_node_runtime_t *rt, vlib_frame_t *f)
 	  }
     }
 
+  vec_free(events);
   return 0;
 }
 

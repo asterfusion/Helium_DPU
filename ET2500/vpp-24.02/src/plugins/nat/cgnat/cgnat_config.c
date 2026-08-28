@@ -505,6 +505,18 @@ cgnat_del_pool_fib_entries (cgnat_main_t *cm, cgnat_pool_t *pool)
 }
 
 static void
+cgnat_add_pool_fib_entries (cgnat_main_t *cm, cgnat_pool_t *pool)
+{
+  cgnat_interface_t *i;
+
+  pool_foreach (i, cm->interfaces)
+    {
+      if (cgnat_interface_is_outside (i))
+        cgnat_add_pool_fib_entries_for_sw_if (pool, i->sw_if_index);
+    }
+}
+
+static void
 cgnat_add_all_pool_fib_entries_for_sw_if (cgnat_main_t *cm, u32 sw_if_index)
 {
   cgnat_pool_t *pool;
@@ -1048,7 +1060,10 @@ cgnat_instance_add_del (u32 *instance_id, u8 *label, u32 inside_vrf_id,
 		  {
 		    cgnat_pool_t *p2 = cgnat_pool_get_by_index (cm, *pi2);
 		    if (p2)
-		      cgnat_pool_free_runtime (p2);
+		      {
+			cgnat_pool_free_runtime (p2);
+			p2->total_blocks = 0;
+		      }
 		  }
 		vec_foreach (pi2, instance->pool_indices)
 		  {
@@ -1066,8 +1081,15 @@ cgnat_instance_add_del (u32 *instance_id, u8 *label, u32 inside_vrf_id,
 	  }
       }
 
-      /* Add FIB receive entries for pool public IPs on outside interfaces. */
-      cgnat_add_all_pool_fib_entries (cm);
+      /* Add FIB receive entries for this instance's pool public IPs on
+       * outside interfaces.  Per-pool (not all configured pools), so the
+       * refcounting in fib_entry_reg pairs 1:1 with the delete path. */
+      vec_foreach_index (i, instance->pool_indices)
+	{
+	  pool = cgnat_pool_get_by_index (cm, instance->pool_indices[i]);
+	  if (pool)
+	    cgnat_add_pool_fib_entries (cm, pool);
+	}
 
       cgnat_recalculate_instance (cm, instance);
 
@@ -1103,6 +1125,7 @@ cgnat_instance_add_del (u32 *instance_id, u8 *label, u32 inside_vrf_id,
 	cgnat_pool_runtime_reset (pool);
 	cgnat_del_pool_fib_entries (cm, pool);
 	cgnat_pool_free_runtime (pool);
+	pool->total_blocks = 0;
 	pool->owner_instance_index = CGNAT_INVALID_INDEX;
       }
     vec_free (owned_pool_indices);
@@ -1279,11 +1302,6 @@ cgnat_plugin_enable_disable (u8 enable, u32 max_sessions, u32 max_mappings)
 	    }
 	}
 
-      /* Re-register /32 local receive entries so VPP answers ARP for pool
-       * public IPs and static mapping outside IPs on outside interfaces. */
-      cgnat_add_all_pool_fib_entries (cm);
-      cgnat_add_all_static_fib_entries (cm);
-
       /* Re-enable interface features before marking enabled. */
       vec_foreach (i, saved_interfaces)
 	{
@@ -1311,11 +1329,37 @@ cgnat_plugin_enable_disable (u8 enable, u32 max_sessions, u32 max_mappings)
 	}
 
       if (!ret)
-	clib_atomic_store_rel_n (&cm->enabled, 1);
+	{
+	  /* Re-register /32 local receive entries so VPP answers ARP for pool
+	   * public IPs and static mapping outside IPs on outside interfaces.
+	   * Done only after all features are up: registration cannot fail, so
+	   * nothing here needs rollback. */
+	  cgnat_add_all_pool_fib_entries (cm);
+	  cgnat_add_all_static_fib_entries (cm);
+	  clib_atomic_store_rel_n (&cm->enabled, 1);
+	}
       else
 	{
-	  /* Feature enablement failed; roll back pool runtime state so a later
-	   * enable attempt starts from a clean runtime. */
+	  /* Feature enablement failed (recorded but the loop above runs to
+	   * completion, so every interface may be enabled): roll features
+	   * back, then reset pool runtime so a later enable starts clean.
+	   * FIB entries were not registered on this path. */
+	  vec_foreach (i, saved_interfaces)
+	    {
+	      if (i->flags & CGNAT_INTERFACE_FLAG_IS_INSIDE)
+		{
+		  vnet_feature_enable_disable ("ip4-unicast",
+					       "cgnat-in2out-policy",
+					       i->sw_if_index, 0, 0, 0);
+		  ip4_sv_reass_enable_disable_with_refcnt (i->sw_if_index, 0);
+		}
+	      if (i->flags & CGNAT_INTERFACE_FLAG_IS_OUTSIDE)
+		{
+		  vnet_feature_enable_disable ("ip4-unicast", "cgnat-out2in",
+					       i->sw_if_index, 0, 0, 0);
+		  ip4_sv_reass_enable_disable_with_refcnt (i->sw_if_index, 0);
+		}
+	    }
 	  vec_foreach_index (pi, cm->pools)
 	    {
 	      pool = vec_elt_at_index (cm->pools, pi);
@@ -1397,10 +1441,6 @@ cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
 {
   cgnat_main_t *cm = &cgnat_main;
 
-  /* Runtime tables exist only after the plugin is enabled; reject all
-   * configuration changes before that point. */
-  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
-    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
   cgnat_interface_t *match = 0;
   u8 flag = is_inside ? CGNAT_INTERFACE_FLAG_IS_INSIDE :
 				CGNAT_INTERFACE_FLAG_IS_OUTSIDE;
@@ -1499,11 +1539,6 @@ int
 cgnat_interface_zone_set (u32 sw_if_index, cgnat_interface_role_t role)
 {
   cgnat_main_t *cm = &cgnat_main;
-
-  /* Runtime tables exist only after the plugin is enabled; reject all
-   * configuration changes before that point. */
-  if (PREDICT_FALSE (!clib_atomic_load_relax_n (&cm->enabled)))
-    return VNET_API_ERROR_FEATURE_ALREADY_DISABLED;
   cgnat_interface_t *match;
   u8 old_flags;
   int rv;
