@@ -32,24 +32,44 @@ static uword
 cgnat_timer_process (vlib_main_t *vm, vlib_node_runtime_t *rt,
 		     vlib_frame_t *f)
 {
+  cgnat_main_t *cm = &cgnat_main;
+  uword event_type = 0, *event_data = NULL;
+
   while (1)
     {
-      f64 now;
+      /* Wait for Godot... */
+      if (cm->enabled)
+      {
+          vlib_process_wait_for_event_or_clock (vm, 0.01);
+          event_type = vlib_process_get_events (vm, &event_data);
+      }
+      else
+      {
+          vlib_process_wait_for_event (vm);
+          event_type = vlib_process_get_events (vm, &event_data);
+      }
 
-      vlib_process_wait_for_event_or_clock (vm, 0.1);
-      vlib_process_get_events (vm, 0);
-      now = vlib_time_now (vm);
-      vlib_worker_thread_barrier_sync (vm);
+      f64 now = vlib_time_now (vm);
+      switch (event_type)
+      {
+      case CGNAT_TIMER_PROCESS_SCHED:
+            break;
+      default:
+            /* Nothing to do. */
+            break;
+      }
+
       cgnat_pba_expire_timers (now);
       cgnat_session_expire_timers (now);
-      vlib_worker_thread_barrier_release (vm);
+
+      vec_reset_length (event_data);
     }
 
   return 0;
 }
 
 /* *INDENT-OFF* */
-VLIB_REGISTER_NODE (cgnat_timer_process_node, static) = {
+VLIB_REGISTER_NODE (cgnat_timer_process_node) = {
   .function = cgnat_timer_process,
   .type = VLIB_NODE_TYPE_PROCESS,
   .name = "cgnat-timer-process",

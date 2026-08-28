@@ -162,14 +162,11 @@ cgnat_recalculate_instance (cgnat_main_t *cm, cgnat_instance_t *instance)
       if (!pool)
 	continue;
       instance->total_blocks += pool->total_blocks;
-      instance->allocated_blocks +=
-	clib_atomic_load_relax_n (&pool->allocated_blocks);
+      instance->allocated_blocks += clib_atomic_load_relax_n (&pool->allocated_blocks);
       instance->cooling_blocks += clib_atomic_load_relax_n (&pool->cooling_blocks);
       instance->active_users += clib_atomic_load_relax_n (&pool->active_users);
-      addr_min =
-	clib_min (addr_min, clib_net_to_host_u32 (pool->first_ip.as_u32));
-      addr_max =
-	clib_max (addr_max, clib_net_to_host_u32 (pool->last_ip.as_u32));
+      addr_min = clib_min (addr_min, clib_net_to_host_u32 (pool->first_ip.as_u32));
+      addr_max = clib_max (addr_max, clib_net_to_host_u32 (pool->last_ip.as_u32));
     }
 
   /* Public-address envelope used by the hairpin pre-filter in
@@ -1329,6 +1326,9 @@ cgnat_plugin_enable_disable (u8 enable, u32 max_sessions, u32 max_mappings)
 
       vlib_worker_thread_barrier_release (cm->vlib_main);
       vec_free (saved_interfaces);
+
+      vlib_process_signal_event (cm->vlib_main, cgnat_timer_process_node.index, CGNAT_TIMER_PROCESS_SCHED, 0);
+      vlib_process_signal_event (cm->vlib_main, cgnat_log_process_node.index, CGNAT_TIMER_PROCESS_SCHED, 0);
       return ret;
     }
 

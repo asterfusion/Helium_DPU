@@ -155,17 +155,36 @@ static uword
 cgnat_log_process (vlib_main_t *vm, vlib_node_runtime_t *rt, vlib_frame_t *f)
 {
   cgnat_main_t *cm = &cgnat_main;
+  uword event_type = 0, *event_data = NULL;
+  cgnat_log_event_t events[256];
+  u32 n, i;
 
   while (1)
     {
       f64 poll_interval = cm->log_poll_interval ?
 			    cm->log_poll_interval :
 			    CGNAT_LOG_POLL_INTERVAL_DEFAULT;
-      cgnat_log_event_t events[256];
-      u32 n, i;
 
-      vlib_process_wait_for_event_or_clock (vm, poll_interval);
-      vlib_process_get_events (vm, 0);
+      /* Wait for Godot... */
+      if (cm->enabled)
+      {
+          vlib_process_wait_for_event_or_clock (vm, poll_interval);
+          event_type = vlib_process_get_events (vm, &event_data);
+      }
+      else
+      {
+          vlib_process_wait_for_event (vm);
+          event_type = vlib_process_get_events (vm, &event_data);
+      }
+
+      switch (event_type)
+      {
+      case CGNAT_TIMER_PROCESS_SCHED:
+            break;
+      default:
+            /* Nothing to do. */
+            break;
+      }
 
       while ((n = lf_fifo_dequeue_sc (cm->log_fifo, 256, events)) > 0)
 	for (i = 0; i < n; i++)
@@ -179,7 +198,7 @@ cgnat_log_process (vlib_main_t *vm, vlib_node_runtime_t *rt, vlib_frame_t *f)
 }
 
 /* *INDENT-OFF* */
-VLIB_REGISTER_NODE (cgnat_log_process_node, static) = {
+VLIB_REGISTER_NODE (cgnat_log_process_node) = {
   .function = cgnat_log_process,
   .type = VLIB_NODE_TYPE_PROCESS,
   .name = "cgnat-log-process",

@@ -51,6 +51,8 @@
 #define CGNAT_TIMER_MAX_DELAY 2047
 #define CGNAT_SESSION_TIMER_MAX_EXPIRATIONS 1024
 #define CGNAT_COOLING_TIMER_MAX_EXPIRATIONS 1024
+#define CGNAT_SESSION_TIMER_VEC (1024 * 1024)
+#define CGNAT_COOLING_TIMER_VEC (1024 * 16)
 #define CGNAT_LOG_FIFO_SIZE (64 * 1024)
 #define CGNAT_LOG_POLL_INTERVAL_DEFAULT (0.01)
 #define CGNAT_LOG_EVENT_STR_LEN 24
@@ -69,6 +71,11 @@
 #define CGNAT_PBA_PROTO_UDP   1
 #define CGNAT_PBA_PROTO_ICMP  2
 #define CGNAT_PBA_PROTO_COUNT 3
+
+typedef enum
+{
+    CGNAT_TIMER_PROCESS_SCHED = 1,
+} cgnat_timer_process_event_e;
 
 typedef enum
 {
@@ -700,13 +707,23 @@ typedef struct
   u64 *mapping_reap_quarantine;
   clib_spinlock_t session_pool_lock;
 
+  /* Deleted sessions are parked here and only returned to the pool by
+   * cgnat_session_reap() under a worker barrier: until then the slot stays
+   * allocated with DELETING set, so lock-free session-table readers that
+   * already resolved the value can still lock the session and revalidate
+   * generation + DELETING. */
+  clib_spinlock_t session_reap_lock;
+  u64 *session_reap_queue;
+
   tw_timer_wheel_2t_1w_2048sl_t cooling_timer_wheel;
   cgnat_cooling_timer_t *cooling_timers;
   u8 cooling_timer_initialized;
+  u32 *cooling_expired;
 
   tw_timer_wheel_2t_1w_2048sl_t session_timer_wheel;
   cgnat_session_timer_t *session_timers;
   u8 session_timer_initialized;
+  u32 *session_expired;
   clib_spinlock_t session_timer_lock;
 
   u32 in2out_policy_node_index;
@@ -939,6 +956,8 @@ cgnat_instance_index_by_acl (cgnat_main_t *cm, u32 acl_index)
 extern vlib_node_registration_t cgnat_in2out_node;
 extern vlib_node_registration_t cgnat_in2out_policy_node;
 extern vlib_node_registration_t cgnat_out2in_node;
+extern vlib_node_registration_t cgnat_timer_process_node;
+extern vlib_node_registration_t cgnat_log_process_node;
 
 int cgnat_plugin_enable_disable (u8 enable, u32 max_sessions, u32 max_mappings);
 int cgnat_pool_add_del (u32 *pool_id, cgnat_pool_config_t *config, u8 is_add);

@@ -734,22 +734,20 @@ cgnat_in2out_session_fast_path (cgnat_main_t *cm, cgnat_instance_t *instance,
 		       cgnat_session_remote_port (ip->protocol, remote_port),
 		       ip->protocol);
 
-  cgnat_session_table_lock (cm, &kv);
+  /* Lock-free lookup: bihash readers need no lock (bihash_doc.h), and the
+   * resolved session pointer stays dereferenceable because deleted slots are
+   * recycled only by cgnat_session_reap() under a worker barrier.  The
+   * generation + DELETING revalidation under session->lock is the
+   * authoritative check. */
   if (clib_bihash_search_24_8 (&cm->session_table, &kv, &value))
-    {
-      cgnat_session_table_unlock (cm, &kv);
-      return 0;
-    }
+    return 0;
   session = cgnat_session_get_if_valid (cm, value.value);
   if (PREDICT_FALSE (!session))
-    {
-      cgnat_session_table_unlock (cm, &kv);
-      return 0;
-    }
+    return 0;
   clib_spinlock_lock (&session->lock);
-  cgnat_session_table_unlock (cm, &kv);
-
-  if (PREDICT_FALSE (session->flags & CGNAT_SESSION_FLAG_DELETING))
+  if (PREDICT_FALSE (session->generation !=
+		       cgnat_value_get_generation (value.value) ||
+		     (session->flags & CGNAT_SESSION_FLAG_DELETING)))
     {
       clib_spinlock_unlock (&session->lock);
       return 0;
@@ -799,22 +797,16 @@ cgnat_out2in_session_fast_path (cgnat_main_t *cm, clib_bihash_kv_24_8_t *rkv,
   cgnat_instance_t *instance;
   int rv;
 
-  cgnat_session_table_lock (cm, rkv);
+  /* Lock-free lookup, same rationale as cgnat_in2out_session_fast_path. */
   if (clib_bihash_search_24_8 (&cm->session_table, rkv, &value))
-    {
-      cgnat_session_table_unlock (cm, rkv);
-      return 0;
-    }
+    return 0;
   session = cgnat_session_get_if_valid (cm, value.value);
   if (PREDICT_FALSE (!session))
-    {
-      cgnat_session_table_unlock (cm, rkv);
-      return 0;
-    }
+    return 0;
   clib_spinlock_lock (&session->lock);
-  cgnat_session_table_unlock (cm, rkv);
-
-  if (PREDICT_FALSE (session->flags & CGNAT_SESSION_FLAG_DELETING))
+  if (PREDICT_FALSE (session->generation !=
+		       cgnat_value_get_generation (value.value) ||
+		     (session->flags & CGNAT_SESSION_FLAG_DELETING)))
     {
       clib_spinlock_unlock (&session->lock);
       return 0;

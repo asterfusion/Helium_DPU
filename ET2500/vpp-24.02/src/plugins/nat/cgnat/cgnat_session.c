@@ -589,6 +589,9 @@ cgnat_session_alloc (cgnat_main_t *cm, u32 *session_index)
   return session;
 }
 
+/* The returned user pointer is only stable while the caller holds the
+ * user's stripe lock (cgnat_user_lock) or a worker barrier: all deletions
+ * of committed users run under one of the two. */
 static cgnat_user_t *
 cgnat_mapping_get_user (cgnat_main_t *cm, cgnat_mapping_t *mapping,
 			cgnat_instance_t **instancep)
@@ -605,10 +608,7 @@ cgnat_mapping_get_user (cgnat_main_t *cm, cgnat_mapping_t *mapping,
 
   if (mapping->user_index >= pool_len (instance->users) ||
       pool_is_free_index (instance->users, mapping->user_index))
-    {
-      clib_spinlock_unlock (&instance->users_lock);
-      return 0;
-    }
+    return 0;
   user = pool_elt_at_index (instance->users, mapping->user_index);
 
   if (instancep)
@@ -903,6 +903,21 @@ cgnat_log_session (cgnat_main_t *cm, char *event, char *reason,
 static void cgnat_static_addr_mapping_schedule_delete (cgnat_main_t *cm,
 					    cgnat_mapping_t *mapping);
 
+/* Park a deleted session for reclamation under the next worker barrier.
+ * Until cgnat_session_reap() runs, the pool slot stays allocated with
+ * DELETING set, so a lock-free session-table reader that already resolved
+ * the value can still lock the session and revalidate it. */
+static_always_inline void
+cgnat_session_reap_push (cgnat_main_t *cm, cgnat_session_t *session)
+{
+  u64 value =
+    cgnat_index_to_value (session - cm->sessions, session->generation);
+
+  clib_spinlock_lock (&cm->session_reap_lock);
+  vec_add1 (cm->session_reap_queue, value);
+  clib_spinlock_unlock (&cm->session_reap_lock);
+}
+
 static void
 cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
 				 clib_bihash_kv_24_8_t *kv,
@@ -910,6 +925,7 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
 {
   clib_bihash_kv_24_8_t current;
   cgnat_mapping_t *mapping;
+  cgnat_instance_t *instance;
   cgnat_user_t *user;
   u32 previous_active_sessions = 0;
   u32 release_user_instance_index = CGNAT_INVALID_INDEX;
@@ -978,13 +994,25 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
       if (old)
 	cgnat_session_counter_dec (cm, mapping);
 
-      user = cgnat_mapping_get_user (cm, mapping, 0);
-      if (user)
+      instance = cgnat_instance_get_by_index (cm, mapping->instance_index);
+      if (instance)
 	{
-	  cgnat_user_session_unreserve (user);
-	  release_user_instance_index = mapping->instance_index;
-	  release_user_inside_fib_index = mapping->inside_fib_index;
-	  release_user_private_ip = mapping->inside_ip;
+	  /* Hold the user's stripe lock across lookup + unreserve: every
+	   * deletion of a committed user (idle release, cooling expiry)
+	   * runs under the same stripe, so the user cannot be freed or
+	   * recycled while we touch it. */
+	  cgnat_user_lock (instance, mapping->inside_fib_index,
+			   mapping->inside_ip);
+	  user = cgnat_mapping_get_user (cm, mapping, 0);
+	  if (user)
+	    {
+	      cgnat_user_session_unreserve (user);
+	      release_user_instance_index = mapping->instance_index;
+	      release_user_inside_fib_index = mapping->inside_fib_index;
+	      release_user_private_ip = mapping->inside_ip;
+	    }
+	  cgnat_user_unlock (instance, mapping->inside_fib_index,
+			     mapping->inside_ip);
 	}
       if (session->flags & CGNAT_SESSION_FLAG_ADF_REMOTE_RECORDED)
 	cgnat_adf_remote_unref (cm, mapping, session->remote_ip);
@@ -1022,10 +1050,10 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
 	cgnat_static_addr_mapping_schedule_delete (cm, mapping);
     }
 
-  clib_spinlock_free (&session->lock);
-  clib_spinlock_lock (&cm->session_pool_lock);
-  pool_put (cm->sessions, session);
-  clib_spinlock_unlock (&cm->session_pool_lock);
+  /* Deferred reclamation: the slot stays allocated (with DELETING set) until
+   * cgnat_session_reap() runs under a worker barrier, so lock-free
+   * session-table readers holding a resolved pointer stay safe. */
+  cgnat_session_reap_push (cm, session);
 }
 
 static void
@@ -1340,15 +1368,31 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
     user = 0;
   else
   {
-    user = cgnat_mapping_get_user (cm, mapping, &instance);
-    if (PREDICT_FALSE (!user || !instance))
+    instance = cgnat_instance_get_by_index (cm, mapping->instance_index);
+    if (PREDICT_FALSE (!instance))
     {
       cgnat_session_table_unlock2 (cm, &kv, &rkv);
       clib_spinlock_unlock (&mapping->lock);
       return VNET_API_ERROR_NO_SUCH_ENTRY;
     }
 
+    /* Hold the user's stripe lock across lookup + reserve so the user
+     * cannot be deleted or recycled in between: every deletion of a
+     * committed user runs under the same stripe. */
+    cgnat_user_lock (instance, mapping->inside_fib_index, mapping->inside_ip);
+    user = cgnat_mapping_get_user (cm, mapping, 0);
+    if (PREDICT_FALSE (!user))
+    {
+      cgnat_user_unlock (instance, mapping->inside_fib_index,
+			 mapping->inside_ip);
+      cgnat_session_table_unlock2 (cm, &kv, &rkv);
+      clib_spinlock_unlock (&mapping->lock);
+      return VNET_API_ERROR_NO_SUCH_ENTRY;
+    }
+
     rv = cgnat_user_session_reserve (instance, user, now);
+    cgnat_user_unlock (instance, mapping->inside_fib_index,
+		       mapping->inside_ip);
     if (rv)
     {
       cgnat_session_table_unlock2 (cm, &kv, &rkv);
@@ -1384,7 +1428,13 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   {
     cgnat_session_table_unlock2 (cm, &kv, &rkv);
     if (user)
-      cgnat_user_session_unreserve (user);
+      {
+	cgnat_user_lock (instance, mapping->inside_fib_index,
+			 mapping->inside_ip);
+	cgnat_user_session_unreserve (user);
+	cgnat_user_unlock (instance, mapping->inside_fib_index,
+			   mapping->inside_ip);
+      }
     clib_spinlock_unlock (&session->lock);
     clib_spinlock_free (&session->lock);
     clib_spinlock_lock (&cm->session_pool_lock);
@@ -1395,15 +1445,22 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   }
   if (clib_bihash_add_del_24_8 (&cm->session_table, &rkv, 1))
   {
+    /* kv was already published, so a lock-free reader may hold a pointer to
+     * this session: mark it DELETING and reclaim it only under the next
+     * worker barrier via the reap queue. */
     clib_bihash_add_del_24_8 (&cm->session_table, &kv, 0);
     cgnat_session_table_unlock2 (cm, &kv, &rkv);
     if (user)
-      cgnat_user_session_unreserve (user);
+      {
+	cgnat_user_lock (instance, mapping->inside_fib_index,
+			 mapping->inside_ip);
+	cgnat_user_session_unreserve (user);
+	cgnat_user_unlock (instance, mapping->inside_fib_index,
+			   mapping->inside_ip);
+      }
+    session->flags |= CGNAT_SESSION_FLAG_DELETING;
     clib_spinlock_unlock (&session->lock);
-    clib_spinlock_free (&session->lock);
-    clib_spinlock_lock (&cm->session_pool_lock);
-    pool_put (cm->sessions, session);
-    clib_spinlock_unlock (&cm->session_pool_lock);
+    cgnat_session_reap_push (cm, session);
     clib_spinlock_unlock (&mapping->lock);
     return VNET_API_ERROR_BUG;
   }
@@ -1704,6 +1761,41 @@ cgnat_dynamic_mapping_reap (cgnat_main_t *cm)
 	    }
 	}
       cgnat_mapping_pool_put (cm, mapping);
+    }
+  vec_free (pending);
+}
+
+/* Called only with a worker barrier held (the periodic timer path).  Any
+ * sessions deleted by teardown paths are reclaimed by the next timer tick.
+ * Returns reaped sessions to the pool; until this runs, deleted slots stay
+ * allocated so lock-free readers can still lock them and revalidate. */
+static void
+cgnat_session_reap (cgnat_main_t *cm)
+{
+  u64 *pending, *value;
+
+  clib_spinlock_lock (&cm->session_reap_lock);
+  pending = cm->session_reap_queue;
+  cm->session_reap_queue = 0;
+  clib_spinlock_unlock (&cm->session_reap_lock);
+
+  vec_foreach (value, pending)
+    {
+      u32 session_index = cgnat_value_get_index (*value);
+      u32 generation = cgnat_value_get_generation (*value);
+      cgnat_session_t *session;
+
+      if (pool_is_free_index (cm->sessions, session_index))
+	continue;
+      session = pool_elt_at_index (cm->sessions, session_index);
+      if (session->generation != generation ||
+	  !(session->flags & CGNAT_SESSION_FLAG_DELETING))
+	continue;
+
+      clib_spinlock_free (&session->lock);
+      clib_spinlock_lock (&cm->session_pool_lock);
+      pool_put (cm->sessions, session);
+      clib_spinlock_unlock (&cm->session_pool_lock);
     }
   vec_free (pending);
 }
@@ -2532,7 +2624,7 @@ cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings)
   pool_alloc_aligned (cm->sessions, max_sessions, CLIB_CACHE_LINE_BYTES);
   pool_alloc_aligned (cm->mappings, max_mappings, CLIB_CACHE_LINE_BYTES);
   vec_validate (cm->session_generation_by_index, max_sessions - 1);
-  vec_validate (cm->mapping_generation_by_index, max_sessions - 1);
+  vec_validate (cm->mapping_generation_by_index, max_mappings - 1);
 
   /* One cache line of session counters per vlib thread. */
   vec_validate_aligned (cm->session_counters_per_thread,
@@ -2565,6 +2657,8 @@ cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings)
    * tw_timer_expire_timers_vec_2t_1w_2048sl(). */
   tw_timer_wheel_init_2t_1w_2048sl (&cm->session_timer_wheel, 0, 1.0,
 				    CGNAT_SESSION_TIMER_MAX_EXPIRATIONS);
+  vec_prealloc(cm->session_expired, CGNAT_SESSION_TIMER_VEC);
+
   for (i = 0; i < CGNAT_MAPPING_TABLE_LOCK_BUCKETS; i++)
     clib_spinlock_init (&cm->mapping_table_locks[i]);
   for (i = 0; i < CGNAT_SESSION_TABLE_LOCK_BUCKETS; i++)
@@ -2576,6 +2670,7 @@ cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings)
   clib_spinlock_init (&cm->mapping_reap_lock);
   clib_spinlock_init (&cm->session_pool_lock);
   clib_spinlock_init (&cm->session_timer_lock);
+  clib_spinlock_init (&cm->session_reap_lock);
   cm->session_timer_initialized = 1;
   cm->session_tables_initialized = 1;
 }
@@ -2603,6 +2698,7 @@ cgnat_session_reset (cgnat_main_t *cm)
   vec_free (cm->adf_remote_generation_by_index);
   vec_free (cm->mapping_reap_queue);
   vec_free (cm->mapping_reap_quarantine);
+  vec_free (cm->session_reap_queue);
   pool_free (cm->session_timers);
 
   clib_bihash_free_16_8 (&cm->in2out_mapping_table);
@@ -2616,6 +2712,7 @@ cgnat_session_reset (cgnat_main_t *cm)
   if (cm->session_timer_initialized)
     {
       tw_timer_wheel_free_2t_1w_2048sl (&cm->session_timer_wheel);
+      vec_free(cm->session_expired);
       cm->session_timer_initialized = 0;
     }
 
@@ -2630,6 +2727,7 @@ cgnat_session_reset (cgnat_main_t *cm)
   clib_spinlock_free (&cm->mapping_reap_lock);
   clib_spinlock_free (&cm->session_pool_lock);
   clib_spinlock_free (&cm->session_timer_lock);
+  clib_spinlock_free (&cm->session_reap_lock);
 
   cm->session_tables_initialized = 0;
 
@@ -2644,10 +2742,10 @@ cgnat_session_expire_timers (f64 now)
   if (!cm->session_timer_initialized)
     return;
 
-  u32 *expired = vec_new(u32, CGNAT_COOLING_TIMER_MAX_EXPIRATIONS);
-  expired = tw_timer_expire_timers_vec_2t_1w_2048sl (&cm->session_timer_wheel, now, expired);
-  cgnat_session_process_expired_timers (expired);
-  vec_free (expired);
+  cm->session_expired = tw_timer_expire_timers_vec_2t_1w_2048sl (&cm->session_timer_wheel, now, cm->session_expired);
+  cgnat_session_process_expired_timers (cm->session_expired);
+  vec_reset_length (cm->session_expired);
+  cgnat_session_reap (cm);
   cgnat_dynamic_mapping_reap (cm);
 }
 

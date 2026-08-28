@@ -814,6 +814,7 @@ cgnat_cooling_process_expired (u32 *expired_timers)
       cgnat_pool_t *pool;
       cgnat_public_ip_t *ip;
       cgnat_block_t *block;
+      u8 have_owner_key;
 
       entry_index = expired_timers[i] & 0x7FFFFFFF;
       if (processed >= CGNAT_COOLING_TIMER_MAX_EXPIRATIONS)
@@ -839,7 +840,9 @@ cgnat_cooling_process_expired (u32 *expired_timers)
 	goto done;
 
       ip = vec_elt_at_index (pool->public_ips, entry->public_ip_index);
-      cgnat_user_lock (instance, entry->inside_fib_index, entry->private_ip);
+      have_owner_key = entry->inside_fib_index != CGNAT_INVALID_INDEX;
+      if (have_owner_key)
+	cgnat_user_lock (instance, entry->inside_fib_index, entry->private_ip);
       clib_spinlock_lock (&ip->lock);
 
       if (entry->block_index < vec_len (ip->blocks) &&
@@ -858,12 +861,12 @@ cgnat_cooling_process_expired (u32 *expired_timers)
 		  tw_timer_start_2t_1w_2048sl (&cm->cooling_timer_wheel,
 					       entry_index, 0, delay);
 		  clib_spinlock_unlock (&ip->lock);
-		  cgnat_user_unlock (instance, entry->inside_fib_index,
-				     entry->private_ip);
+		  if (have_owner_key)
+		    cgnat_user_unlock (instance, entry->inside_fib_index,
+				       entry->private_ip);
 		  continue;
 		}
-	      if (!pool_is_free_index (instance->users,
-				       block->owner_user_index))
+	      if (have_owner_key && !pool_is_free_index (instance->users, block->owner_user_index))
 		{
 		  cgnat_user_t *user =
 		    pool_elt_at_index (instance->users,
@@ -879,8 +882,8 @@ cgnat_cooling_process_expired (u32 *expired_timers)
 	}
 
       clib_spinlock_unlock (&ip->lock);
-      cgnat_user_unlock (instance, entry->inside_fib_index,
-			 entry->private_ip);
+      if (have_owner_key)
+	cgnat_user_unlock (instance, entry->inside_fib_index, entry->private_ip);
 
     done:
       pool_put_index (cm->cooling_timers, entry_index);
@@ -940,6 +943,8 @@ cgnat_start_block_cooling (cgnat_main_t *cm, u32 instance_index,
   entry->block_index = block - ip->blocks;
   entry->block_id = block->block_id;
   entry->gen_id = block->gen_id;
+  /* CGNAT_INVALID_INDEX tells the expiry path the owner user was already
+   * deleted: no user cleanup is needed (or even possible) for this block. */
   entry->inside_fib_index = CGNAT_INVALID_INDEX;
   entry->private_ip = private_ip;
   if (instance_index < vec_len (cm->instances) &&
@@ -971,6 +976,7 @@ cgnat_pba_init (cgnat_main_t *cm)
    * tw_timer_expire_timers_vec_2t_1w_2048sl(). */
   tw_timer_wheel_init_2t_1w_2048sl (&cm->cooling_timer_wheel, 0, 1.0,
 				    CGNAT_COOLING_TIMER_MAX_EXPIRATIONS);
+  vec_prealloc(cm->cooling_expired, CGNAT_COOLING_TIMER_VEC);
   cm->cooling_timer_initialized = 1;
 }
 
@@ -981,6 +987,7 @@ cgnat_pba_reset (cgnat_main_t *cm)
   if (cm->cooling_timer_initialized)
     {
       tw_timer_wheel_free_2t_1w_2048sl (&cm->cooling_timer_wheel);
+      vec_free(cm->cooling_expired);
       cm->cooling_timer_initialized = 0;
     }
 
@@ -995,10 +1002,9 @@ cgnat_pba_expire_timers (f64 now)
   if (!cm->cooling_timer_initialized)
     return;
 
-  u32 *expired = vec_new(u32, CGNAT_COOLING_TIMER_MAX_EXPIRATIONS);
-  expired = tw_timer_expire_timers_vec_2t_1w_2048sl ( &cm->cooling_timer_wheel, now, expired);
-  cgnat_cooling_process_expired (expired);
-  vec_free (expired);
+  cm->cooling_expired = tw_timer_expire_timers_vec_2t_1w_2048sl ( &cm->cooling_timer_wheel, now, cm->cooling_expired);
+  cgnat_cooling_process_expired (cm->cooling_expired);
+  vec_reset_length (cm->cooling_expired);
 }
 
 static cgnat_user_t *
