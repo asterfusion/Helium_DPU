@@ -34,6 +34,7 @@ cgnat_timer_process (vlib_main_t *vm, vlib_node_runtime_t *rt,
 {
   cgnat_main_t *cm = &cgnat_main;
   uword event_type = 0, *event_data = NULL;
+  f64 last_reap = 0;
 
   while (1)
     {
@@ -67,12 +68,26 @@ cgnat_timer_process (vlib_main_t *vm, vlib_node_runtime_t *rt,
 
       /* Slot reclamation is different: datapath readers resolve session and
        * mapping pool pointers without any lock, so deleted entries may only
-       * return to their pools once every worker has passed a barrier.  Keep
-       * the barrier section this small so the worker pause stays O(reaped
-       * count), independent of the expire workload. */
-      vlib_worker_thread_barrier_sync (vm);
-      cgnat_reap (cm);
-      vlib_worker_thread_barrier_release (vm);
+       * return to their pools once every worker has passed a barrier.
+       *
+       * Run it only when there is actually something to reap, and at most
+       * every 200ms: an unconditional barrier at the 10ms expire cadence
+       * pauses every worker 100 times a second even when the reap queues
+       * are empty.  The vec_len reads race with worker-side vec_add1, which
+       * is harmless: a missed update just defers reclamation to the next
+       * tick, and the 200ms cadence bounds the delay either way.  The
+       * barrier section stays O(reaped count), independent of the expire
+       * workload. */
+      u8 reap_pending = vec_len (cm->session_reap_queue) ||
+			vec_len (cm->mapping_reap_queue) ||
+			vec_len (cm->mapping_reap_quarantine);
+      if (reap_pending && now - last_reap >= 0.2)
+	{
+	  vlib_worker_thread_barrier_sync (vm);
+	  cgnat_reap (cm);
+	  vlib_worker_thread_barrier_release (vm);
+	  last_reap = now;
+	}
 
       vec_reset_length (event_data);
     }
