@@ -769,7 +769,8 @@ vl_api_cgnat_user_dump_t_handler (vl_api_cgnat_user_dump_t *mp)
     {
       if (!instance->configured)
 	continue;
-      pool_foreach (user, instance->users)
+      for (u32 s = 0; s < CGNAT_USER_LOCK_BUCKETS; s++)
+	pool_foreach (user, instance->users_per_shard[s])
 	{
 	  vl_api_cgnat_user_details_t *rmp;
 

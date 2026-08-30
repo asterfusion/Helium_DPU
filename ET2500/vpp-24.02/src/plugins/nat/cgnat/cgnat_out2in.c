@@ -65,6 +65,8 @@ VLIB_NODE_FN (cgnat_out2in_node) (vlib_main_t *vm,
   u32 pkts_processed = 0;
   f64 now = vlib_time_now (vm);
 
+  u64 s0 = 0, s1 = 0;
+
   if (PREDICT_FALSE (!cm->enabled))
     {
       u32 i;
@@ -85,6 +87,7 @@ VLIB_NODE_FN (cgnat_out2in_node) (vlib_main_t *vm,
       cgnat_interface_t *interface0, *interface1;
       u32 next0 = CGNAT_OUT2IN_NEXT_LOOKUP, next1 = CGNAT_OUT2IN_NEXT_LOOKUP;
       u32 sw_if_index0, sw_if_index1;
+      u64 sn0, sn1;
       int rv;
 
       bp = vlib_get_buffer (vm, from[4]);
@@ -94,8 +97,22 @@ VLIB_NODE_FN (cgnat_out2in_node) (vlib_main_t *vm,
       vlib_prefetch_buffer_header (bp, LOAD);
       clib_prefetch_load (vlib_buffer_get_current (bp));
 
-      cgnat_prefetch_session_out2in (cm, vlib_get_buffer (vm, from[2]));
-      cgnat_prefetch_session_out2in (cm, vlib_get_buffer (vm, from[3]));
+      /* Two iterations ahead: hash the reverse flow keys and prefetch the
+       * session-table bucket + KV page. */
+      cgnat_prefetch_session_out2in (cm, vlib_get_buffer (vm, from[4]));
+      cgnat_prefetch_session_out2in (cm, vlib_get_buffer (vm, from[5]));
+
+      /* One iteration ahead: resolve the session-table values of the next
+       * pair and prefetch the session pool lines - the last dependent cache
+       * miss in the lookup chain. */
+      sn0 = cgnat_out2in_session_peek (cm, vlib_get_buffer (vm, from[2]));
+      sn1 = cgnat_out2in_session_peek (cm, vlib_get_buffer (vm, from[3]));
+      if (sn0 && cgnat_value_get_index (sn0) < pool_len (cm->sessions))
+	clib_prefetch_load (pool_elt_at_index (cm->sessions,
+					       cgnat_value_get_index (sn0)));
+      if (sn1 && cgnat_value_get_index (sn1) < pool_len (cm->sessions))
+	clib_prefetch_load (pool_elt_at_index (cm->sessions,
+					       cgnat_value_get_index (sn1)));
 
       b0 = vlib_get_buffer (vm, from[0]);
       b1 = vlib_get_buffer (vm, from[1]);
@@ -106,7 +123,7 @@ VLIB_NODE_FN (cgnat_out2in_node) (vlib_main_t *vm,
       if (PREDICT_TRUE (interface0 &&
 			cgnat_interface_is_outside (interface0)))
 	{
-	  rv = cgnat_session_out2in (vm, b0, now);
+	  rv = cgnat_out2in_execute (vm, b0, s0, now);
 	  if (PREDICT_FALSE (rv != 0 &&
 			     rv != VNET_API_ERROR_NO_SUCH_ENTRY &&
 			     rv != VNET_API_ERROR_UNSUPPORTED))
@@ -117,12 +134,15 @@ VLIB_NODE_FN (cgnat_out2in_node) (vlib_main_t *vm,
       if (PREDICT_TRUE (interface1 &&
 			cgnat_interface_is_outside (interface1)))
 	{
-	  rv = cgnat_session_out2in (vm, b1, now);
+	  rv = cgnat_out2in_execute (vm, b1, s1, now);
 	  if (PREDICT_FALSE (rv != 0 &&
 			     rv != VNET_API_ERROR_NO_SUCH_ENTRY &&
 			     rv != VNET_API_ERROR_UNSUPPORTED))
 	    next1 = CGNAT_OUT2IN_NEXT_DROP;
 	}
+
+      s0 = sn0;
+      s1 = sn1;
 
       if (PREDICT_FALSE (node->flags & VLIB_NODE_FLAG_TRACE))
 	{
@@ -167,7 +187,7 @@ VLIB_NODE_FN (cgnat_out2in_node) (vlib_main_t *vm,
       interface0 = cgnat_get_interface (cm, sw_if_index0);
       if (PREDICT_TRUE (interface0 && cgnat_interface_is_outside (interface0)))
 	{
-	  rv = cgnat_session_out2in (vm, b0, now);
+	  rv = cgnat_out2in_execute (vm, b0, 0, now);
 	  if (PREDICT_FALSE (rv != 0 &&
 			     rv != VNET_API_ERROR_NO_SUCH_ENTRY &&
 			     rv != VNET_API_ERROR_UNSUPPORTED))

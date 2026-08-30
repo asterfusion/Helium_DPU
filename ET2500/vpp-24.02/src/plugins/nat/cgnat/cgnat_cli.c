@@ -776,7 +776,8 @@ cgnat_show_user_stats (vlib_main_t *vm, unformat_input_t *input, u8 rate_only)
     {
       if (!instance->configured)
 	continue;
-      pool_foreach (user, instance->users)
+      for (u32 s = 0; s < CGNAT_USER_LOCK_BUCKETS; s++)
+	pool_foreach (user, instance->users_per_shard[s])
 	if (user->key.private_ip.as_u32 == inside_ip.as_u32)
 	  {
 	    u32 rate = now - user->session_rate_window_start < 1.0 ?

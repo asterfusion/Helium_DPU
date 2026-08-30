@@ -22,7 +22,7 @@
 #include <vppinfra/lffifo.h>
 #include <vppinfra/random.h>
 #include <vppinfra/time.h>
-#include <vppinfra/tw_timer_2t_1w_2048sl.h>
+#include <vppinfra/tw_timer_2t_2w_512sl.h>
 
 #define CGNAT_INVALID_INDEX ((u32) ~0)
 #define CGNAT_DEFAULT_START_PORT 1024
@@ -48,9 +48,19 @@
 #define CGNAT_UDP_TIMEOUT 60
 #define CGNAT_ICMP_TIMEOUT 60
 #define CGNAT_OTHER_TIMEOUT 60
-#define CGNAT_TIMER_MAX_DELAY 2047
-#define CGNAT_SESSION_TIMER_MAX_EXPIRATIONS 1024
+/* tw_timer_2t_2w_512sl @1s granularity: fast ring 512s, slow ring 512 slots
+ * of 512s -> direct range 262143s, which covers the 262144s aging config
+ * maximum (CGNAT_VALIDATE_AGING) with the clamp below absorbing the 1s
+ * edge.  (The template ASSERTs slow_ring_offset < 512, so 262144 must not
+ * be armed directly.) */
+#define CGNAT_TIMER_MAX_DELAY 262143
+#define CGNAT_SESSION_TIMER_MAX_EXPIRATIONS 32768
 #define CGNAT_COOLING_TIMER_MAX_EXPIRATIONS 1024
+/* Safety cap on total expirations processed in one timer-process wakeup
+ * (drain loop), so an expiry storm cannot starve other main-thread
+ * processes. */
+#define CGNAT_SESSION_TIMER_DRAIN_CAP (128 * 1024)
+#define CGNAT_COOLING_TIMER_DRAIN_CAP (16 * 1024)
 #define CGNAT_SESSION_TIMER_VEC (1024 * 1024)
 #define CGNAT_COOLING_TIMER_VEC (1024 * 16)
 #define CGNAT_LOG_FIFO_SIZE (64 * 1024)
@@ -444,16 +454,23 @@ typedef struct
 
   u32 instance_index;
   u32 inside_fib_index;
+  /* Cached from the mapping at creation so the fast path never has to
+   * dereference the mapping pool entry: a published session implies a live
+   * mapping (mappings are reaped only after their last session is gone). */
+  u32 outside_fib_index;
 
   u8 protocol;
   u8 tcp_state;
   u8 flags;
   u8 mapping_type;
   u32 timer_gen_id;
-  clib_spinlock_t lock;
 
+  /* Aligned f64; written without a lock (single-copy atomic store), readers
+   * tolerate a stale value - it only skews aging by the 1s touch throttle. */
   f64 last_active;
 } cgnat_session_t;
+
+STATIC_ASSERT_SIZEOF (cgnat_session_t, 64);
 
 typedef enum
 {
@@ -584,7 +601,7 @@ typedef struct
   /* 0 = no TCP MSS clamping; non-zero clamps SYN MSS option to this value. */
   u16 tcp_mss;
   clib_spinlock_t user_locks[CGNAT_USER_LOCK_BUCKETS];
-  clib_spinlock_t users_lock;
+
 
   u16 per_user_max_blocks;
   u16 per_user_max_ports;
@@ -614,8 +631,12 @@ typedef struct
   u32 active_users;
   u32 active_sessions;
 
-  cgnat_user_t *users;
-  uword *user_index_by_key;
+  /* Users are sharded by cgnat_user_lock_index(fib, private_ip): each shard
+   * has its own pool and (fib,ip)->index hash, accessed only under the
+   * matching user_locks[] stripe or a worker barrier - there is no
+   * instance-global users lock.  A user_index encodes shard:7 | slot:25. */
+  cgnat_user_t *users_per_shard[CGNAT_USER_LOCK_BUCKETS];
+  uword *user_index_by_key_shard[CGNAT_USER_LOCK_BUCKETS];
 
   cgnat_static_rule_t *static_rules;
 
@@ -633,7 +654,6 @@ typedef struct
   u32 inside_fib_index;
   ip4_address_t private_ip;
   u16 block_id;
-  u16 remaining_time;
 } cgnat_cooling_timer_t;
 
 typedef struct
@@ -709,12 +729,12 @@ typedef struct
   /* Deleted sessions are parked here and only returned to the pool by
    * cgnat_session_reap() under a worker barrier: until then the slot stays
    * allocated with DELETING set, so lock-free session-table readers that
-   * already resolved the value can still lock the session and revalidate
-   * generation + DELETING. */
+   * already resolved the value can still dereference the session and
+   * revalidate generation + DELETING. */
   clib_spinlock_t session_reap_lock;
   u64 *session_reap_queue;
 
-  tw_timer_wheel_2t_1w_2048sl_t cooling_timer_wheel;
+  tw_timer_wheel_2t_2w_512sl_t cooling_timer_wheel;
   cgnat_cooling_timer_t *cooling_timers;
   u8 cooling_timer_initialized;
   u32 *cooling_expired;
@@ -723,7 +743,7 @@ typedef struct
    * expires them, with no worker barrier in between. */
   clib_spinlock_t cooling_timer_lock;
 
-  tw_timer_wheel_2t_1w_2048sl_t session_timer_wheel;
+  tw_timer_wheel_2t_2w_512sl_t session_timer_wheel;
   cgnat_session_timer_t *session_timers;
   u8 session_timer_initialized;
   u32 *session_expired;
@@ -924,6 +944,41 @@ cgnat_user_lock (cgnat_instance_t *instance, u32 fib_index,
 {
   clib_spinlock_lock (
     &instance->user_locks[cgnat_user_lock_index (fib_index, private_ip)]);
+}
+
+/* user_index encoding: shard (7 bits, == the user_locks[] stripe) in the
+ * high bits, per-shard pool slot in the low 25 bits. */
+#define CGNAT_USER_INDEX_SHARD_SHIFT 25
+#define CGNAT_USER_INDEX_SLOT_MASK ((1u << CGNAT_USER_INDEX_SHARD_SHIFT) - 1)
+
+static_always_inline u32
+cgnat_user_index_make (u32 shard, u32 slot)
+{
+  return (shard << CGNAT_USER_INDEX_SHARD_SHIFT) |
+	 (slot & CGNAT_USER_INDEX_SLOT_MASK);
+}
+
+/* Caller must hold the stripe lock for the shard (or a worker barrier).
+ * Returns NULL for a stale/freed index. */
+static_always_inline cgnat_user_t *
+cgnat_user_from_index (cgnat_instance_t *instance, u32 user_index)
+{
+  u32 shard = user_index >> CGNAT_USER_INDEX_SHARD_SHIFT;
+  u32 slot = user_index & CGNAT_USER_INDEX_SLOT_MASK;
+  cgnat_user_t *users = instance->users_per_shard[shard];
+
+  if (slot >= pool_len (users) || pool_is_free_index (users, slot))
+    return 0;
+  return pool_elt_at_index (users, slot);
+}
+
+static_always_inline u32
+cgnat_user_to_index (cgnat_instance_t *instance, cgnat_user_t *user)
+{
+  u32 shard =
+    cgnat_user_lock_index (user->key.fib_index, user->key.private_ip);
+  return cgnat_user_index_make (shard,
+				user - instance->users_per_shard[shard]);
 }
 
 static_always_inline void

@@ -270,6 +270,12 @@ cgnat_public_ip_runtime_init (cgnat_public_ip_t *ip, cgnat_pool_t *pool)
   for (i = 0; i < ip->total_blocks; i++)
     ip->free_block_bitmap = clib_bitmap_set (ip->free_block_bitmap, i, 1);
 
+  /* Fixed-size pool: the block count per public IP is bounded by
+   * total_blocks by construction, and a preallocated pool never reallocs -
+   * port alloc/release paths dereference ip->blocks without ip->lock
+   * (serialized per block by the owner user's stripe lock). */
+  pool_init_fixed (ip->blocks, ip->total_blocks);
+
   clib_spinlock_init (&ip->lock);
 }
 
@@ -565,19 +571,14 @@ cgnat_public_ip_alloc_block (cgnat_pool_t *pool, cgnat_public_ip_t *ip,
   if (block_id == ~0 || block_id >= ip->total_blocks)
     return 0;
 
-  u32 i;
-
   pool_get_zero (ip->blocks, block);
   block->block_id = block_id;
   block->state = CGNAT_BLOCK_ALLOCATED;
   block->owner_user_index = user_index;
-  for (i = 0; i < CGNAT_PBA_PROTO_COUNT; i++)
-    {
-      block->free_port_bitmap[i][0] =
-	clib_bitmap_dup (pool->free_port_offset_bitmap[0]);
-      block->free_port_bitmap[i][1] =
-	clib_bitmap_dup (pool->free_port_offset_bitmap[1]);
-    }
+  /* Port bitmaps stay NULL here: they are materialized lazily per
+   * protocol/parity on first use (see cgnat_alloc_port_from_block), saving
+   * 6 bitmap dups (~1.6KB at block_size 2048) per block that never sees
+   * that traffic class. */
   ip->block_index_by_id[block_id] = block - ip->blocks;
   ip->free_block_bitmap =
     clib_bitmap_set (ip->free_block_bitmap, block_id, 0);
@@ -608,6 +609,15 @@ cgnat_alloc_port_from_block (cgnat_instance_t *instance,
   block_start = cgnat_block_start_port (pool, block->block_id);
   offset_odd = (private_port ^ block_start) & 1;
   free_ports = block->free_port_bitmap[proto_index][offset_odd];
+  if (PREDICT_FALSE (!free_ports))
+    {
+      /* Lazily materialize the bitmap on first use of this
+       * protocol/parity: the block is owned by the caller's user and this
+       * runs under that user's stripe lock. */
+      block->free_port_bitmap[proto_index][offset_odd] =
+	clib_bitmap_dup (pool->free_port_offset_bitmap[offset_odd]);
+      free_ports = block->free_port_bitmap[proto_index][offset_odd];
+    }
 
   if (pool->port_alloc_mode == CGNAT_PORT_ALLOC_MODE_RANDOM)
   {
@@ -705,18 +715,11 @@ static void
 cgnat_reactivate_cooling_block (cgnat_pool_t *pool, cgnat_public_ip_t *ip,
 				cgnat_block_t *block)
 {
-  u32 i;
-
   block->state = CGNAT_BLOCK_ALLOCATED;
   /* Leave the old timer in the wheel; gen_id makes it expire as stale. */
   block->gen_id++;
-  for (i = 0; i < CGNAT_PBA_PROTO_COUNT; i++)
-    {
-      block->free_port_bitmap[i][0] =
-	clib_bitmap_dup (pool->free_port_offset_bitmap[0]);
-      block->free_port_bitmap[i][1] =
-	clib_bitmap_dup (pool->free_port_offset_bitmap[1]);
-    }
+  /* Port bitmaps were freed at cooling start; they rebuild lazily in
+   * cgnat_alloc_port_from_block on first use of each protocol/parity. */
 
   ip->cooling_blocks--;
   cgnat_pool_cooling_blocks_add (pool, -1);
@@ -752,7 +755,7 @@ cgnat_reactivate_prealloc_user_blocks (cgnat_instance_t *instance,
 	continue;
 
       block = pool_elt_at_index (ip->blocks, block_index);
-      if (block->owner_user_index != (u32) (user - instance->users) ||
+      if (block->owner_user_index != cgnat_user_to_index (instance, user) ||
 	  block->state != CGNAT_BLOCK_COOLING)
 	continue;
 
@@ -772,7 +775,7 @@ cgnat_start_prealloc_user_cooling (cgnat_main_t *cm,
 {
   u16 *owned_block_ids = 0;
   u16 *block_id;
-  u32 user_index = user - instance->users;
+  u32 user_index = cgnat_user_to_index (instance, user);
   ip4_address_t private_ip = user->key.private_ip;
 
   vec_append (owned_block_ids, user->owned_block_ids);
@@ -807,6 +810,12 @@ cgnat_cooling_process_expired (u32 *expired_timers)
   cgnat_main_t *cm = &cgnat_main;
   cgnat_cooling_timer_t *entry;
   u32 i, entry_index, processed = 0;
+  /* Same batching as cgnat_session_process_expired_timers: pool/wheel
+   * bookkeeping is flushed under a single cooling_timer_lock section; the
+   * entries being processed belong to neither the wheel nor the free pool
+   * while we work on them. */
+  u32 *pending_put = 0;
+  u32 *pending_rearm_keep = 0;
 
   for (i = 0; i < vec_len (expired_timers); i++)
     {
@@ -819,11 +828,7 @@ cgnat_cooling_process_expired (u32 *expired_timers)
       entry_index = expired_timers[i] & 0x7FFFFFFF;
       if (processed >= CGNAT_COOLING_TIMER_MAX_EXPIRATIONS)
 	{
-	  clib_spinlock_lock (&cm->cooling_timer_lock);
-	  if (!pool_is_free_index (cm->cooling_timers, entry_index))
-	    tw_timer_start_2t_1w_2048sl (&cm->cooling_timer_wheel,
-					 entry_index, 0, 1);
-	  clib_spinlock_unlock (&cm->cooling_timer_lock);
+	  vec_add1 (pending_rearm_keep, entry_index);
 	  continue;
 	}
 
@@ -855,28 +860,15 @@ cgnat_cooling_process_expired (u32 *expired_timers)
 	      block->block_id == entry->block_id &&
 	      block->gen_id == entry->gen_id)
 	    {
-	      if (entry->remaining_time)
+	      if (have_owner_key)
 		{
-		  u16 delay = clib_min (entry->remaining_time,
-					CGNAT_TIMER_MAX_DELAY);
-		  entry->remaining_time -= delay;
-		  clib_spinlock_lock (&cm->cooling_timer_lock);
-		  tw_timer_start_2t_1w_2048sl (&cm->cooling_timer_wheel,
-					       entry_index, 0, delay);
-		  clib_spinlock_unlock (&cm->cooling_timer_lock);
-		  clib_spinlock_unlock (&ip->lock);
-		  if (have_owner_key)
-		    cgnat_user_unlock (instance, entry->inside_fib_index,
-				       entry->private_ip);
-		  continue;
-		}
-	      if (have_owner_key && !pool_is_free_index (instance->users, block->owner_user_index))
-		{
-		  cgnat_user_t *user =
-		    pool_elt_at_index (instance->users,
-				       block->owner_user_index);
-		  cgnat_user_remove_owned_block (user, block->block_id);
-		  cgnat_delete_user_if_idle (instance, user);
+		  cgnat_user_t *user = cgnat_user_from_index (
+		    instance, block->owner_user_index);
+		  if (user)
+		    {
+		      cgnat_user_remove_owned_block (user, block->block_id);
+		      cgnat_delete_user_if_idle (instance, user);
+		    }
 		}
 	      cgnat_log_pba_block (instance, "PBA_BLOCK_RELEASE",
 				   "cooling_expire", entry->private_ip,
@@ -890,10 +882,24 @@ cgnat_cooling_process_expired (u32 *expired_timers)
 	cgnat_user_unlock (instance, entry->inside_fib_index, entry->private_ip);
 
     done:
+      vec_add1 (pending_put, entry_index);
+    }
+
+  if (vec_len (pending_put) + vec_len (pending_rearm_keep))
+    {
+      u32 *pi;
+
       clib_spinlock_lock (&cm->cooling_timer_lock);
-      pool_put_index (cm->cooling_timers, entry_index);
+      vec_foreach (pi, pending_rearm_keep)
+	if (!pool_is_free_index (cm->cooling_timers, *pi))
+	  tw_timer_start_2t_2w_512sl (&cm->cooling_timer_wheel, *pi, 0, 1);
+      vec_foreach (pi, pending_put)
+	pool_put_index (cm->cooling_timers, *pi);
       clib_spinlock_unlock (&cm->cooling_timer_lock);
     }
+
+  vec_free (pending_put);
+  vec_free (pending_rearm_keep);
 }
 
 static void
@@ -916,13 +922,15 @@ cgnat_start_block_cooling (cgnat_main_t *cm, u32 instance_index,
 	cgnat_instance_get_by_index (cm, instance_index);
       if (!instance)
 	return;
-      if (!pool_is_free_index (instance->users, block->owner_user_index))
-	{
-	  cgnat_user_t *user =
-	    pool_elt_at_index (instance->users, block->owner_user_index);
-	  cgnat_user_remove_owned_block (user, block->block_id);
-	  cgnat_delete_user_if_idle (instance, user);
-	}
+      {
+	cgnat_user_t *user =
+	  cgnat_user_from_index (instance, block->owner_user_index);
+	if (user)
+	  {
+	    cgnat_user_remove_owned_block (user, block->block_id);
+	    cgnat_delete_user_if_idle (instance, user);
+	  }
+      }
 
       cgnat_log_pba_block (instance, "PBA_BLOCK_RELEASE", "idle",
 			   private_ip, ip->addr, pool, block, pool_index);
@@ -954,23 +962,18 @@ cgnat_start_block_cooling (cgnat_main_t *cm, u32 instance_index,
    * deleted: no user cleanup is needed (or even possible) for this block. */
   entry->inside_fib_index = CGNAT_INVALID_INDEX;
   entry->private_ip = private_ip;
-  if (instance_index < vec_len (cm->instances) &&
-      !pool_is_free_index (cm->instances[instance_index].users,
-			   block->owner_user_index))
+  if (instance_index < vec_len (cm->instances))
     {
-      cgnat_user_t *user =
-	pool_elt_at_index (cm->instances[instance_index].users,
-			   block->owner_user_index);
-      entry->inside_fib_index = user->key.fib_index;
+      cgnat_user_t *user = cgnat_user_from_index (
+	&cm->instances[instance_index], block->owner_user_index);
+      if (user)
+	entry->inside_fib_index = user->key.fib_index;
     }
-  entry->remaining_time =
-    pool->cooling_time > CGNAT_TIMER_MAX_DELAY ?
-      pool->cooling_time - CGNAT_TIMER_MAX_DELAY :
-      0;
 
-  tw_timer_start_2t_1w_2048sl (&cm->cooling_timer_wheel, entry_index, 0,
-			       clib_min (pool->cooling_time,
-				 CGNAT_TIMER_MAX_DELAY));
+  /* cooling_time is u16 and validated <= 3600, well inside the wheel's
+   * direct range (262143s): a single arm always suffices. */
+  tw_timer_start_2t_2w_512sl (&cm->cooling_timer_wheel, entry_index, 0,
+			       pool->cooling_time);
   clib_spinlock_unlock (&cm->cooling_timer_lock);
 }
 
@@ -981,8 +984,8 @@ cgnat_pba_init (cgnat_main_t *cm)
     return;
 
   /* No wheel callback: expired timers are collected directly with
-   * tw_timer_expire_timers_vec_2t_1w_2048sl(). */
-  tw_timer_wheel_init_2t_1w_2048sl (&cm->cooling_timer_wheel, 0, 1.0,
+   * tw_timer_expire_timers_vec_2t_2w_512sl(). */
+  tw_timer_wheel_init_2t_2w_512sl (&cm->cooling_timer_wheel, 0, 1.0,
 				    CGNAT_COOLING_TIMER_MAX_EXPIRATIONS);
   vec_prealloc(cm->cooling_expired, CGNAT_COOLING_TIMER_VEC);
   clib_spinlock_init (&cm->cooling_timer_lock);
@@ -995,7 +998,7 @@ cgnat_pba_reset (cgnat_main_t *cm)
   pool_free (cm->cooling_timers);
   if (cm->cooling_timer_initialized)
     {
-      tw_timer_wheel_free_2t_1w_2048sl (&cm->cooling_timer_wheel);
+      tw_timer_wheel_free_2t_2w_512sl (&cm->cooling_timer_wheel);
       vec_free(cm->cooling_expired);
       clib_spinlock_free (&cm->cooling_timer_lock);
       cm->cooling_timer_initialized = 0;
@@ -1034,54 +1037,59 @@ void
 cgnat_pba_expire_timers (f64 now)
 {
   cgnat_main_t *cm = &cgnat_main;
+  u32 total = 0, n;
 
   if (!cm->cooling_timer_initialized)
     return;
 
   /* Lock-synchronized with workers arming cooling timers from the datapath
-   * (cgnat_start_block_cooling); no worker barrier is taken here. */
-  clib_spinlock_lock (&cm->cooling_timer_lock);
-  cm->cooling_expired = tw_timer_expire_timers_vec_2t_1w_2048sl ( &cm->cooling_timer_wheel, now, cm->cooling_expired);
-  clib_spinlock_unlock (&cm->cooling_timer_lock);
-  cgnat_cooling_process_expired (cm->cooling_expired);
-  vec_reset_length (cm->cooling_expired);
+   * (cgnat_start_block_cooling); no worker barrier is taken here.
+   * Drain loop, same rationale as cgnat_session_expire_timers. */
+  for (;;)
+    {
+      clib_spinlock_lock (&cm->cooling_timer_lock);
+      cm->cooling_expired = tw_timer_expire_timers_vec_2t_2w_512sl ( &cm->cooling_timer_wheel, now, cm->cooling_expired);
+      clib_spinlock_unlock (&cm->cooling_timer_lock);
+
+      n = vec_len (cm->cooling_expired);
+      if (!n)
+	break;
+      cgnat_cooling_process_expired (cm->cooling_expired);
+      vec_reset_length (cm->cooling_expired);
+      total += n;
+      if (n < CGNAT_COOLING_TIMER_MAX_EXPIRATIONS ||
+	  total >= CGNAT_COOLING_TIMER_DRAIN_CAP)
+	break;
+    }
 }
 
+/* Call with the user's stripe lock held (cgnat_user_lock) or a worker
+ * barrier: each shard has its own hash and pool, so there is no
+ * instance-wide users lock. */
 static cgnat_user_t *
 cgnat_find_user (cgnat_instance_t *instance, cgnat_user_key_t *key)
 {
+  u32 shard = cgnat_user_lock_index (key->fib_index, key->private_ip);
   uword *p;
-  cgnat_user_t *user = 0;
 
-  clib_spinlock_lock (&instance->users_lock);
-  if (instance->user_index_by_key)
-    {
-      p = hash_get_mem (instance->user_index_by_key, key);
-      if (p)
-	user = pool_elt_at_index (instance->users, p[0]);
-    }
-  clib_spinlock_unlock (&instance->users_lock);
-
-  return user;
+  p = hash_get_mem (instance->user_index_by_key_shard[shard], key);
+  if (p)
+    return cgnat_user_from_index (instance, p[0]);
+  return 0;
 }
 
 static cgnat_user_t *
 cgnat_create_user (cgnat_instance_t *instance, cgnat_user_key_t *key,
 		   u32 pool_index)
 {
+  u32 shard = cgnat_user_lock_index (key->fib_index, key->private_ip);
   cgnat_user_t *user;
 
-  clib_spinlock_lock (&instance->users_lock);
-  if (!instance->user_index_by_key)
-    instance->user_index_by_key =
-      hash_create_mem (0, sizeof (cgnat_user_key_t), sizeof (uword));
-
-  pool_get_zero (instance->users, user);
+  pool_get_zero (instance->users_per_shard[shard], user);
   user->key = *key;
   user->pool_index = pool_index;
   user->public_ip_index = CGNAT_INVALID_INDEX;
   clib_spinlock_init (&user->session_lock);
-  clib_spinlock_unlock (&instance->users_lock);
 
   return user;
 }
@@ -1089,21 +1097,23 @@ cgnat_create_user (cgnat_instance_t *instance, cgnat_user_key_t *key,
 static_always_inline void
 cgnat_commit_user (cgnat_instance_t *instance, cgnat_user_t *user)
 {
-  clib_spinlock_lock (&instance->users_lock);
-  hash_set_mem_alloc (&instance->user_index_by_key, &user->key,
-		      user - instance->users);
-  clib_spinlock_unlock (&instance->users_lock);
+  u32 shard = cgnat_user_lock_index (user->key.fib_index,
+				     user->key.private_ip);
+
+  hash_set_mem_alloc (&instance->user_index_by_key_shard[shard], &user->key,
+		      cgnat_user_to_index (instance, user));
 }
 
 void
 cgnat_delete_user (cgnat_instance_t *instance, cgnat_user_t *user)
 {
+  u32 shard = cgnat_user_lock_index (user->key.fib_index,
+				     user->key.private_ip);
   uword *p;
   u32 user_index;
 
-  clib_spinlock_lock (&instance->users_lock);
-  p = hash_get_mem (instance->user_index_by_key, &user->key);
-  user_index = user - instance->users;
+  p = hash_get_mem (instance->user_index_by_key_shard[shard], &user->key);
+  user_index = cgnat_user_to_index (instance, user);
 
   if (p && p[0] == user_index)
     {
@@ -1124,7 +1134,8 @@ cgnat_delete_user (cgnat_instance_t *instance, cgnat_user_t *user)
 	}
     }
 
-  hash_unset_mem_free (&instance->user_index_by_key, &user->key);
+  hash_unset_mem_free (&instance->user_index_by_key_shard[shard],
+		       &user->key);
   vec_free (user->owned_block_ids);
   {
     int i;
@@ -1132,8 +1143,7 @@ cgnat_delete_user (cgnat_instance_t *instance, cgnat_user_t *user)
       clib_bitmap_free (user->det_port_bitmap[i]);
   }
   clib_spinlock_free (&user->session_lock);
-  pool_put (instance->users, user);
-  clib_spinlock_unlock (&instance->users_lock);
+  pool_put (instance->users_per_shard[shard], user);
 }
 
 void
@@ -1206,7 +1216,7 @@ cgnat_prealloc_blocks_for_user (cgnat_instance_t *instance,
   while (vec_len (user->owned_block_ids) < user->max_blocks &&
 	 cgnat_public_ip_free_blocks (ip))
     {
-      block = cgnat_public_ip_alloc_block (pool, ip, user - instance->users);
+      block = cgnat_public_ip_alloc_block (pool, ip, cgnat_user_to_index (instance, user));
       if (!block)
         break;
 
@@ -1265,7 +1275,7 @@ cgnat_bind_user_to_public_ip (cgnat_instance_t *instance, u32 instance_index,
   }
   else
   {
-    block = cgnat_public_ip_alloc_block (pool, ip, user - instance->users);
+    block = cgnat_public_ip_alloc_block (pool, ip, cgnat_user_to_index (instance, user));
     if (!block)
     {
       clib_spinlock_unlock (&ip->lock);
@@ -1303,7 +1313,7 @@ cgnat_rollback_new_user (cgnat_instance_t *instance, cgnat_pool_t *pool,
 	  pool_is_free_index (ip->blocks, block_index))
 	continue;
       block = pool_elt_at_index (ip->blocks, block_index);
-      if (block->owner_user_index != (u32) (user - instance->users) ||
+      if (block->owner_user_index != cgnat_user_to_index (instance, user) ||
 	  block->state != CGNAT_BLOCK_ALLOCATED ||
 	  cgnat_block_has_active_ports (block))
 	continue;
@@ -1350,8 +1360,11 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
 
   ip = vec_elt_at_index (pool->public_ips, user->public_ip_index);
 
-  clib_spinlock_lock (&ip->lock);
-
+  /* Phase 1 runs without ip->lock: an owned block's port bitmap is only
+   * ever touched under its owner user's stripe lock (held by the caller),
+   * and the blocks pool is fixed-size since runtime init, so its base
+   * cannot move.  Only block state changes (cooling reactivation, new block
+   * allocation) still take ip->lock, in phase 2. */
   for (i = 0; i < vec_len (user->owned_block_ids); i++)
     {
       u16 block_id = user->owned_block_ids[i];
@@ -1359,37 +1372,57 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
       if (bi == CGNAT_INVALID_INDEX)
 	continue;
       block = pool_elt_at_index (ip->blocks, bi);
-      if (block->owner_user_index != user - instance->users)
-	continue;
-
-      if (block->state == CGNAT_BLOCK_COOLING)
-	{
-	  if (user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_PRE_ALLOC)
-	    cgnat_reactivate_prealloc_user_blocks (instance, pool, ip, user);
-	  else
-	    {
-	      cgnat_reactivate_cooling_block (pool, ip, block);
-	      cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
-				   user->key.private_ip, ip->addr, pool, block,
-				   user->pool_index);
-	    }
-	}
-      else if (block->state != CGNAT_BLOCK_ALLOCATED)
+      if (block->owner_user_index != cgnat_user_to_index (instance, user) ||
+	  block->state != CGNAT_BLOCK_ALLOCATED)
 	continue;
 
       rv = cgnat_alloc_port_from_block (instance, pool, block, private_port,
 					protocol, &public_port);
-
       if (!rv)
 	goto done;
+    }
+
+  /* Phase 2: state changes under ip->lock. */
+  clib_spinlock_lock (&ip->lock);
+
+  /* Wake cooling blocks owned by this user and retry the allocation. */
+  for (i = 0; i < vec_len (user->owned_block_ids); i++)
+    {
+      u16 block_id = user->owned_block_ids[i];
+      bi = ip->block_index_by_id[block_id];
+      if (bi == CGNAT_INVALID_INDEX)
+	continue;
+      block = pool_elt_at_index (ip->blocks, bi);
+      if (block->owner_user_index != cgnat_user_to_index (instance, user) ||
+	  block->state != CGNAT_BLOCK_COOLING)
+	continue;
+
+      if (user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_PRE_ALLOC)
+	cgnat_reactivate_prealloc_user_blocks (instance, pool, ip, user);
+      else
+	{
+	  cgnat_reactivate_cooling_block (pool, ip, block);
+	  cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
+			       user->key.private_ip, ip->addr, pool, block,
+			       user->pool_index);
+	}
+
+      rv = cgnat_alloc_port_from_block (instance, pool, block, private_port,
+					protocol, &public_port);
+      if (!rv)
+	{
+	  clib_spinlock_unlock (&ip->lock);
+	  goto done;
+	}
     }
 
   if (user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_ON_DEMAND &&
       vec_len (user->owned_block_ids) < user->max_blocks)
     {
-      block = cgnat_public_ip_alloc_block (pool, ip, user - instance->users);
+      block = cgnat_public_ip_alloc_block (pool, ip, cgnat_user_to_index (instance, user));
       if (!block)
 	{
+	  clib_spinlock_unlock (&ip->lock);
 	  rv = VNET_API_ERROR_LIMIT_EXCEEDED;
 	  goto done;
 	}
@@ -1400,6 +1433,11 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
 			   user->pool_index);
       rv = cgnat_alloc_port_from_block (instance, pool, block, private_port,
 					protocol, &public_port);
+      if (!rv)
+	{
+	  clib_spinlock_unlock (&ip->lock);
+	  goto done;
+	}
     }
 
   /* PRE_ALLOC: blocks reclaimed by the cooling timer are removed from
@@ -1421,7 +1459,7 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
 	  if (bi == CGNAT_INVALID_INDEX)
 	    continue;
 	  block = pool_elt_at_index (ip->blocks, bi);
-	  if (block->owner_user_index != user - instance->users ||
+	  if (block->owner_user_index != cgnat_user_to_index (instance, user) ||
 	      block->state != CGNAT_BLOCK_ALLOCATED)
 	    continue;
 
@@ -1429,9 +1467,14 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
 					    private_port, protocol,
 					    &public_port);
 	  if (!rv)
-	    goto done;
+	    {
+	      clib_spinlock_unlock (&ip->lock);
+	      goto done;
+	    }
 	}
     }
+
+  clib_spinlock_unlock (&ip->lock);
 
 done:
   if (rv == VNET_API_ERROR_LIMIT_EXCEEDED)
@@ -1443,10 +1486,9 @@ done:
       result->public_port = public_port;
       result->pool_index = user->pool_index;
       result->public_ip_index = user->public_ip_index;
-      result->user_index = user - instance->users;
+      result->user_index = cgnat_user_to_index (instance, user);
       result->block_index = block - ip->blocks;
     }
-  clib_spinlock_unlock (&ip->lock);
   return rv;
 }
 
@@ -1660,7 +1702,7 @@ port_found:
   result->public_port = public_port;
   result->pool_index = pool_index;
   result->public_ip_index = public_ip_index;
-  result->user_index = user - instance->users;
+  result->user_index = cgnat_user_to_index (instance, user);
   result->block_index = CGNAT_INVALID_INDEX;
 
   return 0;
@@ -1824,8 +1866,7 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
   cgnat_pool_t *pool;
   cgnat_public_ip_t *ip;
   cgnat_block_t *block;
-  cgnat_user_t *user = 0;
-  ip4_address_t log_private_ip;
+  cgnat_user_t *user;
   u32 block_id, port_offset, block_index;
   u16 pool_start;
   int proto_index;
@@ -1851,10 +1892,13 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
   ip = vec_elt_at_index (pool->public_ips, public_ip_index);
 
   cgnat_user_lock (instance, inside_fib_index, private_ip);
-  clib_spinlock_lock (&ip->lock);
+
+  /* No ip->lock for the port release itself: a block's port bitmap is only
+   * ever touched under its owner user's stripe lock (held here), and the
+   * blocks pool is fixed-size since runtime init, so its base cannot move.
+   * ip->lock is only taken for the block state change (cooling) below. */
   if (block_id >= vec_len (ip->block_index_by_id))
     {
-      clib_spinlock_unlock (&ip->lock);
       cgnat_user_unlock (instance, inside_fib_index, private_ip);
       return VNET_API_ERROR_NO_SUCH_ENTRY;
     }
@@ -1862,33 +1906,27 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
   block_index = ip->block_index_by_id[block_id];
   if (block_index == CGNAT_INVALID_INDEX)
     {
-      clib_spinlock_unlock (&ip->lock);
       cgnat_user_unlock (instance, inside_fib_index, private_ip);
       return VNET_API_ERROR_NO_SUCH_ENTRY;
     }
 
   block = pool_elt_at_index (ip->blocks, block_index);
+  /* A NULL bitmap means no port of this protocol/parity was ever allocated
+   * from this block (bitmaps are materialized lazily) - the port cannot be
+   * in use, so this release is stale. */
   if (block->state != CGNAT_BLOCK_ALLOCATED ||
+      !block->free_port_bitmap[proto_index][port_offset & 1] ||
       clib_bitmap_get (block->free_port_bitmap[proto_index][port_offset & 1],
 		       port_offset))
     {
-      clib_spinlock_unlock (&ip->lock);
       cgnat_user_unlock (instance, inside_fib_index, private_ip);
       return VNET_API_ERROR_NO_SUCH_ENTRY;
     }
 
-  if (pool_is_free_index (instance->users, block->owner_user_index))
-    {
-      clib_spinlock_unlock (&ip->lock);
-      cgnat_user_unlock (instance, inside_fib_index, private_ip);
-      return VNET_API_ERROR_NO_SUCH_ENTRY;
-    }
-
-  user = pool_elt_at_index (instance->users, block->owner_user_index);
-  if (user->key.fib_index != inside_fib_index ||
+  user = cgnat_user_from_index (instance, block->owner_user_index);
+  if (!user || user->key.fib_index != inside_fib_index ||
       user->key.private_ip.as_u32 != private_ip.as_u32)
     {
-      clib_spinlock_unlock (&ip->lock);
       cgnat_user_unlock (instance, inside_fib_index, private_ip);
       return VNET_API_ERROR_NO_SUCH_ENTRY;
     }
@@ -1901,24 +1939,18 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
 
   if (!cgnat_block_has_active_ports (block))
     {
+      clib_spinlock_lock (&ip->lock);
       if (cgnat_prealloc_user_idle (user))
 	cgnat_start_prealloc_user_cooling (cm, instance, instance_index,
 					   pool_index, public_ip_index, pool, ip,
 					   user);
-      else if (!user ||
-	       user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_ON_DEMAND)
-	{
-	  log_private_ip.as_u32 = 0;
-	  if (user)
-	    log_private_ip = user->key.private_ip;
-
-	  cgnat_start_block_cooling (cm, instance_index, pool_index,
-				     public_ip_index, pool, ip, block,
-				     log_private_ip);
-	}
+      else if (user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_ON_DEMAND)
+	cgnat_start_block_cooling (cm, instance_index, pool_index,
+				   public_ip_index, pool, ip, block,
+				   user->key.private_ip);
+      clib_spinlock_unlock (&ip->lock);
     }
 
-  clib_spinlock_unlock (&ip->lock);
   cgnat_user_unlock (instance, inside_fib_index, private_ip);
   return 0;
 }
@@ -1996,7 +2028,8 @@ cgnat_block_user_snapshot (ip4_address_t inside_ip)
     {
       if (!instance->configured)
 	continue;
-      pool_foreach (user, instance->users)
+      for (u32 s = 0; s < CGNAT_USER_LOCK_BUCKETS; s++)
+	pool_foreach (user, instance->users_per_shard[s])
 	{
 	  cgnat_block_user_summary_t *summary;
 	  cgnat_pool_t *pool;
@@ -2032,7 +2065,8 @@ cgnat_block_user_snapshot (ip4_address_t inside_ip)
 		  pool_is_free_index (public_ip->blocks, block_index))
 		continue;
 	      block = pool_elt_at_index (public_ip->blocks, block_index);
-	      if (block->owner_user_index != (u32) (user - instance->users))
+	      if (block->owner_user_index !=
+		  cgnat_user_to_index (instance, user))
 		continue;
 	      summary->owned_blocks++;
 	      if (block->state == CGNAT_BLOCK_COOLING)
@@ -2103,17 +2137,16 @@ cgnat_block_public_snapshot (ip4_address_t public_ip_filter)
 		  clib_memcpy (detail->active_ports, block->active_ports,
 		       sizeof (detail->active_ports));
 		  detail->state = block->state;
-		  if (instance->users &&
-		      block->owner_user_index < vec_len (instance->users) &&
-		      !pool_is_free_index (instance->users,
-					   block->owner_user_index))
-		    {
-		      user = pool_elt_at_index (instance->users,
-						block->owner_user_index);
-		      detail->owner_valid = 1;
-		      detail->inside_ip = user->key.private_ip;
-		      detail->inside_fib_index = user->key.fib_index;
-		    }
+		  {
+		    user = cgnat_user_from_index (instance,
+						  block->owner_user_index);
+		    if (user)
+		      {
+			detail->owner_valid = 1;
+			detail->inside_ip = user->key.private_ip;
+			detail->inside_fib_index = user->key.fib_index;
+		      }
+		  }
 		}
 	    }
 	}

@@ -144,14 +144,14 @@ cgnat_init (vlib_main_t *vm)
   cm->log_class_dynamic =
     vlib_log_register_class_rate_limit ("CGNAT", "DYNAMIC", 0x7FFFFFFF);
   vlib_log_get_subclass_data (cm->log_class_dynamic)->level =
-    VLIB_LOG_LEVEL_NOTICE;
+    VLIB_LOG_LEVEL_DISABLED;
   vlib_log_get_subclass_data (cm->log_class_dynamic)->syslog_level =
     VLIB_LOG_LEVEL_NOTICE;
 
   cm->log_class_deterministic =
     vlib_log_register_class_rate_limit ("CGNAT", "DETERMINISTIC", 0x7FFFFFFF);
   vlib_log_get_subclass_data (cm->log_class_deterministic)->level =
-    VLIB_LOG_LEVEL_NOTICE;
+    VLIB_LOG_LEVEL_DISABLED;
   vlib_log_get_subclass_data (cm->log_class_deterministic)->syslog_level =
     VLIB_LOG_LEVEL_NOTICE;
 

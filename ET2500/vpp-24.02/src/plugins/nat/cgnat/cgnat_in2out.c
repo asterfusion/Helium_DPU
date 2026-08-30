@@ -71,6 +71,8 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
   u32 pkts_processed = 0;
   f64 now = vlib_time_now (vm);
 
+  u64 s0 = 0, s1 = 0;
+
   if (PREDICT_FALSE (!cm->enabled))
     {
       u32 i;
@@ -96,6 +98,7 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
       u32 inside_fib_index1 = CGNAT_INVALID_INDEX;
       u32 acl_index0 = CGNAT_INVALID_INDEX, acl_index1 = CGNAT_INVALID_INDEX;
       u8 context_valid0 = 0, context_valid1 = 0;
+      u64 sn0, sn1;
       int rv;
 
       bp = vlib_get_buffer (vm, from[4]);
@@ -105,8 +108,22 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
       vlib_prefetch_buffer_header (bp, LOAD);
       clib_prefetch_load (vlib_buffer_get_current (bp));
 
-      cgnat_prefetch_session_in2out (cm, vlib_get_buffer (vm, from[2]));
-      cgnat_prefetch_session_in2out (cm, vlib_get_buffer (vm, from[3]));
+      /* Two iterations ahead: hash the flow keys and prefetch the
+       * session-table bucket + KV page. */
+      cgnat_prefetch_session_in2out (cm, vlib_get_buffer (vm, from[4]));
+      cgnat_prefetch_session_in2out (cm, vlib_get_buffer (vm, from[5]));
+
+      /* One iteration ahead: resolve the session-table values of the next
+       * pair and prefetch the session pool lines - the last dependent cache
+       * miss in the lookup chain. */
+      sn0 = cgnat_in2out_session_peek (cm, vlib_get_buffer (vm, from[2]));
+      sn1 = cgnat_in2out_session_peek (cm, vlib_get_buffer (vm, from[3]));
+      if (sn0 && cgnat_value_get_index (sn0) < pool_len (cm->sessions))
+	clib_prefetch_load (pool_elt_at_index (cm->sessions,
+					       cgnat_value_get_index (sn0)));
+      if (sn1 && cgnat_value_get_index (sn1) < pool_len (cm->sessions))
+	clib_prefetch_load (pool_elt_at_index (cm->sessions,
+					       cgnat_value_get_index (sn1)));
 
       b0 = vlib_get_buffer (vm, from[0]);
       b1 = vlib_get_buffer (vm, from[1]);
@@ -123,8 +140,7 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
 	  inside_fib_index0 = cgnat_buffer_inside_fib_index (b0);
 	  acl_index0 = b0->acl_index;
 	  context_valid0 = 1;
-	  rv = cgnat_session_in2out (vm, b0, instance_index0,
-				     inside_fib_index0, now);
+	  rv = cgnat_in2out_execute (vm, b0, s0, now);
 	  if (PREDICT_FALSE (rv && rv != VNET_API_ERROR_UNSUPPORTED))
 	    next0 = CGNAT_IN2OUT_NEXT_DROP;
 	}
@@ -133,11 +149,13 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
 	  inside_fib_index1 = cgnat_buffer_inside_fib_index (b1);
 	  acl_index1 = b1->acl_index;
 	  context_valid1 = 1;
-	  rv = cgnat_session_in2out (vm, b1, instance_index1,
-				     inside_fib_index1, now);
+	  rv = cgnat_in2out_execute (vm, b1, s1, now);
 	  if (PREDICT_FALSE (rv && rv != VNET_API_ERROR_UNSUPPORTED))
 	    next1 = CGNAT_IN2OUT_NEXT_DROP;
 	}
+
+      s0 = sn0;
+      s1 = sn1;
 
       if (PREDICT_FALSE (node->flags & VLIB_NODE_FLAG_TRACE))
 	{
@@ -196,8 +214,7 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
 	  inside_fib_index0 = cgnat_buffer_inside_fib_index (b0);
 	  acl_index0 = b0->acl_index;
 	  context_valid0 = 1;
-	  rv = cgnat_session_in2out (vm, b0, instance_index0, inside_fib_index0,
-				     now);
+	  rv = cgnat_in2out_execute (vm, b0, 0, now);
 	  if (PREDICT_FALSE (rv && rv != VNET_API_ERROR_UNSUPPORTED))
 	    next0 = CGNAT_IN2OUT_NEXT_DROP;
 	}

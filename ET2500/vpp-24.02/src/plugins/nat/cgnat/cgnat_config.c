@@ -175,16 +175,16 @@ cgnat_recalculate_instance (cgnat_main_t *cm, cgnat_instance_t *instance)
   instance->pool_addr_max.as_u32 = clib_host_to_net_u32 (addr_max);
 }
 
-/* Pre-reserve an instance's user pool so it never reallocs at runtime and
- * readers holding a user pointer outside users_lock never see the pool move.
- * A dynamic user always owns at least one port block, so total_blocks bounds
- * the user count; a deterministic instance has at most one user per inside
- * host, bounded by det.inside_count.  Callers must invoke this on an empty
- * users pool. */
+/* Pre-reserve an instance's per-shard user pools so they never realloc at
+ * runtime and readers holding a user pointer outside the stripe lock never
+ * see the pool move.  A dynamic user always owns at least one port block, so
+ * total_blocks bounds the user count; a deterministic instance has at most
+ * one user per inside host, bounded by det.inside_count.  Callers must
+ * invoke this on empty shards. */
 static void
 cgnat_instance_reserve_users (cgnat_instance_t *instance)
 {
-  u32 reserve;
+  u32 reserve, shard;
 
   if (instance->mode == CGNAT_INSTANCE_MODE_DETERMINISTIC)
     reserve = instance->det.inside_count;
@@ -192,7 +192,10 @@ cgnat_instance_reserve_users (cgnat_instance_t *instance)
     reserve = instance->total_blocks;
 
   if (reserve)
-    pool_alloc_aligned (instance->users, reserve, CLIB_CACHE_LINE_BYTES);
+    for (shard = 0; shard < CGNAT_USER_LOCK_BUCKETS; shard++)
+      pool_alloc_aligned (instance->users_per_shard[shard],
+			  reserve / CGNAT_USER_LOCK_BUCKETS + 1,
+			  CLIB_CACHE_LINE_BYTES);
 }
 
 static int
@@ -290,16 +293,24 @@ cgnat_instance_free_runtime (cgnat_instance_t *instance)
 {
   cgnat_static_rule_t *rule;
   cgnat_user_t *user;
-  u32 i;
+  u32 i, s;
 
-  pool_foreach (user, instance->users)
+  for (s = 0; s < CGNAT_USER_LOCK_BUCKETS; s++)
     {
-      int i;
+      pool_foreach (user, instance->users_per_shard[s])
+	{
+	  int i;
 
-      vec_free (user->owned_block_ids);
-      for (i = 0; i < CGNAT_PBA_PROTO_COUNT; i++)
-	clib_bitmap_free (user->det_port_bitmap[i]);
-      clib_spinlock_free (&user->session_lock);
+	  vec_free (user->owned_block_ids);
+	  for (i = 0; i < CGNAT_PBA_PROTO_COUNT; i++)
+	    clib_bitmap_free (user->det_port_bitmap[i]);
+	  clib_spinlock_free (&user->session_lock);
+	}
+      pool_free (instance->users_per_shard[s]);
+      instance->users_per_shard[s] = 0;
+      if (instance->user_index_by_key_shard[s])
+	hash_free (instance->user_index_by_key_shard[s]);
+      instance->user_index_by_key_shard[s] = 0;
     }
   pool_foreach (rule, instance->static_rules)
     {
@@ -307,8 +318,6 @@ cgnat_instance_free_runtime (cgnat_instance_t *instance)
       clib_spinlock_free (&rule->lock);
     }
 
-  hash_free (instance->user_index_by_key);
-  pool_free (instance->users);
   pool_free (instance->static_rules);
   vec_free (instance->acl_indices);
   vec_free (instance->syslog_servers);
@@ -318,7 +327,6 @@ cgnat_instance_free_runtime (cgnat_instance_t *instance)
 
   for (i = 0; i < CGNAT_USER_LOCK_BUCKETS; i++)
     clib_spinlock_free (&instance->user_locks[i]);
-  clib_spinlock_free (&instance->users_lock);
 
   clib_memset (instance, 0, sizeof (*instance));
 }
@@ -332,12 +340,11 @@ cgnat_instance_runtime_init (cgnat_main_t *cm, cgnat_instance_t *instance,
   (void) cm;
 
   for (i = 0; i < CGNAT_USER_LOCK_BUCKETS; i++)
-    clib_spinlock_init (&instance->user_locks[i]);
-  clib_spinlock_init (&instance->users_lock);
-
-  instance->users = 0;
-  instance->user_index_by_key =
-    hash_create_mem (0, sizeof (cgnat_user_key_t), sizeof (uword));
+    {
+      clib_spinlock_init (&instance->user_locks[i]);
+      instance->user_index_by_key_shard[i] =
+	hash_create_mem (0, sizeof (cgnat_user_key_t), sizeof (uword));
+    }
 
   instance->total_blocks = 0;
   instance->allocated_blocks = 0;
@@ -352,16 +359,17 @@ cgnat_instance_runtime_fini (cgnat_instance_t *instance)
   u32 i;
 
   for (i = 0; i < CGNAT_USER_LOCK_BUCKETS; i++)
-    clib_spinlock_free (&instance->user_locks[i]);
-  clib_spinlock_free (&instance->users_lock);
+    {
+      clib_spinlock_free (&instance->user_locks[i]);
 
-  if (instance->users)
-    pool_free (instance->users);
-  instance->users = 0;
+      if (instance->users_per_shard[i])
+	pool_free (instance->users_per_shard[i]);
+      instance->users_per_shard[i] = 0;
 
-  if (instance->user_index_by_key)
-    hash_free (instance->user_index_by_key);
-  instance->user_index_by_key = 0;
+      if (instance->user_index_by_key_shard[i])
+	hash_free (instance->user_index_by_key_shard[i]);
+      instance->user_index_by_key_shard[i] = 0;
+    }
 }
 
 static_always_inline void

@@ -594,16 +594,12 @@ cgnat_session_alloc (cgnat_main_t *cm, u32 *session_index)
   session->generation = ++cm->session_generation_by_index[*session_index];
   clib_spinlock_unlock (&cm->session_pool_lock);
 
-  /* Element-local init does not need the pool lock. */
-  clib_spinlock_init (&session->lock);
-
   return session;
 }
 
 static_always_inline void
 cgnat_session_free_unpublished (cgnat_main_t *cm, cgnat_session_t *session)
 {
-  clib_spinlock_free (&session->lock);
   clib_spinlock_lock (&cm->session_pool_lock);
   pool_put (cm->sessions, session);
   clib_spinlock_unlock (&cm->session_pool_lock);
@@ -626,10 +622,9 @@ cgnat_mapping_get_user (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   if (!instance)
     return 0;
 
-  if (mapping->user_index >= pool_len (instance->users) ||
-      pool_is_free_index (instance->users, mapping->user_index))
+  user = cgnat_user_from_index (instance, mapping->user_index);
+  if (!user)
     return 0;
-  user = pool_elt_at_index (instance->users, mapping->user_index);
 
   if (instancep)
     *instancep = instance;
@@ -871,7 +866,7 @@ cgnat_session_start_timer (cgnat_main_t *cm, cgnat_session_t *session, f64 now)
   /* Atomic: the delete path invalidates timers without session_timer_lock. */
   entry->timer_gen_id = clib_atomic_fetch_add (&session->timer_gen_id, 1) + 1;
 
-  tw_timer_start_2t_1w_2048sl (&cm->session_timer_wheel, entry_index, 0, delay);
+  tw_timer_start_2t_2w_512sl (&cm->session_timer_wheel, entry_index, 0, delay);
 
   clib_spinlock_unlock (&cm->session_timer_lock);
 }
@@ -1166,6 +1161,20 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
   cgnat_main_t *cm = &cgnat_main;
   f64 now = vlib_time_now (cm->vlib_main);
   u32 i, processed = 0;
+  /* Wheel/pool bookkeeping is batched and flushed under a single
+   * session_timer_lock section at the end.  Safe because the entries being
+   * processed belong to neither the wheel nor the free pool while we work
+   * on them, session deletion invalidates armed timers only via
+   * timer_gen_id bumps (never touches the timer pool/wheel), and nothing
+   * else ever puts entries back into the session_timers pool.
+   *
+   * Per-batch processing cap: bounds the main-thread time one wakeup spends
+   * here; entries beyond the cap are re-armed as-is with a 1s delay (the
+   * wheel's tick granularity) and retried on a later wakeup. */
+  u32 *pending_put = 0;
+  u32 *pending_rearm_keep = 0;
+  u32 *pending_rearm = 0;
+  u32 *rearm_delays = 0;
 
   for (i = 0; i < vec_len (expired_timers); i++)
     {
@@ -1180,11 +1189,8 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
       entry_index = expired_timers[i] & 0x7FFFFFFF;
       if (processed >= CGNAT_SESSION_TIMER_MAX_EXPIRATIONS)
 	{
-	  clib_spinlock_lock (&cm->session_timer_lock);
-	  if (!pool_is_free_index (cm->session_timers, entry_index))
-	    tw_timer_start_2t_1w_2048sl (&cm->session_timer_wheel, entry_index,
-					 0, 1);
-	  clib_spinlock_unlock (&cm->session_timer_lock);
+	  /* Over the per-batch cap: re-arm as-is for 1s, no gen bump. */
+	  vec_add1 (pending_rearm_keep, entry_index);
 	  continue;
 	}
 
@@ -1194,7 +1200,10 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 
       entry = pool_elt_at_index (cm->session_timers, entry_index);
       if (pool_is_free_index (cm->sessions, entry->session_index))
-	goto done;
+	{
+	  vec_add1 (pending_put, entry_index);
+	  continue;
+	}
 
       session = pool_elt_at_index (cm->sessions, entry->session_index);
       cgnat_make_flow_key_from_flow (&kv, session);
@@ -1215,36 +1224,91 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 
       if (clib_bihash_search_24_8 (&cm->session_table, &kv, &current) || current.value != session_value)
 	{
-	  goto done;
+	  vec_add1 (pending_put, entry_index);
+	  continue;
 	}
 
       if (session->generation != entry->session_generation ||
-	      session->timer_gen_id != entry->timer_gen_id ||
-	      (session->flags & CGNAT_SESSION_FLAG_DELETING))
+	  session->timer_gen_id != entry->timer_gen_id ||
+	  (session->flags & CGNAT_SESSION_FLAG_DELETING))
 	{
-	  goto done;
+	  vec_add1 (pending_put, entry_index);
+	  continue;
 	}
 
       timeout = cgnat_session_get_timeout (cm, session);
       if (!timeout || session->tcp_state == CGNAT_TCP_CLOSED)
 	{
 	  cgnat_session_delete_with_locks (cm, session, &kv, have_reverse ? &rkv : 0, "tcp_closed");
-	  goto done;
+	  vec_add1 (pending_put, entry_index);
+	  continue;
 	}
 
       if (now - session->last_active < timeout)
 	{
-	  cgnat_session_start_timer (cm, session, now);
-	  goto done;
+	  /* Still active: re-arm the same entry (equivalent to
+	   * cgnat_session_start_timer but reuses the entry instead of
+	   * pool_get'ing a fresh one).  The gen bump happens in the flush
+	   * section below. */
+	  u32 delay;
+	  f64 remaining = (f64) timeout - (now - session->last_active);
+
+	  if (remaining <= 0)
+	    delay = 1;
+	  else
+	    {
+	      delay = (u32) remaining;
+	      if ((f64) delay < remaining)
+		delay++;
+	      delay = clib_min (clib_max (delay, 1), CGNAT_TIMER_MAX_DELAY);
+	    }
+	  vec_add1 (pending_rearm, entry_index);
+	  vec_add1 (rearm_delays, delay);
+	  continue;
 	}
 
       cgnat_session_delete_with_locks (cm, session, &kv, have_reverse ? &rkv : 0, "timeout");
+      vec_add1 (pending_put, entry_index);
+    }
 
-    done:
+  if (vec_len (pending_put) + vec_len (pending_rearm_keep) +
+      vec_len (pending_rearm))
+    {
+      u32 *pi;
+
       clib_spinlock_lock (&cm->session_timer_lock);
-      pool_put_index (cm->session_timers, entry_index);
+
+      vec_foreach (pi, pending_rearm_keep)
+	tw_timer_start_2t_2w_512sl (&cm->session_timer_wheel, *pi, 0, 1);
+
+      for (i = 0; i < vec_len (pending_rearm); i++)
+	{
+	  u32 ei = pending_rearm[i];
+	  cgnat_session_timer_t *entry =
+	    pool_elt_at_index (cm->session_timers, ei);
+	  cgnat_session_t *session =
+	    pool_elt_at_index (cm->sessions, entry->session_index);
+
+	  /* Fresh gen id, same invalidation semantics as
+	   * cgnat_session_start_timer.  If the session was concurrently
+	   * deleted since the loop above, the armed timer fires later and is
+	   * discarded by the generation/DELETING checks. */
+	  entry->timer_gen_id =
+	    clib_atomic_fetch_add (&session->timer_gen_id, 1) + 1;
+	  tw_timer_start_2t_2w_512sl (&cm->session_timer_wheel, ei, 0,
+				    rearm_delays[i]);
+	}
+
+      vec_foreach (pi, pending_put)
+	pool_put_index (cm->session_timers, *pi);
+
       clib_spinlock_unlock (&cm->session_timer_lock);
     }
+
+  vec_free (pending_put);
+  vec_free (pending_rearm_keep);
+  vec_free (pending_rearm);
+  vec_free (rearm_delays);
 }
 
 int
@@ -1267,34 +1331,11 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
 		       remote_ip, mapping->inside_port, remote_port,
 		       mapping->protocol);
 
-  if (!clib_bihash_search_24_8 (&cm->session_table, &kv, &value))
-  {
-    session = cgnat_session_get_if_valid (cm, value.value);
-    if (PREDICT_TRUE (session != NULL))
-    {
-      if (PREDICT_FALSE (session->flags & CGNAT_SESSION_FLAG_DELETING))
-        {
-          return VNET_API_ERROR_NO_SUCH_ENTRY;
-        }
-	 if (cgnat_session_touch (session, now, direction_flag, tcp) && session->tcp_state == CGNAT_TCP_FIN_RST)
-        {
-	        cgnat_session_start_timer (cm, session, now);
-        }
-     if (ensure_adf_remote)
-		{
-		  rv = cgnat_session_ensure_adf_remote (cm, mapping, session);
-		  if (rv)
-		    {
-		      return rv;
-		    }
-		}
-     return 0;
-    }
-    cgnat_session_table_lock (cm, &kv);
-    clib_bihash_add_del_24_8 (&cm->session_table, &kv, 0);
-    cgnat_session_table_unlock (cm, &kv);
-  }
-
+  /* No initial table search here: every caller gets here right after a
+   * fast-path miss on this same key, and the create section below re-checks
+   * under the bucket lock anyway (the in2out/out2in first packets of one
+   * connection can race on different workers).  A redundant first search
+   * would only save a wasted alloc/free in that rare race. */
   if (!allow_create)
     return VNET_API_ERROR_NO_SUCH_ENTRY;
 
@@ -1394,14 +1435,14 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   session->nat_port = mapping->nat_port;
   session->instance_index = mapping->instance_index;
   session->inside_fib_index = mapping->inside_fib_index;
+  session->outside_fib_index = mapping->outside_fib_index;
   session->protocol = mapping->protocol;
   session->tcp_state = CGNAT_TCP_SYN;
   session->mapping_type = mapping->mapping_type;
   session->last_active = now;
   session->flags = direction_flag;
-  clib_spinlock_lock (&session->lock);
+  /* Not yet published: no concurrent reader, no lock needed. */
   cgnat_update_tcp_state (session, tcp);
-  clib_spinlock_unlock (&session->lock);
 
   kv.value = cgnat_index_to_value (session_index, session->generation);
   rkv.value = kv.value;
@@ -1772,8 +1813,6 @@ cgnat_session_reap (cgnat_main_t *cm)
       if (session->generation != generation ||
 	  !(session->flags & CGNAT_SESSION_FLAG_DELETING))
 	continue;
-
-      clib_spinlock_free (&session->lock);
 
       clib_spinlock_lock (&cm->session_pool_lock);
       pool_put (cm->sessions, session);
@@ -2437,17 +2476,18 @@ cgnat_instance_delete_users (cgnat_main_t *cm, cgnat_instance_t *instance)
   cgnat_user_t *user;
   u32 *user_indices = 0;
   u32 *ui;
+  u32 s;
 
   (void) cm;
-  pool_foreach (user, instance->users)
-    vec_add1 (user_indices, user - instance->users);
+  for (s = 0; s < CGNAT_USER_LOCK_BUCKETS; s++)
+    pool_foreach (user, instance->users_per_shard[s])
+      vec_add1 (user_indices, cgnat_user_to_index (instance, user));
 
   vec_foreach (ui, user_indices)
     {
-      if (pool_is_free_index (instance->users, *ui))
-	continue;
-      user = pool_elt_at_index (instance->users, *ui);
-      cgnat_delete_user (instance, user);
+      user = cgnat_user_from_index (instance, *ui);
+      if (user)
+	cgnat_delete_user (instance, user);
     }
   vec_free (user_indices);
 }
@@ -2515,19 +2555,20 @@ cgnat_pool_delete_users_of_pool (cgnat_instance_t *instance, u32 pool_index)
   cgnat_user_t *user;
   u32 *user_indices = 0;
   u32 *ui;
+  u32 s;
 
-  pool_foreach (user, instance->users)
-    {
-      if (user->pool_index == pool_index)
-	vec_add1 (user_indices, user - instance->users);
-    }
+  for (s = 0; s < CGNAT_USER_LOCK_BUCKETS; s++)
+    pool_foreach (user, instance->users_per_shard[s])
+      {
+	if (user->pool_index == pool_index)
+	  vec_add1 (user_indices, cgnat_user_to_index (instance, user));
+      }
 
   vec_foreach (ui, user_indices)
     {
-      if (pool_is_free_index (instance->users, *ui))
-	continue;
-      user = pool_elt_at_index (instance->users, *ui);
-      cgnat_delete_user (instance, user);
+      user = cgnat_user_from_index (instance, *ui);
+      if (user)
+	cgnat_delete_user (instance, user);
     }
   vec_free (user_indices);
 }
@@ -2646,8 +2687,8 @@ cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings)
 			 CGNAT_ADF_REMOTE_HASH_BUCKETS,
 			 CGNAT_ADF_REMOTE_HASH_MEMORY);
   /* No wheel callback: expired timers are collected directly with
-   * tw_timer_expire_timers_vec_2t_1w_2048sl(). */
-  tw_timer_wheel_init_2t_1w_2048sl (&cm->session_timer_wheel, 0, 1.0,
+   * tw_timer_expire_timers_vec_2t_2w_512sl(). */
+  tw_timer_wheel_init_2t_2w_512sl (&cm->session_timer_wheel, 0, 1.0,
 				    CGNAT_SESSION_TIMER_MAX_EXPIRATIONS);
   vec_prealloc(cm->session_expired, CGNAT_SESSION_TIMER_VEC);
 
@@ -2670,14 +2711,10 @@ cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings)
 void
 cgnat_session_reset (cgnat_main_t *cm)
 {
-  cgnat_session_t *session;
   u32 i;
 
   if (!cm->session_tables_initialized)
     return;
-
-  pool_foreach (session, cm->sessions)
-    clib_spinlock_free (&session->lock);
 
   pool_free (cm->sessions);
   pool_free (cm->mappings);
@@ -2700,7 +2737,7 @@ cgnat_session_reset (cgnat_main_t *cm)
 
   if (cm->session_timer_initialized)
     {
-      tw_timer_wheel_free_2t_1w_2048sl (&cm->session_timer_wheel);
+      tw_timer_wheel_free_2t_2w_512sl (&cm->session_timer_wheel);
       vec_free(cm->session_expired);
       cm->session_timer_initialized = 0;
     }
@@ -2727,18 +2764,37 @@ void
 cgnat_session_expire_timers (f64 now)
 {
   cgnat_main_t *cm = &cgnat_main;
+  u32 total = 0, n;
 
   if (!cm->session_timer_initialized)
     return;
 
   /* Lock-synchronized with the datapath (cgnat_session_start_timer holds the
    * same lock); no worker barrier is taken here.  Slot reclamation happens
-   * in cgnat_reap(), which the timer process calls under a barrier. */
-  clib_spinlock_lock (&cm->session_timer_lock);
-  cm->session_expired = tw_timer_expire_timers_vec_2t_1w_2048sl (&cm->session_timer_wheel, now, cm->session_expired);
-  clib_spinlock_unlock (&cm->session_timer_lock);
-  cgnat_session_process_expired_timers (cm->session_expired);
-  vec_reset_length (cm->session_expired);
+   * in cgnat_reap(), which the timer process calls under a barrier.
+   *
+   * Drain loop: the wheel stops a round once max_expirations handles were
+   * collected, but last_run_time only advances by the ticks actually
+   * consumed - so calling expire again with the same `now` picks up the
+   * remaining overdue ticks immediately instead of waiting 10ms per batch.
+   * The drain cap bounds one wakeup's work so the timer process cannot
+   * starve other main-thread processes under an expiry storm. */
+  for (;;)
+    {
+      clib_spinlock_lock (&cm->session_timer_lock);
+      cm->session_expired = tw_timer_expire_timers_vec_2t_2w_512sl (&cm->session_timer_wheel, now, cm->session_expired);
+      clib_spinlock_unlock (&cm->session_timer_lock);
+
+      n = vec_len (cm->session_expired);
+      if (!n)
+	break;
+      cgnat_session_process_expired_timers (cm->session_expired);
+      vec_reset_length (cm->session_expired);
+      total += n;
+      if (n < CGNAT_SESSION_TIMER_MAX_EXPIRATIONS ||
+	  total >= CGNAT_SESSION_TIMER_DRAIN_CAP)
+	break;
+    }
 }
 
 /* Called by the timer process with a worker barrier held: this is the only
