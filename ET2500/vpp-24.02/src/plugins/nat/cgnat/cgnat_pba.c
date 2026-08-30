@@ -988,6 +988,11 @@ cgnat_pba_init (cgnat_main_t *cm)
   tw_timer_wheel_init_2t_2w_512sl (&cm->cooling_timer_wheel, 0, 1.0,
 				    CGNAT_COOLING_TIMER_MAX_EXPIRATIONS);
   vec_prealloc(cm->cooling_expired, CGNAT_COOLING_TIMER_VEC);
+  /* Modest prealloc (growable): cooling timers track blocks, not sessions. */
+  pool_alloc_aligned (cm->cooling_timers, CGNAT_COOLING_TIMER_VEC,
+		      CLIB_CACHE_LINE_BYTES);
+  pool_alloc_aligned (cm->cooling_timer_wheel.timers, CGNAT_COOLING_TIMER_VEC,
+		      CLIB_CACHE_LINE_BYTES);
   clib_spinlock_init (&cm->cooling_timer_lock);
   cm->cooling_timer_initialized = 1;
 }

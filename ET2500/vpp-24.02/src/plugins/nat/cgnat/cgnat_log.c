@@ -159,7 +159,7 @@ cgnat_log_process (vlib_main_t *vm, vlib_node_runtime_t *rt, vlib_frame_t *f)
   cgnat_log_event_t *events = NULL;
   u32 n, i;
 
-  vec_prealloc(events, 256);
+  vec_prealloc(events, 2048);
 
   while (1)
     {
@@ -188,7 +188,7 @@ cgnat_log_process (vlib_main_t *vm, vlib_node_runtime_t *rt, vlib_frame_t *f)
             break;
       }
 
-      while ((n = lf_fifo_dequeue_sc (cm->log_fifo, 256, events)) > 0)
+      while ((n = lf_fifo_dequeue_sc (cm->log_fifo, 2048, events)) > 0)
 	for (i = 0; i < n; i++)
 	  {
 	    cgnat_log_emit (&events[i]);

@@ -592,6 +592,7 @@ cgnat_session_alloc (cgnat_main_t *cm, u32 *session_index)
   *session_index = session - cm->sessions;
   vec_validate (cm->session_generation_by_index, *session_index);
   session->generation = ++cm->session_generation_by_index[*session_index];
+  session->timer_handle = CGNAT_INVALID_INDEX;
   clib_spinlock_unlock (&cm->session_pool_lock);
 
   return session;
@@ -840,7 +841,8 @@ void
 cgnat_session_start_timer (cgnat_main_t *cm, cgnat_session_t *session, f64 now)
 {
   cgnat_session_timer_t *entry;
-  u32 delay, entry_index, timeout;
+  tw_timer_wheel_2t_2w_512sl_t *w = &cm->session_timer_wheel;
+  u32 delay, entry_index, timeout, wh;
   f64 remaining;
 
   timeout = cgnat_session_get_timeout (cm, session);
@@ -859,14 +861,41 @@ cgnat_session_start_timer (cgnat_main_t *cm, cgnat_session_t *session, f64 now)
 
   clib_spinlock_lock (&cm->session_timer_lock);
 
+  /* Fast case: the session already has an armed timer - update it in place
+   * (no new entry, nothing orphaned).  The identity chain validates that the
+   * handle still names this session's own timer entry: a wheel slot is freed
+   * at expire time and may have been reissued to another session's timer,
+   * so the wheel entry's user_handle must resolve back to our timer entry,
+   * which must point back at this session and this handle. */
+  wh = session->timer_handle;
+  if (wh != CGNAT_INVALID_INDEX &&
+      !tw_timer_handle_is_free_2t_2w_512sl (w, wh))
+    {
+      u32 ei = pool_elt_at_index (w->timers, wh)->user_handle & 0x7FFFFFFF;
+
+      if (!pool_is_free_index (cm->session_timers, ei))
+	{
+	  entry = pool_elt_at_index (cm->session_timers, ei);
+	  if (entry->session_index == (u32) (session - cm->sessions) &&
+	      entry->session_generation == session->generation &&
+	      entry->wheel_handle == wh)
+	    {
+	      tw_timer_update_2t_2w_512sl (w, wh, delay);
+	      clib_spinlock_unlock (&cm->session_timer_lock);
+	      return;
+	    }
+	}
+    }
+
+  /* Fresh arm (creation, or the old entry already fired). */
   pool_get_zero (cm->session_timers, entry);
   entry_index = entry - cm->session_timers;
   entry->session_index = session - cm->sessions;
   entry->session_generation = session->generation;
-  /* Atomic: the delete path invalidates timers without session_timer_lock. */
-  entry->timer_gen_id = clib_atomic_fetch_add (&session->timer_gen_id, 1) + 1;
-
-  tw_timer_start_2t_2w_512sl (&cm->session_timer_wheel, entry_index, 0, delay);
+  wh = tw_timer_start_2t_2w_512sl (w, entry_index, 0, delay);
+  entry->wheel_handle = wh;
+  /* Atomic: the delete path stores INVALID without session_timer_lock. */
+  clib_atomic_store_relax_n (&session->timer_handle, wh);
 
   clib_spinlock_unlock (&cm->session_timer_lock);
 }
@@ -920,7 +949,8 @@ cgnat_session_reap_push (cgnat_main_t *cm, cgnat_session_t *session)
 static void
 cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
 				 clib_bihash_kv_24_8_t *kv,
-				 clib_bihash_kv_24_8_t *rkv, char *reason)
+				 clib_bihash_kv_24_8_t *rkv, char *reason,
+				 u8 timer_just_fired)
 {
   clib_bihash_kv_24_8_t current;
   cgnat_mapping_t *mapping;
@@ -1025,11 +1055,55 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
     }
 
   /* No lock needed: the session is already invisible (table entries removed,
-   * DELETING set) and the log only snapshots immutable identity fields.
-   * timer_gen_id is bumped atomically because the timer arm path
-   * (cgnat_session_start_timer) updates it the same way. */
+   * DELETING set) and the log only snapshots immutable identity fields. */
   session->tcp_state = CGNAT_TCP_CLOSED;
-  clib_atomic_fetch_add (&session->timer_gen_id, 1);
+
+  /* Stop the armed aging timer right away so its entry does not linger in
+   * the wheel until the original fire time.  timer_just_fired (expiry-driven
+   * deletes) means the session's armed entry is the one currently being
+   * processed: already out of the wheel, pool_put by the expire flush.
+   * (Residual race: a datapath re-arm slipping in after the caller's
+   * validation leaves an orphan that is discarded at its fire time.)
+   *
+   * Otherwise stop under session_timer_lock.  The wheel entry being still
+   * armed (not handle_is_free) implies our timer entry cannot sit in any
+   * in-flight expire batch, so pool_put here cannot race the expiry path's
+   * unlocked reads.  The identity chain guards against a recycled wheel
+   * handle aliasing another session's timer. */
+  if (timer_just_fired)
+    clib_atomic_store_relax_n (&session->timer_handle, CGNAT_INVALID_INDEX);
+  else
+    {
+      u32 wh = clib_atomic_swap_acq_n (&session->timer_handle,
+				       CGNAT_INVALID_INDEX);
+
+      if (wh != CGNAT_INVALID_INDEX)
+	{
+	  tw_timer_wheel_2t_2w_512sl_t *w = &cm->session_timer_wheel;
+
+	  clib_spinlock_lock (&cm->session_timer_lock);
+	  if (!tw_timer_handle_is_free_2t_2w_512sl (w, wh))
+	    {
+	      u32 ei =
+		pool_elt_at_index (w->timers, wh)->user_handle & 0x7FFFFFFF;
+
+	      if (!pool_is_free_index (cm->session_timers, ei))
+		{
+		  cgnat_session_timer_t *entry =
+		    pool_elt_at_index (cm->session_timers, ei);
+
+		  if (entry->session_index == (u32) (session - cm->sessions) &&
+		      entry->session_generation == session->generation &&
+		      entry->wheel_handle == wh)
+		    {
+		      tw_timer_stop_2t_2w_512sl (w, wh);
+		      pool_put_index (cm->session_timers, ei);
+		    }
+		}
+	    }
+	  clib_spinlock_unlock (&cm->session_timer_lock);
+	}
+    }
   cgnat_log_session (cm, "SESSION_DELETE", reason, session);
 
   if (release_user_instance_index != CGNAT_INVALID_INDEX)
@@ -1086,7 +1160,7 @@ cgnat_session_delete (cgnat_main_t *cm, cgnat_session_t *session, char *reason)
 				   session->protocol);
       have_reverse = 1;
     }
-  cgnat_session_delete_with_locks (cm, session, &kv, have_reverse ? &rkv : 0, reason);
+  cgnat_session_delete_with_locks (cm, session, &kv, have_reverse ? &rkv : 0, reason, 0);
 }
 
 static_always_inline int
@@ -1165,8 +1239,8 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
    * session_timer_lock section at the end.  Safe because the entries being
    * processed belong to neither the wheel nor the free pool while we work
    * on them, session deletion invalidates armed timers only via
-   * timer_gen_id bumps (never touches the timer pool/wheel), and nothing
-   * else ever puts entries back into the session_timers pool.
+   * timer_handle invalidation (never touches the timer pool/wheel), and
+   * nothing else ever puts entries back into the session_timers pool.
    *
    * Per-batch processing cap: bounds the main-thread time one wakeup spends
    * here; entries beyond the cap are re-armed as-is with a 1s delay (the
@@ -1229,7 +1303,7 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 	}
 
       if (session->generation != entry->session_generation ||
-	  session->timer_gen_id != entry->timer_gen_id ||
+	  session->timer_handle != entry->wheel_handle ||
 	  (session->flags & CGNAT_SESSION_FLAG_DELETING))
 	{
 	  vec_add1 (pending_put, entry_index);
@@ -1239,17 +1313,16 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
       timeout = cgnat_session_get_timeout (cm, session);
       if (!timeout || session->tcp_state == CGNAT_TCP_CLOSED)
 	{
-	  cgnat_session_delete_with_locks (cm, session, &kv, have_reverse ? &rkv : 0, "tcp_closed");
+	  cgnat_session_delete_with_locks (cm, session, &kv, have_reverse ? &rkv : 0, "tcp_closed", 1);
 	  vec_add1 (pending_put, entry_index);
 	  continue;
 	}
 
       if (now - session->last_active < timeout)
 	{
-	  /* Still active: re-arm the same entry (equivalent to
-	   * cgnat_session_start_timer but reuses the entry instead of
-	   * pool_get'ing a fresh one).  The gen bump happens in the flush
-	   * section below. */
+	  /* Still active: re-arm the same entry.  The wheel entry was freed
+	   * when it fired, so the flush section re-arms it and refreshes
+	   * entry->wheel_handle / session->timer_handle. */
 	  u32 delay;
 	  f64 remaining = (f64) timeout - (now - session->last_active);
 
@@ -1267,7 +1340,7 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 	  continue;
 	}
 
-      cgnat_session_delete_with_locks (cm, session, &kv, have_reverse ? &rkv : 0, "timeout");
+      cgnat_session_delete_with_locks (cm, session, &kv, have_reverse ? &rkv : 0, "timeout", 1);
       vec_add1 (pending_put, entry_index);
     }
 
@@ -1278,8 +1351,23 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 
       clib_spinlock_lock (&cm->session_timer_lock);
 
+      /* Fired wheel entries were freed at expire time, so both re-arm kinds
+       * need a fresh tw_timer_start; refresh the entry and session handles
+       * to the new wheel slot.  If the session was concurrently deleted
+       * since the loop above, the armed timer fires later and is discarded
+       * by the generation/DELETING/handle checks. */
       vec_foreach (pi, pending_rearm_keep)
-	tw_timer_start_2t_2w_512sl (&cm->session_timer_wheel, *pi, 0, 1);
+	{
+	  cgnat_session_timer_t *entry =
+	    pool_elt_at_index (cm->session_timers, *pi);
+	  cgnat_session_t *session =
+	    pool_elt_at_index (cm->sessions, entry->session_index);
+	  u32 wh = tw_timer_start_2t_2w_512sl (&cm->session_timer_wheel, *pi,
+					     0, 1);
+
+	  entry->wheel_handle = wh;
+	  clib_atomic_store_relax_n (&session->timer_handle, wh);
+	}
 
       for (i = 0; i < vec_len (pending_rearm); i++)
 	{
@@ -1288,15 +1376,11 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 	    pool_elt_at_index (cm->session_timers, ei);
 	  cgnat_session_t *session =
 	    pool_elt_at_index (cm->sessions, entry->session_index);
+	  u32 wh = tw_timer_start_2t_2w_512sl (&cm->session_timer_wheel, ei, 0,
+					     rearm_delays[i]);
 
-	  /* Fresh gen id, same invalidation semantics as
-	   * cgnat_session_start_timer.  If the session was concurrently
-	   * deleted since the loop above, the armed timer fires later and is
-	   * discarded by the generation/DELETING checks. */
-	  entry->timer_gen_id =
-	    clib_atomic_fetch_add (&session->timer_gen_id, 1) + 1;
-	  tw_timer_start_2t_2w_512sl (&cm->session_timer_wheel, ei, 0,
-				    rearm_delays[i]);
+	  entry->wheel_handle = wh;
+	  clib_atomic_store_relax_n (&session->timer_handle, wh);
 	}
 
       vec_foreach (pi, pending_put)
@@ -2072,6 +2156,12 @@ cgnat_static_rule_delete_mappings (cgnat_main_t *cm,
 
   vec_foreach (mapping_index, rule->exact_mapping_indices)
     {
+      /* Skip tombstones written by
+       * cgnat_static_addr_mapping_schedule_delete(): ~0u is outside the
+       * mappings pool, so pool_is_free_index on it is an out-of-bounds
+       * bitmap read. */
+      if (*mapping_index == CGNAT_INVALID_INDEX)
+	continue;
       if (!pool_is_free_index (cm->mappings, *mapping_index))
 	{
 	  mapping = pool_elt_at_index (cm->mappings, *mapping_index);
@@ -2691,6 +2781,18 @@ cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings)
   tw_timer_wheel_init_2t_2w_512sl (&cm->session_timer_wheel, 0, 1.0,
 				    CGNAT_SESSION_TIMER_MAX_EXPIRATIONS);
   vec_prealloc(cm->session_expired, CGNAT_SESSION_TIMER_VEC);
+
+  /* Preallocate the timer bookkeeping pools (growable, same as the
+   * session/mapping pools): in-place timer updates keep one entry per live
+   * session, so max_sessions plus a fixed margin (one drain round) covers
+   * transient double occupancy and out-of-band delete orphans.  Avoids
+   * whole-pool realloc copies under session_timer_lock during ramp-up. */
+  pool_alloc_aligned (cm->session_timers,
+		      max_sessions + CGNAT_SESSION_TIMER_POOL_MARGIN,
+		      CLIB_CACHE_LINE_BYTES);
+  pool_alloc_aligned (cm->session_timer_wheel.timers,
+		      max_sessions + CGNAT_SESSION_TIMER_POOL_MARGIN,
+		      CLIB_CACHE_LINE_BYTES);
 
   for (i = 0; i < CGNAT_MAPPING_TABLE_LOCK_BUCKETS; i++)
     clib_spinlock_init (&cm->mapping_table_locks[i]);

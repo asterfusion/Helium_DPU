@@ -62,8 +62,13 @@
 #define CGNAT_SESSION_TIMER_DRAIN_CAP (128 * 1024)
 #define CGNAT_COOLING_TIMER_DRAIN_CAP (16 * 1024)
 #define CGNAT_SESSION_TIMER_VEC (1024 * 1024)
+/* Fixed margin over max_sessions for timer bookkeeping pools: covers one
+ * in-flight drain round plus re-arm races (double occupancy while the old
+ * entry awaits processing).  Operator-scale mass deletes may exceed it and
+ * fall back to pool growth, which is a one-time transient. */
+#define CGNAT_SESSION_TIMER_POOL_MARGIN (128 * 1024)
 #define CGNAT_COOLING_TIMER_VEC (1024 * 16)
-#define CGNAT_LOG_FIFO_SIZE (64 * 1024)
+#define CGNAT_LOG_FIFO_SIZE (256 * 1024)
 #define CGNAT_LOG_POLL_INTERVAL_DEFAULT (0.01)
 #define CGNAT_LOG_EVENT_STR_LEN 24
 #define CGNAT_LOG_REASON_STR_LEN 32
@@ -463,7 +468,11 @@ typedef struct
   u8 tcp_state;
   u8 flags;
   u8 mapping_type;
-  u32 timer_gen_id;
+  /* Wheel-internal handle of the armed aging timer (CGNAT_INVALID_INDEX when
+   * unarmed).  Re-arms update the wheel entry in place (tw_timer_update);
+   * deletion stores INVALID here (atomically, without the timer lock) and
+   * leaves the armed entry to be discarded at its fire time. */
+  u32 timer_handle;
 
   /* Aligned f64; written without a lock (single-copy atomic store), readers
    * tolerate a stale value - it only skews aging by the 1s touch throttle. */
@@ -660,7 +669,10 @@ typedef struct
 {
   u32 session_index;
   u32 session_generation;
-  u32 timer_gen_id;
+  /* Handle returned by tw_timer_start (wheel-internal pool index); the entry
+   * pool index stays the stable identity for expire processing because wheel
+   * handles are freed at expire time and may be reissued. */
+  u32 wheel_handle;
 } cgnat_session_timer_t;
 
 typedef struct
