@@ -14,7 +14,21 @@ static clib_error_t *
 cgnat_enable_command_fn (vlib_main_t *vm, unformat_input_t *input,
 			 vlib_cli_command_t *cmd)
 {
-  int rv = cgnat_plugin_enable_disable (1, 0, 0);
+  u32 max_sessions = 0, max_mappings = 0;
+  int rv;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "max-sessions %u", &max_sessions))
+	;
+      else if (unformat (input, "max-mappings %u", &max_mappings))
+	;
+      else
+	return clib_error_return (0, "unknown input '%U'",
+				  format_unformat_error, input);
+    }
+
+  rv = cgnat_plugin_enable_disable (1, max_sessions, max_mappings);
   return rv ? clib_error_return (0, "cgnat enable returned %d", rv) : 0;
 }
 
@@ -1478,7 +1492,7 @@ cgnat_set_log_queue_command_fn (vlib_main_t *vm, unformat_input_t *input,
 /* *INDENT-OFF* */
 VLIB_CLI_COMMAND (cgnat_enable_command, static) = {
   .path = "cgnat enable",
-  .short_help = "cgnat enable",
+  .short_help = "cgnat enable [max-sessions <n>] [max-mappings <n>]",
   .function = cgnat_enable_command_fn,
 };
 VLIB_CLI_COMMAND (cgnat_disable_command, static) = {

@@ -2603,8 +2603,13 @@ cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings)
   max_sessions = max_sessions > 0 ? max_sessions : CGNAT_SESSION_POOL_INITIAL_SIZE;
   max_mappings = max_mappings > 0 ? max_mappings : CGNAT_MAPPING_POOL_INITIAL_SIZE;
 
-  u32 sessions_buckets = cgnat_calc_bihash_buckets(max_sessions > 0 ? max_sessions : CGNAT_SESSION_POOL_INITIAL_SIZE);
-  u32 mappings_buckets = cgnat_calc_bihash_buckets(max_mappings > 0 ? max_mappings : CGNAT_MAPPING_POOL_INITIAL_SIZE);
+  /* The session table stores two entries per session (forward + reverse
+   * key), so size the buckets for 2 * max_sessions; otherwise half of the
+   * buckets split to a second page and every lookup pays an extra
+   * dependent cache miss.  Mapping entries go one-per-table, so the
+   * mapping tables stay sized on max_mappings. */
+  u32 sessions_buckets = cgnat_calc_bihash_buckets (2 * max_sessions);
+  u32 mappings_buckets = cgnat_calc_bihash_buckets (max_mappings);
 
   /* Keep a modest initial reserve to reduce early pool growth without
    * requiring a large VPP main heap on small test machines. */
