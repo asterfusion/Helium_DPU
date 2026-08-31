@@ -192,8 +192,12 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
       n_left -= 2;
     }
 
-  /* Scalar tail (also covers the last prefetched pairs). */
-  while (n_left > 0)
+  /* Scalar tail (also covers the last prefetched pairs).  The first two
+   * buffers still own the values peeked in the last pipeline iteration. */
+  {
+    u32 tail_i = 0;
+
+    while (n_left > 0)
     {
       vlib_buffer_t *b0;
       u32 bi0 = from[0];
@@ -203,6 +207,7 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
       u32 inside_fib_index0 = CGNAT_INVALID_INDEX;
       u32 acl_index0 = CGNAT_INVALID_INDEX;
       u8 context_valid0 = 0;
+      u64 sval = tail_i == 0 ? s0 : tail_i == 1 ? s1 : 0;
       int rv;
 
       b0 = vlib_get_buffer (vm, bi0);
@@ -214,7 +219,7 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
 	  inside_fib_index0 = cgnat_buffer_inside_fib_index (b0);
 	  acl_index0 = b0->acl_index;
 	  context_valid0 = 1;
-	  rv = cgnat_in2out_execute (vm, b0, 0, now);
+	  rv = cgnat_in2out_execute (vm, b0, sval, now);
 	  if (PREDICT_FALSE (rv && rv != VNET_API_ERROR_UNSUPPORTED))
 	    next0 = CGNAT_IN2OUT_NEXT_DROP;
 	}
@@ -236,7 +241,9 @@ VLIB_NODE_FN (cgnat_in2out_node) (vlib_main_t *vm,
       next++;
       from++;
       n_left--;
+      tail_i++;
     }
+  }
 
   vlib_buffer_enqueue_to_next (vm, node, vlib_frame_vector_args (frame),
 			       nexts, frame->n_vectors);

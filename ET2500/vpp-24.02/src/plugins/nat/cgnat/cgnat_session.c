@@ -848,6 +848,12 @@ cgnat_session_start_timer (cgnat_main_t *cm, cgnat_session_t *session, f64 now)
   u32 delay, entry_index, timeout, wh;
   f64 remaining;
 
+  /* A racing packet must not arm a timer for a session being deleted; its
+   * slot is reclaimed by the reap pass and a fresh arm would orphan it until
+   * its fire time. */
+  if (PREDICT_FALSE (session->flags & CGNAT_SESSION_FLAG_DELETING))
+    return;
+
   timeout = cgnat_session_get_timeout (cm, session);
   if (!timeout)
     return;
@@ -1146,24 +1152,19 @@ static void
 cgnat_session_delete (cgnat_main_t *cm, cgnat_session_t *session, char *reason)
 {
   clib_bihash_kv_24_8_t kv, rkv;
-  cgnat_instance_t *instance;
-  u8 have_reverse = 0;
 
   cgnat_make_flow_key_from_flow (&kv, session);
 
   /* The session's identity fields are immutable after creation, so reading
    * them unlocked here is safe; all synchronization lives in
-   * cgnat_session_delete_with_locks(). */
-  instance = cgnat_instance_get_by_index (cm, session->instance_index);
-  if (instance)
-    {
-      cgnat_make_reverse_flow_key (&rkv, instance->outside_fib_index,
-				   session->nat_ip, session->remote_ip,
-				   session->nat_port, session->remote_port,
-				   session->protocol);
-      have_reverse = 1;
-    }
-  cgnat_session_delete_with_locks (cm, session, &kv, have_reverse ? &rkv : 0, reason, 0);
+   * cgnat_session_delete_with_locks().  The reverse key is built from the
+   * session's cached outside_fib_index, so teardown with the instance
+   * already gone still removes the reverse table entry. */
+  cgnat_make_reverse_flow_key (&rkv, session->outside_fib_index,
+			       session->nat_ip, session->remote_ip,
+			       session->nat_port, session->remote_port,
+			       session->protocol);
+  cgnat_session_delete_with_locks (cm, session, &kv, &rkv, reason, 0);
 }
 
 static_always_inline int
@@ -1259,9 +1260,7 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
       cgnat_session_t *session;
       u32 entry_index, timeout;
       clib_bihash_kv_24_8_t kv, current, rkv;
-      cgnat_instance_t *instance;
       u64 session_value;
-      u8 have_reverse = 0;
 
       entry_index = expired_timers[i] & 0x7FFFFFFF;
       if (processed >= CGNAT_SESSION_TIMER_MAX_EXPIRATIONS)
@@ -1286,16 +1285,13 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
       cgnat_make_flow_key_from_flow (&kv, session);
 
       /* Identity fields are immutable after creation; synchronization lives
-       * in cgnat_session_delete_with_locks(). */
-      instance = cgnat_instance_get_by_index (cm, session->instance_index);
-      if (instance)
-	{
-	  cgnat_make_reverse_flow_key (&rkv, instance->outside_fib_index,
-				       session->nat_ip, session->remote_ip,
-				       session->nat_port, session->remote_port,
-				       session->protocol);
-	  have_reverse = 1;
-	}
+       * in cgnat_session_delete_with_locks().  Reverse key from the
+       * session's cached outside_fib_index: valid even if the instance is
+       * already gone. */
+      cgnat_make_reverse_flow_key (&rkv, session->outside_fib_index,
+				   session->nat_ip, session->remote_ip,
+				   session->nat_port, session->remote_port,
+				   session->protocol);
 
       session_value = cgnat_index_to_value (entry->session_index, entry->session_generation);
 
@@ -1316,7 +1312,7 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
       timeout = cgnat_session_get_timeout (cm, session);
       if (!timeout || session->tcp_state == CGNAT_TCP_CLOSED)
 	{
-	  cgnat_session_delete_with_locks (cm, session, &kv, have_reverse ? &rkv : 0, "tcp_closed", 1);
+	  cgnat_session_delete_with_locks (cm, session, &kv, &rkv, "tcp_closed", 1);
 	  vec_add1 (pending_put, entry_index);
 	  continue;
 	}
@@ -1343,7 +1339,7 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 	  continue;
 	}
 
-      cgnat_session_delete_with_locks (cm, session, &kv, have_reverse ? &rkv : 0, "timeout", 1);
+      cgnat_session_delete_with_locks (cm, session, &kv, &rkv, "timeout", 1);
       vec_add1 (pending_put, entry_index);
     }
 
@@ -1398,6 +1394,35 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
   vec_free (rearm_delays);
 }
 
+/* Common session-hit handling: touch, FIN/RST re-arm, ADF ensure.
+ * Returns 0 on success, VNET_API_ERROR_NO_SUCH_ENTRY if the session is
+ * already being deleted. */
+static_always_inline int
+cgnat_session_hit (cgnat_main_t *cm, cgnat_mapping_t *mapping,
+		   cgnat_session_t *session, u8 direction_flag,
+		   tcp_header_t *tcp, f64 now, u8 ensure_adf_remote)
+{
+  int rv;
+
+  if (PREDICT_FALSE (session->flags & CGNAT_SESSION_FLAG_DELETING))
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  cgnat_session_touch (session, now, direction_flag, tcp);
+  /* Packet-driven re-arm: a racing store from the other direction can hide
+   * the FIN/RST transition in session->tcp_state, but must not lose the
+   * re-arm. */
+  if (tcp && (tcp->flags & (TCP_FLAG_FIN | TCP_FLAG_RST)))
+    cgnat_session_start_timer (cm, session, now);
+
+  if (ensure_adf_remote)
+    {
+      rv = cgnat_session_ensure_adf_remote (cm, mapping, session);
+      if (rv)
+	return rv;
+    }
+  return 0;
+}
+
 int
 cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
 				 ip4_address_t remote_ip, u16 remote_port,
@@ -1418,13 +1443,21 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
 		       remote_ip, mapping->inside_port, remote_port,
 		       mapping->protocol);
 
-  /* No initial table search here: every caller gets here right after a
-   * fast-path miss on this same key, and the create section below re-checks
-   * under the bucket lock anyway (the in2out/out2in first packets of one
-   * connection can race on different workers).  A redundant first search
-   * would only save a wasted alloc/free in that rare race. */
+  /* allow_create=0 callers (the out2in ADF probe for a session the in2out
+   * direction just created) still need the hit path, so search before the
+   * gate.  For allow_create=1 the caller just missed this key in the fast
+   * path; the only remaining race (first packets of both directions landing
+   * on different workers) is closed by the check-and-set publish below. */
   if (!allow_create)
-    return VNET_API_ERROR_NO_SUCH_ENTRY;
+    {
+      if (clib_bihash_search_24_8 (&cm->session_table, &kv, &value))
+	return VNET_API_ERROR_NO_SUCH_ENTRY;
+      session = cgnat_session_get_if_valid (cm, value.value);
+      if (!session)
+	return VNET_API_ERROR_NO_SUCH_ENTRY;
+      return cgnat_session_hit (cm, mapping, session, direction_flag, tcp,
+				now, ensure_adf_remote);
+    }
 
   new_session = cgnat_session_alloc (cm, &new_session_index);
   if (PREDICT_FALSE (!new_session))
@@ -1436,37 +1469,6 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   cgnat_make_reverse_flow_key (&rkv, mapping->outside_fib_index,
 			       mapping->nat_ip, remote_ip, mapping->nat_port,
 			       remote_port, mapping->protocol);
-  // check whether session already create
-  if (!clib_bihash_search_24_8 (&cm->session_table, &kv, &value))
-  {
-	  session = cgnat_session_get_if_valid (cm, value.value);
-	  if (session)
-	    {
-	      cgnat_session_free_unpublished (cm, new_session);
-          if (PREDICT_FALSE (session->flags & CGNAT_SESSION_FLAG_DELETING))
-		{
-		  return VNET_API_ERROR_NO_SUCH_ENTRY;
-		}
-          if (cgnat_session_touch (session, now, direction_flag, tcp) && session->tcp_state == CGNAT_TCP_FIN_RST)
-		{
-		  cgnat_session_start_timer (cm, session, now);
-		}
-	      if (ensure_adf_remote)
-		{
-		  rv = cgnat_session_ensure_adf_remote (cm, mapping, session);
-		  if (rv)
-		    {
-		      return rv;
-		    }
-		}
-	      return 0;
-	    }
-
-	  cgnat_session_table_lock (cm, &kv);
-	  clib_bihash_add_del_24_8 (&cm->session_table, &kv, 0);
-	  cgnat_session_table_unlock (cm, &kv);
-  }
-
   // check mapping status, if apping is deleting
   if (PREDICT_FALSE (clib_atomic_load_acq_n (&mapping->flags) &
 		     CGNAT_MAPPING_FLAG_DELETING))
@@ -1535,7 +1537,39 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   rkv.value = kv.value;
 
 
+  /* Publish check-and-set under the forward-key bucket lock: first packets
+   * of both directions of one connection can race on different workers, and
+   * clib_bihash_add_del overwrites existing keys - an unchecked insert would
+   * silently orphan the loser's session (leaking its timer, user
+   * reservation, counters and mapping reference).  All writers of a key
+   * hold its stripe lock, so the search result is stable inside this
+   * section. */
   cgnat_session_table_lock (cm, &kv);
+  if (!clib_bihash_search_24_8 (&cm->session_table, &kv, &value))
+    {
+      cgnat_session_t *winner = cgnat_session_get_if_valid (cm, value.value);
+
+      if (winner)
+	{
+	  cgnat_session_table_unlock (cm, &kv);
+	  /* Lost the race to a concurrent first packet: drop our
+	   * unpublished session and use the winner's. */
+	  if (user)
+	    {
+	      cgnat_user_lock (instance, mapping->inside_fib_index,
+			       mapping->inside_ip);
+	      cgnat_user_session_unreserve (user);
+	      cgnat_user_unlock (instance, mapping->inside_fib_index,
+				 mapping->inside_ip);
+	    }
+	  cgnat_session_free_unpublished (cm, session);
+	  return cgnat_session_hit (cm, mapping, winner, direction_flag, tcp,
+				    now, ensure_adf_remote);
+	}
+      /* Stale entry (dead generation or DELETING): remove it before
+       * publishing ours. */
+      clib_bihash_add_del_24_8 (&cm->session_table, &kv, 0);
+    }
   rv = clib_bihash_add_del_24_8 (&cm->session_table, &kv, 1);
   cgnat_session_table_unlock (cm, &kv);
   if (rv)
@@ -2676,8 +2710,12 @@ cgnat_pool_cleanup_runtime (cgnat_main_t *cm, cgnat_pool_t *pool,
   if (instance)
     cgnat_pool_delete_users_of_pool (instance, pool_index);
   /* Session deletion can arm fresh cooling timers via release_user_if_idle;
-   * purge after all deletes so no timer outlives the pool. */
-  cgnat_pba_purge_cooling_timers (cm, pool->owner_instance_index, pool_index);
+   * purge after all deletes so no timer outlives the pool.  Match on the
+   * caller's instance: pool->owner_instance_index is already reset by the
+   * time we run, so it would purge nothing. */
+  cgnat_pba_purge_cooling_timers (cm, instance ? instance - cm->instances :
+						 CGNAT_INVALID_INDEX,
+				  pool_index);
   cgnat_pool_runtime_reset (pool);
 }
 
@@ -2887,6 +2925,14 @@ cgnat_session_expire_timers (f64 now)
   for (;;)
     {
       clib_spinlock_lock (&cm->session_timer_lock);
+      /* The wheel gates each call with next_run_time = last call's now + 1s,
+       * which would defeat a same-now re-call; reopen the gate to
+       * last_run_time (advanced only by the ticks actually consumed), so a
+       * full batch means we keep draining this wakeup instead of stalling
+       * ~1s per batch. */
+      if (total)
+	cm->session_timer_wheel.next_run_time =
+	  cm->session_timer_wheel.last_run_time;
       cm->session_expired = tw_timer_expire_timers_vec_2t_2w_512sl (&cm->session_timer_wheel, now, cm->session_expired);
       clib_spinlock_unlock (&cm->session_timer_lock);
 

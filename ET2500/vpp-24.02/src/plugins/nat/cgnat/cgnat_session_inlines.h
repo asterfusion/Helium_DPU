@@ -344,6 +344,16 @@ cgnat_extract_l4 (vlib_buffer_t *b, ip4_header_t *ip, u16 *src_port,
   if (ip->protocol == IP_PROTOCOL_TCP)
     {
       *tcp = (tcp_header_t *) l4;
+      /* mss_clamping walks TCP options up to the advertised data offset
+       * without any length context; SYN packets (the only ones it acts on)
+       * must carry the full advertised header inside the packet. */
+      if (PREDICT_FALSE (tcp_syn (*tcp) &&
+			 (ip4_header_bytes (ip) + (tcp_doff (*tcp) << 2) >
+			    clib_net_to_host_u16 (ip->length) ||
+			  l4 + (tcp_doff (*tcp) << 2) >
+			    (u8 *) vlib_buffer_get_current (b) +
+			      b->current_length)))
+	return VNET_API_ERROR_INVALID_VALUE;
       *src_port = clib_net_to_host_u16 ((*tcp)->src_port);
       *dst_port = clib_net_to_host_u16 ((*tcp)->dst_port);
       return 0;
@@ -440,41 +450,56 @@ cgnat_prefetch_session_out2in (cgnat_main_t *cm, vlib_buffer_t *b)
   clib_bihash_prefetch_data_24_8 (&cm->session_table, hash);
 }
 
-static_always_inline u8
+static_always_inline void
 cgnat_update_tcp_state (cgnat_session_t *session, tcp_header_t *tcp)
 {
-  u8 old_state = session->tcp_state;
-  u8 new_state = old_state;
+  u8 old_state, new_state;
 
   if (!tcp)
-    return 0;
+    return;
 
   /* Transitions must not resurrect a closing session: once FIN/RST is seen
    * the session stays in FIN_RST until it ages out on the short timeout -
    * a plain ACK of a half-closed connection or a retransmitted SYN must not
    * pull it back to ESTABLISHED (which would keep the port block alive for
    * the full established timeout).  Likewise a stray SYN must not downgrade
-   * an ESTABLISHED session. */
-  if (tcp->flags & (TCP_FLAG_FIN | TCP_FLAG_RST))
-    new_state = CGNAT_TCP_FIN_RST;
-  else if (tcp->flags & TCP_FLAG_SYN)
+   * an ESTABLISHED session.
+   *
+   * The two directions of a flow may run on different workers, so the store
+   * must not lose a FIN/RST transition to a racing ACK store
+   * (last-writer-wins on a plain store).  Transitions are monotone
+   * (SYN < ESTABLISHED < FIN_RST; CLOSED is terminal, set only by the
+   * delete path), so the CAS loop converges in one retry at worst.  Write
+   * only on change: an unconditional store would dirty the session cache
+   * line on every packet and cause cross-core ping-pong. */
+  old_state = session->tcp_state;
+  for (;;)
     {
-      if (old_state != CGNAT_TCP_FIN_RST && old_state != CGNAT_TCP_ESTABLISHED)
-	new_state = CGNAT_TCP_SYN;
-    }
-  else if (tcp->flags & TCP_FLAG_ACK)
-    {
-      if (old_state != CGNAT_TCP_FIN_RST)
-	new_state = CGNAT_TCP_ESTABLISHED;
-    }
+      if (old_state == CGNAT_TCP_CLOSED)
+	return;
 
-  /* Write back only on change: an unconditional store would dirty the
-   * session cache line on every packet and cause cross-core ping-pong for
-   * bidirectional flows handled on different workers. */
-  if (new_state == old_state)
-    return 0;
-  session->tcp_state = new_state;
-  return 1;
+      new_state = old_state;
+      if (tcp->flags & (TCP_FLAG_FIN | TCP_FLAG_RST))
+	new_state = CGNAT_TCP_FIN_RST;
+      else if (tcp->flags & TCP_FLAG_SYN)
+	{
+	  if (old_state != CGNAT_TCP_FIN_RST &&
+	      old_state != CGNAT_TCP_ESTABLISHED)
+	    new_state = CGNAT_TCP_SYN;
+	}
+      else if (tcp->flags & TCP_FLAG_ACK)
+	{
+	  if (old_state != CGNAT_TCP_FIN_RST)
+	    new_state = CGNAT_TCP_ESTABLISHED;
+	}
+
+      if (new_state == old_state)
+	return;
+      /* CAS failure reloads old_state: recompute against the winner. */
+      if (clib_atomic_cmp_and_swap_acq_relax_n (&session->tcp_state,
+						&old_state, new_state, 0))
+	return;
+    }
 }
 
 /* Lock-free per-packet touch.  The two directions of a flow may land on
@@ -484,9 +509,8 @@ cgnat_update_tcp_state (cgnat_session_t *session, tcp_header_t *tcp)
  *   throttled to one write per second;
  * - flags uses a conditional atomic RMW (the delete and ADF paths update it
  *   the same way);
- * - tcp_state is a monotone state machine; a lost race only skews the aging
- *   timeout by a packet or two, which is acceptable. */
-static_always_inline u8
+ * - tcp_state is updated with a monotone CAS state machine. */
+static_always_inline void
 cgnat_session_touch (cgnat_session_t *session, f64 now, u8 direction_flag,
 		  tcp_header_t *tcp)
 {
@@ -500,7 +524,7 @@ cgnat_session_touch (cgnat_session_t *session, f64 now, u8 direction_flag,
   if (!(session->flags & direction_flag))
     clib_atomic_fetch_or (&session->flags, direction_flag);
 
-  return cgnat_update_tcp_state (session, tcp);
+  cgnat_update_tcp_state (session, tcp);
 }
 
 static_always_inline cgnat_mapping_t *
@@ -812,8 +836,12 @@ cgnat_in2out_translate_session (cgnat_main_t *cm, cgnat_instance_t *instance,
 {
   cgnat_mapping_t *hairpin_dst_mapping = 0;
 
-  if (cgnat_session_touch (session, now, CGNAT_SESSION_FLAG_SEEN_IN2OUT, tcp) &&
-      session->tcp_state == CGNAT_TCP_FIN_RST)
+  cgnat_session_touch (session, now, CGNAT_SESSION_FLAG_SEEN_IN2OUT, tcp);
+  /* Drive the short-timeout re-arm from the packet itself: a racing store
+   * from the other direction can hide the FIN/RST transition in
+   * session->tcp_state, but must not lose the re-arm.  Repeated FIN/RST
+   * packets just re-run the in-place timer update. */
+  if (tcp && (tcp->flags & (TCP_FLAG_FIN | TCP_FLAG_RST)))
     cgnat_session_start_timer (cm, session, now);
 
   if (PREDICT_FALSE (session->mapping_type != CGNAT_MAPPING_STATIC &&
@@ -911,8 +939,9 @@ cgnat_out2in_translate_session (cgnat_main_t *cm, vlib_buffer_t *b,
 {
   cgnat_instance_t *instance;
 
-  if (cgnat_session_touch (session, now, CGNAT_SESSION_FLAG_SEEN_OUT2IN, tcp) &&
-      session->tcp_state == CGNAT_TCP_FIN_RST)
+  cgnat_session_touch (session, now, CGNAT_SESSION_FLAG_SEEN_OUT2IN, tcp);
+  /* Packet-driven re-arm, same rationale as the in2out side. */
+  if (tcp && (tcp->flags & (TCP_FLAG_FIN | TCP_FLAG_RST)))
     cgnat_session_start_timer (cm, session, now);
 
   instance = cgnat_instance_get_by_index (cm, session->instance_index);

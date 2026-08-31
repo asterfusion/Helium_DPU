@@ -575,6 +575,10 @@ cgnat_public_ip_alloc_block (cgnat_pool_t *pool, cgnat_public_ip_t *ip,
   block->block_id = block_id;
   block->state = CGNAT_BLOCK_ALLOCATED;
   block->owner_user_index = user_index;
+  /* Monotonic incarnation id: pool_get_zero reset it, so assign from the
+   * per-IP source - a recycled slot must never alias a stale cooling
+   * timer's gen_id. */
+  block->gen_id = ++ip->alloc_gen;
   /* Port bitmaps stay NULL here: they are materialized lazily per
    * protocol/parity on first use (see cgnat_alloc_port_from_block), saving
    * 6 bitmap dups (~1.6KB at block_size 2048) per block that never sees
@@ -892,7 +896,14 @@ cgnat_cooling_process_expired (u32 *expired_timers)
       clib_spinlock_lock (&cm->cooling_timer_lock);
       vec_foreach (pi, pending_rearm_keep)
 	if (!pool_is_free_index (cm->cooling_timers, *pi))
-	  tw_timer_start_2t_2w_512sl (&cm->cooling_timer_wheel, *pi, 0, 1);
+	  {
+	    /* The fired wheel entry was freed at expire time; refresh the
+	     * handle so purge/validation never follow a stale one. */
+	    cgnat_cooling_timer_t *t =
+	      pool_elt_at_index (cm->cooling_timers, *pi);
+	    t->wheel_handle =
+	      tw_timer_start_2t_2w_512sl (&cm->cooling_timer_wheel, *pi, 0, 1);
+	  }
       vec_foreach (pi, pending_put)
 	pool_put_index (cm->cooling_timers, *pi);
       clib_spinlock_unlock (&cm->cooling_timer_lock);
@@ -952,6 +963,7 @@ cgnat_start_block_cooling (cgnat_main_t *cm, u32 instance_index,
   clib_spinlock_lock (&cm->cooling_timer_lock);
   pool_get_zero (cm->cooling_timers, entry);
   entry_index = entry - cm->cooling_timers;
+  entry->wheel_handle = CGNAT_INVALID_INDEX;
   entry->instance_index = instance_index;
   entry->pool_index = pool_index;
   entry->public_ip_index = public_ip_index;
@@ -971,9 +983,12 @@ cgnat_start_block_cooling (cgnat_main_t *cm, u32 instance_index,
     }
 
   /* cooling_time is u16 and validated <= 3600, well inside the wheel's
-   * direct range (262143s): a single arm always suffices. */
-  tw_timer_start_2t_2w_512sl (&cm->cooling_timer_wheel, entry_index, 0,
-			       pool->cooling_time);
+   * direct range (262143s): a single arm always suffices.  Keep the wheel
+   * handle so the purge path can stop the timer instead of leaving it to
+   * fire into a recycled pool slot. */
+  entry->wheel_handle =
+    tw_timer_start_2t_2w_512sl (&cm->cooling_timer_wheel, entry_index, 0,
+				pool->cooling_time);
   clib_spinlock_unlock (&cm->cooling_timer_lock);
 }
 
@@ -1033,7 +1048,12 @@ cgnat_pba_purge_cooling_timers (cgnat_main_t *cm, u32 instance_index,
       vec_add1 (indices, t - cm->cooling_timers);
     }
   vec_foreach (pi, indices)
-    pool_put_index (cm->cooling_timers, *pi);
+    {
+      t = pool_elt_at_index (cm->cooling_timers, *pi);
+      if (t->wheel_handle != CGNAT_INVALID_INDEX)
+	tw_timer_stop_2t_2w_512sl (&cm->cooling_timer_wheel, t->wheel_handle);
+      pool_put_index (cm->cooling_timers, *pi);
+    }
   clib_spinlock_unlock (&cm->cooling_timer_lock);
   vec_free (indices);
 }
@@ -1053,6 +1073,11 @@ cgnat_pba_expire_timers (f64 now)
   for (;;)
     {
       clib_spinlock_lock (&cm->cooling_timer_lock);
+      /* Reopen the wheel's next_run_time gate on drain re-entry, same as
+       * cgnat_session_expire_timers. */
+      if (total)
+	cm->cooling_timer_wheel.next_run_time =
+	  cm->cooling_timer_wheel.last_run_time;
       cm->cooling_expired = tw_timer_expire_timers_vec_2t_2w_512sl ( &cm->cooling_timer_wheel, now, cm->cooling_expired);
       clib_spinlock_unlock (&cm->cooling_timer_lock);
 
@@ -1373,6 +1398,8 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
   for (i = 0; i < vec_len (user->owned_block_ids); i++)
     {
       u16 block_id = user->owned_block_ids[i];
+      if (block_id >= vec_len (ip->block_index_by_id))
+	continue;
       bi = ip->block_index_by_id[block_id];
       if (bi == CGNAT_INVALID_INDEX)
 	continue;
@@ -1394,6 +1421,8 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
   for (i = 0; i < vec_len (user->owned_block_ids); i++)
     {
       u16 block_id = user->owned_block_ids[i];
+      if (block_id >= vec_len (ip->block_index_by_id))
+	continue;
       bi = ip->block_index_by_id[block_id];
       if (bi == CGNAT_INVALID_INDEX)
 	continue;
@@ -1460,6 +1489,8 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
 	{
 	  u16 block_id = user->owned_block_ids[i];
 
+	  if (block_id >= vec_len (ip->block_index_by_id))
+	    continue;
 	  bi = ip->block_index_by_id[block_id];
 	  if (bi == CGNAT_INVALID_INDEX)
 	    continue;
@@ -1838,27 +1869,6 @@ cgnat_det_o2imap (cgnat_instance_t *instance, ip4_address_t public_ip,
   inside_ip->as_u32 =
     clib_host_to_net_u32 (det->inside_first_host + (u32) inside_offset);
   return 0;
-}
-
-int
-cgnat_pba_alloc_port (u32 instance_index, u32 fib_index,
-		      ip4_address_t private_ip, u16 private_port,
-		      u8 protocol,
-		      cgnat_pba_alloc_result_t *result)
-{
-  cgnat_main_t *cm = &cgnat_main;
-  cgnat_instance_t *instance;
-  int rv;
-
-  instance = cgnat_instance_get_by_index (cm, instance_index);
-  if (!instance)
-    return VNET_API_ERROR_NO_SUCH_ENTRY;
-
-  cgnat_user_lock (instance, fib_index, private_ip);
-  rv = cgnat_pba_alloc_port_locked (instance_index, fib_index, private_ip,
-				    private_port, protocol, result);
-  cgnat_user_unlock (instance, fib_index, private_ip);
-  return rv;
 }
 
 int

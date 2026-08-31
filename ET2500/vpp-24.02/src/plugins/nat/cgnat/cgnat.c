@@ -77,11 +77,18 @@ cgnat_timer_process (vlib_main_t *vm, vlib_node_runtime_t *rt,
        * is harmless: a missed update just defers reclamation to the next
        * tick, and the 200ms cadence bounds the delay either way.  The
        * barrier section stays O(reaped count), independent of the expire
-       * workload. */
+       * workload.
+       *
+       * Depth trigger: under sustained churn the 200ms cadence pins
+       * delete_rate x 0.2s pool slots; reap early once the queue exceeds
+       * 2% of the session pool so new flows don't fail while capacity
+       * exists. */
       u8 reap_pending = vec_len (cm->session_reap_queue) ||
 			vec_len (cm->mapping_reap_queue) ||
 			vec_len (cm->mapping_reap_quarantine);
-      if (reap_pending && now - last_reap >= 0.2)
+      if (reap_pending &&
+	  (now - last_reap >= 0.2 ||
+	   vec_len (cm->session_reap_queue) > pool_len (cm->sessions) / 50))
 	{
 	  vlib_worker_thread_barrier_sync (vm);
 	  cgnat_reap (cm);

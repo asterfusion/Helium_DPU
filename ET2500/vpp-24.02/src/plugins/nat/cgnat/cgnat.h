@@ -266,6 +266,10 @@ typedef struct
   /* Active port allocations per protocol (TCP/UDP/ICMP). */
   u16 active_ports[CGNAT_PBA_PROTO_COUNT];
   u32 owner_user_index;
+  /* Monotonic per-block incarnation id, assigned from the owning public
+   * IP's alloc_gen at allocation time (never reset by slot reuse): cooling
+   * timer expiry validates against it, so a stale timer can never
+   * false-match a recycled block slot. */
   u32 gen_id;
 
   /*
@@ -288,6 +292,9 @@ typedef struct
   u32 active_users;
 
   clib_spinlock_t lock;
+
+  /* Per-IP monotonic source of block incarnation ids (see cgnat_block_t). */
+  u32 alloc_gen;
 
   /* 1 means the block is immediately available for allocation. */
   clib_bitmap_t *free_block_bitmap;
@@ -663,6 +670,11 @@ typedef struct
   u32 inside_fib_index;
   ip4_address_t private_ip;
   u16 block_id;
+  /* Wheel handle from tw_timer_start (CGNAT_INVALID_INDEX when unarmed), so
+   * cgnat_pba_purge_cooling_timers can stop the wheel entry instead of
+   * leaving it to fire into a recycled pool slot. */
+  u16 pad16;
+  u32 wheel_handle;
 } cgnat_cooling_timer_t;
 
 typedef struct
@@ -966,6 +978,7 @@ cgnat_user_lock (cgnat_instance_t *instance, u32 fib_index,
 static_always_inline u32
 cgnat_user_index_make (u32 shard, u32 slot)
 {
+  ASSERT (slot <= CGNAT_USER_INDEX_SLOT_MASK);
   return (shard << CGNAT_USER_INDEX_SHARD_SHIFT) |
 	 (slot & CGNAT_USER_INDEX_SLOT_MASK);
 }
@@ -1087,9 +1100,6 @@ void cgnat_session_counts (cgnat_main_t *cm, u64 *total, u64 *tcp, u64 *udp,
 cgnat_session_t *cgnat_session_snapshot (cgnat_session_filter_t *filter);
 u32 cgnat_session_delete_matching (cgnat_session_filter_t *filter);
 
-int cgnat_pba_alloc_port (u32 instance_index, u32 fib_index,
-			  ip4_address_t private_ip, u16 private_port, u8 protocol,
-			  cgnat_pba_alloc_result_t *result);
 int cgnat_pba_alloc_port_locked (u32 instance_index, u32 fib_index,
 				 ip4_address_t private_ip, u16 private_port,
 				 u8 protocol,
