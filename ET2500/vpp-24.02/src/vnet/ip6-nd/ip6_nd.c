@@ -49,6 +49,13 @@ typedef struct ip6_nd_t_
 static ip6_link_delegate_id_t ip6_nd_delegate_id;
 static ip6_nd_t *ip6_nd_pool;
 
+typedef enum
+{
+  ICMP6_NEIGHBOR_ADVERTISEMENT_NEXT_PUNT,
+  ICMP6_NEIGHBOR_ADVERTISEMENT_NEXT_DROP,
+  ICMP6_NEIGHBOR_ADVERTISEMENT_N_NEXT,
+} icmp6_neighbor_advertisement_next_t;
+
 static_always_inline uword
 icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 					      vlib_node_runtime_t * node,
@@ -258,10 +265,29 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	    }
 	  else
 	    {
-	      next0 = 0;
-	      error0 = error0 == ICMP6_ERROR_NONE ?
-		ICMP6_ERROR_NEIGHBOR_ADVERTISEMENTS_RX : error0;
-	      c_type = IP_NEIGHBOR_CTR_REPLY;
+			c_type = IP_NEIGHBOR_CTR_REPLY;
+			/*
+			* The NA has already passed the existing VPP validation and
+			* neighbor-learning path. If linux-cp successfully created a
+			* host copy, suppress the original punt path to avoid delivering
+			 * the same NA to Linux a second time.
+			*
+			* If the host copy failed, retain the original ip6-punt path as
+			* a fail-open fallback.
+			*/
+			if (PREDICT_FALSE (error0 == ICMP6_ERROR_NONE &&
+				vnet_buffer2 (p0)->lcp_host_copy_done)
+			){
+				error0 =
+					ICMP6_ERROR_NEIGHBOR_ADVERTISEMENT_PUNT_SUPPRESSED_LINUX_COPY;
+				next0 = ICMP6_NEIGHBOR_ADVERTISEMENT_NEXT_DROP;
+			}
+			else
+			{
+				next0 = ICMP6_NEIGHBOR_ADVERTISEMENT_NEXT_PUNT;
+				error0 = error0 == ICMP6_ERROR_NONE ?
+				ICMP6_ERROR_NEIGHBOR_ADVERTISEMENTS_RX : error0;
+			}
 	    }
 
 	  vlib_increment_simple_counter (
@@ -388,9 +414,10 @@ VLIB_REGISTER_NODE (ip6_icmp_neighbor_advertisement_node,static) =
 
   .format_trace = format_icmp6_input_trace,
 
-  .n_next_nodes = 1,
+  .n_next_nodes = ICMP6_NEIGHBOR_ADVERTISEMENT_N_NEXT,
   .next_nodes = {
-    [0] = "ip6-punt",
+    [ICMP6_NEIGHBOR_ADVERTISEMENT_NEXT_PUNT] = "ip6-punt",
+	[ICMP6_NEIGHBOR_ADVERTISEMENT_NEXT_DROP] = "ip6-drop",
   },
 };
 /* *INDENT-ON* */

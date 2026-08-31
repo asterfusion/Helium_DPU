@@ -152,12 +152,7 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
 		            if (c0)
 		            {
 		              copies[n_copies++] = vlib_get_buffer_index (vm, c0);
-                  /*
-                  * Mark only the original NS. The copy was made before this
-                  * assignment, so the copy does not inherit the marker.
-                  */
-                  if (icmp0->type == ICMP6_neighbor_solicitation)
-                    vnet_buffer2 (b0)->lcp_host_copy_done = 1;
+                  vnet_buffer2 (b0)->lcp_host_copy_done = 1;
 		            }
               }
             }
@@ -182,8 +177,7 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
 		            if (c1)
 		            {
 		              copies[n_copies++] = vlib_get_buffer_index (vm, c1);
-                  if (icmp1->type == ICMP6_neighbor_solicitation)
-                    vnet_buffer2 (b1)->lcp_host_copy_done = 1;
+                  vnet_buffer2 (b1)->lcp_host_copy_done = 1;
 		            }
               }
             }
@@ -260,7 +254,6 @@ VLIB_NODE_FN (lcp_ndp_phy_node) (vlib_main_t * vm,
 		            if (c)
 		            {
 		              copies[n_copies++] = vlib_get_buffer_index (vm, c);
-                  if (icmp->type == ICMP6_neighbor_solicitation)
                   vnet_buffer2 (b0)->lcp_host_copy_done = 1;
 		            }
               }
