@@ -347,6 +347,9 @@ cgnat_icmp_error_rewrite_inner_l4 (ip4_header_t *inner_ip, void *inner_l4,
     l3_delta,
     cgnat_ip_csum_delta_for_ip4_address (inner_ip->dst_address, new_dst_ip));
 
+  inner_ip->src_address = new_src_ip;
+  inner_ip->dst_address = new_dst_ip;
+
   if (inner_protocol == IP_PROTOCOL_TCP)
     {
       tcp_header_t *tcp = inner_l4;
