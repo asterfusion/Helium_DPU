@@ -1352,20 +1352,40 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 
       /* Fired wheel entries were freed at expire time, so both re-arm kinds
        * need a fresh tw_timer_start; refresh the entry and session handles
-       * to the new wheel slot.  If the session was concurrently deleted
-       * since the loop above, the armed timer fires later and is discarded
-       * by the generation/DELETING/handle checks. */
+       * to the new wheel slot. */
       vec_foreach (pi, pending_rearm_keep)
 	{
-	  cgnat_session_timer_t *entry =
-	    pool_elt_at_index (cm->session_timers, *pi);
-	  cgnat_session_t *session =
-	    pool_elt_at_index (cm->sessions, entry->session_index);
-	  u32 wh = tw_timer_start_2t_2w_512sl (&cm->session_timer_wheel, *pi,
-					     0, 1);
+	  cgnat_session_timer_t *entry = pool_elt_at_index (cm->session_timers, *pi);
+	  cgnat_session_t *session;
 
-	  entry->wheel_handle = wh;
-	  clib_atomic_store_relax_n (&session->timer_handle, wh);
+	  /* Over-cap entries skipped every check in the loop above, so
+	   * re-validate here before re-arming: a stale entry (its session
+	   * was deleted and the slot reaped/reallocated, or a racing
+	   * datapath re-arm already replaced this timer) must be dropped,
+	   * not re-armed.  Re-arming it would overwrite the current
+	   * session's timer_handle, orphaning the session's real timer -
+	   * whose fire then fails the handle check and is discarded
+	   * without re-arm, leaving the session with no timer and unable
+	   * to age out. */
+	  if (pool_is_free_index (cm->sessions, entry->session_index))
+	    {
+	      vec_add1 (pending_put, *pi);
+	      continue;
+	    }
+	  session = pool_elt_at_index (cm->sessions, entry->session_index);
+	  if (session->generation != entry->session_generation ||
+	      session->timer_handle != entry->wheel_handle ||
+	      (session->flags & CGNAT_SESSION_FLAG_DELETING))
+	    {
+	      vec_add1 (pending_put, *pi);
+	      continue;
+	    }
+	  {
+	    u32 wh = tw_timer_start_2t_2w_512sl (&cm->session_timer_wheel, *pi, 0, 1);
+
+	    entry->wheel_handle = wh;
+	    clib_atomic_store_relax_n (&session->timer_handle, wh);
+	  }
 	}
 
       for (i = 0; i < vec_len (pending_rearm); i++)
@@ -1375,8 +1395,7 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 	    pool_elt_at_index (cm->session_timers, ei);
 	  cgnat_session_t *session =
 	    pool_elt_at_index (cm->sessions, entry->session_index);
-	  u32 wh = tw_timer_start_2t_2w_512sl (&cm->session_timer_wheel, ei, 0,
-					     rearm_delays[i]);
+	  u32 wh = tw_timer_start_2t_2w_512sl (&cm->session_timer_wheel, ei, 0, rearm_delays[i]);
 
 	  entry->wheel_handle = wh;
 	  clib_atomic_store_relax_n (&session->timer_handle, wh);
