@@ -1811,6 +1811,18 @@ counters icmp6 {
     units "packets";
     description "neighbor advertisement suppressed because Linux is the reply owner";
   };
+  neighbor_advertisement_punt_suppressed_linux_copy {
+    severity info;
+    type counter64;
+    units "packets";
+    description "neighbor advertisement punt suppressed after Linux copy";
+  };
+  redirect_punt_suppressed_linux_copy {
+    severity info;
+    type counter64;
+    units "packets";
+    description "ICMPv6 redirect punt suppressed after Linux copy";
+  };
 };
 
 paths {
