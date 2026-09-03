@@ -103,6 +103,7 @@ typedef struct
 } lcp_match_result_t;
 
 bool lcp_packet_parse (vlib_main_t *vm, vlib_buffer_t *b, u32 context,
+		       bool reassembly_metadata_valid,
 		       lcp_packet_view_t *view);
 bool lcp_match_select (const lcp_packet_view_t *view,
 		       lcp_match_result_t *result);

@@ -266,7 +266,7 @@ class TestLinuxCP(VppTestCase):
                 trap_row.split(),
                 [
                     str(trap_id),
-                    "IPOE_FDB_MISS",
+                    "ARP_REQUEST",
                     "yes",
                     "2",
                     "none",
@@ -295,6 +295,289 @@ class TestLinuxCP(VppTestCase):
                 policer_index=0xFFFFFFFF,
             )
         self.assertIsNone(self._copp_policy_details(trap_id))
+
+    def test_linux_cp_copp_reassembly_lifecycle(self):
+        """Linux CP CoPP shallow reassembly switch and pair lifecycle"""
+
+        state = self.vapi.lcp_copp_reassembly_get()
+        self.assertFalse(state.enabled)
+        self.assertEqual(state.enabled_interfaces, 0)
+
+        pairs = ((self.pg1, self.pg0), (self.pg3, self.pg2))
+        added = []
+        external_ref_phy = None
+        try:
+            # Enabling before pair creation is supported and idempotent.
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=True)
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=True)
+            state = self.vapi.lcp_copp_reassembly_get()
+            self.assertTrue(state.enabled)
+            self.assertEqual(state.enabled_interfaces, 0)
+
+            for expected, (phy, host) in enumerate(pairs, 1):
+                self.vapi.cli("test lcp add phy %s host %s" % (phy, host))
+                added.append((phy, host))
+                state = self.vapi.lcp_copp_reassembly_get()
+                self.assertEqual(state.enabled_interfaces, expected)
+                features = self.vapi.cli("show interface features %s" % phy)
+                self.assertIn("ip4-sv-reassembly-feature", features)
+                self.assertIn("ip6-sv-reassembly-feature", features)
+                # `show interface features` prints the path from the terminal
+                # node backwards, so an earlier-running feature appears later.
+                self.assertGreater(
+                    features.index("ip4-sv-reassembly-feature"),
+                    features.index("linux-cp-ip4-punt"),
+                )
+                self.assertGreater(
+                    features.index("ip6-sv-reassembly-feature"),
+                    features.index("linux-cp-ip6-punt"),
+                )
+
+            # Bulk disable releases only LCP's references on every pair.
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=False)
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=False)
+            state = self.vapi.lcp_copp_reassembly_get()
+            self.assertFalse(state.enabled)
+            self.assertEqual(state.enabled_interfaces, 0)
+
+            # Enabling with existing pairs exercises the transactional walk.
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=True)
+            state = self.vapi.lcp_copp_reassembly_get()
+            self.assertTrue(state.enabled)
+            self.assertEqual(state.enabled_interfaces, len(pairs))
+
+            # A separate shallow-reassembly owner must survive pair deletion.
+            phy, host = added[-1]
+            self.vapi.ip_reassembly_enable_disable(
+                sw_if_index=phy.sw_if_index,
+                enable_ip4=True,
+                enable_ip6=True,
+                type=VppEnum.vl_api_ip_reass_type_t.IP_REASS_TYPE_SHALLOW_VIRTUAL,
+            )
+            external_ref_phy = phy
+            phy, host = added.pop()
+            self.vapi.cli("test lcp del phy %s host %s" % (phy, host))
+            self.assertEqual(
+                self.vapi.lcp_copp_reassembly_get().enabled_interfaces, 1
+            )
+            features = self.vapi.cli("show interface features %s" % phy)
+            self.assertIn("ip4-sv-reassembly-feature", features)
+            self.assertIn("ip6-sv-reassembly-feature", features)
+
+            self.vapi.ip_reassembly_enable_disable(
+                sw_if_index=phy.sw_if_index,
+                enable_ip4=False,
+                enable_ip6=False,
+                type=VppEnum.vl_api_ip_reass_type_t.IP_REASS_TYPE_SHALLOW_VIRTUAL,
+            )
+            external_ref_phy = None
+
+            output = self.vapi.cli("show lcp copp reassembly")
+            self.assertIn("enabled", output)
+            self.assertIn("timeout", output)
+            self.assertIn("fragments/context", output)
+        finally:
+            if external_ref_phy is not None:
+                self.vapi.ip_reassembly_enable_disable(
+                    sw_if_index=external_ref_phy.sw_if_index,
+                    enable_ip4=False,
+                    enable_ip6=False,
+                    type=VppEnum.vl_api_ip_reass_type_t.IP_REASS_TYPE_SHALLOW_VIRTUAL,
+                )
+            for phy, host in reversed(added):
+                self.vapi.cli("test lcp del phy %s host %s" % (phy, host))
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=False)
+
+    def test_linux_cp_copp_reassembly_fragments(self):
+        """IPv4/IPv6 fragments use the first fragment's CoPP metadata"""
+
+        host = self.pg0
+        phy = self.pg1
+        phy.config_ip4()
+        phy.config_ip6()
+        VppLcpPair(self, phy, host).add_vpp_config()
+        trap_ids = (44, 46, 47, 48)
+
+        try:
+            for trap_id in trap_ids:
+                self.vapi.lcp_copp_trap_del(trap_id=trap_id)
+                self.vapi.lcp_copp_trap_add(
+                    trap_id=trap_id,
+                    action=3,
+                    priority=1 if trap_id == 44 else 100,
+                    policer_index=0xFFFFFFFF,
+                )
+
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=True)
+            snmp_before = self._copp_counter("trap_hit", 46)
+            bgp4_before = self._copp_counter("trap_hit", 47)
+            bgp6_before = self._copp_counter("trap_hit", 48)
+            ip2me_before = self._copp_counter("trap_hit", 44)
+            ethernet = Ether(src=phy.remote_mac, dst=phy.local_mac)
+
+            def ip4_fragments(identification):
+                first = (
+                    ethernet
+                    / IP(
+                        src=phy.remote_ip4,
+                        dst=phy.local_ip4,
+                        id=identification,
+                        flags="MF",
+                    )
+                    / UDP(sport=50000, dport=161)
+                    / Raw(b"first-v4")
+                )
+                later = (
+                    ethernet
+                    / IP(
+                        src=phy.remote_ip4,
+                        dst=phy.local_ip4,
+                        id=identification,
+                        frag=2,
+                        proto=17,
+                    )
+                    / Raw(b"later-v4")
+                )
+                return [first, later]
+
+            def ip4_tcp_fragments(identification):
+                first = (
+                    ethernet
+                    / IP(
+                        src=phy.remote_ip4,
+                        dst=phy.local_ip4,
+                        id=identification,
+                        flags="MF",
+                    )
+                    / TCP(sport=50000, dport=179)
+                    / Raw(b"tcp4")
+                )
+                later = (
+                    ethernet
+                    / IP(
+                        src=phy.remote_ip4,
+                        dst=phy.local_ip4,
+                        id=identification,
+                        frag=3,
+                        proto=6,
+                    )
+                    / Raw(b"later-tcp4")
+                )
+                return [first, later]
+
+            def ip6_fragments(identification):
+                first = (
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / IPv6ExtHdrFragment(
+                        id=identification, offset=0, m=1, nh=17
+                    )
+                    / UDP(sport=50000, dport=161)
+                    / Raw(b"first-v6")
+                )
+                later = (
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / IPv6ExtHdrFragment(
+                        id=identification, offset=2, m=0, nh=17
+                    )
+                    / Raw(b"later-v6")
+                )
+                return [first, later]
+
+            def ip6_hbh_fragments(identification):
+                first = (
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / IPv6ExtHdrHopByHop()
+                    / IPv6ExtHdrFragment(
+                        id=identification, offset=0, m=1, nh=17
+                    )
+                    / UDP(sport=50000, dport=161)
+                    / Raw(b"first-h6")
+                )
+                later = (
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / IPv6ExtHdrHopByHop()
+                    / IPv6ExtHdrFragment(
+                        id=identification, offset=2, m=0, nh=17
+                    )
+                    / Raw(b"later-h6")
+                )
+                return [first, later]
+
+            def ip6_tcp_fragments(identification):
+                first = (
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / IPv6ExtHdrFragment(
+                        id=identification, offset=0, m=1, nh=6
+                    )
+                    / TCP(sport=50000, dport=179)
+                    / Raw(b"tcp6")
+                )
+                later = (
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / IPv6ExtHdrFragment(
+                        id=identification, offset=3, m=0, nh=6
+                    )
+                    / Raw(b"later-tcp6")
+                )
+                return [first, later]
+
+            # Exercise both natural order and a cached non-first fragment.
+            for family, make_fragments, identification, trap_id in (
+                ("ip4-ordered", ip4_fragments, 0x4101, 46),
+                ("ip4-reordered", ip4_fragments, 0x4102, 46),
+                ("ip6-ordered", ip6_fragments, 0x6101, 46),
+                ("ip6-reordered", ip6_fragments, 0x6102, 46),
+                ("ip6-hop-by-hop", ip6_hbh_fragments, 0x6104, 46),
+                ("ip4-tcp", ip4_tcp_fragments, 0x4103, 47),
+                ("ip6-tcp", ip6_tcp_fragments, 0x6103, 48),
+            ):
+                with self.subTest(family=family):
+                    fragments = make_fragments(identification)
+                    if family.endswith("reordered"):
+                        fragments.reverse()
+                    before = self._copp_counter("trap_hit", trap_id)
+                    self.send_and_expect(phy, fragments, host)
+                    self._assert_copp_counter_delta(
+                        "trap_hit", trap_id, before, 2, family
+                    )
+
+            self._assert_copp_counter_delta(
+                "trap_hit", 46, snmp_before, 10, "reassembled fragments"
+            )
+            self._assert_copp_counter_delta(
+                "trap_hit", 47, bgp4_before, 2, "IPv4 TCP fragments"
+            )
+            self._assert_copp_counter_delta(
+                "trap_hit", 48, bgp6_before, 2, "IPv6 TCP fragments"
+            )
+            self._assert_copp_counter_delta(
+                "trap_hit", 44, ip2me_before, 0, "reassembled fragments"
+            )
+
+            # With reassembly disabled, only the first TCP fragment carries
+            # port 179; the non-first fragment safely falls back to IP2ME.
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=False)
+            bgp4_before = self._copp_counter("trap_hit", 47)
+            ip2me_before = self._copp_counter("trap_hit", 44)
+            self.send_and_expect(phy, ip4_tcp_fragments(0x4104), host)
+            self._assert_copp_counter_delta(
+                "trap_hit", 47, bgp4_before, 1, "disabled IPv4 TCP fragments"
+            )
+            self._assert_copp_counter_delta(
+                "trap_hit", 44, ip2me_before, 1, "disabled IPv4 TCP fragments"
+            )
+        finally:
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=False)
+            for trap_id in trap_ids:
+                self.vapi.lcp_copp_trap_del(trap_id=trap_id)
+            phy.unconfig_ip6()
+            phy.unconfig_ip4()
 
     def test_linux_cp_copp_l2_actions(self):
         """Linux CP CoPP LLDP/LACP/PTP actions and host bypass"""

@@ -551,6 +551,7 @@ lcp_parse_ip6 (vlib_buffer_t *b, const u8 *data, u32 available,
 
 bool
 lcp_packet_parse (vlib_main_t *vm, vlib_buffer_t *b, u32 context,
+		  bool reassembly_metadata_valid,
 		  lcp_packet_view_t *view)
 {
   const u8 *current = vlib_buffer_get_current (b);
@@ -593,6 +594,43 @@ lcp_packet_parse (vlib_main_t *vm, vlib_buffer_t *b, u32 context,
     lcp_parse_ip6 (b, current, b->current_length, view);
   else
     return false;
+
+  /* Shallow virtual reassembly forwards the original fragments and annotates
+   * every released buffer with L4 information learned from the first
+   * fragment.  Prefer that trusted metadata for the whole fragment set; this
+   * also handles IPv6 extension chains where the local parser cannot reliably
+   * locate the fragment header in a non-first fragment. */
+  if (reassembly_metadata_valid)
+    {
+      view->ip_protocol = vnet_buffer (b)->ip.reass.ip_proto;
+      view->valid_fields |= LCP_MATCH_FIELD_IP_PROTOCOL;
+
+	/* IPv6 shallow reassembly has no truncation flag; its learned ports
+	 * are authoritative.  IPv4 explicitly marks truncated L4 headers. */
+      bool l4_metadata_valid =
+	view->ip_version == 6 ||
+	!vnet_buffer (b)->ip.reass.l4_layer_truncated;
+
+      if (l4_metadata_valid &&
+	  (view->ip_protocol == IP_PROTOCOL_TCP ||
+	   view->ip_protocol == IP_PROTOCOL_UDP))
+	{
+	  view->l4_src_port = clib_net_to_host_u16 (
+	    vnet_buffer (b)->ip.reass.l4_src_port);
+	  view->l4_dst_port = clib_net_to_host_u16 (
+	    vnet_buffer (b)->ip.reass.l4_dst_port);
+	  view->valid_fields |= LCP_MATCH_FIELD_L4_PORTS;
+	  view->state |= LCP_MATCH_STATE_TRUSTED_L4;
+	}
+      else if (l4_metadata_valid &&
+	       (view->ip_protocol == IP_PROTOCOL_ICMP ||
+		view->ip_protocol == IP_PROTOCOL_ICMP6))
+	{
+	  view->icmp_type =
+	    vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags;
+	  view->valid_fields |= LCP_MATCH_FIELD_ICMP_TYPE;
+	}
+    }
 
   if (context == LCP_MATCH_CTX_LOCAL4 || context == LCP_MATCH_CTX_LOCAL6)
     {

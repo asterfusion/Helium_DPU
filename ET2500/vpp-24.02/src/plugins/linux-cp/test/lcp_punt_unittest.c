@@ -447,7 +447,7 @@ lcp_copp_l2_parse_command_fn (vlib_main_t *vm, unformat_input_t *input,
       lcp_copp_l2_test_packet_reset (
 	b, cases[i].vlan_count, cases[i].subtype,
 	cases[i].current_advance, cases[i].frame_length);
-      if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_L2_DIRECT, &view))
+      if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_L2_DIRECT, false, &view))
 	{
 	  err = clib_error_return (0, "%s: packet parse failed",
 				   cases[i].name);
@@ -895,7 +895,7 @@ lcp_copp_ip6_ext_command_fn (vlib_main_t *vm, unformat_input_t *input,
   p[1] = 0x50; /* src port 50000 */
   p[2] = 0x00;
   p[3] = 0xa1; /* dst port 161 */
-  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, &view))
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, false, &view))
     {
       err = clib_error_return (0, "IPv6+UDP parse failed");
       goto done;
@@ -918,7 +918,7 @@ lcp_copp_ip6_ext_command_fn (vlib_main_t *vm, unformat_input_t *input,
   p[1] = 0x50; /* src port 50000 */
   p[2] = 0x00;
   p[3] = 0x16; /* dst port 22 */
-  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, &view))
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, false, &view))
     {
       err = clib_error_return (0, "IPv6+TCP parse failed");
       goto done;
@@ -938,7 +938,7 @@ lcp_copp_ip6_ext_command_fn (vlib_main_t *vm, unformat_input_t *input,
   p[1] = 0x50;
   p[2] = 0x00;
   p[3] = 0xa1;
-  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, &view))
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, false, &view))
     {
       err = clib_error_return (0, "IPv6+HBH+UDP parse failed");
       goto done;
@@ -958,7 +958,7 @@ lcp_copp_ip6_ext_command_fn (vlib_main_t *vm, unformat_input_t *input,
   p[1] = 0x50;
   p[2] = 0x00;
   p[3] = 0xa1;
-  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, &view))
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, false, &view))
     {
       err = clib_error_return (0, "IPv6+Routing+UDP parse failed");
       goto done;
@@ -978,7 +978,7 @@ lcp_copp_ip6_ext_command_fn (vlib_main_t *vm, unformat_input_t *input,
   p[1] = 0x50;
   p[2] = 0x00;
   p[3] = 0xa1;
-  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, &view))
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, false, &view))
     {
       err = clib_error_return (0, "IPv6+DestOpt+UDP parse failed");
       goto done;
@@ -1006,7 +1006,7 @@ lcp_copp_ip6_ext_command_fn (vlib_main_t *vm, unformat_input_t *input,
   p[1] = 0x50;
   p[2] = 0x00;
   p[3] = 0xa1;
-  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, &view))
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, false, &view))
     {
       err = clib_error_return (0, "IPv6+frag0+UDP parse failed");
       goto done;
@@ -1016,6 +1016,19 @@ lcp_copp_ip6_ext_command_fn (vlib_main_t *vm, unformat_input_t *input,
   CHECK_FIELD (view.l4_dst_port, 161, "IPv6+frag0+UDP: dst port %u != %u");
   CHECK_FIELD (view.state & LCP_MATCH_STATE_FRAGMENT, LCP_MATCH_STATE_FRAGMENT,
 	       "IPv6+frag0+UDP: not marked fragment (state %u != %u)");
+
+  vnet_buffer (b)->ip.reass.ip_proto = IP_PROTOCOL_UDP;
+  vnet_buffer (b)->ip.reass.l4_src_port = clib_host_to_net_u16 (50000);
+  vnet_buffer (b)->ip.reass.l4_dst_port = clib_host_to_net_u16 (161);
+  vnet_buffer (b)->ip.reass.l4_layer_truncated = 0;
+  vnet_buffer (b)->ip.reass.is_non_first_fragment = 0;
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, true, &view))
+    {
+      err = clib_error_return (0, "IPv6+frag0 metadata parse failed");
+      goto done;
+    }
+  CHECK_FIELD (view.l4_dst_port, 161,
+	       "IPv6+frag0 metadata: dst port %u != %u");
 
   /* IPv6 non-first fragment: fragment_index >= 0, fragment offset != 0.
    * The fragment next header is UDP but L4 ports must not be parsed. */
@@ -1033,7 +1046,7 @@ lcp_copp_ip6_ext_command_fn (vlib_main_t *vm, unformat_input_t *input,
   p[7] = 1; /* identification */
   p += 8;
   clib_memset (p, 0, 8);
-  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, &view))
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, false, &view))
     {
       err = clib_error_return (0, "IPv6+fragN parse failed");
       goto done;
@@ -1045,6 +1058,40 @@ lcp_copp_ip6_ext_command_fn (vlib_main_t *vm, unformat_input_t *input,
 	       "IPv6+fragN: not marked non-first fragment (state %u != %u)");
   CHECK_FIELD (view.valid_fields & LCP_MATCH_FIELD_L4_PORTS, 0,
 	       "IPv6+fragN: unexpectedly parsed L4 ports (valid_fields %u != %u)");
+
+  /* The same non-first fragment can use shallow-reassembly metadata only
+   * when its producer has explicitly proved that the feature ran. */
+  vnet_buffer (b)->ip.reass.ip_proto = IP_PROTOCOL_UDP;
+  vnet_buffer (b)->ip.reass.l4_src_port = clib_host_to_net_u16 (50000);
+  vnet_buffer (b)->ip.reass.l4_dst_port = clib_host_to_net_u16 (161);
+  vnet_buffer (b)->ip.reass.l4_layer_truncated = 0;
+  vnet_buffer (b)->ip.reass.is_non_first_fragment = 1;
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, false, &view))
+    {
+      err = clib_error_return (0, "IPv6+fragN stale metadata parse failed");
+      goto done;
+    }
+  CHECK_FIELD (view.valid_fields & LCP_MATCH_FIELD_L4_PORTS, 0,
+	       "IPv6+fragN stale metadata: L4 fields %u != %u");
+
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, true, &view))
+    {
+      err = clib_error_return (0, "IPv6+fragN metadata parse failed");
+      goto done;
+    }
+  CHECK_FIELD (view.l4_dst_port, 161,
+	       "IPv6+fragN metadata: dst port %u != %u");
+
+  /* Truncated metadata preserves safe L3 classification but never exposes
+   * ports. */
+  vnet_buffer (b)->ip.reass.l4_layer_truncated = 1;
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, true, &view))
+    {
+      err = clib_error_return (0, "IPv6+fragN truncated parse failed");
+      goto done;
+    }
+  CHECK_FIELD (view.valid_fields & LCP_MATCH_FIELD_L4_PORTS, 0,
+	       "IPv6+fragN truncated: L4 fields %u != %u");
 
   /* IPv6 malformed extension chain: HBH next header points to a non-
    * extension protocol (IPv4).  The chain terminates at the bogus next
@@ -1059,7 +1106,7 @@ lcp_copp_ip6_ext_command_fn (vlib_main_t *vm, unformat_input_t *input,
   p[1] = 0x50;
   p[2] = 0x00;
   p[3] = 0xa1;
-  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, &view))
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, false, &view))
     {
       err = clib_error_return (0, "IPv6+malformed parse failed");
       goto done;
@@ -1076,7 +1123,7 @@ lcp_copp_ip6_ext_command_fn (vlib_main_t *vm, unformat_input_t *input,
   p = (u8 *) (ip6 + 1);
   p[0] = IP_PROTOCOL_UDP;
   p[1] = 7; /* length claims 64 bytes, but only 2 bytes available */
-  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, &view))
+  if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP6, false, &view))
     {
       err = clib_error_return (0, "IPv6+truncated parse failed");
       goto done;

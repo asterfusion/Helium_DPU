@@ -30,6 +30,8 @@
 #include <vppinfra/linux/netns.h>
 
 #include <vnet/ip/ip_punt_drop.h>
+#include <vnet/ip/reass/ip4_sv_reass.h>
+#include <vnet/ip/reass/ip6_sv_reass.h>
 #include <vnet/fib/fib_table.h>
 #include <vnet/adj/adj_mcast.h>
 #include <vnet/udp/udp.h>
@@ -66,6 +68,140 @@ lcp_itf_num_pairs (void)
 static uword *lip_db_by_vif;
 index_t *lip_db_by_phy;
 u32 *lip_db_by_host;
+
+/* Bitmap members hold one LCP-owned reference on both shallow virtual
+ * reassembly features. */
+lcp_copp_reassembly_main_t lcp_copp_reassembly_main;
+
+static int
+lcp_copp_reassembly_interface_set (u32 sw_if_index, u8 enable)
+{
+  int rv;
+  u8 current =
+    clib_bitmap_get (lcp_copp_reassembly_main.interfaces, sw_if_index);
+
+  if (current == !!enable)
+    return 0;
+
+  if (enable)
+    {
+      rv = ip4_sv_reass_enable_disable_with_refcnt (sw_if_index, 1);
+      if (rv)
+	{
+	  int rollback_rv =
+	    ip4_sv_reass_enable_disable_with_refcnt (sw_if_index, 0);
+	  if (rollback_rv)
+	    LCP_ITF_PAIR_ERR (
+	      "failed to roll back IPv4 shallow reassembly on interface %u: %d",
+	      sw_if_index, rollback_rv);
+	  return rv;
+	}
+      rv = ip6_sv_reass_enable_disable_with_refcnt (sw_if_index, 1);
+      if (rv)
+	{
+	  int rollback_rv6 =
+	    ip6_sv_reass_enable_disable_with_refcnt (sw_if_index, 0);
+	  int rollback_rv4 =
+	    ip4_sv_reass_enable_disable_with_refcnt (sw_if_index, 0);
+	  if (rollback_rv6)
+	    LCP_ITF_PAIR_ERR (
+	      "failed to roll back IPv6 shallow reassembly on interface %u: %d",
+	      sw_if_index, rollback_rv6);
+	  if (rollback_rv4)
+	    LCP_ITF_PAIR_ERR (
+	      "failed to roll back IPv4 shallow reassembly on interface %u: %d",
+	      sw_if_index, rollback_rv4);
+	  return rv;
+	}
+    }
+  else
+    {
+      int rv4 = ip4_sv_reass_enable_disable_with_refcnt (sw_if_index, 0);
+      int rv6 = ip6_sv_reass_enable_disable_with_refcnt (sw_if_index, 0);
+
+      if (rv4)
+	LCP_ITF_PAIR_ERR (
+	  "failed to disable IPv4 shallow reassembly on interface %u: %d",
+	  sw_if_index, rv4);
+      if (rv6)
+	LCP_ITF_PAIR_ERR (
+	  "failed to disable IPv6 shallow reassembly on interface %u: %d",
+	  sw_if_index, rv6);
+      if (rv4 || rv6)
+	{
+	  int rollback_rv4 =
+	    ip4_sv_reass_enable_disable_with_refcnt (sw_if_index, 1);
+	  int rollback_rv6 =
+	    ip6_sv_reass_enable_disable_with_refcnt (sw_if_index, 1);
+	  if (rollback_rv4)
+	    LCP_ITF_PAIR_ERR (
+	      "failed to restore IPv4 shallow reassembly on interface %u: %d",
+	      sw_if_index, rollback_rv4);
+	  if (rollback_rv6)
+	    LCP_ITF_PAIR_ERR (
+	      "failed to restore IPv6 shallow reassembly on interface %u: %d",
+	      sw_if_index, rollback_rv6);
+	  return rv4 ? rv4 : rv6;
+	}
+    }
+
+  lcp_copp_reassembly_main.interfaces = clib_bitmap_set (
+    lcp_copp_reassembly_main.interfaces, sw_if_index, !!enable);
+  return 0;
+}
+
+int
+lcp_copp_reassembly_enable_disable (u8 enable)
+{
+  u32 *changed_interfaces = 0;
+  lcp_itf_pair_t *lip;
+  int rv = 0;
+
+  enable = !!enable;
+  if (lcp_copp_reassembly_main.enabled == enable)
+    return 0;
+
+  pool_foreach (lip, lcp_itf_pair_pool)
+    {
+      rv = lcp_copp_reassembly_interface_set (lip->lip_phy_sw_if_index,
+					       enable);
+      if (rv)
+	break;
+      vec_add1 (changed_interfaces, lip->lip_phy_sw_if_index);
+    }
+
+  if (rv)
+    {
+      while (vec_len (changed_interfaces))
+	{
+	  u32 sw_if_index = vec_pop (changed_interfaces);
+	  int rollback_rv =
+	    lcp_copp_reassembly_interface_set (sw_if_index, !enable);
+
+	  if (rollback_rv)
+	    LCP_ITF_PAIR_ERR (
+	      "failed to roll back shallow reassembly on interface %u: %d",
+	      sw_if_index, rollback_rv);
+	}
+    }
+  else
+    lcp_copp_reassembly_main.enabled = enable;
+
+  vec_free (changed_interfaces);
+  return rv;
+}
+
+u8
+lcp_copp_reassembly_is_enabled (void)
+{
+  return lcp_copp_reassembly_main.enabled;
+}
+
+u32
+lcp_copp_reassembly_enabled_interfaces (void)
+{
+  return clib_bitmap_count_set_bits (lcp_copp_reassembly_main.interfaces);
+}
 
 /**
  * vector of virtual function table
@@ -246,14 +382,21 @@ lcp_itf_set_adjs (lcp_itf_pair_t *lip)
 void
 lcp_copp_features_set (u32 phy_sw_if_index, u8 enable)
 {
+  u8 unicast_context = 1;
+  u8 multicast_context = 0;
+
   vnet_feature_enable_disable ("ip4-unicast", "linux-cp-ip4-punt",
-			       phy_sw_if_index, enable, NULL, 0);
+			       phy_sw_if_index, enable, &unicast_context,
+			       sizeof (unicast_context));
   vnet_feature_enable_disable ("ip4-multicast", "linux-cp-ip4-punt",
-			       phy_sw_if_index, enable, NULL, 0);
+			       phy_sw_if_index, enable, &multicast_context,
+			       sizeof (multicast_context));
   vnet_feature_enable_disable ("ip6-unicast", "linux-cp-ip6-punt",
-			       phy_sw_if_index, enable, NULL, 0);
+			       phy_sw_if_index, enable, &unicast_context,
+			       sizeof (unicast_context));
   vnet_feature_enable_disable ("ip6-multicast", "linux-cp-ip6-punt",
-			       phy_sw_if_index, enable, NULL, 0);
+			       phy_sw_if_index, enable, &multicast_context,
+			       sizeof (multicast_context));
   vnet_l2_feature_enable_disable ("l2-input-ip4", "linux-cp-l2-punt",
 				  phy_sw_if_index, enable, NULL, 0);
   vnet_l2_feature_enable_disable ("l2-input-ip6", "linux-cp-l2-punt",
@@ -277,6 +420,13 @@ lcp_itf_pair_add (u32 host_sw_if_index, u32 phy_sw_if_index, u8 *host_name,
 
   if (lipi != INDEX_INVALID)
     return VNET_API_ERROR_VALUE_EXIST;
+
+  if (lcp_copp_reassembly_main.enabled)
+    {
+      int rv = lcp_copp_reassembly_interface_set (phy_sw_if_index, 1);
+      if (rv)
+	return rv;
+    }
 
   LCP_ITF_PAIR_INFO ("add: host:%U phy:%U, host_if:%v vif:%d ns:%s",
 		     format_vnet_sw_if_index_name, vnet_get_main (),
@@ -357,10 +507,13 @@ lcp_itf_pair_add (u32 host_sw_if_index, u32 phy_sw_if_index, u8 *host_name,
 
   if (hash_elts (lip_db_by_vif) == 1)
     {
+      u8 reassembly_capable = 1;
       vnet_feature_enable_disable ("ip4-punt", "linux-cp-local-punt", 0, 1,
-				   NULL, 0);
+				   &reassembly_capable,
+				   sizeof (reassembly_capable));
       vnet_feature_enable_disable ("ip6-punt", "linux-cp-local-punt", 0, 1,
-				   NULL, 0);
+				   &reassembly_capable,
+				   sizeof (reassembly_capable));
     }
 
   /* enable ARP feature node for broadcast interfaces */
@@ -476,6 +629,18 @@ lcp_itf_pair_del (u32 phy_sw_if_index)
 
   lip = lcp_itf_pair_get (lipi);
 
+  if (lcp_copp_reassembly_main.enabled)
+    {
+      int rv = lcp_copp_reassembly_interface_set (phy_sw_if_index, 0);
+      if (rv)
+	{
+	  LCP_ITF_PAIR_ERR (
+	    "failed to disable shallow reassembly on interface %u: %d",
+	    phy_sw_if_index, rv);
+	  return rv;
+	}
+    }
+
   LCP_ITF_PAIR_NOTICE (
     "pair_del: host:%U phy:%U host_if:%v vif:%d ns:%v",
     format_vnet_sw_if_index_name, vnet_get_main (), lip->lip_host_sw_if_index,
@@ -517,10 +682,13 @@ lcp_itf_pair_del (u32 phy_sw_if_index)
 
   if (hash_elts (lip_db_by_vif) == 1)
     {
+      u8 reassembly_capable = 1;
       vnet_feature_enable_disable ("ip4-punt", "linux-cp-local-punt", 0, 0,
-				   NULL, 0);
+				   &reassembly_capable,
+				   sizeof (reassembly_capable));
       vnet_feature_enable_disable ("ip6-punt", "linux-cp-local-punt", 0, 0,
-				   NULL, 0);
+				   &reassembly_capable,
+				   sizeof (reassembly_capable));
     }
 
   /* disable ARP feature node for broadcast interfaces */
@@ -552,12 +720,13 @@ lcp_itf_pair_del (u32 phy_sw_if_index)
   return 0;
 }
 
-static void
+static int
 lcp_itf_pair_delete_by_index (index_t lipi)
 {
   u32 host_sw_if_index;
   lcp_itf_pair_t *lip;
   u8 *host_name, *ns;
+  int rv;
 
   lip = lcp_itf_pair_get (lipi);
 
@@ -565,7 +734,13 @@ lcp_itf_pair_delete_by_index (index_t lipi)
   host_sw_if_index = lip->lip_host_sw_if_index;
   ns = vec_dup (lip->lip_namespace);
 
-  lcp_itf_pair_del (lip->lip_phy_sw_if_index);
+  rv = lcp_itf_pair_del (lip->lip_phy_sw_if_index);
+  if (rv)
+    {
+      vec_free (host_name);
+      vec_free (ns);
+      return rv;
+    }
 
   if (vnet_sw_interface_is_sub (vnet_get_main (), host_sw_if_index))
     {
@@ -596,6 +771,7 @@ lcp_itf_pair_delete_by_index (index_t lipi)
 
   vec_free (host_name);
   vec_free (ns);
+  return 0;
 }
 
 int
@@ -608,9 +784,7 @@ lcp_itf_pair_delete (u32 phy_sw_if_index)
   if (lipi == INDEX_INVALID)
     return VNET_API_ERROR_INVALID_SW_IF_INDEX;
 
-  lcp_itf_pair_delete_by_index (lipi);
-
-  return 0;
+  return lcp_itf_pair_delete_by_index (lipi);
 }
 
 /**
@@ -874,6 +1048,8 @@ lcp_itf_pair_create (u32 phy_sw_if_index, u8 *host_if_name,
   const vnet_hw_interface_t *hw;
   const lcp_itf_pair_t *lip;
   index_t lipi;
+  u8 host_link_created = 0;
+  int rv;
 
   lipi = lcp_itf_pair_find_by_phy (phy_sw_if_index);
 
@@ -1043,7 +1219,10 @@ lcp_itf_pair_create (u32 phy_sw_if_index, u8 *host_if_name,
 	    }
 
 	  if (!err)
-	    vif_index = if_nametoindex ((char *) host_if_name);
+	    {
+	      host_link_created = 1;
+	      vif_index = if_nametoindex ((char *) host_if_name);
+	    }
 	}
 
       /*
@@ -1175,8 +1354,39 @@ lcp_itf_pair_create (u32 phy_sw_if_index, u8 *host_if_name,
 		     vnet_get_main (), phy_sw_if_index,
 		     format_vnet_sw_if_index_name, vnet_get_main (),
 		     host_sw_if_index, host_if_name);
-  lcp_itf_pair_add (host_sw_if_index, phy_sw_if_index, host_if_name, vif_index,
-		    host_if_type, ns);
+  rv = lcp_itf_pair_add (host_sw_if_index, phy_sw_if_index, host_if_name,
+			 vif_index, host_if_type, ns);
+  if (rv)
+    {
+      if (vnet_sw_interface_is_sub (vnm, host_sw_if_index))
+	{
+	  if (host_link_created)
+	    {
+	      int curr_ns_fd = -1;
+	      int vif_ns_fd = -1;
+
+	      if (ns)
+		{
+		  curr_ns_fd = clib_netns_open (NULL /* self */);
+		  vif_ns_fd = clib_netns_open (ns);
+		  if (vif_ns_fd != -1)
+		    clib_setns (vif_ns_fd);
+		}
+	      lcp_netlink_del_link ((const char *) host_if_name);
+	      if (vif_ns_fd != -1)
+		close (vif_ns_fd);
+	      if (curr_ns_fd != -1)
+		{
+		  clib_setns (curr_ns_fd);
+		  close (curr_ns_fd);
+		}
+	    }
+	  vnet_delete_sub_interface (host_sw_if_index);
+	}
+      else
+	tap_delete_if (vlib_get_main (), host_sw_if_index);
+      return rv;
+    }
 
   /*
    * Copy the link state from VPP into the host side.
@@ -1255,14 +1465,19 @@ lcp_itf_pair_replace_end (void)
     .indicies = NULL,
   };
   index_t *lipi;
+  int rv = 0;
 
   lcp_itf_pair_walk (lcp_itf_pair_walk_sweep, &ctx);
 
   vec_foreach (lipi, ctx.indicies)
-    lcp_itf_pair_delete_by_index (*lipi);
+    {
+      int delete_rv = lcp_itf_pair_delete_by_index (*lipi);
+      if (delete_rv && !rv)
+	rv = delete_rv;
+    }
 
   vec_free (ctx.indicies);
-  return (0);
+  return rv;
 }
 
 static clib_error_t *

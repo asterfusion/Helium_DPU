@@ -1279,7 +1279,7 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 
 	  vnet_feature_next (&original_next, b0);
 	  next0 = original_next;
-	  if (lcp_packet_parse (vm, b0, LCP_MATCH_CTX_ARP, &view) &&
+	  if (lcp_packet_parse (vm, b0, LCP_MATCH_CTX_ARP, false, &view) &&
 	      lcp_match_select (&view, &result))
 	    {
 	      if (!lcp_buffer_set_trap_id (b0, result.trap_type))

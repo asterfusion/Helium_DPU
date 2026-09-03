@@ -158,19 +158,32 @@ lcp_ip_producer_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	    {
 	      lcp_buffer_clear_copp_processed (b);
 	      vnet_buffer2 (b)->trap_id = LCP_TRAP_INVALID;
+	      copp_processed = false;
 	    }
 	  else
 	    vnet_buffer2 (b)->trap_id = LCP_TRAP_INVALID;
 
-	  vnet_feature_next (&original_next, b);
+	  u8 *feature_context = 0;
+	  if (context == LCP_MATCH_CTX_IP4 || context == LCP_MATCH_CTX_IP6)
+	    feature_context = vnet_feature_next_with_data (
+	      &original_next, b, sizeof (*feature_context));
+	  else
+	    vnet_feature_next (&original_next, b);
 	  next = original_next;
+	  if (feature_context && *feature_context)
+	    packet_context = context == LCP_MATCH_CTX_IP6 ?
+			       LCP_MATCH_CTX_LOCAL6 : LCP_MATCH_CTX_LOCAL4;
 	  if (context == LCP_MATCH_CTX_LOCAL_IP46)
 	    packet_context =
 	      b->current_length &&
 		(*(u8 *) vlib_buffer_get_current (b) >> 4) == 6 ?
 		LCP_MATCH_CTX_LOCAL6 : LCP_MATCH_CTX_LOCAL4;
 	  if (!copp_processed && vnet_buffer2 (b)->trap_id == LCP_TRAP_INVALID &&
-	      lcp_packet_parse (vm, b, packet_context, &view) &&
+	      lcp_packet_parse (
+		vm, b, packet_context,
+		lcp_copp_reassembly_metadata_valid (
+		  vnet_buffer (b)->sw_if_index[VLIB_RX]),
+		&view) &&
 	      lcp_match_select (&view, &result))
 	    {
 	      if (!lcp_buffer_set_trap_id (b, result.trap_type))
@@ -295,6 +308,7 @@ VNET_FEATURE_INIT (lcp_ip4_producer_uc, static) = {
   .arc_name = "ip4-unicast",
   .node_name = "linux-cp-ip4-punt",
   .runs_before = VNET_FEATURES ("ip4-not-enabled"),
+  .runs_after = VNET_FEATURES ("ip4-sv-reassembly-feature"),
 };
 VNET_FEATURE_INIT (lcp_ip4_producer_mc, static) = {
   .arc_name = "ip4-multicast",
@@ -305,6 +319,7 @@ VNET_FEATURE_INIT (lcp_ip6_producer_uc, static) = {
   .arc_name = "ip6-unicast",
   .node_name = "linux-cp-ip6-punt",
   .runs_before = VNET_FEATURES ("ip6-not-enabled"),
+  .runs_after = VNET_FEATURES ("ip6-sv-reassembly-feature"),
 };
 VNET_FEATURE_INIT (lcp_ip6_producer_mc, static) = {
   .arc_name = "ip6-multicast",
@@ -459,7 +474,7 @@ lcp_l2_producer_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	    }
 
 	  vnet_buffer2 (b)->trap_id = LCP_TRAP_INVALID;
-	  if (lcp_packet_parse (vm, b, context, &view) &&
+	  if (lcp_packet_parse (vm, b, context, false, &view) &&
 	      lcp_match_select (&view, &result))
 	    {
 	      if (!is_feature && result.trap_type == LCP_TRAP_STP &&
