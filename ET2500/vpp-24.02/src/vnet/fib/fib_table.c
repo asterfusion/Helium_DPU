@@ -598,12 +598,12 @@ fib_table_entry_path_add (u32 fib_index,
     return (fib_entry_index);
 }
 
-static int
-fib_route_path_cmp_for_sort (void * v1,
-			     void * v2)
-{
-    return (fib_route_path_cmp(v1, v2));
-}
+// static int
+// fib_route_path_cmp_for_sort (void * v1,
+// 			     void * v2)
+// {
+//     return (fib_route_path_cmp(v1, v2));
+// }
 
 fib_node_index_t
 fib_table_entry_path_add2 (u32 fib_index,
@@ -623,11 +623,11 @@ fib_table_entry_path_add2 (u32 fib_index,
     {
 	fib_table_route_path_fixup(prefix, &flags, &rpaths[ii]);
     }
-    /*
-     * sort the paths provided by the control plane. this means
-     * the paths and the extension on the entry will be sorted.
-     */
-    vec_sort_with_function(rpaths, fib_route_path_cmp_for_sort);
+    // /*
+    //  * sort the paths provided by the control plane. this means
+    //  * the paths and the extension on the entry will be sorted.
+    //  */
+    // vec_sort_with_function(rpaths, fib_route_path_cmp_for_sort);
 
     if (FIB_NODE_INDEX_INVALID == fib_entry_index)
     {
@@ -788,11 +788,11 @@ fib_table_entry_update (u32 fib_index,
     {
 	fib_table_route_path_fixup(prefix, &flags, &paths[ii]);
     }
-    /*
-     * sort the paths provided by the control plane. this means
-     * the paths and the extension on the entry will be sorted.
-     */
-    vec_sort_with_function(paths, fib_route_path_cmp_for_sort);
+    // /*
+    //  * sort the paths provided by the control plane. this means
+    //  * the paths and the extension on the entry will be sorted.
+    //  */
+    // vec_sort_with_function(paths, fib_route_path_cmp_for_sort);
 
     if (FIB_NODE_INDEX_INVALID == fib_entry_index)
     {
