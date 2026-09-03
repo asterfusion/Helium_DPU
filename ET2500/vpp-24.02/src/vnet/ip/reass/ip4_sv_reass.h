@@ -26,6 +26,20 @@
 #include <vnet/api_errno.h>
 #include <vnet/vnet.h>
 
+typedef struct
+{
+  u16 l4_src_port;
+  u16 l4_dst_port;
+  u8 ip_proto;
+  u8 icmp_type_or_tcp_flags;
+  u8 l4_layer_truncated;
+  u8 valid_fields;
+} ip4_sv_reass_metadata_t;
+
+#define IP4_SV_REASS_METADATA_FIELD_IP_PROTOCOL (1 << 0)
+#define IP4_SV_REASS_METADATA_FIELD_L4_PORTS    (1 << 1)
+#define IP4_SV_REASS_METADATA_FIELD_ICMP_TYPE   (1 << 2)
+
 /**
  * @brief set ip4 reassembly configuration
  */
@@ -47,6 +61,9 @@ vnet_api_error_t ip4_sv_reass_enable_disable (u32 sw_if_index,
 int ip4_sv_reass_enable_disable_with_refcnt (u32 sw_if_index, int is_enable);
 int ip4_sv_reass_output_enable_disable_with_refcnt (u32 sw_if_index,
 						    int is_enable);
+
+bool ip4_sv_reass_find_metadata (vlib_main_t *vm, vlib_buffer_t *b,
+				 ip4_sv_reass_metadata_t *metadata);
 
 uword ip4_sv_reass_custom_register_next_node (uword node_index);
 uword ip4_sv_reass_custom_context_register_next_node (uword node_index);

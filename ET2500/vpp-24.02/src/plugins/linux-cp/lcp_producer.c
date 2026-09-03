@@ -5,6 +5,8 @@
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/feature/feature.h>
 #include <vnet/ip/ip4_packet.h>
+#include <vnet/ip/reass/ip4_sv_reass.h>
+#include <vnet/ip/reass/ip6_sv_reass.h>
 #include <vnet/llc/llc.h>
 #include <vnet/osi/osi.h>
 
@@ -51,6 +53,26 @@ typedef enum
 #undef _
   LCP_LOCAL_PRODUCER_N_NEXT,
 } lcp_local_producer_next_t;
+
+typedef enum
+{
+  LCP_IP_ADAPTER_UNICAST,
+  LCP_IP_ADAPTER_MULTICAST,
+  LCP_IP_ADAPTER_LOCAL,
+  LCP_IP_ADAPTER_LEGACY,
+} lcp_ip_adapter_t;
+
+typedef enum
+{
+  LCP_IP_ERROR_SV_METADATA_HIT,
+  LCP_IP_ERROR_SV_METADATA_MISS,
+  LCP_IP_N_ERROR,
+} lcp_ip_error_t;
+
+static char *lcp_ip_error_strings[] = {
+  [LCP_IP_ERROR_SV_METADATA_HIT] = "local SV metadata query hit",
+  [LCP_IP_ERROR_SV_METADATA_MISS] = "local SV metadata query fallback",
+};
 
 #define foreach_lcp_l2_feature_next                                      \
   _ (DROP, "error-drop")                                                \
@@ -100,6 +122,7 @@ typedef struct
   u8 llc_control;
   u8 osi_protocol;
   u8 isis_pdu_type;
+  u8 metadata_source;
   u32 valid_fields;
 } lcp_producer_trace_t;
 
@@ -113,17 +136,68 @@ format_lcp_producer_trace (u8 *s, va_list *args)
 
   return format (s, "linux-cp context 0x%x sw_if_index %u trap %u "
 		 "matched-rule %s (%u) fields 0x%x llc %02x/%02x/%02x "
-		 "osi %02x pdu %u",
+		 "osi %02x pdu %u metadata-source %u",
 		 t->context, t->sw_if_index, t->trap_id,
 		 rule ? rule->name : "unknown", t->rule_id, t->valid_fields,
 		 t->llc_dsap, t->llc_ssap, t->llc_control, t->osi_protocol,
-		 t->isis_pdu_type);
+		 t->isis_pdu_type, t->metadata_source);
+}
+
+static_always_inline void
+lcp_ip_metadata_from_buffer (vlib_buffer_t *b, bool is_ip6,
+			     lcp_ip_metadata_t *metadata)
+{
+  metadata->ip_protocol = vnet_buffer (b)->ip.reass.ip_proto;
+  metadata->l4_src_port =
+    clib_net_to_host_u16 (vnet_buffer (b)->ip.reass.l4_src_port);
+  metadata->l4_dst_port =
+    clib_net_to_host_u16 (vnet_buffer (b)->ip.reass.l4_dst_port);
+  metadata->icmp_type = vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags;
+  metadata->l4_ports_valid =
+    is_ip6 || !vnet_buffer (b)->ip.reass.l4_layer_truncated;
+  metadata->icmp_type_valid = metadata->l4_ports_valid;
+}
+
+static_always_inline bool
+lcp_ip_local_metadata_find (vlib_main_t *vm, vlib_buffer_t *b, bool is_ip6,
+			    lcp_ip_metadata_t *metadata)
+{
+  if (is_ip6)
+    {
+      ip6_sv_reass_metadata_t sv;
+      if (!ip6_sv_reass_find_metadata (vm, b, &sv))
+	return false;
+      metadata->ip_protocol = sv.ip_proto;
+      metadata->l4_src_port = clib_net_to_host_u16 (sv.l4_src_port);
+      metadata->l4_dst_port = clib_net_to_host_u16 (sv.l4_dst_port);
+      metadata->icmp_type = sv.icmp_type_or_tcp_flags;
+      metadata->l4_ports_valid =
+	(sv.valid_fields & IP6_SV_REASS_METADATA_FIELD_L4_PORTS) != 0;
+      metadata->icmp_type_valid =
+	(sv.valid_fields & IP6_SV_REASS_METADATA_FIELD_ICMP_TYPE) != 0;
+      return true;
+    }
+  else
+    {
+      ip4_sv_reass_metadata_t sv;
+      if (!ip4_sv_reass_find_metadata (vm, b, &sv))
+	return false;
+      metadata->ip_protocol = sv.ip_proto;
+      metadata->l4_src_port = clib_net_to_host_u16 (sv.l4_src_port);
+      metadata->l4_dst_port = clib_net_to_host_u16 (sv.l4_dst_port);
+      metadata->icmp_type = sv.icmp_type_or_tcp_flags;
+      metadata->l4_ports_valid =
+	(sv.valid_fields & IP4_SV_REASS_METADATA_FIELD_L4_PORTS) != 0;
+      metadata->icmp_type_valid =
+	(sv.valid_fields & IP4_SV_REASS_METADATA_FIELD_ICMP_TYPE) != 0;
+      return true;
+    }
 }
 
 static_always_inline uword
 lcp_ip_producer_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
-			vlib_frame_t *frame, u32 context, u32 drop_next,
-			u32 punt_next)
+			vlib_frame_t *frame, u32 context,
+			lcp_ip_adapter_t adapter, u32 drop_next, u32 punt_next)
 {
   u32 *from = vlib_frame_vector_args (frame);
   u32 n_left = frame->n_vectors;
@@ -141,36 +215,66 @@ lcp_ip_producer_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  u32 bi = from[0], next, original_next;
 	  vlib_buffer_t *b = vlib_get_buffer (vm, bi);
 	  lcp_action_result_t action_result;
-	  lcp_packet_view_t view;
+	  lcp_packet_view_t view = { 0 };
 	  lcp_match_result_t result = { 0 };
+	  lcp_ip_metadata_t metadata = { 0 };
+	  const lcp_ip_metadata_t *metadata_ptr = NULL;
 	  u32 packet_context = context;
+	  u8 metadata_source = 0;
 
 	  bool copp_processed = lcp_buffer_copp_processed (b);
 
-	  /*
-	   * The trap id is stored in buffer opaque metadata and buffers are
-	   * recycled by VPP.  L2 classification initializes it explicitly, but
-	   * the IP producers used to inspect a stale value and skip classification
-	   * for most subsequent packets.  L3 packets enter this producer before
-	   * any LCP decision, so start each packet with a clean marker.
-	   */
-	  if (copp_processed)
+	  vnet_feature_next (&original_next, b);
+	  next = original_next;
+
+	  /* device-input initializes freshly received buffers.  Graph adapters
+	   * preserve an earlier decision; the legacy punt boundary consumes its
+	   * marker before continuing toward Linux delivery. */
+	  if (adapter == LCP_IP_ADAPTER_LEGACY && copp_processed)
 	    {
 	      lcp_buffer_clear_copp_processed (b);
 	      vnet_buffer2 (b)->trap_id = LCP_TRAP_INVALID;
 	    }
-	  else
+	  else if (!copp_processed)
 	    vnet_buffer2 (b)->trap_id = LCP_TRAP_INVALID;
 
-	  vnet_feature_next (&original_next, b);
-	  next = original_next;
 	  if (context == LCP_MATCH_CTX_LOCAL_IP46)
 	    packet_context =
 	      b->current_length &&
 		(*(u8 *) vlib_buffer_get_current (b) >> 4) == 6 ?
 		LCP_MATCH_CTX_LOCAL6 : LCP_MATCH_CTX_LOCAL4;
+	  bool is_ip6 = packet_context == LCP_MATCH_CTX_IP6 ||
+			packet_context == LCP_MATCH_CTX_LOCAL6;
+	  bool shallow_enabled = lcp_copp_reassembly_metadata_valid (
+	    vnet_buffer (b)->sw_if_index[VLIB_RX]);
+
+	  if (adapter == LCP_IP_ADAPTER_UNICAST && shallow_enabled)
+	    {
+	      lcp_ip_metadata_from_buffer (b, is_ip6, &metadata);
+	      metadata_ptr = &metadata;
+	      metadata_source = 1;
+	    }
+
+	  bool parsed = lcp_packet_parse (vm, b, packet_context, metadata_ptr,
+				  &view);
+	  if (parsed && adapter == LCP_IP_ADAPTER_LOCAL && shallow_enabled &&
+	      (view.state & LCP_MATCH_STATE_FRAGMENT))
+	    {
+	      if (lcp_ip_local_metadata_find (vm, b, is_ip6, &metadata))
+		{
+		  metadata_ptr = &metadata;
+		  metadata_source = 2;
+		  lcp_packet_view_apply_ip_metadata (&view, metadata_ptr);
+		  vlib_node_increment_counter (vm, node->node_index,
+					       LCP_IP_ERROR_SV_METADATA_HIT, 1);
+		}
+	      else
+		vlib_node_increment_counter (vm, node->node_index,
+					     LCP_IP_ERROR_SV_METADATA_MISS, 1);
+	    }
+
 	  if (!copp_processed && vnet_buffer2 (b)->trap_id == LCP_TRAP_INVALID &&
-	      lcp_packet_parse (vm, b, packet_context, &view) &&
+	      parsed &&
 	      lcp_match_select (&view, &result))
 	    {
 	      if (!lcp_buffer_set_trap_id (b, result.trap_type))
@@ -209,6 +313,8 @@ lcp_ip_producer_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	      t->trap_id = result.trap_type;
 	      t->rule_id = result.evidence_rule_id;
 	      t->context = packet_context;
+	      t->metadata_source = metadata_source;
+	      t->valid_fields = view.valid_fields;
 	    }
 
 	  to_next[0] = bi;
@@ -228,10 +334,41 @@ lcp_ip_producer_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
   return frame->n_vectors;
 }
 
+VLIB_NODE_FN (lcp_copp_input_init_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+  u32 *buffers = vlib_frame_vector_args (frame);
+  u16 nexts[VLIB_FRAME_SIZE];
+
+  for (u32 i = 0; i < frame->n_vectors; i++)
+    {
+      vlib_buffer_t *b = vlib_get_buffer (vm, buffers[i]);
+      u32 next;
+
+      lcp_buffer_clear_copp_processed (b);
+      vnet_buffer2 (b)->trap_id = LCP_TRAP_INVALID;
+      vnet_feature_next (&next, b);
+      nexts[i] = next;
+    }
+
+  vlib_buffer_enqueue_to_next (vm, node, buffers, nexts, frame->n_vectors);
+  return frame->n_vectors;
+}
+
 VLIB_NODE_FN (lcp_ip4_producer_node)
 (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
 {
   return lcp_ip_producer_inline (vm, node, frame, LCP_MATCH_CTX_IP4,
+				 LCP_IP_ADAPTER_UNICAST,
+				 LCP_IP4_PRODUCER_NEXT_DROP,
+				 LCP_IP4_PRODUCER_NEXT_PUNT);
+}
+
+VLIB_NODE_FN (lcp_ip4_multicast_producer_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+  return lcp_ip_producer_inline (vm, node, frame, LCP_MATCH_CTX_IP4,
+				 LCP_IP_ADAPTER_MULTICAST,
 				 LCP_IP4_PRODUCER_NEXT_DROP,
 				 LCP_IP4_PRODUCER_NEXT_PUNT);
 }
@@ -240,6 +377,16 @@ VLIB_NODE_FN (lcp_ip6_producer_node)
 (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
 {
   return lcp_ip_producer_inline (vm, node, frame, LCP_MATCH_CTX_IP6,
+				 LCP_IP_ADAPTER_UNICAST,
+				 LCP_IP6_PRODUCER_NEXT_DROP,
+				 LCP_IP6_PRODUCER_NEXT_PUNT);
+}
+
+VLIB_NODE_FN (lcp_ip6_multicast_producer_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+  return lcp_ip_producer_inline (vm, node, frame, LCP_MATCH_CTX_IP6,
+				 LCP_IP_ADAPTER_MULTICAST,
 				 LCP_IP6_PRODUCER_NEXT_DROP,
 				 LCP_IP6_PRODUCER_NEXT_PUNT);
 }
@@ -248,12 +395,50 @@ VLIB_NODE_FN (lcp_local_producer_node)
 (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
 {
   return lcp_ip_producer_inline (vm, node, frame, LCP_MATCH_CTX_LOCAL_IP46,
+				 LCP_IP_ADAPTER_LEGACY,
 				 LCP_LOCAL_PRODUCER_NEXT_DROP,
 				 LCP_LOCAL_PRODUCER_NEXT_PUNT);
 }
 
+VLIB_NODE_FN (lcp_ip4_local_producer_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+  return lcp_ip_producer_inline (vm, node, frame, LCP_MATCH_CTX_LOCAL4,
+				 LCP_IP_ADAPTER_LOCAL,
+				 LCP_LOCAL_PRODUCER_NEXT_DROP,
+				 LCP_LOCAL_PRODUCER_NEXT_PUNT);
+}
+
+VLIB_NODE_FN (lcp_ip6_local_producer_node)
+(vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame)
+{
+  return lcp_ip_producer_inline (vm, node, frame, LCP_MATCH_CTX_LOCAL6,
+				 LCP_IP_ADAPTER_LOCAL,
+				 LCP_LOCAL_PRODUCER_NEXT_DROP,
+				 LCP_LOCAL_PRODUCER_NEXT_PUNT);
+}
+
+VLIB_REGISTER_NODE (lcp_copp_input_init_node) = {
+  .name = "linux-cp-copp-input-init",
+  .vector_size = sizeof (u32),
+  .type = VLIB_NODE_TYPE_INTERNAL,
+};
+
 VLIB_REGISTER_NODE (lcp_ip4_producer_node) = {
   .name = "linux-cp-ip4-punt",
+  .vector_size = sizeof (u32),
+  .format_trace = format_lcp_producer_trace,
+  .type = VLIB_NODE_TYPE_INTERNAL,
+  .n_next_nodes = LCP_IP4_PRODUCER_N_NEXT,
+  .next_nodes = {
+#define _(sym, node) [LCP_IP4_PRODUCER_NEXT_##sym] = node,
+    foreach_lcp_ip4_producer_next
+#undef _
+  },
+};
+
+VLIB_REGISTER_NODE (lcp_ip4_multicast_producer_node) = {
+  .name = "linux-cp-ip4-multicast-punt",
   .vector_size = sizeof (u32),
   .format_trace = format_lcp_producer_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
@@ -278,6 +463,19 @@ VLIB_REGISTER_NODE (lcp_ip6_producer_node) = {
   },
 };
 
+VLIB_REGISTER_NODE (lcp_ip6_multicast_producer_node) = {
+  .name = "linux-cp-ip6-multicast-punt",
+  .vector_size = sizeof (u32),
+  .format_trace = format_lcp_producer_trace,
+  .type = VLIB_NODE_TYPE_INTERNAL,
+  .n_next_nodes = LCP_IP6_PRODUCER_N_NEXT,
+  .next_nodes = {
+#define _(sym, node) [LCP_IP6_PRODUCER_NEXT_##sym] = node,
+    foreach_lcp_ip6_producer_next
+#undef _
+  },
+};
+
 VLIB_REGISTER_NODE (lcp_local_producer_node) = {
   .name = "linux-cp-local-punt",
   .vector_size = sizeof (u32),
@@ -291,24 +489,52 @@ VLIB_REGISTER_NODE (lcp_local_producer_node) = {
   },
 };
 
+#define LCP_REGISTER_LOCAL_PRODUCER_NODE(node, node_name)                 \
+  VLIB_REGISTER_NODE (node) = {                                          \
+    .name = node_name, .vector_size = sizeof (u32),                       \
+    .format_trace = format_lcp_producer_trace,                            \
+    .type = VLIB_NODE_TYPE_INTERNAL,                                      \
+    .n_errors = LCP_IP_N_ERROR,                                           \
+    .error_strings = lcp_ip_error_strings,                                \
+    .n_next_nodes = LCP_LOCAL_PRODUCER_N_NEXT,                            \
+    .next_nodes = {                                                       \
+      [LCP_LOCAL_PRODUCER_NEXT_DROP] = "error-drop",                     \
+      [LCP_LOCAL_PRODUCER_NEXT_PUNT] = "linux-cp-copp-punt",             \
+    },                                                                    \
+  }
+
+LCP_REGISTER_LOCAL_PRODUCER_NODE (lcp_ip4_local_producer_node,
+				  "linux-cp-ip4-local-punt");
+LCP_REGISTER_LOCAL_PRODUCER_NODE (lcp_ip6_local_producer_node,
+				  "linux-cp-ip6-local-punt");
+#undef LCP_REGISTER_LOCAL_PRODUCER_NODE
+
+VNET_FEATURE_INIT (lcp_copp_input_init, static) = {
+  .arc_name = "device-input",
+  .node_name = "linux-cp-copp-input-init",
+  .runs_before = VNET_FEATURES ("ethernet-input"),
+};
+
 VNET_FEATURE_INIT (lcp_ip4_producer_uc, static) = {
   .arc_name = "ip4-unicast",
   .node_name = "linux-cp-ip4-punt",
   .runs_before = VNET_FEATURES ("ip4-not-enabled"),
+  .runs_after = VNET_FEATURES ("ip4-sv-reassembly-feature"),
 };
 VNET_FEATURE_INIT (lcp_ip4_producer_mc, static) = {
   .arc_name = "ip4-multicast",
-  .node_name = "linux-cp-ip4-punt",
+  .node_name = "linux-cp-ip4-multicast-punt",
   .runs_before = VNET_FEATURES ("ip4-not-enabled"),
 };
 VNET_FEATURE_INIT (lcp_ip6_producer_uc, static) = {
   .arc_name = "ip6-unicast",
   .node_name = "linux-cp-ip6-punt",
   .runs_before = VNET_FEATURES ("ip6-not-enabled"),
+  .runs_after = VNET_FEATURES ("ip6-sv-reassembly-feature"),
 };
 VNET_FEATURE_INIT (lcp_ip6_producer_mc, static) = {
   .arc_name = "ip6-multicast",
-  .node_name = "linux-cp-ip6-punt",
+  .node_name = "linux-cp-ip6-multicast-punt",
   .runs_before = VNET_FEATURES ("ip6-not-enabled"),
 };
 VNET_FEATURE_INIT (lcp_local_ip4_feature, static) = {
@@ -320,6 +546,16 @@ VNET_FEATURE_INIT (lcp_local_ip6_feature, static) = {
   .arc_name = "ip6-punt",
   .node_name = "linux-cp-local-punt",
   .runs_before = VNET_FEATURES ("linux-cp-punt-l3", "ip6-punt-redirect"),
+};
+VNET_FEATURE_INIT (lcp_local_ip4_classify_feature, static) = {
+  .arc_name = "ip4-local",
+  .node_name = "linux-cp-ip4-local-punt",
+  .runs_before = VNET_FEATURES ("ip4-local-end-of-arc"),
+};
+VNET_FEATURE_INIT (lcp_local_ip6_classify_feature, static) = {
+  .arc_name = "ip6-local",
+  .node_name = "linux-cp-ip6-local-punt",
+  .runs_before = VNET_FEATURES ("ip6-local-end-of-arc"),
 };
 
 static_always_inline u32
@@ -459,7 +695,7 @@ lcp_l2_producer_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	    }
 
 	  vnet_buffer2 (b)->trap_id = LCP_TRAP_INVALID;
-	  if (lcp_packet_parse (vm, b, context, &view) &&
+	  if (lcp_packet_parse (vm, b, context, NULL, &view) &&
 	      lcp_match_select (&view, &result))
 	    {
 	      if (!is_feature && result.trap_type == LCP_TRAP_STP &&

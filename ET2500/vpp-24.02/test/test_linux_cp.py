@@ -139,7 +139,17 @@ class TestLinuxCP(VppTestCase):
     def _assert_copp_graph_and_feature_lifecycle(self):
         expected_fixed_nexts = {
             "linux-cp-ip4-punt": ["error-drop", "linux-cp-copp-punt"],
+            "linux-cp-ip4-multicast-punt": [
+                "error-drop",
+                "linux-cp-copp-punt",
+            ],
             "linux-cp-ip6-punt": ["error-drop", "linux-cp-copp-punt"],
+            "linux-cp-ip6-multicast-punt": [
+                "error-drop",
+                "linux-cp-copp-punt",
+            ],
+            "linux-cp-ip4-local-punt": ["error-drop", "linux-cp-copp-punt"],
+            "linux-cp-ip6-local-punt": ["error-drop", "linux-cp-copp-punt"],
             "linux-cp-local-punt": ["error-drop", "linux-cp-copp-punt"],
             "linux-cp-l2-punt": ["error-drop", "linux-cp-l2-delivery"],
             "linux-cp-l2-direct-adapter": [
@@ -162,7 +172,9 @@ class TestLinuxCP(VppTestCase):
         phy = self.pg1
         producer_names = (
             "linux-cp-ip4-punt",
+            "linux-cp-ip4-multicast-punt",
             "linux-cp-ip6-punt",
+            "linux-cp-ip6-multicast-punt",
             "linux-cp-l2-punt",
             "linux-cp-arp-phy",
         )
@@ -266,7 +278,7 @@ class TestLinuxCP(VppTestCase):
                 trap_row.split(),
                 [
                     str(trap_id),
-                    "IPOE_FDB_MISS",
+                    "ARP_REQUEST",
                     "yes",
                     "2",
                     "none",
@@ -295,6 +307,398 @@ class TestLinuxCP(VppTestCase):
                 policer_index=0xFFFFFFFF,
             )
         self.assertIsNone(self._copp_policy_details(trap_id))
+
+    def test_linux_cp_copp_reassembly_lifecycle(self):
+        """Linux CP CoPP shallow reassembly switch and pair lifecycle"""
+
+        state = self.vapi.lcp_copp_reassembly_get()
+        self.assertFalse(state.enabled)
+        self.assertEqual(state.enabled_interfaces, 0)
+
+        pairs = ((self.pg1, self.pg0), (self.pg3, self.pg2))
+        added = []
+        external_ref_phy = None
+        try:
+            # Enabling before pair creation is supported and idempotent.
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=True)
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=True)
+            state = self.vapi.lcp_copp_reassembly_get()
+            self.assertTrue(state.enabled)
+            self.assertEqual(state.enabled_interfaces, 0)
+
+            for expected, (phy, host) in enumerate(pairs, 1):
+                self.vapi.cli("test lcp add phy %s host %s" % (phy, host))
+                added.append((phy, host))
+                state = self.vapi.lcp_copp_reassembly_get()
+                self.assertEqual(state.enabled_interfaces, expected)
+                features = self.vapi.cli("show interface features %s" % phy)
+                self.assertIn("linux-cp-copp-input-init", features)
+                self.assertIn("ip4-sv-reassembly-feature", features)
+                self.assertIn("ip6-sv-reassembly-feature", features)
+                self.assertIn("linux-cp-ip4-local-punt", features)
+                self.assertIn("linux-cp-ip6-local-punt", features)
+                # `show interface features` lists this arc in execution order.
+                self.assertLess(
+                    features.index("ip4-sv-reassembly-feature"),
+                    features.index("linux-cp-ip4-punt"),
+                )
+                self.assertLess(
+                    features.index("ip6-sv-reassembly-feature"),
+                    features.index("linux-cp-ip6-punt"),
+                )
+
+            # Bulk disable releases only LCP's references on every pair.
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=False)
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=False)
+            state = self.vapi.lcp_copp_reassembly_get()
+            self.assertFalse(state.enabled)
+            self.assertEqual(state.enabled_interfaces, 0)
+
+            # Enabling with existing pairs exercises the transactional walk.
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=True)
+            state = self.vapi.lcp_copp_reassembly_get()
+            self.assertTrue(state.enabled)
+            self.assertEqual(state.enabled_interfaces, len(pairs))
+
+            # A separate shallow-reassembly owner must survive pair deletion.
+            phy, host = added[-1]
+            self.vapi.ip_reassembly_enable_disable(
+                sw_if_index=phy.sw_if_index,
+                enable_ip4=True,
+                enable_ip6=True,
+                type=VppEnum.vl_api_ip_reass_type_t.IP_REASS_TYPE_SHALLOW_VIRTUAL,
+            )
+            external_ref_phy = phy
+            phy, host = added.pop()
+            self.vapi.cli("test lcp del phy %s host %s" % (phy, host))
+            self.assertEqual(
+                self.vapi.lcp_copp_reassembly_get().enabled_interfaces, 1
+            )
+            features = self.vapi.cli("show interface features %s" % phy)
+            self.assertNotIn("linux-cp-copp-input-init", features)
+            self.assertNotIn("linux-cp-ip4-local-punt", features)
+            self.assertNotIn("linux-cp-ip6-local-punt", features)
+            self.assertIn("ip4-sv-reassembly-feature", features)
+            self.assertIn("ip6-sv-reassembly-feature", features)
+
+            self.vapi.ip_reassembly_enable_disable(
+                sw_if_index=phy.sw_if_index,
+                enable_ip4=False,
+                enable_ip6=False,
+                type=VppEnum.vl_api_ip_reass_type_t.IP_REASS_TYPE_SHALLOW_VIRTUAL,
+            )
+            external_ref_phy = None
+
+            output = self.vapi.cli("show lcp copp reassembly")
+            self.assertIn("enabled", output)
+            self.assertIn("timeout", output)
+            self.assertIn("fragments/context", output)
+        finally:
+            if external_ref_phy is not None:
+                self.vapi.ip_reassembly_enable_disable(
+                    sw_if_index=external_ref_phy.sw_if_index,
+                    enable_ip4=False,
+                    enable_ip6=False,
+                    type=VppEnum.vl_api_ip_reass_type_t.IP_REASS_TYPE_SHALLOW_VIRTUAL,
+                )
+            for phy, host in reversed(added):
+                self.vapi.cli("test lcp del phy %s host %s" % (phy, host))
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=False)
+
+    def test_linux_cp_copp_reassembly_fragments(self):
+        """IPv4/IPv6 fragments use the first fragment's CoPP metadata"""
+
+        host = self.pg0
+        phy = self.pg1
+        egress = self.pg2
+        phy.config_ip4()
+        phy.config_ip6()
+        egress.config_ip4()
+        egress.config_ip6()
+        egress.resolve_arp()
+        egress.resolve_ndp()
+        VppLcpPair(self, phy, host).add_vpp_config()
+        trap_ids = (25, 27, 29, 43, 45, 46, 47, 48, 49)
+        vrrp_route = None
+
+        try:
+            for trap_id in trap_ids:
+                self.vapi.lcp_copp_trap_del(trap_id=trap_id)
+                self.vapi.lcp_copp_trap_add(
+                    trap_id=trap_id,
+                    action=3,
+                    priority=1 if trap_id == 43 else 100,
+                    policer_index=0xFFFFFFFF,
+                )
+
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=True)
+            snmp_before = self._copp_counter("trap_hit", 45)
+            bgp4_before = self._copp_counter("trap_hit", 46)
+            bgp6_before = self._copp_counter("trap_hit", 47)
+            ip2me_before = self._copp_counter("trap_hit", 43)
+            ethernet = Ether(src=phy.remote_mac, dst=phy.local_mac)
+
+            def ip4_fragments(identification):
+                first = (
+                    ethernet
+                    / IP(
+                        src=phy.remote_ip4,
+                        dst=phy.local_ip4,
+                        id=identification,
+                        flags="MF",
+                    )
+                    / UDP(sport=50000, dport=161)
+                    / Raw(b"first-v4")
+                )
+                later = (
+                    ethernet
+                    / IP(
+                        src=phy.remote_ip4,
+                        dst=phy.local_ip4,
+                        id=identification,
+                        frag=2,
+                        proto=17,
+                    )
+                    / Raw(b"later-v4")
+                )
+                return [first, later]
+
+            def ip4_tcp_fragments(identification):
+                first = (
+                    ethernet
+                    / IP(
+                        src=phy.remote_ip4,
+                        dst=phy.local_ip4,
+                        id=identification,
+                        flags="MF",
+                    )
+                    / TCP(sport=50000, dport=179)
+                    / Raw(b"tcp4")
+                )
+                later = (
+                    ethernet
+                    / IP(
+                        src=phy.remote_ip4,
+                        dst=phy.local_ip4,
+                        id=identification,
+                        frag=3,
+                        proto=6,
+                    )
+                    / Raw(b"later-tcp4")
+                )
+                return [first, later]
+
+            def ip6_fragments(identification):
+                first = (
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / IPv6ExtHdrFragment(
+                        id=identification, offset=0, m=1, nh=17
+                    )
+                    / UDP(sport=50000, dport=161)
+                    / Raw(b"first-v6")
+                )
+                later = (
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / IPv6ExtHdrFragment(
+                        id=identification, offset=2, m=0, nh=17
+                    )
+                    / Raw(b"later-v6")
+                )
+                return [first, later]
+
+            def ip6_hbh_fragments(identification):
+                first = (
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / IPv6ExtHdrHopByHop()
+                    / IPv6ExtHdrFragment(
+                        id=identification, offset=0, m=1, nh=17
+                    )
+                    / UDP(sport=50000, dport=161)
+                    / Raw(b"first-h6")
+                )
+                later = (
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / IPv6ExtHdrHopByHop()
+                    / IPv6ExtHdrFragment(
+                        id=identification, offset=2, m=0, nh=17
+                    )
+                    / Raw(b"later-h6")
+                )
+                return [first, later]
+
+            def ip6_tcp_fragments(identification):
+                first = (
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / IPv6ExtHdrFragment(
+                        id=identification, offset=0, m=1, nh=6
+                    )
+                    / TCP(sport=50000, dport=179)
+                    / Raw(b"tcp6")
+                )
+                later = (
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / IPv6ExtHdrFragment(
+                        id=identification, offset=3, m=0, nh=6
+                    )
+                    / Raw(b"later-tcp6")
+                )
+                return [first, later]
+
+            # Exercise both natural order and a cached non-first fragment.
+            for family, make_fragments, identification, trap_id in (
+                ("ip4-ordered", ip4_fragments, 0x4101, 45),
+                ("ip4-reordered", ip4_fragments, 0x4102, 45),
+                ("ip6-ordered", ip6_fragments, 0x6101, 45),
+                ("ip6-reordered", ip6_fragments, 0x6102, 45),
+                ("ip6-hop-by-hop", ip6_hbh_fragments, 0x6104, 45),
+                ("ip4-tcp", ip4_tcp_fragments, 0x4103, 46),
+                ("ip6-tcp", ip6_tcp_fragments, 0x6103, 47),
+            ):
+                with self.subTest(family=family):
+                    fragments = make_fragments(identification)
+                    if family.endswith("reordered"):
+                        fragments.reverse()
+                    before = self._copp_counter("trap_hit", trap_id)
+                    self.send_and_expect(phy, fragments, host)
+                    self._assert_copp_counter_delta(
+                        "trap_hit", trap_id, before, 2, family
+                    )
+
+            self._assert_copp_counter_delta(
+                "trap_hit", 45, snmp_before, 10, "reassembled fragments"
+            )
+            self._assert_copp_counter_delta(
+                "trap_hit", 46, bgp4_before, 2, "IPv4 TCP fragments"
+            )
+            self._assert_copp_counter_delta(
+                "trap_hit", 47, bgp6_before, 2, "IPv6 TCP fragments"
+            )
+            self._assert_copp_counter_delta(
+                "trap_hit", 43, ip2me_before, 0, "reassembled fragments"
+            )
+
+            # TCP/179 is a LOCAL rule.  Fragment metadata produced on the
+            # unicast arc must not make transit BGP traffic enter CoPP.
+            transit4 = ip4_tcp_fragments(0x4105)
+            transit6 = ip6_tcp_fragments(0x6105)
+            for fragment in transit4:
+                fragment[IP].dst = egress.remote_ip4
+            for fragment in transit6:
+                fragment[IPv6].dst = egress.remote_ip6
+            bgp4_before = self._copp_counter("trap_hit", 46)
+            bgp6_before = self._copp_counter("trap_hit", 47)
+            ip2me_before = self._copp_counter("trap_hit", 43)
+            self.send_and_expect(phy, transit4, egress)
+            self.send_and_expect(phy, transit6, egress)
+            self._assert_copp_counter_delta(
+                "trap_hit", 46, bgp4_before, 0, "transit IPv4 fragments"
+            )
+            self._assert_copp_counter_delta(
+                "trap_hit", 47, bgp6_before, 0, "transit IPv6 fragments"
+            )
+            self._assert_copp_counter_delta(
+                "trap_hit", 43, ip2me_before, 0, "transit fragments"
+            )
+
+            MRouteEntryFlags = VppEnum.vl_api_mfib_entry_flags_t
+            MRouteItfFlags = VppEnum.vl_api_mfib_itf_flags_t
+            vrrp_route = VppIpMRoute(
+                self,
+                "0.0.0.0",
+                "224.0.0.18",
+                32,
+                MRouteEntryFlags.MFIB_API_ENTRY_FLAG_NONE,
+                [
+                    VppMRoutePath(
+                        phy.sw_if_index,
+                        MRouteItfFlags.MFIB_API_ITF_FLAG_ACCEPT,
+                    )
+                ],
+            ).add_vpp_config()
+            control_packets = (
+                (
+                    "ospf-v4",
+                    25,
+                    ethernet
+                    / IP(src=phy.remote_ip4, dst=phy.local_ip4, proto=89)
+                    / Raw(b"ospf-v4"),
+                ),
+                (
+                    "ospf-v6",
+                    29,
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6, nh=89)
+                    / Raw(b"ospf-v6"),
+                ),
+                (
+                    "bfd-v4",
+                    48,
+                    ethernet
+                    / IP(src=phy.remote_ip4, dst=phy.local_ip4)
+                    / UDP(sport=50000, dport=3784)
+                    / Raw(b"bfd-v4"),
+                ),
+                (
+                    "bfd-v6",
+                    49,
+                    ethernet
+                    / IPv6(src=phy.remote_ip6, dst=phy.local_ip6)
+                    / UDP(sport=50000, dport=3784)
+                    / Raw(b"bfd-v6"),
+                ),
+                (
+                    "vrrp-v4-multicast",
+                    27,
+                    Ether(src=phy.remote_mac, dst="01:00:5e:00:00:12")
+                    / IP(
+                        src=phy.remote_ip4,
+                        dst="224.0.0.18",
+                        proto=112,
+                        ttl=255,
+                    )
+                    / Raw(b"vrrp-v4"),
+                ),
+            )
+            for packet_name, trap_id, packet in control_packets:
+                with self.subTest(packet=packet_name):
+                    trap_before = self._copp_counter("trap_hit", trap_id)
+                    ip2me_before = self._copp_counter("trap_hit", 43)
+                    self.send_and_expect(phy, [packet], host)
+                    self._assert_copp_counter_delta(
+                        "trap_hit", trap_id, trap_before, 1, packet_name
+                    )
+                    self._assert_copp_counter_delta(
+                        "trap_hit", 43, ip2me_before, 0, packet_name
+                    )
+
+            # With reassembly disabled, only the first TCP fragment carries
+            # port 179; the non-first fragment safely falls back to IP2ME.
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=False)
+            bgp4_before = self._copp_counter("trap_hit", 46)
+            ip2me_before = self._copp_counter("trap_hit", 43)
+            self.send_and_expect(phy, ip4_tcp_fragments(0x4104), host)
+            self._assert_copp_counter_delta(
+                "trap_hit", 46, bgp4_before, 1, "disabled IPv4 TCP fragments"
+            )
+            self._assert_copp_counter_delta(
+                "trap_hit", 43, ip2me_before, 1, "disabled IPv4 TCP fragments"
+            )
+        finally:
+            self.vapi.lcp_copp_reassembly_enable_disable(enable=False)
+            for trap_id in trap_ids:
+                self.vapi.lcp_copp_trap_del(trap_id=trap_id)
+            if vrrp_route is not None:
+                vrrp_route.remove_vpp_config()
+            egress.unconfig_ip6()
+            egress.unconfig_ip4()
+            phy.unconfig_ip6()
+            phy.unconfig_ip4()
 
     def test_linux_cp_copp_l2_actions(self):
         """Linux CP CoPP LLDP/LACP/PTP actions and host bypass"""
@@ -452,14 +856,14 @@ class TestLinuxCP(VppTestCase):
             "delivery_drop",
         )
         counters_before = {
-            name: self._copp_counter(name, 26) for name in counter_names
+            name: self._copp_counter(name, 25) for name in counter_names
         }
         delivery_feature_enabled = False
 
         try:
-            self.vapi.lcp_copp_trap_del(trap_id=26)
+            self.vapi.lcp_copp_trap_del(trap_id=25)
             self.vapi.lcp_copp_trap_add(
-                trap_id=26,
+                trap_id=25,
                 action=3,
                 priority=100,
                 policer_index=pass_policer.policer_index,
@@ -468,7 +872,7 @@ class TestLinuxCP(VppTestCase):
 
             # DROP does not enter the policer, even when one is attached.
             self.vapi.lcp_copp_trap_update(
-                trap_id=26,
+                trap_id=25,
                 action=0,
                 priority=100,
                 policer_index=pass_policer.policer_index,
@@ -477,7 +881,7 @@ class TestLinuxCP(VppTestCase):
 
             # FORWARD bypasses a policer whose result would be DROP.
             self.vapi.lcp_copp_trap_update(
-                trap_id=26,
+                trap_id=25,
                 action=1,
                 priority=100,
                 policer_index=drop_policer.policer_index,
@@ -485,7 +889,7 @@ class TestLinuxCP(VppTestCase):
             self.send_and_expect_only(phy, [ospf], egress)
 
             self.vapi.lcp_copp_trap_update(
-                trap_id=26,
+                trap_id=25,
                 action=2,
                 priority=100,
                 policer_index=pass_policer.policer_index,
@@ -496,7 +900,7 @@ class TestLinuxCP(VppTestCase):
 
             # COPY polices only the CPU clone; its original still forwards.
             self.vapi.lcp_copp_trap_update(
-                trap_id=26,
+                trap_id=25,
                 action=2,
                 priority=100,
                 policer_index=drop_policer.policer_index,
@@ -505,7 +909,7 @@ class TestLinuxCP(VppTestCase):
 
             # TRAP polices the original CPU-bound packet.
             self.vapi.lcp_copp_trap_update(
-                trap_id=26,
+                trap_id=25,
                 action=3,
                 priority=100,
                 policer_index=drop_policer.policer_index,
@@ -520,7 +924,7 @@ class TestLinuxCP(VppTestCase):
             )
             delivery_feature_enabled = True
             self.vapi.lcp_copp_trap_update(
-                trap_id=26,
+                trap_id=25,
                 action=3,
                 priority=100,
                 policer_index=pass_policer.policer_index,
@@ -528,7 +932,7 @@ class TestLinuxCP(VppTestCase):
             self.send_and_assert_no_replies(phy, [ospf])
 
             counters_after = {
-            name: self._copp_counter(name, 26) for name in counter_names
+            name: self._copp_counter(name, 25) for name in counter_names
             }
             counter_delta = {
                 name: counters_after[name] - counters_before[name]
@@ -549,7 +953,7 @@ class TestLinuxCP(VppTestCase):
                 self.vapi.lcp_set_interface_punt_feature(
                     sw_if_index=phy.sw_if_index, punt_on=False
                 )
-            self.vapi.lcp_copp_trap_del(trap_id=26)
+            self.vapi.lcp_copp_trap_del(trap_id=25)
             route.remove_vpp_config()
             for interface in (phy, egress):
                 interface.unconfig_ip4()
@@ -596,7 +1000,7 @@ class TestLinuxCP(VppTestCase):
         )
         packets = (
             (
-                23,
+                22,
                 Ether(src=phy.remote_mac, dst="ff:ff:ff:ff:ff:ff")
                 / ARP(
                     op=1,
@@ -607,7 +1011,7 @@ class TestLinuxCP(VppTestCase):
                 ),
             ),
             (
-                24,
+                23,
                 Ether(src=phy.remote_mac, dst=phy.local_mac)
                 / ARP(
                     op=2,
@@ -694,16 +1098,16 @@ class TestLinuxCP(VppTestCase):
         phy = self.pg1
         phy.config_ip4()
         pair = VppLcpPair(self, phy, host).add_vpp_config()
-        trap_ids = (44, 45, 46, 47)
+        trap_ids = (43, 44, 45, 46)
 
         packets = (
-            (47, TCP(sport=179, dport=50000)),
-            (47, TCP(sport=50000, dport=179)),
-            # Equal priorities use the smaller trap type (SSH=45 < BGP=47).
-            (45, TCP(sport=179, dport=22)),
-            (45, TCP(sport=50000, dport=22)),
-            (46, UDP(sport=50000, dport=161)),
-            (44, UDP(sport=50000, dport=162)),
+            (46, TCP(sport=179, dport=50000)),
+            (46, TCP(sport=50000, dport=179)),
+            # Equal priorities use the smaller trap type (SSH=44 < BGP=46).
+            (44, TCP(sport=179, dport=22)),
+            (44, TCP(sport=50000, dport=22)),
+            (45, UDP(sport=50000, dport=161)),
+            (43, UDP(sport=50000, dport=162)),
         )
         counters_before = {
             trap_id: self._copp_counter("trap_hit", trap_id)
@@ -719,7 +1123,7 @@ class TestLinuxCP(VppTestCase):
                     # Keep the IP2ME fallback below the protocol traps.
                     # Later assertions explicitly raise it to validate
                     # runtime priority and equal-priority tie-breaking.
-                    priority=1 if trap_id == 44 else 100,
+                    priority=1 if trap_id == 43 else 100,
                     policer_index=0xFFFFFFFF,
                 )
 
@@ -732,7 +1136,7 @@ class TestLinuxCP(VppTestCase):
                 )
                 self.send_and_expect(phy, [packet], host)
 
-            expected_hits = {44: 1, 45: 2, 46: 1, 47: 2}
+            expected_hits = {43: 1, 44: 2, 45: 1, 46: 2}
             for trap_id, expected in expected_hits.items():
                 self.assertEqual(
                     self._copp_counter("trap_hit", trap_id)
@@ -741,10 +1145,10 @@ class TestLinuxCP(VppTestCase):
                 )
 
             # Runtime policy priority is the only business priority.
-            bgp_before = self._copp_counter("trap_hit", 47)
-            ip2me_before = self._copp_counter("trap_hit", 44)
+            bgp_before = self._copp_counter("trap_hit", 46)
+            ip2me_before = self._copp_counter("trap_hit", 43)
             self.vapi.lcp_copp_trap_update(
-                trap_id=44,
+                trap_id=43,
                 action=3,
                 priority=200,
                 policer_index=0xFFFFFFFF,
@@ -756,26 +1160,34 @@ class TestLinuxCP(VppTestCase):
                 / Raw(b"priority")
             )
             self.send_and_expect(phy, [priority_packet], host)
-            self.assertEqual(self._copp_counter("trap_hit", 47), bgp_before)
+            self.assertEqual(self._copp_counter("trap_hit", 46), bgp_before)
             self.assertEqual(
-                self._copp_counter("trap_hit", 44), ip2me_before + 1
+                self._copp_counter("trap_hit", 43), ip2me_before + 1
             )
 
             # Equal policy priority falls back to the smaller trap type (IP2ME).
             self.vapi.lcp_copp_trap_update(
-                trap_id=44,
+                trap_id=43,
                 action=3,
                 priority=100,
                 policer_index=0xFFFFFFFF,
             )
             self.send_and_expect(phy, [priority_packet], host)
             self.assertEqual(
-                self._copp_counter("trap_hit", 44), ip2me_before + 2
+                self._copp_counter("trap_hit", 43), ip2me_before + 2
             )
-            self.assertEqual(self._copp_counter("trap_hit", 47), bgp_before)
+            self.assertEqual(self._copp_counter("trap_hit", 46), bgp_before)
 
-            with self.subTest(packet="ipv4-options", expected_trap=47):
-                options_before = self._copp_counter("trap_hit", 47)
+            # Restore the normal fallback priority before testing parser
+            # coverage independently of policy arbitration.
+            self.vapi.lcp_copp_trap_update(
+                trap_id=43,
+                action=3,
+                priority=1,
+                policer_index=0xFFFFFFFF,
+            )
+            with self.subTest(packet="ipv4-options", expected_trap=46):
+                options_before = self._copp_counter("trap_hit", 46)
                 options_packet = (
                     Ether(src=phy.remote_mac, dst=phy.local_mac)
                     / IP(
@@ -788,12 +1200,12 @@ class TestLinuxCP(VppTestCase):
                 )
                 self.send_and_expect(phy, [options_packet], host)
                 self._assert_copp_counter_delta(
-                    "trap_hit", 47, options_before, 1, "ipv4-options"
+                    "trap_hit", 46, options_before, 1, "ipv4-options"
                 )
 
             # The fallback remains subject to policy after classification.
             self.vapi.lcp_copp_trap_update(
-                trap_id=44,
+                trap_id=43,
                 action=0,
                 priority=100,
                 policer_index=0xFFFFFFFF,
@@ -817,16 +1229,16 @@ class TestLinuxCP(VppTestCase):
         phy = self.pg1
         phy.config_ip6()
         pair = VppLcpPair(self, phy, host).add_vpp_config()
-        trap_ids = (44, 45, 46, 48)
+        trap_ids = (43, 44, 45, 47)
 
         packets = (
-            (48, TCP(sport=179, dport=50000)),
-            (48, TCP(sport=50000, dport=179)),
-            # Equal priorities use the smaller trap type (SSH=45 < BGPV6=48).
-            (45, TCP(sport=179, dport=22)),
-            (45, TCP(sport=50000, dport=22)),
-            (46, UDP(sport=50000, dport=161)),
-            (44, UDP(sport=50000, dport=162)),
+            (47, TCP(sport=179, dport=50000)),
+            (47, TCP(sport=50000, dport=179)),
+            # Equal priorities use the smaller trap type (SSH=44 < BGPV6=47).
+            (44, TCP(sport=179, dport=22)),
+            (44, TCP(sport=50000, dport=22)),
+            (45, UDP(sport=50000, dport=161)),
+            (43, UDP(sport=50000, dport=162)),
         )
         counters_before = {
             trap_id: self._copp_counter("trap_hit", trap_id)
@@ -842,7 +1254,7 @@ class TestLinuxCP(VppTestCase):
                     # Keep the IP2ME fallback below the protocol traps.
                     # Later assertions explicitly raise it to validate
                     # runtime priority and equal-priority tie-breaking.
-                    priority=1 if trap_id == 44 else 100,
+                    priority=1 if trap_id == 43 else 100,
                     policer_index=0xFFFFFFFF,
                 )
 
@@ -861,7 +1273,7 @@ class TestLinuxCP(VppTestCase):
                 )
                 self.send_and_expect(phy, [packet], host)
 
-            expected_hits = {44: 1, 45: 2, 46: 1, 48: 2}
+            expected_hits = {43: 1, 44: 2, 45: 1, 47: 2}
             for trap_id, expected in expected_hits.items():
                 self.assertEqual(
                     self._copp_counter("trap_hit", trap_id)
@@ -873,33 +1285,33 @@ class TestLinuxCP(VppTestCase):
             # eh[last].protocol, eh[last].offset and fragment_index handling.
             ext_packets = (
                 # Plain IPv6 + UDP: hdr_chain.length == 1, last protocol UDP.
-                ("plain-udp", 46, UDP(sport=50000, dport=161)),
+                ("plain-udp", 45, UDP(sport=50000, dport=161)),
                 # Plain IPv6 + TCP: hdr_chain.length == 1, last protocol TCP.
-                ("plain-tcp", 48, TCP(sport=50000, dport=179)),
+                ("plain-tcp", 47, TCP(sport=50000, dport=179)),
                 # IPv6 + Hop-by-Hop + UDP: chain walks HBH, last protocol UDP.
                 (
                     "hop-by-hop-udp",
-                    46,
+                    45,
                     IPv6ExtHdrHopByHop() / UDP(sport=50000, dport=161),
                 ),
                 # IPv6 + Routing + UDP: chain walks Routing, last protocol UDP.
                 (
                     "routing-udp",
-                    46,
+                    45,
                     IPv6ExtHdrRouting() / UDP(sport=50000, dport=161),
                 ),
                 # IPv6 + Destination Options + UDP: chain walks DestOpt,
                 # last protocol UDP.
                 (
                     "destination-options-udp",
-                    46,
+                    45,
                     IPv6ExtHdrDestOpt() / UDP(sport=50000, dport=161),
                 ),
                 # IPv6 first fragment + UDP: fragment_index >= 0, offset == 0,
                 # last protocol UDP, L4 ports parsed.
                 (
                     "first-fragment-udp",
-                    46,
+                    45,
                     IPv6ExtHdrFragment(offset=0, m=1, nh=17)
                     / UDP(sport=50000, dport=161),
                 ),
@@ -930,19 +1342,19 @@ class TestLinuxCP(VppTestCase):
                 / IPv6ExtHdrFragment(offset=8, m=0, nh=17)
                 / Raw(b"non-first-fragment")
             )
-            with self.subTest(packet="non-first-fragment", expected_trap=44):
-                ip2me_before = self._copp_counter("trap_hit", 44)
-                snmp_before2 = self._copp_counter("trap_hit", 46)
+            with self.subTest(packet="non-first-fragment", expected_trap=43):
+                ip2me_before = self._copp_counter("trap_hit", 43)
+                snmp_before2 = self._copp_counter("trap_hit", 45)
                 self.send_and_expect(phy, [non_first], host)
                 self._assert_copp_counter_delta(
-                    "trap_hit", 44, ip2me_before, 1, "non-first-fragment"
+                    "trap_hit", 43, ip2me_before, 1, "non-first-fragment"
                 )
                 self._assert_copp_counter_delta(
-                    "trap_hit", 46, snmp_before2, 0, "non-first-fragment"
+                    "trap_hit", 45, snmp_before2, 0, "non-first-fragment"
                 )
 
             self.vapi.lcp_copp_trap_update(
-                trap_id=44,
+                trap_id=43,
                 action=0,
                 priority=100,
                 policer_index=0xFFFFFFFF,

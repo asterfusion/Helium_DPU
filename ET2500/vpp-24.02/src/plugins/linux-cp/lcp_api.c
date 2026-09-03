@@ -469,6 +469,35 @@ vl_api_lcp_copp_stats_clear_t_handler (vl_api_lcp_copp_stats_clear_t *mp)
   REPLY_MACRO_END (VL_API_LCP_COPP_STATS_CLEAR_REPLY);
 }
 
+static void
+vl_api_lcp_copp_reassembly_enable_disable_t_handler (
+  vl_api_lcp_copp_reassembly_enable_disable_t *mp)
+{
+  vl_api_lcp_copp_reassembly_enable_disable_reply_t *rmp;
+  vlib_main_t *vm = vlib_get_main ();
+  int rv;
+
+  vlib_worker_thread_barrier_sync (vm);
+  rv = lcp_copp_reassembly_enable_disable (mp->enable);
+  vlib_worker_thread_barrier_release (vm);
+
+  REPLY_MACRO_END (VL_API_LCP_COPP_REASSEMBLY_ENABLE_DISABLE_REPLY);
+}
+
+static void
+vl_api_lcp_copp_reassembly_get_t_handler (
+  vl_api_lcp_copp_reassembly_get_t *mp)
+{
+  vl_api_lcp_copp_reassembly_get_reply_t *rmp;
+  int rv = 0;
+
+  REPLY_MACRO2_END (VL_API_LCP_COPP_REASSEMBLY_GET_REPLY, ({
+		      rmp->enabled = lcp_copp_reassembly_is_enabled ();
+		      rmp->enabled_interfaces =
+			lcp_copp_reassembly_enabled_interfaces ();
+		    }));
+}
+
 /*
  * Set up the API message handling tables
  */
