@@ -102,8 +102,21 @@ typedef struct
   u16 evidence_rule_id; /* Diagnostic only; never used for arbitration. */
 } lcp_match_result_t;
 
+typedef struct
+{
+  u16 l4_src_port;
+  u16 l4_dst_port;
+  u8 ip_protocol;
+  u8 icmp_type;
+  bool l4_ports_valid;
+  bool icmp_type_valid;
+} lcp_ip_metadata_t;
+
 bool lcp_packet_parse (vlib_main_t *vm, vlib_buffer_t *b, u32 context,
+		       const lcp_ip_metadata_t *metadata,
 		       lcp_packet_view_t *view);
+void lcp_packet_view_apply_ip_metadata (lcp_packet_view_t *view,
+					const lcp_ip_metadata_t *metadata);
 bool lcp_match_select (const lcp_packet_view_t *view,
 		       lcp_match_result_t *result);
 const lcp_match_rule_t *lcp_match_rule_find (u16 rule_id);

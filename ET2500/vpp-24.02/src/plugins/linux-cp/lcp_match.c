@@ -549,8 +549,42 @@ lcp_parse_ip6 (vlib_buffer_t *b, const u8 *data, u32 available,
     }
 }
 
+void
+lcp_packet_view_apply_ip_metadata (lcp_packet_view_t *view,
+				   const lcp_ip_metadata_t *metadata)
+{
+  view->ip_protocol = metadata->ip_protocol;
+  view->valid_fields |= LCP_MATCH_FIELD_IP_PROTOCOL;
+
+  if (metadata->l4_ports_valid &&
+      (view->ip_protocol == IP_PROTOCOL_TCP ||
+       view->ip_protocol == IP_PROTOCOL_UDP))
+    {
+      view->l4_src_port = metadata->l4_src_port;
+      view->l4_dst_port = metadata->l4_dst_port;
+      view->valid_fields |= LCP_MATCH_FIELD_L4_PORTS;
+      view->state |= LCP_MATCH_STATE_TRUSTED_L4;
+    }
+  else
+    {
+      view->valid_fields &= ~LCP_MATCH_FIELD_L4_PORTS;
+      view->state &= ~LCP_MATCH_STATE_TRUSTED_L4;
+    }
+
+  if (metadata->icmp_type_valid &&
+      (view->ip_protocol == IP_PROTOCOL_ICMP ||
+       view->ip_protocol == IP_PROTOCOL_ICMP6))
+    {
+      view->icmp_type = metadata->icmp_type;
+      view->valid_fields |= LCP_MATCH_FIELD_ICMP_TYPE;
+    }
+  else
+    view->valid_fields &= ~LCP_MATCH_FIELD_ICMP_TYPE;
+}
+
 bool
 lcp_packet_parse (vlib_main_t *vm, vlib_buffer_t *b, u32 context,
+		  const lcp_ip_metadata_t *metadata,
 		  lcp_packet_view_t *view)
 {
   const u8 *current = vlib_buffer_get_current (b);
@@ -593,6 +627,12 @@ lcp_packet_parse (vlib_main_t *vm, vlib_buffer_t *b, u32 context,
     lcp_parse_ip6 (b, current, b->current_length, view);
   else
     return false;
+
+  /* Prefer metadata supplied by the graph adapter.  The unicast adapter uses
+   * the SV output on the current buffer; the local adapter queries the SV
+   * context because lookup may overwrite the buffer's reassembly union. */
+  if (metadata)
+    lcp_packet_view_apply_ip_metadata (view, metadata);
 
   if (context == LCP_MATCH_CTX_LOCAL4 || context == LCP_MATCH_CTX_LOCAL6)
     {

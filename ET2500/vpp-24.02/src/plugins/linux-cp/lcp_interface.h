@@ -18,6 +18,7 @@
 #include <vnet/dpo/dpo.h>
 #include <vnet/adj/adj.h>
 #include <vnet/ip/ip_types.h>
+#include <vppinfra/bitmap.h>
 
 #include <plugins/linux-cp/lcp.h>
 
@@ -140,6 +141,30 @@ extern int lcp_itf_pair_add (u32 host_sw_if_index, u32 phy_sw_if_index,
 			     lip_host_type_t host_type, u8 *ns);
 extern int lcp_itf_pair_del (u32 phy_sw_if_index);
 void lcp_copp_features_set (u32 phy_sw_if_index, u8 enable);
+
+/**
+ * Enable or disable shallow virtual reassembly on all LCP PHY interfaces.
+ * The operation is idempotent and rolls back interfaces changed by a failed
+ * bulk update.
+ */
+int lcp_copp_reassembly_enable_disable (u8 enable);
+u8 lcp_copp_reassembly_is_enabled (void);
+u32 lcp_copp_reassembly_enabled_interfaces (void);
+
+typedef struct
+{
+  uword *interfaces;
+  u8 enabled;
+} lcp_copp_reassembly_main_t;
+
+extern lcp_copp_reassembly_main_t lcp_copp_reassembly_main;
+
+static_always_inline bool
+lcp_copp_reassembly_metadata_valid (u32 sw_if_index)
+{
+  return PREDICT_FALSE (lcp_copp_reassembly_main.enabled) &&
+	 clib_bitmap_get (lcp_copp_reassembly_main.interfaces, sw_if_index);
+}
 
 /**
  * Create an interface-pair from PHY sw_if_index and tap name.

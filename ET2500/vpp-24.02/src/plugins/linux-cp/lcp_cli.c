@@ -25,6 +25,8 @@
 #include <vlibmemory/api.h>
 #include <vpp/app/version.h>
 #include <vnet/format_fns.h>
+#include <vnet/ip/reass/ip4_sv_reass.h>
+#include <vnet/ip/reass/ip6_sv_reass.h>
 
 #include <plugins/linux-cp/lcp_interface.h>
 #include <plugins/linux-cp/lcp_match.h>
@@ -485,6 +487,76 @@ VLIB_CLI_COMMAND (lcp_copp_stats_clear_cmd_node, static) = {
   .path = "clear lcp copp stats",
   .function = lcp_copp_stats_clear_cmd,
   .short_help = "clear lcp copp stats",
+};
+
+static clib_error_t *
+lcp_copp_reassembly_set_cmd (vlib_main_t *vm, unformat_input_t *input,
+			     vlib_cli_command_t *cmd)
+{
+  u8 enable;
+  int rv;
+
+  if (unformat (input, "enable"))
+    enable = 1;
+  else if (unformat (input, "disable"))
+    enable = 0;
+  else
+    return clib_error_return (0, "expected 'enable' or 'disable'");
+
+  if (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    return clib_error_return (0, "unknown input '%U'", format_unformat_error,
+			      input);
+
+  vlib_worker_thread_barrier_sync (vm);
+  rv = lcp_copp_reassembly_enable_disable (enable);
+  vlib_worker_thread_barrier_release (vm);
+  if (rv)
+    return clib_error_return (0, "LCP CoPP reassembly update failed (%d)",
+			      rv);
+
+  return 0;
+}
+
+VLIB_CLI_COMMAND (lcp_copp_reassembly_set_cmd_node, static) = {
+  .path = "set lcp copp reassembly",
+  .function = lcp_copp_reassembly_set_cmd,
+  .short_help = "set lcp copp reassembly enable|disable",
+};
+
+static clib_error_t *
+lcp_copp_reassembly_show_cmd (vlib_main_t *vm, unformat_input_t *input,
+			      vlib_cli_command_t *cmd)
+{
+  u32 timeout_ms, max_reassemblies, max_fragments, walk_interval_ms;
+
+  if (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    return clib_error_return (0, "unknown input '%U'", format_unformat_error,
+			      input);
+
+  vlib_cli_output (vm, "LCP CoPP shallow reassembly: %s",
+		   lcp_copp_reassembly_is_enabled () ? "enabled" : "disabled");
+  vlib_cli_output (vm, "Enabled LCP PHY interfaces: %u",
+		   lcp_copp_reassembly_enabled_interfaces ());
+
+  ip4_sv_reass_get (&timeout_ms, &max_reassemblies, &max_fragments,
+		    &walk_interval_ms);
+  vlib_cli_output (
+    vm, "IPv4: timeout %u ms, contexts %u, fragments/context %u, walk %u ms",
+    timeout_ms, max_reassemblies, max_fragments, walk_interval_ms);
+
+  ip6_sv_reass_get (&timeout_ms, &max_reassemblies, &max_fragments,
+		    &walk_interval_ms);
+  vlib_cli_output (
+    vm, "IPv6: timeout %u ms, contexts %u, fragments/context %u, walk %u ms",
+    timeout_ms, max_reassemblies, max_fragments, walk_interval_ms);
+
+  return 0;
+}
+
+VLIB_CLI_COMMAND (lcp_copp_reassembly_show_cmd_node, static) = {
+  .path = "show lcp copp reassembly",
+  .function = lcp_copp_reassembly_show_cmd,
+  .short_help = "show lcp copp reassembly",
 };
 
 static clib_error_t *
