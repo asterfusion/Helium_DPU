@@ -416,6 +416,29 @@ mpls_fib_table_show_one (const mpls_fib_t *mpls_fib,
     }
 }
 
+static void
+mpls_fib_table_show_summary (const mpls_fib_t *mpls_fib,
+			     vlib_main_t * vm)
+{
+    fib_node_index_t lfei;
+    mpls_label_t key;
+    u64 n_eos = 0, n_non_eos = 0;
+
+    hash_foreach(key, lfei, mpls_fib->mf_entries,
+    ({
+	if (key & 1)
+	    n_eos++;
+	else
+	    n_non_eos++;
+    }));
+
+    vlib_cli_output (vm, "%=20s%=16s", "EOS-bit", "Count");
+    vlib_cli_output (vm, "%20s%16lu", "EOS", n_eos);
+    vlib_cli_output (vm, "%20s%16lu", "non-EOS", n_non_eos);
+    vlib_cli_output (vm, "%20s%16lu", "Total",
+		     (u64) hash_elts (mpls_fib->mf_entries));
+}
+
 static clib_error_t *
 mpls_fib_show (vlib_main_t * vm,
 	       unformat_input_t * input,
@@ -423,18 +446,18 @@ mpls_fib_show (vlib_main_t * vm,
 {
     fib_table_t * fib_table;
     mpls_label_t label;
-    int table_id;
+    int table_id, verbose;
 
     table_id = -1;
     label = MPLS_LABEL_INVALID;
+    verbose = 1;
 
     while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
-	/* if (unformat (input, "brief") || unformat (input, "summary") */
-	/*     || unformat (input, "sum")) */
-	/*     verbose = 0; */
-
-	if (unformat (input, "%d", &label))
+	if (unformat (input, "brief") || unformat (input, "summary") ||
+	    unformat (input, "sum"))
+	    verbose = 0;
+	else if (unformat (input, "%d", &label))
 	    continue;
 	else if (unformat (input, "table %d", &table_id))
 	    ;
@@ -462,6 +485,13 @@ mpls_fib_show (vlib_main_t * vm,
             }
         }
         vlib_cli_output (vm, "%v]", s);
+	vec_free (s);
+
+	if (!verbose)
+	{
+	    mpls_fib_table_show_summary(mpls_fib_get(fib_table->ft_index), vm);
+	    continue;
+	}
 
 	if (MPLS_LABEL_INVALID == label)
 	{
@@ -478,6 +508,6 @@ mpls_fib_show (vlib_main_t * vm,
 
 VLIB_CLI_COMMAND (mpls_fib_show_command, static) = {
     .path = "show mpls fib",
-    .short_help = "show mpls fib [summary] [table <n>]",
+    .short_help = "show mpls fib [summary] [table <n>] [<label>]",
     .function = mpls_fib_show,
 };
