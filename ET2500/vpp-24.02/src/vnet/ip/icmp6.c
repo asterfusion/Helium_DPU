@@ -130,6 +130,7 @@ format_icmp6_input_trace (u8 * s, va_list * va)
 typedef enum
 {
   ICMP_INPUT_NEXT_PUNT,
+  ICMP_INPUT_NEXT_DROP,
   ICMP_INPUT_N_NEXT,
 } icmp_input_next_t;
 
@@ -220,9 +221,30 @@ ip6_icmp_input (vlib_main_t * vm,
 	    im->min_valid_length_by_type[type0] ?
 	    ICMP6_ERROR_LENGTH_TOO_SMALL_FOR_TYPE : error0;
 
-	  b0->error = node->errors[error0];
+    /*
+    * Redirect has no dedicated VPP input handler and normally enters
+    * ip6-punt. If linux-cp has already created a Linux host copy,
+    * suppress the original punt path after the existing ICMPv6
+    * validation has succeeded.
+    *
+    * Keep the original punt behavior when the Linux copy was not
+    * created or when validation reported another error.
+    */
 
-	  next0 = error0 != ICMP6_ERROR_NONE ? ICMP_INPUT_NEXT_PUNT : next0;
+    if (PREDICT_FALSE (
+      type0 == ICMP6_redirect &&
+      error0 == ICMP6_ERROR_UNKNOWN_TYPE &&
+      vnet_buffer2 (b0)->lcp_host_copy_done)
+    ){
+      error0 = ICMP6_ERROR_REDIRECT_PUNT_SUPPRESSED_LINUX_COPY;
+      next0 = ICMP_INPUT_NEXT_DROP;
+    }
+    else if (error0 != ICMP6_ERROR_NONE)
+    {
+      next0 = ICMP_INPUT_NEXT_PUNT;
+    }
+
+	  b0->error = node->errors[error0];
 
 	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
 					   to_next, n_left_to_next,
@@ -247,9 +269,10 @@ VLIB_REGISTER_NODE (ip6_icmp_input_node) = {
   .n_errors = ICMP6_N_ERROR,
   .error_counters = icmp6_error_counters,
 
-  .n_next_nodes = 1,
+  .n_next_nodes = ICMP_INPUT_N_NEXT,
   .next_nodes = {
     [ICMP_INPUT_NEXT_PUNT] = "ip6-punt",
+    [ICMP_INPUT_NEXT_DROP] = "ip6-drop",
   },
 };
 /* *INDENT-ON* */

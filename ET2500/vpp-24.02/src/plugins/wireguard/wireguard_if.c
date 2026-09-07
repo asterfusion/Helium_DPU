@@ -248,6 +248,40 @@ wg_if_instance_free (u32 instance)
   return 0;
 }
 
+int wg_if_route_set(u32 tun_sw_if_index, const fib_prefix_t *route_dst_ips)
+{
+    wg_if_t *wg_if;
+    u32 ii;
+
+    if (tun_sw_if_index == ~0)
+    {
+        return (VNET_API_ERROR_INVALID_SW_IF_INDEX);
+    }
+
+    wg_if = wg_if_get (wg_if_find_by_sw_if_index (tun_sw_if_index));
+    if (!wg_if)
+    {
+        return (VNET_API_ERROR_INVALID_SW_IF_INDEX);
+    }
+
+    if (route_dst_ips && vec_len (route_dst_ips) > 0)
+    {
+        vec_validate (wg_if->route_dst_ips, vec_len (route_dst_ips) - 1);
+        vec_set_len(wg_if->route_dst_ips, vec_len(route_dst_ips));
+        vec_foreach_index (ii, route_dst_ips)
+        {
+            wg_if->route_dst_ips[ii] = route_dst_ips[ii];
+        }
+    }
+
+    else
+    {
+        vec_free (wg_if->route_dst_ips);
+        wg_if->route_dst_ips = NULL;
+    }
+
+    return 0;
+}
 
 int
 wg_if_create (u32 user_instance,
@@ -364,6 +398,7 @@ wg_if_delete (u32 sw_if_index)
   wg_if_peer_walk (wg_if, wg_peer_if_delete, NULL);
 
   hash_free (wg_if->peers);
+  vec_free (wg_if->route_dst_ips);
 
   index_t *ii;
   index_t *ifs = wg_if_indexes_get_by_port (wg_if->port);

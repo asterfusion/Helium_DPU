@@ -378,6 +378,26 @@ send_one_worker_interrupt (vlib_main_t * vm, acl_main_t * am,
     }
 }
 
+/*
+ * Ensure that an in-progress interface cleanup gets another chance to run.
+ *
+ * Do not rely on interrupt_is_pending here: this is the recovery path for a
+ * cleanup whose software state and VLIB interrupt state may have diverged.
+ * Setting the VLIB interrupt-pending bit again is idempotent.
+ */
+static void
+ensure_worker_cleaner_interrupt (acl_main_t * am, int thread_index)
+{
+  acl_fa_per_worker_data_t *pw = &am->per_worker_data[thread_index];
+
+  /* Publish the cleanup request before notifying the target thread. */
+  CLIB_MEMORY_BARRIER ();
+  pw->interrupt_is_pending = 1;
+  vlib_node_set_interrupt_pending (
+    vlib_get_main_by_index (thread_index),
+    acl_fa_worker_session_cleaner_process_node.index);
+}
+
 void
 aclp_post_session_change_request (acl_main_t * am, u32 target_thread,
 				  u32 target_session, u32 request_type)
@@ -715,12 +735,9 @@ acl_fa_session_cleaner_process (vlib_main_t * vm, vlib_node_runtime_t * rt,
 					   "ACL_FA_NODE_CLEAN: waiting previous cleaning cycle to finish on %u",
 					   "i4",
 					   (u32) (pw0 - am->per_worker_data));
-		  vlib_process_suspend (vm, 0.0001);
-		  if (pw0->interrupt_is_needed)
-		    {
-		      send_one_worker_interrupt (vm, am,
-						 (pw0 - am->per_worker_data));
-		    }
+		  ensure_worker_cleaner_interrupt (
+		    am, pw0 - am->per_worker_data);
+		  vlib_process_suspend (vm, 0.001);
 		}
 	      if (pw0->clear_in_process)
 		{
@@ -765,12 +782,9 @@ acl_fa_session_cleaner_process (vlib_main_t * vm, vlib_node_runtime_t * rt,
 					   "ACL_FA_NODE_CLEAN: waiting for my cleaning cycle to finish on %u",
 					   "i4",
 					   (u32) (pw0 - am->per_worker_data));
-		  vlib_process_suspend (vm, 0.0001);
-		  if (pw0->interrupt_is_needed)
-		    {
-		      send_one_worker_interrupt (vm, am,
-						 (pw0 - am->per_worker_data));
-		    }
+		  ensure_worker_cleaner_interrupt (
+		    am, pw0 - am->per_worker_data);
+		  vlib_process_suspend (vm, 0.001);
 		}
 	    }
 	    acl_log_info ("ACL_FA_NODE_CLEAN: cleaning done");
@@ -962,3 +976,5 @@ VLIB_REGISTER_NODE (acl_fa_session_cleaner_process_node, static) = {
  * eval: (c-set-style "gnu")
  * End:
  */
+
+

@@ -42,20 +42,54 @@ static void
   ip_address_t src;
   u32 sw_if_index = ~0;
   int rv = 0;
+  fib_prefix_t *route_dst_ips = NULL;
 
-  wg_feature_init (wmp);
-
-  ip_address_decode2 (&mp->interface.src_ip, &src);
-
-  key_from_base64 (mp->interface.private_key, NOISE_KEY_LEN_BASE64, private_key);
-
-  if (mp->generate_key)
+  sw_if_index = ntohl(mp->interface.sw_if_index);
+  clib_warning("zcf: api_sw_if_index = %u", sw_if_index);
+  if (sw_if_index != ~0)
   {
-      curve25519_gen_secret (private_key);
+      if (mp->n_route_dst_ips > 0)
+      {
+          vec_validate (route_dst_ips, mp->n_route_dst_ips - 1);
+          for (int i = 0; i < mp->n_route_dst_ips; i++)
+          {
+              ip_prefix_decode (&mp->route_dst_ips[i], &route_dst_ips[i]);
+          }
+      }
+
+      rv = wg_if_route_set(sw_if_index, route_dst_ips);
+      vec_free (route_dst_ips);
   }
 
-  rv = wg_if_create (ntohl (mp->interface.user_instance), private_key,
+  else
+  {
+    sw_if_index = ~0;
+    wg_feature_init (wmp);
+
+    ip_address_decode2 (&mp->interface.src_ip, &src);
+
+    key_from_base64 (mp->interface.private_key, NOISE_KEY_LEN_BASE64, private_key);
+
+    if (mp->generate_key)
+    {
+        curve25519_gen_secret (private_key);
+    }
+
+    rv = wg_if_create (ntohl (mp->interface.user_instance), private_key,
 		     ntohs (mp->interface.port), &src, &sw_if_index);
+
+    //if (mp->n_route_dst_ips > 0)
+    //{
+    //    vec_validate (route_dst_ips, mp->n_route_dst_ips - 1);
+    //    for (int i = 0; i < mp->n_route_dst_ips; i++)
+    //    {
+    //        ip_prefix_decode (&mp->route_dst_ips[i], &route_dst_ips[i]);
+    //    }
+    //    vec_free (route_dst_ips);
+
+    //    wg_if_route_set(sw_if_index, route_dst_ips);
+    //}
+  }
 
   REPLY_MACRO2(VL_API_WIREGUARD_INTERFACE_CREATE_REPLY,
   {

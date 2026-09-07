@@ -457,6 +457,8 @@ STATIC_ASSERT (sizeof (vnet_buffer_opaque_t) <=
 
 #define vnet_buffer(b) ((vnet_buffer_opaque_t *) (b)->opaque)
 
+
+
 /* Full cache line (64 bytes) of additional space */
 typedef struct
 {
@@ -496,6 +498,7 @@ typedef struct
     i16 outer_l4_hdr_offset;
   };
 
+  union {
   struct
   {
     u32 arc_next;
@@ -506,6 +509,13 @@ typedef struct
     };
   } nat;
 
+  struct
+  {
+    u32 instance_index;
+    u32 inside_fib_index;
+  } cgnat;
+  };
+
   union {
   struct{
   u32 l2_rx_sw_if_index; /* store the orignal if index when bvi */
@@ -514,7 +524,10 @@ typedef struct
   u32 hqos_guser_id; /* store the hqos user group id */
   u32 actual_tx_sw_if_index;
   u8 tc_index_dpo; /* store the traffic class dpo */
-
+  /*
+  * Set by linux-cp-arp-phy when an ARP packet or a NDP packet has been
+  * successfully copied and queued for the Linux host interface.*/
+  u8 lcp_host_copy_done : 1;
   };
 
   u32 unused[8];

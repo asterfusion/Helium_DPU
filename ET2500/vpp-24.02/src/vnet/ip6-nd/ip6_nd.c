@@ -49,6 +49,13 @@ typedef struct ip6_nd_t_
 static ip6_link_delegate_id_t ip6_nd_delegate_id;
 static ip6_nd_t *ip6_nd_pool;
 
+typedef enum
+{
+  ICMP6_NEIGHBOR_ADVERTISEMENT_NEXT_PUNT,
+  ICMP6_NEIGHBOR_ADVERTISEMENT_NEXT_DROP,
+  ICMP6_NEIGHBOR_ADVERTISEMENT_N_NEXT,
+} icmp6_neighbor_advertisement_next_t;
+
 static_always_inline uword
 icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 					      vlib_node_runtime_t * node,
@@ -90,6 +97,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	  icmp6_neighbor_discovery_ethernet_link_layer_address_option_t *o0;
 	  u32 bi0, options_len0, sw_if_index0, next0, error0;
 	  u32 ip6_sadd_link_local, ip6_sadd_unspecified;
+	  u8 target_is_interface_local0;
 	  ip_neighbor_counter_type_t c_type;
 	  int is_rewrite0;
 	  u32 ni0;
@@ -109,6 +117,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 
 	  error0 = ICMP6_ERROR_NONE;
 	  sw_if_index0 = vnet_buffer (p0)->sw_if_index[VLIB_RX];
+	  target_is_interface_local0 = 0;
 	  ip6_sadd_link_local =
 	    ip6_address_is_link_local_unicast (&ip0->src_address);
 	  ip6_sadd_unspecified =
@@ -206,6 +215,15 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 			{
 			  /* It's an address that belongs to one of our interfaces
 			   * that's good. */
+			   /*
+			   * Suppress VPP's NA only when the local address belongs to
+			   * the interface on which this NS was received. Linux NDP
+			   * ownership is interface-specific.
+			   */
+			   target_is_interface_local0 =(sw_if_index0 ==
+				fib_entry_get_resolving_interface_for_source (
+					fei, FIB_SOURCE_INTERFACE));
+
 			}
 		      else if (FIB_ENTRY_FLAG_LOCAL &
 			       fib_entry_get_flags_for_source (
@@ -213,6 +231,7 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 			{
 			  /* It's one of our link local addresses
 			   * that's good. */
+			  target_is_interface_local0 = 1;
 			}
 		      else if (fib_entry_is_sourced (fei,
 						     FIB_SOURCE_IP6_ND_PROXY))
@@ -232,6 +251,13 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 
 	  if (is_solicitation)
 	    {
+			if(error0 == ICMP6_ERROR_NONE &&
+				target_is_interface_local0 &&
+				vnet_buffer2(p0)->lcp_host_copy_done
+			){
+				error0 =
+					ICMP6_ERROR_NEIGHBOR_ADVERTISEMENT_SUPPRESSED_LINUX_OWNER;
+			}
 	      next0 = (error0 != ICMP6_ERROR_NONE ?
 			       ICMP6_NEIGHBOR_SOLICITATION_NEXT_DROP :
 			       ICMP6_NEIGHBOR_SOLICITATION_NEXT_REPLY);
@@ -239,10 +265,29 @@ icmp6_neighbor_solicitation_or_advertisement (vlib_main_t * vm,
 	    }
 	  else
 	    {
-	      next0 = 0;
-	      error0 = error0 == ICMP6_ERROR_NONE ?
-		ICMP6_ERROR_NEIGHBOR_ADVERTISEMENTS_RX : error0;
-	      c_type = IP_NEIGHBOR_CTR_REPLY;
+			c_type = IP_NEIGHBOR_CTR_REPLY;
+			/*
+			* The NA has already passed the existing VPP validation and
+			* neighbor-learning path. If linux-cp successfully created a
+			* host copy, suppress the original punt path to avoid delivering
+			 * the same NA to Linux a second time.
+			*
+			* If the host copy failed, retain the original ip6-punt path as
+			* a fail-open fallback.
+			*/
+			if (PREDICT_FALSE (error0 == ICMP6_ERROR_NONE &&
+				vnet_buffer2 (p0)->lcp_host_copy_done)
+			){
+				error0 =
+					ICMP6_ERROR_NEIGHBOR_ADVERTISEMENT_PUNT_SUPPRESSED_LINUX_COPY;
+				next0 = ICMP6_NEIGHBOR_ADVERTISEMENT_NEXT_DROP;
+			}
+			else
+			{
+				next0 = ICMP6_NEIGHBOR_ADVERTISEMENT_NEXT_PUNT;
+				error0 = error0 == ICMP6_ERROR_NONE ?
+				ICMP6_ERROR_NEIGHBOR_ADVERTISEMENTS_RX : error0;
+			}
 	    }
 
 	  vlib_increment_simple_counter (
@@ -369,9 +414,10 @@ VLIB_REGISTER_NODE (ip6_icmp_neighbor_advertisement_node,static) =
 
   .format_trace = format_icmp6_input_trace,
 
-  .n_next_nodes = 1,
+  .n_next_nodes = ICMP6_NEIGHBOR_ADVERTISEMENT_N_NEXT,
   .next_nodes = {
-    [0] = "ip6-punt",
+    [ICMP6_NEIGHBOR_ADVERTISEMENT_NEXT_PUNT] = "ip6-punt",
+	[ICMP6_NEIGHBOR_ADVERTISEMENT_NEXT_DROP] = "ip6-drop",
   },
 };
 /* *INDENT-ON* */

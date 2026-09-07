@@ -2524,25 +2524,10 @@ VLIB_CLI_COMMAND (show_dns_cache_command) =
 /* *INDENT-ON* */
 
 static clib_error_t *
-dns_enable_disable_command_fn (vlib_main_t *vm, unformat_input_t *input,
-			       vlib_cli_command_t *cmd)
+dns_enable_disable_common (vlib_main_t *vm, u32 enable_disable)
 {
   dns_main_t *dm = &dns_main;
-  u32 enable_disable;
   int rv;
-
-  enable_disable = 0;
-
-  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
-    {
-      if (unformat (input, "enable"))
-	enable_disable = 1;
-      else if (unformat (input, "disable"))
-	enable_disable = 0;
-      else
-	return clib_error_return (0, "unknown input `%U'",
-				  format_unformat_error, input);
-    }
 
   rv = dns_enable_disable (vm, dm, enable_disable);
   if (rv)
@@ -2551,10 +2536,49 @@ dns_enable_disable_command_fn (vlib_main_t *vm, unformat_input_t *input,
   return 0;
 }
 
-VLIB_CLI_COMMAND (dns_enable_disable_command) = {
+static clib_error_t *
+dns_enable_command_fn (vlib_main_t *vm, unformat_input_t *input,
+		       vlib_cli_command_t *cmd)
+{
+  if (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    return clib_error_return (0, "unknown input `%U'",
+			      format_unformat_error, input);
+
+  return dns_enable_disable_common (vm, 1);
+}
+
+static clib_error_t *
+dns_disable_command_fn (vlib_main_t *vm, unformat_input_t *input,
+			vlib_cli_command_t *cmd)
+{
+  if (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    return clib_error_return (0, "unknown input `%U'",
+			      format_unformat_error, input);
+
+  return dns_enable_disable_common (vm, 0);
+}
+
+/*
+ * "dns" deliberately has no function of its own. If it had one, the CLI
+ * dispatcher would fall back to running it whenever a failing sub-command
+ * (e.g. "dns cache") returns an error, silently toggling name resolution
+ * with already-consumed input.
+ */
+VLIB_CLI_COMMAND (dns_command) = {
   .path = "dns",
   .short_help = "dns [enable][disable]",
-  .function = dns_enable_disable_command_fn,
+};
+
+VLIB_CLI_COMMAND (dns_enable_command) = {
+  .path = "dns enable",
+  .short_help = "dns enable",
+  .function = dns_enable_command_fn,
+};
+
+VLIB_CLI_COMMAND (dns_disable_command) = {
+  .path = "dns disable",
+  .short_help = "dns disable",
+  .function = dns_disable_command_fn,
 };
 
 static clib_error_t *
@@ -2684,6 +2708,9 @@ dns_cache_add_del_command_fn (vlib_main_t * vm,
     {
       if (unformat (input, "%v", &name))
 	{
+	  /* The cache hash uses strlen/strcmp, so the key must be
+	   * a NULL-terminated C string */
+	  dns_terminate_c_string (&name);
 	  rv = dns_delete_by_name (dm, name);
 	  switch (rv)
 	    {
@@ -2715,13 +2742,17 @@ dns_cache_add_del_command_fn (vlib_main_t * vm,
   /* Note: dns_add_static_entry consumes the name vector if OK... */
   if (unformat (input, "%U", unformat_dns_reply, &dns_reply_data, &name))
     {
+      /* The cache hash uses strlen/strcmp, so the key must be
+       * a NULL-terminated C string */
+      dns_terminate_c_string (&name);
       rv = dns_add_static_entry (dm, name, dns_reply_data);
       switch (rv)
 	{
 	case VNET_API_ERROR_ENTRY_ALREADY_EXISTS:
+	  error = clib_error_return (0, "%v already in the cache...", name);
 	  vec_free (name);
 	  vec_free (dns_reply_data);
-	  return clib_error_return (0, "%v already in the cache...", name);
+	  return error;
 	case 0:
 	  return 0;
 
