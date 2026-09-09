@@ -9,6 +9,7 @@
 #include <vnet/fib/fib_table.h>
 
 #include <nat/cgnat/cgnat.h>
+#include <nat/cgnat/cgnat_ipfix.h>
 
 static clib_error_t *
 cgnat_enable_command_fn (vlib_main_t *vm, unformat_input_t *input,
@@ -1227,6 +1228,56 @@ cgnat_show_instance_config_one (vlib_main_t *vm, cgnat_instance_t *instance)
 }
 
 static clib_error_t *
+cgnat_show_ipfix_command_fn (vlib_main_t *vm, unformat_input_t *input,
+			     vlib_cli_command_t *cmd)
+{
+  cgnat_main_t *cm = &cgnat_main;
+  cgnat_instance_t *instance;
+  cgnat_ipfix_exporter_t *config;
+
+  (void) input;
+  (void) cmd;
+
+  vlib_cli_output (vm,
+		   "IPFIX records-encoded %llu no-buffer %llu no-runtime %llu "
+		   "queue-full %llu",
+		   cm->ipfix_records_encoded, cm->ipfix_no_buffer,
+		   cm->ipfix_no_runtime, cm->log_full);
+
+  vec_foreach (instance, cm->instances)
+    {
+      if (!instance->configured)
+	continue;
+      vec_foreach (config, instance->ipfix_exporters)
+	{
+	  if (config->runtime_index == CGNAT_INVALID_INDEX ||
+	      pool_is_free_index (cm->ipfix_runtimes,
+				  config->runtime_index))
+	    {
+	      vlib_cli_output (
+		vm, " instance %u collector %U:%u src %U:%u inactive",
+		instance->instance_id, format_ip4_address,
+		&config->collector_address, config->collector_port,
+		format_ip4_address, &config->src_address, config->src_port);
+	      continue;
+	    }
+
+	  cgnat_ipfix_runtime_t *runtime = pool_elt_at_index (
+	    cm->ipfix_runtimes, config->runtime_index);
+	  vlib_cli_output (
+	    vm, " instance %u collector %U:%u src %U:%u exporter %u "
+		"stream %u templates session %u pba %u",
+	    instance->instance_id, format_ip4_address,
+	    &config->collector_address, config->collector_port,
+	    format_ip4_address, &config->src_address, config->src_port,
+	    runtime->exporter_index, runtime->stream_index,
+	    runtime->session_template_id, runtime->pba_template_id);
+	}
+    }
+  return 0;
+}
+
+static clib_error_t *
 cgnat_show_instance_config_command_fn (vlib_main_t *vm, unformat_input_t *input,
 				       vlib_cli_command_t *cmd)
 {
@@ -1599,6 +1650,11 @@ VLIB_CLI_COMMAND (cgnat_show_instance_stat_command, static) = {
   .path = "cgnat show instance stat",
   .short_help = "cgnat show instance stat <all>|instance <name>|<name>",
   .function = cgnat_show_instance_stat_command_fn,
+};
+VLIB_CLI_COMMAND (cgnat_show_ipfix_command, static) = {
+  .path = "cgnat show ipfix",
+  .short_help = "cgnat show ipfix",
+  .function = cgnat_show_ipfix_command_fn,
 };
 VLIB_CLI_COMMAND (cgnat_show_pool_config_command, static) = {
   .path = "cgnat show pool config",

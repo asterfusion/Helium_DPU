@@ -175,6 +175,7 @@ add_vpp_plugin(cgnat
   SOURCES
   cgnat/cgnat.c
   cgnat/cgnat_log.c
+  cgnat/cgnat_ipfix.c
   cgnat/cgnat_config.c
   cgnat/cgnat_cli.c
   cgnat/cgnat_api.c

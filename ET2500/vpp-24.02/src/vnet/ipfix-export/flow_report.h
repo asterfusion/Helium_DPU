@@ -151,7 +151,7 @@ typedef struct flow_report
 /*
  * The maximum number of ipfix exporters we can have at once
  */
-#define IPFIX_EXPORTERS_MAX 5
+#define IPFIX_EXPORTERS_MAX 64
 
 /*
  * We support multiple exporters. Each one has its own configured
@@ -188,6 +188,25 @@ typedef struct ipfix_exporter
   u32 domain_id;
 #endif
 } ipfix_exporter_t;
+
+typedef struct
+{
+  /* Complete key and transport policy for a programmatically-created
+   * exporter.  The returned pool index is the authoritative handle; callers
+   * should retain it instead of using the legacy collector-only lookup. */
+  /* Collector destination and local source must use the same IP family. */
+  ip_address_t collector;
+  ip_address_t src_address;
+  /* UDP destination port; the source port is a property of each stream. */
+  u16 collector_port;
+  /* FIB used by the generated packet's IP lookup. */
+  u32 fib_index;
+  /* Maximum complete IP packet size and template refresh period in seconds. */
+  u32 path_mtu;
+  u32 template_interval;
+  /* Optional for IPv4 and mandatory in practice for IPv6. */
+  u8 udp_checksum;
+} vnet_ipfix_exporter_params_t;
 
 typedef struct flow_report_main
 {
@@ -250,21 +269,39 @@ int vnet_stream_change (ipfix_exporter_t *exp, u32 old_domain_id,
 ipfix_exporter_t *
 vnet_ipfix_exporter_lookup (const ip_address_t *ipfix_collector);
 
+/* Public C lifecycle for exporter pool entries 1..N.  Entry 0 remains owned
+ * by legacy users.  Delete requires that all reports have first been removed. */
+int vnet_ipfix_exporter_create (const vnet_ipfix_exporter_params_t *params,
+				u32 *exporter_index);
+int vnet_ipfix_exporter_delete (u32 exporter_index);
+ipfix_exporter_t *vnet_ipfix_exporter_get (u32 exporter_index);
+int vnet_ipfix_exp_send_template (ipfix_exporter_t *exp, flow_report_t *fr);
+
 /*
- * Get the currently in use buffer for the given stream on the given core.
- * If there is no current buffer then allocate a new one and return that.
- * This is the buffer that data records should be written into. The offset
- * currently in use is stored in the per-thread data for the stream and
- * should be updated as new records are written in.
+ * Get the pending buffer for a report/thread, allocating one if necessary.
+ * Before returning room, automatically send an existing buffer if appending
+ * fr->data_record_size would exceed the exporter path MTU.  The caller writes
+ * at per_thread_data.next_data_offset and advances that offset, record count
+ * and buffer length.  NULL means allocation failed or the first template has
+ * not yet been sent.
  */
 vlib_buffer_t *vnet_ipfix_exp_get_buffer (vlib_main_t *vm,
 					  ipfix_exporter_t *exp,
 					  flow_report_t *fr, u32 thread_index);
 
+/* Fill IP/UDP/IPFIX/Set lengths, export time, domain and sequence number, then
+ * detach a pending data buffer from the report without submitting it.  This
+ * lets a flow-data callback append the buffer to its existing output frame.
+ * The caller owns the returned index; ~0 means there was no data to send. */
+u32 vnet_ipfix_exp_finalize_buffer (vlib_main_t *vm, ipfix_exporter_t *exp,
+				    flow_report_t *fr,
+				    flow_report_stream_t *stream,
+				    u32 thread_index, vlib_buffer_t *b0);
+
 /*
- * Send the provided buffer. At this stage the buffer should be populated
- * with data records, with the offset in use stored in the stream per thread
- * data. This func will fix up all the headers and then send the buffer.
+ * Finalize a populated data buffer and submit it directly to the matching
+ * IPv4/IPv6 lookup node.  Use finalize_buffer() instead when the caller is
+ * already building a node output frame.
  */
 void vnet_ipfix_exp_send_buffer (vlib_main_t *vm, ipfix_exporter_t *exp,
 				 flow_report_t *fr,

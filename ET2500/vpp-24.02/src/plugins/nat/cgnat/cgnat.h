@@ -156,10 +156,34 @@ typedef enum
   CGNAT_LOG_EVENT_KIND_SESSION = 1,
 } cgnat_log_event_kind_t;
 
+typedef enum
+{
+  /* One event snapshot may be delivered to either or both consumers. */
+  CGNAT_EVENT_SINK_SYSLOG = (1 << 0),
+  CGNAT_EVENT_SINK_IPFIX = (1 << 1),
+} cgnat_event_sink_t;
+
+typedef enum
+{
+  /* IANA natEvent values.  Session events match RFC-defined NAT logging;
+   * 16/17 identify port-block allocation and release. */
+  CGNAT_IPFIX_EVENT_SESSION_CREATE = 4,
+  CGNAT_IPFIX_EVENT_SESSION_DELETE = 5,
+  CGNAT_IPFIX_EVENT_PBA_ALLOC = 16,
+  CGNAT_IPFIX_EVENT_PBA_RELEASE = 17,
+} cgnat_ipfix_event_t;
+
 typedef struct
 {
+  /* Fixed-size producer snapshot: workers enqueue it once and the main-thread
+   * log process fans it out to the selected syslog and IPFIX sinks. */
   u8 kind;
+  u8 sink_mask;
+  u8 ipfix_event;
+  u64 timestamp_ms;
+  u32 instance_index;
   u32 instance_id;
+  u32 inside_vrf_id;
   u8 event[CGNAT_LOG_EVENT_STR_LEN];
   u8 reason[CGNAT_LOG_REASON_STR_LEN];
   u8 instance_label[CGNAT_LOG_INSTANCE_LABEL_LEN];
@@ -187,6 +211,7 @@ typedef struct
       } session;
   };
 } __clib_aligned(256) cgnat_log_event_t;
+STATIC_ASSERT_SIZEOF (cgnat_log_event_t, 256);
 
 typedef enum
 {
@@ -542,10 +567,13 @@ typedef struct
 
 typedef struct
 {
+  /* Persistent operator configuration.  runtime_index is valid only while
+   * this collector has live flow-report exporter/stream/report state. */
   ip4_address_t collector_address;
   ip4_address_t src_address;
   u16 collector_port;
   u16 src_port;
+  u32 runtime_index;
 } cgnat_ipfix_exporter_t;
 
 typedef struct
@@ -793,6 +821,15 @@ typedef struct
   u64 log_sent;
   f64 log_poll_interval;
 
+  /* Runtime bridge from per-instance collector configuration to indices in
+   * the shared VPP flow-report subsystem. */
+  struct cgnat_ipfix_runtime *ipfix_runtimes;
+  /* Main-thread counters: encoded records, unavailable buffers (including
+   * waiting for the first template), and missing/stale runtime state. */
+  u64 ipfix_records_encoded;
+  u64 ipfix_no_buffer;
+  u64 ipfix_no_runtime;
+
   vlib_main_t *vlib_main;
   vnet_main_t *vnet_main;
   ip4_main_t *ip4_main;
@@ -846,7 +883,16 @@ void cgnat_log_enqueue (cgnat_log_event_t *event);
 void cgnat_log_emit (cgnat_log_event_t *event);
 void cgnat_log_event_set_common (cgnat_log_event_t *event,
 				 cgnat_instance_t *instance, char *event_name,
-				 char *reason);
+				 char *reason, cgnat_ipfix_event_t ipfix_event);
+void cgnat_log_drain (void);
+
+void cgnat_ipfix_init (cgnat_main_t *cm);
+int cgnat_ipfix_exporter_create (u32 instance_index,
+				 cgnat_ipfix_exporter_t *config);
+void cgnat_ipfix_exporter_destroy (cgnat_ipfix_exporter_t *config);
+int cgnat_ipfix_instance_enable (u32 instance_index);
+void cgnat_ipfix_instance_disable (cgnat_instance_t *instance);
+void cgnat_ipfix_emit (cgnat_log_event_t *event);
 
 #define cgnat_log_err(...)                                                    \
   vlib_log (VLIB_LOG_LEVEL_ERR, cgnat_main.log_class_dynamic, __VA_ARGS__)

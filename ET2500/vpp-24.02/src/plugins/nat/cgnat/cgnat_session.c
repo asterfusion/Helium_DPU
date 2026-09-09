@@ -12,6 +12,7 @@
 #include <vnet/tcp/tcp_packet.h>
 #include <vnet/udp/udp_packet.h>
 #include <vnet/ip/icmp46_packet.h>
+#include <vnet/fib/fib_table.h>
 
 #include <nat/lib/nat_inlines.h>
 #include <nat/lib/inlines.h>
@@ -911,13 +912,13 @@ cgnat_session_start_timer (cgnat_main_t *cm, cgnat_session_t *session, f64 now)
 
 static void
 cgnat_log_session (cgnat_main_t *cm, char *event, char *reason,
-		   cgnat_session_t *session)
+		   cgnat_ipfix_event_t ipfix_event, cgnat_session_t *session)
 {
   cgnat_instance_t *instance;
   cgnat_log_event_t log_event;
 
   instance = cgnat_instance_get_by_index (cm, session->instance_index);
-  if (!instance || !instance->syslog_enabled ||
+  if (!instance || (!instance->syslog_enabled && !instance->ipfix_enabled) ||
       instance->log_mode != CGNAT_LOG_MODE_SESSION)
     return;
 
@@ -925,7 +926,11 @@ cgnat_log_session (cgnat_main_t *cm, char *event, char *reason,
    * fixed-size event and hand it to the main-thread log process. */
   clib_memset (&log_event, 0, sizeof (log_event));
   log_event.kind = CGNAT_LOG_EVENT_KIND_SESSION;
-  cgnat_log_event_set_common (&log_event, instance, event, reason);
+  cgnat_log_event_set_common (&log_event, instance, event, reason,
+			      ipfix_event);
+  log_event.inside_vrf_id =
+    session->inside_fib_index == CGNAT_INVALID_INDEX ? 0 :
+      fib_table_get_table_id (session->inside_fib_index, FIB_PROTOCOL_IP4);
   log_event.session.private_ip = session->inside_ip;
   log_event.session.private_port = session->inside_port;
   log_event.session.public_ip = session->nat_ip;
@@ -1113,7 +1118,8 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
 	  clib_spinlock_unlock (&cm->session_timer_lock);
 	}
     }
-  cgnat_log_session (cm, "SESSION_DELETE", reason, session);
+  cgnat_log_session (cm, "SESSION_DELETE", reason,
+		     CGNAT_IPFIX_EVENT_SESSION_DELETE, session);
 
   if (release_user_instance_index != CGNAT_INVALID_INDEX)
     cgnat_pba_release_user_if_idle (release_user_instance_index,
@@ -1650,7 +1656,8 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
 	  return rv;
 	}
     }
-  cgnat_log_session (cm, "SESSION_CREATE", 0, session);
+  cgnat_log_session (cm, "SESSION_CREATE", 0,
+		     CGNAT_IPFIX_EVENT_SESSION_CREATE, session);
   cgnat_session_start_timer (cm, session, now);
   return 0;
 }

@@ -214,6 +214,7 @@ cgnat_block_start_port (cgnat_pool_t *pool, u16 block_id)
 
 static_always_inline void
 cgnat_log_pba_block (cgnat_instance_t *instance, char *event, char *reason,
+		     cgnat_ipfix_event_t ipfix_event,
 		     ip4_address_t private_ip, ip4_address_t public_ip,
 		     cgnat_pool_t *pool, cgnat_block_t *block,
 		     u32 pool_index)
@@ -223,17 +224,21 @@ cgnat_log_pba_block (cgnat_instance_t *instance, char *event, char *reason,
 
   (void) pool_index;
 
-  if (!instance || !pool || !block || !instance->syslog_enabled ||
+  if (!instance || !pool || !block ||
+      (!instance->syslog_enabled && !instance->ipfix_enabled) ||
       instance->log_mode != CGNAT_LOG_MODE_PORT_BLOCK)
     return;
 
   block_start = cgnat_block_start_port (pool, block->block_id);
   block_end = clib_min (block_start + pool->block_size - 1,
-			(u32) cgnat_pool_end_port (pool));
+				(u32) cgnat_pool_end_port (pool));
 
+  /* Snapshot allocation state while it is valid; the asynchronous consumer
+   * must not dereference user/pool/block objects after they can be reused. */
   clib_memset (&log_event, 0, sizeof (log_event));
   log_event.kind = CGNAT_LOG_EVENT_KIND_PBA_BLOCK;
-  cgnat_log_event_set_common (&log_event, instance, event, reason);
+  cgnat_log_event_set_common (&log_event, instance, event, reason,
+			      ipfix_event);
   log_event.block.private_ip = private_ip;
   log_event.block.public_ip = public_ip;
   log_event.block.public_port_start = (u16) block_start;
@@ -765,6 +770,7 @@ cgnat_reactivate_prealloc_user_blocks (cgnat_instance_t *instance,
 
       cgnat_reactivate_cooling_block (pool, ip, block);
       cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
+			   CGNAT_IPFIX_EVENT_PBA_ALLOC,
 			   user->key.private_ip, ip->addr, pool, block,
 			   user->pool_index);
     }
@@ -875,7 +881,9 @@ cgnat_cooling_process_expired (u32 *expired_timers)
 		    }
 		}
 	      cgnat_log_pba_block (instance, "PBA_BLOCK_RELEASE",
-				   "cooling_expire", entry->private_ip,
+				   "cooling_expire",
+				   CGNAT_IPFIX_EVENT_PBA_RELEASE,
+				   entry->private_ip,
 				   ip->addr, pool, block, entry->pool_index);
 	      cgnat_block_return_free (pool, ip, block, 1);
 	    }
@@ -944,7 +952,8 @@ cgnat_start_block_cooling (cgnat_main_t *cm, u32 instance_index,
       }
 
       cgnat_log_pba_block (instance, "PBA_BLOCK_RELEASE", "idle",
-			   private_ip, ip->addr, pool, block, pool_index);
+			   CGNAT_IPFIX_EVENT_PBA_RELEASE, private_ip,
+			   ip->addr, pool, block, pool_index);
       cgnat_block_return_free (pool, ip, block, 0);
       return;
     }
@@ -958,8 +967,9 @@ cgnat_start_block_cooling (cgnat_main_t *cm, u32 instance_index,
   cgnat_pool_allocated_blocks_add (pool, -1);
   cgnat_pool_cooling_blocks_add (pool, 1);
   cgnat_log_pba_block (cgnat_instance_get_by_index (cm, instance_index),
-		       "PBA_BLOCK_RELEASE", "idle", private_ip, ip->addr,
-		       pool, block, pool_index);
+		       "PBA_BLOCK_RELEASE", "idle",
+		       CGNAT_IPFIX_EVENT_PBA_RELEASE, private_ip, ip->addr, pool,
+		       block, pool_index);
   clib_spinlock_lock (&cm->cooling_timer_lock);
   pool_get_zero (cm->cooling_timers, entry);
   entry_index = entry - cm->cooling_timers;
@@ -1252,6 +1262,7 @@ cgnat_prealloc_blocks_for_user (cgnat_instance_t *instance,
 
       vec_add1 (user->owned_block_ids, block->block_id);
       cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
+			   CGNAT_IPFIX_EVENT_PBA_ALLOC,
 			   user->key.private_ip, ip->addr, pool, block,
 			   pool_index);
       count++;
@@ -1313,8 +1324,9 @@ cgnat_bind_user_to_public_ip (cgnat_instance_t *instance, u32 instance_index,
     }
     vec_add1 (user->owned_block_ids, block->block_id);
     cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
-        user->key.private_ip, ip->addr, pool, block,
-        pool_index);
+			 CGNAT_IPFIX_EVENT_PBA_ALLOC,
+			 user->key.private_ip, ip->addr, pool, block,
+			 pool_index);
   }
 
   clib_atomic_fetch_add (&ip->active_users, 1);
@@ -1348,6 +1360,7 @@ cgnat_rollback_new_user (cgnat_instance_t *instance, cgnat_pool_t *pool,
 	  cgnat_block_has_active_ports (block))
 	continue;
       cgnat_log_pba_block (instance, "PBA_BLOCK_RELEASE", "force_delete",
+			   CGNAT_IPFIX_EVENT_PBA_RELEASE,
 			   user->key.private_ip, ip->addr, pool, block,
 			   user->pool_index);
       cgnat_block_return_free (pool, ip, block, 0);
@@ -1437,6 +1450,7 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
 	{
 	  cgnat_reactivate_cooling_block (pool, ip, block);
 	  cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
+			       CGNAT_IPFIX_EVENT_PBA_ALLOC,
 			       user->key.private_ip, ip->addr, pool, block,
 			       user->pool_index);
 	}
@@ -1463,6 +1477,7 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
 
       vec_add1 (user->owned_block_ids, block->block_id);
       cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
+			   CGNAT_IPFIX_EVENT_PBA_ALLOC,
 			   user->key.private_ip, ip->addr, pool, block,
 			   user->pool_index);
       rv = cgnat_alloc_port_from_block (instance, pool, block, private_port,
