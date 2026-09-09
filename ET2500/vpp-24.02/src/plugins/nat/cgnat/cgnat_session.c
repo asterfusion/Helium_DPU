@@ -2453,6 +2453,8 @@ cgnat_static_mapping_add_del (u32 instance_index, ip4_address_t outside_ip,
   cgnat_static_fib_add_for_rule (cm, rule);
 
 done:
+  if (!rv)
+    cgnat_recalculate_instance (cm, instance);
   vlib_worker_thread_barrier_release (cm->vlib_main);
   return rv;
 }

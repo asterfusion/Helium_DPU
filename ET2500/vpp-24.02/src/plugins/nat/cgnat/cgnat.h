@@ -655,10 +655,11 @@ typedef struct
   /* Global pool indices. Configuration updates run under a worker barrier. */
   u32 *pool_indices;
 
-  /* Envelope [min,max] over all attached pools' public address ranges,
+  /* Envelope [min,max] over attached pools and static outside addresses,
    * maintained by cgnat_recalculate_instance().  Used to cheaply skip the
    * hairpin destination lookup for packets whose destination cannot be one
-   * of our own public addresses.  min > max means "no pool attached". */
+   * of our own public addresses.  Holes are allowed; min > max means that
+   * neither a pool nor a static outside address is configured. */
   ip4_address_t pool_addr_min;
   ip4_address_t pool_addr_max;
 

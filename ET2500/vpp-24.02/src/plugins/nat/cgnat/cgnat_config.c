@@ -150,6 +150,7 @@ cgnat_pool_index_from_id (u32 pool_id, u32 *pool_index)
 void
 cgnat_recalculate_instance (cgnat_main_t *cm, cgnat_instance_t *instance)
 {
+  cgnat_static_rule_t *rule;
   u32 *pool_index;
   u32 addr_min = ~0u, addr_max = 0;
 
@@ -170,8 +171,16 @@ cgnat_recalculate_instance (cgnat_main_t *cm, cgnat_instance_t *instance)
       addr_max = clib_max (addr_max, clib_net_to_host_u32 (pool->last_ip.as_u32));
     }
 
-  /* Public-address envelope used by the hairpin pre-filter in
-   * cgnat_session_in2out(). */
+  pool_foreach (rule, instance->static_rules)
+    {
+      u32 outside_addr = clib_net_to_host_u32 (rule->outside_ip.as_u32);
+
+      addr_min = clib_min (addr_min, outside_addr);
+      addr_max = clib_max (addr_max, outside_addr);
+    }
+
+  /* Public-address envelope over dynamic pools and static outside addresses,
+   * used by the hairpin pre-filter in cgnat_session_in2out(). */
   instance->pool_addr_min.as_u32 = clib_host_to_net_u32 (addr_min);
   instance->pool_addr_max.as_u32 = clib_host_to_net_u32 (addr_max);
 }
