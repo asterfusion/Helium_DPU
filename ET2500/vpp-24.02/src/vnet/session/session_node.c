@@ -278,9 +278,13 @@ session_mq_connect_handler (session_worker_t *wrk, session_evt_elt_t *elt)
     }
 
   /* If on worker, check if main has any pending messages. Avoids reordering
-   * with other control messages that need to be handled by main
+   * with other control messages that need to be handled by main.
+   * Must not postpone when main itself is draining the pending list with
+   * the barrier held: the event was already dequeued in order, and
+   * re-queueing it makes two pending connects re-queue each other
+   * endlessly, wedging main in session_wrk_handle_evts_main_rpc.
    */
-  if (thread_index)
+  if (thread_index && !vlib_thread_is_main_w_barrier ())
     {
       he = clib_llist_elt (wrk->event_elts, wrk->evts_pending_main);
 
@@ -403,6 +407,15 @@ session_mq_unlisten_handler (session_worker_t *wrk, session_evt_elt_t *elt)
   if (!app)
     return;
 
+  app_wrk = application_get_worker (app, mp->wrk_index);
+
+  /* Drop stale unlisten messages from previous worker instances: worker
+   * map indices and listener handles are pooled and can be reused by a
+   * newer worker/listener generation (e.g., app reload), and acting on
+   * them would tear down the new worker's listener state */
+  if (app_wrk && app_wrk->api_client_index != mp->client_index)
+    return;
+
   clib_memset (a, 0, sizeof (*a));
   a->app_index = app->app_index;
   a->handle = sh;
@@ -411,7 +424,6 @@ session_mq_unlisten_handler (session_worker_t *wrk, session_evt_elt_t *elt)
   if ((rv = vnet_unlisten (a)))
     session_worker_stat_error_inc (wrk, rv, 1);
 
-  app_wrk = application_get_worker (app, a->wrk_map_index);
   if (!app_wrk)
     return;
 
@@ -449,6 +461,8 @@ session_mq_accepted_reply_handler (session_worker_t *wrk,
       clib_warning ("app doesn't own session");
       return;
     }
+
+  session_accepting_untrack (s);
 
   /* Server isn't interested, disconnect the session */
   if (mp->retval)

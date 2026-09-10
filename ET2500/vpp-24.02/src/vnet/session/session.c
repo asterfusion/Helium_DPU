@@ -1244,6 +1244,77 @@ session_transport_reset_notify (transport_connection_t * tc)
   app_worker_reset_notify (app_wrk, s);
 }
 
+/**
+ * Time after which a session in ACCEPTING state that the app did not
+ * accept or reject is closed
+ */
+#define SESSION_ACCEPTING_TIMEOUT 30.0
+
+/** Interval at which workers check for expired ACCEPTING sessions */
+#define SESSION_ACCEPTING_SWEEP_INTV 1.0
+
+static void
+session_accepting_track (session_t *s)
+{
+  session_worker_t *wrk = session_main_get_worker (s->thread_index);
+
+  vec_validate (wrk->accepting_since, s->session_index);
+  if (wrk->accepting_since[s->session_index] == 0.0)
+    wrk->n_accepting += 1;
+  wrk->accepting_since[s->session_index] = vlib_time_now (wrk->vm);
+}
+
+void
+session_accepting_untrack (session_t *s)
+{
+  session_worker_t *wrk = session_main_get_worker (s->thread_index);
+
+  if (s->session_index < vec_len (wrk->accepting_since)
+      && wrk->accepting_since[s->session_index] != 0.0)
+    {
+      wrk->accepting_since[s->session_index] = 0.0;
+      if (wrk->n_accepting)
+	wrk->n_accepting -= 1;
+    }
+}
+
+static void
+session_accepting_sweep (f64 now, u8 thread_index)
+{
+  session_worker_t *wrk = session_main_get_worker (thread_index);
+  u32 n_accepting = 0;
+  session_t *s;
+
+  if (!wrk->n_accepting
+      || now - wrk->last_accepting_sweep < SESSION_ACCEPTING_SWEEP_INTV)
+    return;
+  wrk->last_accepting_sweep = now;
+
+  /* *INDENT-OFF* */
+  pool_foreach (s, wrk->sessions)
+    {
+      if (s->session_state != SESSION_STATE_ACCEPTING)
+	continue;
+      if (s->session_index >= vec_len (wrk->accepting_since)
+	  || wrk->accepting_since[s->session_index] == 0.0)
+	continue;
+      if (now - wrk->accepting_since[s->session_index]
+	  < SESSION_ACCEPTING_TIMEOUT)
+	{
+	  n_accepting += 1;
+	  continue;
+	}
+      /* App never accepted or rejected the session, close it */
+      session_accepting_untrack (s);
+      session_close (s);
+    }
+  /* *INDENT-ON* */
+
+  /* Self-correct drift from sessions that left ACCEPTING state through
+   * transport notifications */
+  wrk->n_accepting = n_accepting;
+}
+
 int
 session_stream_accept_notify (transport_connection_t * tc)
 {
@@ -1257,11 +1328,13 @@ session_stream_accept_notify (transport_connection_t * tc)
   if (s->session_state != SESSION_STATE_CREATED)
     return 0;
   session_set_state (s, SESSION_STATE_ACCEPTING);
+  session_accepting_track (s);
   if (app_worker_accept_notify (app_wrk, s))
     {
       /* On transport delete, no notifications should be sent. Unless, the
        * accept is retried and successful. */
       session_set_state (s, SESSION_STATE_CREATED);
+      session_accepting_untrack (s);
       return -1;
     }
   return 0;
@@ -1324,10 +1397,12 @@ session_dgram_accept (transport_connection_t * tc, u32 listener_index,
 
   session_lookup_add_connection (tc, session_handle (s));
   session_set_state (s, SESSION_STATE_ACCEPTING);
+  session_accepting_track (s);
 
   app_wrk = app_worker_get (s->app_wrk_index);
   if ((rv = app_worker_accept_notify (app_wrk, s)))
     {
+      session_accepting_untrack (s);
       session_lookup_del_session (s);
       segment_manager_dealloc_fifos (s->rx_fifo, s->tx_fifo);
       session_free (s);
@@ -2195,6 +2270,9 @@ session_main_init (vlib_main_t * vm)
   smm->last_transport_proto_type = TRANSPORT_PROTO_HTTP;
   smm->port_allocator_min_src_port = 1024;
   smm->port_allocator_max_src_port = 65535;
+
+  session_register_update_time_fn (session_accepting_sweep,
+				   1 /* is_add */ );
 
   return 0;
 }

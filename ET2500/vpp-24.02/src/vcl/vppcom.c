@@ -546,6 +546,8 @@ vcl_session_bound_handler (vcl_worker_t * wrk, session_bound_msg_t * mp)
 	  session->session_state = VCL_STATE_DETACHED;
 	  session->vpp_handle = mp->handle;
 	  session->vpp_error = mp->retval;
+	  /* Allow listen to be retried */
+	  session->flags &= ~VCL_SESSION_F_PENDING_LISTEN;
 	  return sid;
 	}
       else
@@ -1138,7 +1140,7 @@ vcl_handle_mq_event (vcl_worker_t * wrk, session_event_t * e)
   return VPPCOM_OK;
 }
 
-static int
+int
 vppcom_wait_for_session_state_change (u32 session_index,
 				      vcl_session_state_t state,
 				      f64 wait_for_time)
@@ -1243,19 +1245,30 @@ vppcom_session_unbind (u32 session_handle)
   session_accepted_msg_t *accepted_msg;
   vcl_session_t *session = 0;
   vcl_session_msg_t *evt;
+  svm_msg_q_t *evt_q;
 
   session = vcl_session_get_w_handle (wrk, session_handle);
   if (!session)
     return VPPCOM_EBADFD;
 
   /* Flush pending accept events, if any */
-  while (clib_fifo_elts (session->accept_evts_fifo))
+  while (session->accept_evts_fifo && clib_fifo_elts (session->accept_evts_fifo))
     {
       clib_fifo_sub2 (session->accept_evts_fifo, evt);
       accepted_msg = &evt->accepted_msg;
       vcl_session_table_del_vpp_handle (wrk, accepted_msg->handle);
-      vcl_send_session_accepted_reply (session->vpp_evt_q,
-				       accepted_msg->context,
+      /* Stream listeners have no event queue of their own, attach the one
+       * the accepted message originated from */
+      evt_q = session->vpp_evt_q;
+      if (!evt_q &&
+	  vcl_segment_attach_mq (vcl_vpp_worker_segment_handle (0),
+				 accepted_msg->vpp_event_queue_address,
+				 accepted_msg->mq_index, &evt_q))
+	{
+	  VDBG (0, "failed to attach vpp event queue for accepted reply");
+	  continue;
+	}
+      vcl_send_session_accepted_reply (evt_q, accepted_msg->context,
 				       accepted_msg->handle, -1);
     }
   clib_fifo_free (session->accept_evts_fifo);
@@ -1580,8 +1593,16 @@ vcl_session_cleanup (vcl_worker_t * wrk, vcl_session_t * s,
       goto cleanup;
     }
 
-  if (s->session_state == VCL_STATE_LISTEN)
+  if (s->session_state == VCL_STATE_LISTEN ||
+      s->session_state == VCL_STATE_LISTEN_NO_MQ)
     {
+      /* Listeners migrated to another worker/generation sit in
+       * LISTEN_NO_MQ state. They must still be unbound at close:
+       * otherwise this worker stays in vpp's accept rotation for the
+       * listener until the whole process exits, and a lingering worker
+       * (e.g., draining keepalive connections on reload) keeps getting
+       * new connections it will never accept. Vpp-side unlisten is
+       * per-worker: it only removes this worker from the rotation. */
       rv = vppcom_session_unbind (sh);
       if (PREDICT_FALSE (rv < 0))
 	VDBG (0, "session %u [0x%llx]: listener unbind failed! "
@@ -1720,6 +1741,8 @@ vppcom_session_listen (uint32_t listen_sh, uint32_t q_len)
   if (PREDICT_FALSE (rv))
     {
       listen_session = vcl_session_get_w_handle (wrk, listen_sh);
+      /* Allow listen to be retried */
+      listen_session->flags &= ~VCL_SESSION_F_PENDING_LISTEN;
       VDBG (0, "session %u [0x%llx]: listen failed! returning %d (%s)",
 	    listen_sh, listen_session->vpp_handle, rv,
 	    vppcom_retval_str (rv));
@@ -3149,7 +3172,9 @@ vcl_epoll_wait_handle_mq_event (vcl_worker_t * wrk, session_event_t * e,
 	s = vcl_session_accepted (wrk, (session_accepted_msg_t *) e->data);
       else
 	s = vcl_session_get (wrk, e->session_index);
-      if (!s || !vcl_ep_session_needs_evt (s, EPOLLIN))
+      if (PREDICT_FALSE (!s))
+	break;
+      if (!vcl_ep_session_needs_evt (s, EPOLLIN))
 	break;
       sid = s->session_index;
       session_events = s->vep.ev.events;
