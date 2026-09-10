@@ -1701,24 +1701,35 @@ cgnat_static_protocol_conflict (u8 a, u8 b)
 
 static int
 cgnat_static_rule_conflict (cgnat_instance_t *instance,
-			    cgnat_static_rule_t *candidate,
-			    u32 skip_index)
+			    cgnat_static_rule_t *candidate)
 {
   cgnat_static_rule_t *rule;
 
   pool_foreach (rule, instance->static_rules)
     {
-      if ((u32) (rule - instance->static_rules) == skip_index)
-	continue;
-
       if (!cgnat_static_protocol_conflict (rule->protocol,
 					   candidate->protocol))
 	continue;
 
+      /* A port mapping for the same inside address is an exact exception to
+       * an address-level mapping.  The datapath checks exact mappings before
+       * the address fallback, so either configuration order is valid.
+       * Sharing only the outside address with a different inside host stays
+       * a conflict: the address rule's port-preserving fallback could not
+       * provide an unambiguous bidirectional mapping for that port. */
+      if ((rule->type == CGNAT_STATIC_PORT_MAP) !=
+	  (candidate->type == CGNAT_STATIC_PORT_MAP))
+	{
+	  if (rule->inside_ip.as_u32 == candidate->inside_ip.as_u32)
+	    continue;
+	  if (rule->outside_ip.as_u32 == candidate->outside_ip.as_u32)
+	    return 1;
+	  continue;
+	}
+
       if (rule->outside_ip.as_u32 == candidate->outside_ip.as_u32)
 	{
 	  if (rule->type != CGNAT_STATIC_PORT_MAP ||
-	      candidate->type != CGNAT_STATIC_PORT_MAP ||
 	      rule->outside_port == candidate->outside_port)
 	    return 1;
 	}
@@ -1726,7 +1737,6 @@ cgnat_static_rule_conflict (cgnat_instance_t *instance,
       if (rule->inside_ip.as_u32 == candidate->inside_ip.as_u32)
 	{
 	  if (rule->type != CGNAT_STATIC_PORT_MAP ||
-	      candidate->type != CGNAT_STATIC_PORT_MAP ||
 	      rule->inside_port == candidate->inside_port)
 	    return 1;
 	}
@@ -1978,36 +1988,140 @@ cgnat_static_rule_pool_put (cgnat_instance_t *instance,
 }
 
 static int
-cgnat_static_dynamic_mapping_conflict (cgnat_main_t *cm,
+cgnat_static_mapping_is_replaced (cgnat_main_t *cm,
+				  cgnat_static_rule_t *candidate,
+				  cgnat_mapping_t *mapping)
+{
+  cgnat_instance_t *instance;
+  cgnat_static_rule_t *owner;
+
+  if (mapping->instance_index != candidate->instance_index ||
+      (mapping->flags & CGNAT_MAPPING_FLAG_DELETING))
+    return 0;
+
+  if (candidate->protocol != CGNAT_STATIC_PROTO_ALL &&
+      mapping->protocol != candidate->protocol)
+    return 0;
+
+  if (cgnat_mapping_is_auto (mapping))
+    {
+      if (candidate->type != CGNAT_STATIC_PORT_MAP)
+	return mapping->inside_ip.as_u32 == candidate->inside_ip.as_u32 ||
+	       mapping->nat_ip.as_u32 == candidate->outside_ip.as_u32;
+
+      return (mapping->inside_ip.as_u32 == candidate->inside_ip.as_u32 &&
+	      mapping->inside_port == candidate->inside_port) ||
+	     (mapping->nat_ip.as_u32 == candidate->outside_ip.as_u32 &&
+	      mapping->nat_port == candidate->outside_port);
+    }
+
+  /* Adding an address rule must leave existing port exceptions intact.
+   * Adding a port rule, however, may collide with an exact mapping that an
+   * address rule created lazily for earlier traffic.  Replace only that
+   * derived mapping; a port mapping owned by another port rule remains a
+   * configuration conflict and was rejected by cgnat_static_rule_conflict. */
+  if (candidate->type != CGNAT_STATIC_PORT_MAP ||
+      mapping->mapping_type != CGNAT_MAPPING_STATIC)
+    return 0;
+
+  instance = cgnat_instance_get_by_index (cm, mapping->instance_index);
+  if (!instance || mapping->static_rule_index == CGNAT_INVALID_INDEX ||
+      pool_is_free_index (instance->static_rules,
+			  mapping->static_rule_index))
+    return 0;
+  owner = pool_elt_at_index (instance->static_rules,
+			     mapping->static_rule_index);
+  if (owner->type == CGNAT_STATIC_PORT_MAP ||
+      mapping->protocol != candidate->protocol)
+    return 0;
+
+  return (mapping->inside_fib_index == candidate->inside_fib_index &&
+	  mapping->inside_ip.as_u32 == candidate->inside_ip.as_u32 &&
+	  mapping->inside_port == candidate->inside_port) ||
+	 (mapping->outside_fib_index == candidate->outside_fib_index &&
+	  mapping->nat_ip.as_u32 == candidate->outside_ip.as_u32 &&
+	  mapping->nat_port == candidate->outside_port);
+}
+
+/* Static configuration runs under a worker barrier.  Remove sessions first
+ * so their normal teardown updates user/session counters and schedules the
+ * now-idle mapping.  Zero-session mappings are scheduled explicitly. */
+static void
+cgnat_static_replace_runtime_mappings (cgnat_main_t *cm,
 				       cgnat_static_rule_t *candidate)
 {
   cgnat_mapping_t *mapping;
+  cgnat_session_t *session;
+  u64 *mapping_values = 0;
+  u64 *mapping_value;
+  u64 *session_values = 0;
+  u64 *session_value;
 
   pool_foreach (mapping, cm->mappings)
     {
-      if (!cgnat_mapping_is_auto (mapping) ||
-	  mapping->instance_index != candidate->instance_index ||
-	  (mapping->flags & CGNAT_MAPPING_FLAG_DELETING))
-	continue;
-
-      if (candidate->protocol != CGNAT_STATIC_PROTO_ALL &&
-	  mapping->protocol != candidate->protocol)
-	continue;
-
-      if (candidate->type != CGNAT_STATIC_PORT_MAP)
-	{
-	  if (mapping->inside_ip.as_u32 == candidate->inside_ip.as_u32 ||
-	      mapping->nat_ip.as_u32 == candidate->outside_ip.as_u32)
-	    return 1;
-	}
-      else if ((mapping->inside_ip.as_u32 == candidate->inside_ip.as_u32 &&
-		mapping->inside_port == candidate->inside_port) ||
-	       (mapping->nat_ip.as_u32 == candidate->outside_ip.as_u32 &&
-		mapping->nat_port == candidate->outside_port))
-	return 1;
+      if (cgnat_static_mapping_is_replaced (cm, candidate, mapping))
+	vec_add1 (mapping_values,
+		  cgnat_index_to_value (mapping - cm->mappings,
+					mapping->generation));
     }
 
-  return 0;
+  if (vec_len (mapping_values) == 0)
+    {
+      vec_free (mapping_values);
+      return;
+    }
+
+  /* Scan the session pool once.  A single address rule can replace many
+   * mappings, so rescanning all sessions for every mapping would hold the
+   * worker barrier for unnecessarily long on a busy appliance. */
+  pool_foreach (session, cm->sessions)
+    {
+      u64 value;
+
+      if ((session->flags & CGNAT_SESSION_FLAG_DELETING) ||
+	  session->mapping_index == CGNAT_INVALID_INDEX)
+	continue;
+      value = cgnat_index_to_value (session->mapping_index,
+				    session->mapping_generation);
+      mapping = cgnat_mapping_get_if_valid (cm, value);
+      if (mapping &&
+	  cgnat_static_mapping_is_replaced (cm, candidate, mapping))
+	vec_add1 (session_values,
+		  cgnat_index_to_value (session - cm->sessions,
+					session->generation));
+    }
+
+  vec_foreach (session_value, session_values)
+    {
+      u32 session_index = cgnat_value_get_index (*session_value);
+      u32 session_generation = cgnat_value_get_generation (*session_value);
+
+      if (pool_is_free_index (cm->sessions, session_index))
+	continue;
+      session = pool_elt_at_index (cm->sessions, session_index);
+      if (session->generation == session_generation &&
+	  !(session->flags & CGNAT_SESSION_FLAG_DELETING))
+	cgnat_session_delete (cm, session, "static_replace");
+    }
+
+  /* A conflicting mapping without sessions was not visited by session
+   * teardown, so place it on the same deferred-reap path explicitly. */
+  vec_foreach (mapping_value, mapping_values)
+    {
+      mapping = cgnat_mapping_get_if_valid (cm, *mapping_value);
+      if (!mapping)
+	continue;
+      if (cgnat_mapping_is_auto (mapping))
+	cgnat_dynamic_mapping_schedule_delete (cm, mapping);
+      else
+	cgnat_static_addr_mapping_schedule_delete (cm, mapping);
+    }
+
+  /* The barrier makes immediate reaping safe and frees mapping-table keys
+   * before the new exact port mapping is installed. */
+  cgnat_dynamic_mapping_reap (cm);
+  vec_free (session_values);
+  vec_free (mapping_values);
 }
 
 static int
@@ -2373,17 +2487,13 @@ cgnat_static_mapping_add_del (u32 instance_index, ip4_address_t outside_ip,
       goto done;
     }
 
-  if (cgnat_static_rule_conflict (instance, &candidate, CGNAT_INVALID_INDEX))
+  if (cgnat_static_rule_conflict (instance, &candidate))
     {
       rv = VNET_API_ERROR_VALUE_EXIST;
       goto done;
     }
 
-  if (cgnat_static_dynamic_mapping_conflict (cm, &candidate))
-    {
-      rv = VNET_API_ERROR_VALUE_EXIST;
-      goto done;
-    }
+  cgnat_static_replace_runtime_mappings (cm, &candidate);
 
   pool_get_zero (instance->static_rules, rule);
   rule_index = rule - instance->static_rules;
