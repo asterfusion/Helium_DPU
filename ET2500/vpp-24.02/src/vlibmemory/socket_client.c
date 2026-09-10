@@ -317,11 +317,9 @@ vl_sock_api_recv_fd_msg_internal (socket_client_main_t * scm, int fds[],
     size = recvmsg (socket_fd, &mh, 0);
 
   if (size != 5)
-    {
-      return (size == 0) ? clib_error_return (0, "disconnected") :
-	clib_error_return_unix (0, "recvmsg: malformed message (fd %d)",
-				socket_fd);
-    }
+    return (size == 0) ? clib_error_return (0, "disconnected") :
+      clib_error_return_unix (0, "recvmsg: malformed message (fd %d)",
+			      socket_fd);
 
   cmsg = CMSG_FIRSTHDR (&mh);
   while (cmsg)

@@ -709,15 +709,22 @@ vcl_bapi_app_worker_del (vcl_worker_t * wrk)
 {
   /* Notify vpp that the worker is going away */
   if (wrk->wrk_index == vcl_get_worker_index ())
-    vcl_bapi_send_app_worker_add_del (0 /* is_add */ );
-  else
-    vcl_bapi_send_child_worker_del (wrk);
+    {
+      vcl_bapi_send_app_worker_add_del (0 /* is_add */ );
 
-  /* Disconnect the binary api */
-  if (vec_len (vcm->workers) == 1)
-    vcl_bapi_disconnect_from_vpp ();
-  else
-    vl_client_send_disconnect (1 /* vpp should cleanup */ );
+      /* Disconnect the binary api */
+      if (vec_len (vcm->workers) == 1)
+	vcl_bapi_disconnect_from_vpp ();
+      else
+	vl_client_send_disconnect (1 /* vpp should cleanup */ );
+      return;
+    }
+
+  /* Only ask vpp to remove the child worker. The child's api connection
+   * is reaped by vpp when the child process dies; disconnecting here
+   * would drop this process' own client registration along with the app
+   * workers attached to it. */
+  vcl_bapi_send_child_worker_del (wrk);
 }
 
 int
