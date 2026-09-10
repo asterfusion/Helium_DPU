@@ -134,6 +134,14 @@ typedef enum
 
 typedef enum
 {
+  /* Capacity above a pre-allocated user's reserved block floor. Keep this
+   * property on the block while it is COOLING: owned_block_ids can reorder
+   * when timers expire, so vector position cannot identify elastic blocks. */
+  CGNAT_BLOCK_FLAG_ELASTIC = (1 << 0),
+} cgnat_block_flags_t;
+
+typedef enum
+{
   CGNAT_MAPPING_FLAG_DELETING = 1,
 } cgnat_mapping_flags_t;
 
@@ -286,6 +294,8 @@ typedef enum
 typedef struct
 {
   u16 block_id;
+  /* cgnat_block_flags_t, stored as u16 to use the existing alignment hole. */
+  u16 flags;
   cgnat_block_state_t state;
 
   /* Active port allocations per protocol (TCP/UDP/ICMP). */
@@ -356,9 +366,13 @@ typedef struct
   /* Active port allocations per protocol (TCP/UDP/ICMP). */
   u16 active_ports[CGNAT_PBA_PROTO_COUNT];
 
+  /* Hard ownership ceiling after applying max-blocks and max-ports. */
   u16 max_blocks;
   /* Per-protocol limit on active port allocations. */
   u16 max_ports;
+  /* PRE_ALLOC target: min(configured prealloc, max_blocks). Blocks between
+   * min_blocks and max_blocks are elastic; ON_DEMAND keeps this at zero. */
+  u16 min_blocks;
   cgnat_block_alloc_mode_t block_alloc_mode;
   /* Owned blocks include both ALLOCATED and user-revivable COOLING blocks. */
   u16 *owned_block_ids;
