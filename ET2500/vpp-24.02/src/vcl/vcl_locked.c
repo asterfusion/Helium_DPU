@@ -105,12 +105,19 @@ typedef struct vcl_locked_session_
   uword *vcl_wrk_index_to_session_index; /**< map vcl wrk to session */
 } vcl_locked_session_t;
 
+typedef struct vls_pending_wrk_cleanup_
+{
+  u32 wrk_index;		       /**< vcl wrk index of exited child */
+  pid_t pid;			       /**< pid the child had when queued */
+} vls_pending_wrk_cleanup_t;
+
 typedef struct vls_worker_
 {
   clib_rwlock_t sh_to_vlsh_table_lock; /**< ht rwlock with mt workers */
   vcl_locked_session_t *vls_pool;      /**< pool of vls session */
   uword *sh_to_vlsh_table;	       /**< map from vcl sh to vls sh */
-  u32 *pending_vcl_wrk_cleanup;	       /**< child vcl wrks to cleanup */
+  vls_pending_wrk_cleanup_t *pending_vcl_wrk_cleanup; /**< child vcl wrks
+							    to cleanup */
   u32 vcl_wrk_index;		       /**< if 1:1 map vls to vcl wrk */
 } vls_worker_t;
 
@@ -667,22 +674,42 @@ vls_listener_wrk_is_active (vcl_locked_session_t * vls, u32 wrk_index)
   return (is_set == 1);
 }
 
-static void
+static int
 vls_listener_wrk_start_listen (vcl_locked_session_t * vls, u32 wrk_index)
 {
   vcl_worker_t *wrk;
   vcl_session_t *ls;
+  int rv;
 
   wrk = vcl_worker_get (wrk_index);
   ls = vcl_session_get (wrk, vls->session_index);
 
   /* Listen request already sent */
   if (ls->flags & VCL_SESSION_F_PENDING_LISTEN)
-    return;
+    return 0;
 
   vcl_send_session_listen (wrk, ls);
 
+  /* Wait synchronously for the bound notification. If listen fails and
+   * we fail to notice, the worker is never added to the listener's
+   * workers bitmap in vpp and accepts are silently routed to other
+   * (possibly dead) workers. */
+  rv = vppcom_wait_for_session_state_change (ls->session_index,
+					     VCL_STATE_LISTEN,
+					     5 /* timeout (s) */);
+  if (rv)
+    {
+      /* Clear pending flag set by vcl_send_session_listen or a retry
+       * would be short-circuited forever */
+      ls->flags &= ~VCL_SESSION_F_PENDING_LISTEN;
+      VERR ("worker %u listen failed for session %u state %s: %d",
+	    wrk_index, ls->session_index,
+	    vcl_session_state_str (ls->session_state), rv);
+      return -1;
+    }
+
   vls_listener_wrk_set (vls, wrk_index, 1 /* is_active */);
+  return 0;
 }
 
 static void
@@ -1326,7 +1353,8 @@ vls_mp_checks (vcl_locked_session_t * vls, int is_add)
 	break;
 
       /* Register worker as listener */
-      vls_listener_wrk_start_listen (vls, vls->vcl_wrk_index);
+      if (vls_listener_wrk_start_listen (vls, vls->vcl_wrk_index))
+	break;
 
       /* If owner worker did not attempt to accept/xpoll on the session,
        * force a listen stop for it, since it may not be interested in
@@ -1334,10 +1362,22 @@ vls_mp_checks (vcl_locked_session_t * vls, int is_add)
        * This is pretty much a hack done to give app workers the illusion
        * that it is fine to listen and not accept new sessions for a
        * given listener. Without it, we would accumulate unhandled
-       * accepts on the passive worker message queue. */
+       * accepts on the passive worker message queue.
+       * The active bitmap lives in shared memory and is indexed by vcl
+       * worker slot, so bits set by previous process generations survive
+       * worker slot reuse. Trust it only if the worker currently holding
+       * the owner slot is still alive. */
       owner_wrk = vls_shared_get_owner (vls);
-      if (!vls_listener_wrk_is_active (vls, owner_wrk))
-	vls_listener_wrk_stop_listen (vls, owner_wrk);
+      if (owner_wrk != vls->vcl_wrk_index)
+	{
+	  vcl_worker_t *owner = vcl_worker_get_if_valid (owner_wrk);
+
+	  if (owner && kill (owner->current_pid, 0) >= 0
+	      && vls_listener_wrk_is_active (vls, owner_wrk))
+	    break;
+	  if (owner)
+	    vls_listener_wrk_stop_listen (vls, owner_wrk);
+	}
       break;
     default:
       break;
@@ -1674,7 +1714,7 @@ vls_cleanup_forked_child (vcl_worker_t * wrk, vcl_worker_t * child_wrk)
 static void
 vls_handle_pending_wrk_cleanup (void)
 {
-  u32 *wip;
+  vls_pending_wrk_cleanup_t *p;
   vcl_worker_t *child_wrk, *wrk;
   vls_worker_t *vls_wrk = vls_worker_get_current ();
 
@@ -1682,11 +1722,20 @@ vls_handle_pending_wrk_cleanup (void)
     return;
 
   wrk = vcl_worker_get_current ();
-  vec_foreach (wip, vls_wrk->pending_vcl_wrk_cleanup)
+  vec_foreach (p, vls_wrk->pending_vcl_wrk_cleanup)
     {
-      child_wrk = vcl_worker_get_if_valid (*wip);
+      child_wrk = vcl_worker_get_if_valid (p->wrk_index);
       if (!child_wrk)
 	continue;
+      /* The worker slot may have been reused by a newer process since the
+       * entry was queued. Clean up only if it still belongs to the child
+       * that actually exited. */
+      if (child_wrk->current_pid != p->pid)
+	{
+	  VWRN ("skip cleanup of wrk %u: slot reused by pid %u",
+		p->wrk_index, child_wrk->current_pid);
+	  continue;
+	}
       vls_cleanup_forked_child (wrk, child_wrk);
     }
   vec_reset_length (vls_wrk->pending_vcl_wrk_cleanup);
@@ -1698,6 +1747,7 @@ static void
 vls_intercept_sigchld_handler (int signum, siginfo_t * si, void *uc)
 {
   vcl_worker_t *wrk, *child_wrk;
+  vls_pending_wrk_cleanup_t *pending;
   vls_worker_t *vls_wrk;
 
   if (vcl_get_worker_index () == ~0)
@@ -1729,7 +1779,9 @@ vls_intercept_sigchld_handler (int signum, siginfo_t * si, void *uc)
    * So move child wrk cleanup from sighandler to vls_epoll_wait/vls_select.
    */
   vls_wrk = vls_worker_get_current ();
-  vec_add1 (vls_wrk->pending_vcl_wrk_cleanup, child_wrk->wrk_index);
+  vec_add2 (vls_wrk->pending_vcl_wrk_cleanup, pending, 1);
+  pending->wrk_index = child_wrk->wrk_index;
+  pending->pid = child_wrk->current_pid;
 
 done:
   if (old_sa.sa_flags & SA_SIGINFO)
@@ -1748,12 +1800,17 @@ done:
 static void
 vls_incercept_sigchld ()
 {
-  struct sigaction sa;
-  if (old_sa.sa_sigaction)
-    {
-      VDBG (0, "have intercepted sigchld");
-      return;
-    }
+  struct sigaction sa, cur;
+
+  /* The handler restores old_sa after the first SIGCHLD, so re-install on
+   * every fork or exits of later children would not queue a cleanup. But
+   * if our handler is still installed (no SIGCHLD since the last fork),
+   * keep the current old_sa: overwriting it with our own handler would
+   * make the handler recurse into itself when the next SIGCHLD fires. */
+  if (sigaction (SIGCHLD, 0, &cur) == 0 &&
+      cur.sa_sigaction == vls_intercept_sigchld_handler)
+    return;
+
   clib_memset (&sa, 0, sizeof (sa));
   sa.sa_sigaction = vls_intercept_sigchld_handler;
   sa.sa_flags = SA_SIGINFO;
@@ -1769,6 +1826,12 @@ vls_app_pre_fork (void)
 {
   vls_incercept_sigchld ();
   vcl_flush_mq_events ();
+  /* Clean up any pending forked child workers before forking again.
+   * Without this, a previous child that exited but wasn't cleaned up
+   * yet (pending in the SIGCHLD handler queue) will be lost because
+   * the new fork overwrites wrk->forked_child, causing the SIGCHLD
+   * handler to skip the old child's cleanup. */
+  vls_handle_pending_wrk_cleanup ();
 }
 
 static void
@@ -1789,11 +1852,23 @@ vls_app_fork_child_handler (void)
   /*
    * Allocate and register vcl worker with vpp
    */
-  if (vppcom_worker_register ())
-    {
-      VERR ("couldn't register new worker!");
-      return;
-    }
+  {
+    int n_tries = 0;
+
+    while (vppcom_worker_register ())
+      {
+	VERR ("couldn't register new worker (attempt %u)!", n_tries + 1);
+	if (++n_tries >= 5)
+	  {
+	    VERR ("worker registration failed, giving up");
+	    /* Unblock the parent spinning on the forking flag, then exit
+	     * and let the app (e.g., nginx master) respawn the worker */
+	    vcm->forking = 0;
+	    _exit (1);
+	  }
+	usleep (200e3);
+      }
+  }
 
   /*
    * Allocate/initialize vls worker and share sessions
@@ -1831,7 +1906,11 @@ vls_app_exit (void)
   /* Handle pending wrk cleanup */
   vls_handle_pending_wrk_cleanup ();
 
-  /* Unshare the sessions. VCL will clean up the worker */
+  /* Unshare the sessions. VCL will clean up the worker: vppcom_app_exit,
+   * registered earlier via atexit, runs right after this handler and does
+   * vcl_worker_cleanup (current, notify_vpp=1). Cleaning the vcl worker
+   * here as well would leave vppcom_app_exit with worker index ~0 and an
+   * out-of-bounds pool access. */
   vls_unshare_vcl_worker_sessions (vcl_worker_get_current ());
   vls_worker_free (wrk);
 }

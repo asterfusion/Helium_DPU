@@ -288,16 +288,32 @@ static app_worker_t *
 app_listener_select_worker (app_listener_t *al)
 {
   application_t *app;
-  u32 wrk_index;
+  app_worker_t *app_wrk;
+  u32 wrk_index, n_tries = 0, n_workers;
 
   app = application_get (al->app_index);
-  wrk_index = clib_bitmap_next_set (al->workers, al->accept_rotor + 1);
-  if (wrk_index == ~0)
-    wrk_index = clib_bitmap_first_set (al->workers);
+  n_workers = clib_bitmap_count_set_bits (al->workers);
+  ASSERT (n_workers != 0);
 
-  ASSERT (wrk_index != ~0);
-  al->accept_rotor = wrk_index;
-  return application_get_worker (app, wrk_index);
+  /* Round-robin over the listener's workers but skip the ones with
+   * congested message queues. Fall back to the first worker if all are
+   * congested and let the caller reject the accept. */
+  wrk_index = al->accept_rotor;
+  while (n_tries++ < n_workers)
+    {
+      wrk_index = clib_bitmap_next_set (al->workers, wrk_index + 1);
+      if (wrk_index == ~0)
+	wrk_index = clib_bitmap_first_set (al->workers);
+      app_wrk = application_get_worker (app, wrk_index);
+      if (!app_worker_mq_is_congested (app_wrk))
+	{
+	  al->accept_rotor = wrk_index;
+	  return app_wrk;
+	}
+    }
+
+  al->accept_rotor = clib_bitmap_first_set (al->workers);
+  return application_get_worker (app, al->accept_rotor);
 }
 
 session_t *
