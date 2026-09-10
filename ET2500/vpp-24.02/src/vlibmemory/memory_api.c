@@ -330,8 +330,6 @@ vl_api_memclnt_delete_t_handler (vl_api_memclnt_delete_t * mp)
 
   handle = mp->index;
 
-  vl_api_call_reaper_functions (handle);
-
   epoch = vl_msg_api_handle_get_epoch (handle);
   client_index = vl_msg_api_handle_get_index (handle);
 
@@ -343,6 +341,16 @@ vl_api_memclnt_delete_t_handler (vl_api_memclnt_delete_t * mp)
 	 (am->shmem_hdr->application_restarts & VL_API_EPOCH_MASK));
       return;
     }
+
+  /* Reap only after the delete has been validated: a stale delete must not
+   * tear down state owned by a newer client that has since recycled this
+   * client index. Reaper functions key applications by the full api handle
+   * (what apps report as their client index), so pass the handle, not the
+   * bare client index. Skip the reaper if the slot is already free: the
+   * delete is then a stale duplicate. */
+  if (pool_is_free_index (am->vl_clients, client_index))
+    return;
+  vl_api_call_reaper_functions (handle);
 
   regpp = pool_elt_at_index (am->vl_clients, client_index);
 
@@ -695,6 +703,8 @@ vl_mem_api_dead_client_scan (api_main_t * am, vl_shmem_hdr_t * shm, f64 now)
 	    {
 	      u32 handle;
 
+	      /* Reaper functions key applications by the full api handle
+	       * (what apps report as their client index), so rebuild it */
 	      handle = vl_msg_api_handle_from_index_and_epoch
 		(dead_indices[i], shm->application_restarts);
 	      vl_api_call_reaper_functions (handle);
