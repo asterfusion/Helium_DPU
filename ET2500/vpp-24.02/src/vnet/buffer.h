@@ -230,13 +230,24 @@ typedef struct
 	      {
 		u16 l4_src_port;	/* tcp/udp/icmp src port */
 		u16 l4_dst_port;	/* tcp/udp/icmp dst port */
-		u32 tcp_ack_number;
+		/* An outer packet cannot be both TCP and an ICMP error, so ICMP
+		 * quoted-packet metadata can reuse the TCP-only slots without
+		 * growing vnet_buffer opaque data. */
+		union
+		{
+		  u32 tcp_ack_number;
+		  u8 icmp_error_inner_protocol;
+		};
 		u8 save_rewrite_length;
 		u8 ip_proto;	/* protocol in ip header */
 		u8 icmp_type_or_tcp_flags;
 		u8 is_non_first_fragment : 1;
 		u8 l4_layer_truncated : 7;
-		u32 tcp_seq_number;
+		union
+		{
+		  u32 tcp_seq_number;
+		  u32 icmp_error_inner_dst_address;
+		};
 	      };
 	      /* full reassembly output variables */
 	      struct

@@ -316,12 +316,42 @@ cgnat_extract_l4 (vlib_buffer_t *b, ip4_header_t *ip, u16 *src_port,
   *tcp = 0;
   *udp = 0;
 
-  /* Non-first fragments carry no L4 header.  Interfaces with CGNAT enabled
-   * get shallow virtual reassembly automatically, so a raw non-first
-   * fragment here means reassembly is off or failed: drop it instead of
-   * reading payload bytes as port numbers. */
+  /* Shallow virtual reassembly holds an out-of-order non-first fragment
+   * until the first fragment arrives, then copies the first fragment's L4
+   * metadata to every fragment.  A non-first fragment has no physical L4
+   * header: use only that metadata and leave tcp/udp NULL so the rewrite
+   * path changes the IP header but never treats payload bytes as ports. */
   if (PREDICT_FALSE (ip4_is_fragment (ip) && !ip4_is_first_fragment (ip)))
-    return VNET_API_ERROR_INVALID_VALUE;
+    {
+      if (PREDICT_FALSE (
+	    !vnet_buffer (b)->ip.reass.is_non_first_fragment ||
+	    vnet_buffer (b)->ip.reass.ip_proto != ip->protocol))
+	return VNET_API_ERROR_INVALID_VALUE;
+
+      if (ip->protocol == IP_PROTOCOL_TCP ||
+	  ip->protocol == IP_PROTOCOL_UDP)
+	{
+	  *src_port = clib_net_to_host_u16 (
+	    vnet_buffer (b)->ip.reass.l4_src_port);
+	  *dst_port = clib_net_to_host_u16 (
+	    vnet_buffer (b)->ip.reass.l4_dst_port);
+	  return 0;
+	}
+
+      if (ip->protocol == IP_PROTOCOL_ICMP &&
+	  (vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags ==
+	     ICMP4_echo_request ||
+	   vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags ==
+	     ICMP4_echo_reply))
+	{
+	  *src_port = clib_net_to_host_u16 (
+	    vnet_buffer (b)->ip.reass.l4_src_port);
+	  *dst_port = *src_port;
+	  return 0;
+	}
+
+      return VNET_API_ERROR_UNSUPPORTED;
+    }
 
   if (ip->protocol == IP_PROTOCOL_TCP)
     l4_len = sizeof (tcp_header_t);
@@ -382,6 +412,25 @@ cgnat_extract_l4 (vlib_buffer_t *b, ip4_header_t *ip, u16 *src_port,
     *dst_port = *src_port;
     return 0;
   }
+}
+
+static_always_inline int
+cgnat_is_icmp_error (vlib_buffer_t *b, ip4_header_t *ip)
+{
+  icmp46_header_t *icmp;
+
+  if (ip->protocol != IP_PROTOCOL_ICMP)
+    return 0;
+
+  if (ip4_is_fragment (ip) && !ip4_is_first_fragment (ip))
+    return vnet_buffer (b)->ip.reass.is_non_first_fragment &&
+	   icmp_type_is_error_message (
+	     vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags);
+
+  icmp = (icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
+  return (u8 *) (icmp + 1) <=
+	   (u8 *) vlib_buffer_get_current (b) + b->current_length &&
+	 icmp_type_is_error_message (icmp->type);
 }
 
 static_always_inline u16
@@ -610,7 +659,8 @@ cgnat_l4_rewrite_in2out (ip4_header_t *ip, tcp_header_t *tcp, udp_header_t *udp,
     }
   else if (udp)
     udp->src_port = new_port;
-  else if (ip->protocol == IP_PROTOCOL_ICMP)
+  else if (ip->protocol == IP_PROTOCOL_ICMP &&
+	   (!ip4_is_fragment (ip) || ip4_is_first_fragment (ip)))
     {
       icmp46_header_t *icmp = (icmp46_header_t *) ((u8 *) ip +
 						     ip4_header_bytes (ip));
@@ -665,7 +715,8 @@ cgnat_l4_rewrite_out2in (ip4_header_t *ip, tcp_header_t *tcp, udp_header_t *udp,
     }
   else if (udp)
     udp->dst_port = new_port;
-  else if (ip->protocol == IP_PROTOCOL_ICMP)
+  else if (ip->protocol == IP_PROTOCOL_ICMP &&
+	   (!ip4_is_fragment (ip) || ip4_is_first_fragment (ip)))
     {
       icmp46_header_t *icmp = (icmp46_header_t *) ((u8 *) ip +
 						     ip4_header_bytes (ip));
@@ -748,7 +799,8 @@ cgnat_l4_rewrite_hairpin (ip4_header_t *ip, tcp_header_t *tcp,
       udp->src_port = new_src_port;
       udp->dst_port = new_dst_port;
     }
-  else if (ip->protocol == IP_PROTOCOL_ICMP)
+  else if (ip->protocol == IP_PROTOCOL_ICMP &&
+	   (!ip4_is_fragment (ip) || ip4_is_first_fragment (ip)))
     {
       icmp46_header_t *icmp = (icmp46_header_t *) ((u8 *) ip +
 						     ip4_header_bytes (ip));
@@ -986,24 +1038,11 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
   u16 inside_port, remote_port, session_remote_port;
   int rv;
 
-  /* ICMP Error Messages carry an inner IP datagram; translate them through
-   * the mapping that owns the public address embedded in that inner packet.
-   * Errors are not fragmented in normal operation; drop fragments to avoid
-   * reading partial ICMP headers. */
-  if (ip->protocol == IP_PROTOCOL_ICMP && !ip4_is_fragment (ip))
-    {
-      icmp46_header_t *icmp =
-	(icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
-
-      /* The buffer must actually carry the ICMP header before we read the
-       * type: truncated packets must not be dereferenced past the segment. */
-      if ((u8 *) (icmp + 1) <=
-	    (u8 *) vlib_buffer_get_current (b) + b->current_length &&
-	  icmp_type_is_error_message (icmp->type))
-	return cgnat_icmp_error_translate_in2out (cm, vm, b, ip,
-						  instance_index,
-						  inside_fib_index);
-    }
+  /* For non-first fragments, the translator consumes only virtual
+   * reassembly metadata and rewrites only the outer IP header. */
+  if (cgnat_is_icmp_error (b, ip))
+    return cgnat_icmp_error_translate_in2out (
+      cm, vm, b, ip, instance_index, inside_fib_index);
 
   rv = cgnat_extract_l4 (b, ip, &inside_port, &remote_port, &tcp, &udp);
   if (rv)
@@ -1239,21 +1278,8 @@ cgnat_session_out2in (vlib_main_t *vm, vlib_buffer_t *b, f64 now)
   u32 outside_fib_index;
   int rv;
 
-  /* ICMP Error Messages carry an inner IP datagram; translate them through
-   * the mapping that owns the public address embedded in that inner packet.
-   * Errors are not fragmented in normal operation; drop fragments to avoid
-   * reading partial ICMP headers. */
-  if (ip->protocol == IP_PROTOCOL_ICMP && !ip4_is_fragment (ip))
-    {
-      icmp46_header_t *icmp =
-	(icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
-
-      /* Same truncated-packet guard as the in2out side. */
-      if ((u8 *) (icmp + 1) <=
-	    (u8 *) vlib_buffer_get_current (b) + b->current_length &&
-	  icmp_type_is_error_message (icmp->type))
-	return cgnat_icmp_error_translate_out2in (cm, vm, b, ip);
-    }
+  if (cgnat_is_icmp_error (b, ip))
+    return cgnat_icmp_error_translate_out2in (cm, vm, b, ip);
 
   rv = cgnat_extract_l4 (b, ip, &remote_port, &nat_port, &tcp, &udp);
   if (rv)
