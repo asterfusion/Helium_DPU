@@ -180,7 +180,7 @@ cgnat_recalculate_instance (cgnat_main_t *cm, cgnat_instance_t *instance)
     }
 
   /* Public-address envelope over dynamic pools and static outside addresses,
-   * used by the hairpin pre-filter in cgnat_session_in2out(). */
+   * used by the hairpin pre-filter in the in2out fast and slow paths. */
   instance->pool_addr_min.as_u32 = clib_host_to_net_u32 (addr_min);
   instance->pool_addr_max.as_u32 = clib_host_to_net_u32 (addr_max);
 }

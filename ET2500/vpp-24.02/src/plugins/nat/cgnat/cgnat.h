@@ -820,6 +820,7 @@ typedef struct
 
   u32 in2out_policy_node_index;
   u32 in2out_node_index;
+  u32 in2out_slow_node_index;
   u32 out2in_node_index;
 
   u16 msg_id_base;
@@ -1100,6 +1101,7 @@ cgnat_instance_index_by_acl (cgnat_main_t *cm, u32 acl_index)
 }
 
 extern vlib_node_registration_t cgnat_in2out_node;
+extern vlib_node_registration_t cgnat_in2out_slow_node;
 extern vlib_node_registration_t cgnat_in2out_policy_node;
 extern vlib_node_registration_t cgnat_out2in_node;
 extern vlib_node_registration_t cgnat_timer_process_node;

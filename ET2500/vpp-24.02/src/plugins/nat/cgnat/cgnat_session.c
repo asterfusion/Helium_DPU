@@ -2369,12 +2369,9 @@ cgnat_static_addr_get_or_create_mapping (cgnat_main_t *cm,
   if (!cgnat_mapping_table_search (cm, &cm->out2in_mapping_table, &kv, &value))
     return cgnat_mapping_get_if_valid (cm, value.value);
 
-  if (!cgnat_mapping_table_search (cm, &cm->out2in_mapping_table, &kv, &value))
-    {
-      mapping = cgnat_mapping_get_if_valid (cm, value.value);
-      return mapping;
-    }
-
+  /* Do not repeat the same lookup before create: exact_mapping_create
+   * rechecks both mapping keys.  If another worker wins after this miss, its
+   * VALUE_EXIST result is resolved by the retry lookup below. */
   rv = cgnat_static_exact_mapping_create (cm, rule, packet_port, packet_port,
 					  protocol, inside_fib_index,
 					  &mapping_index);
