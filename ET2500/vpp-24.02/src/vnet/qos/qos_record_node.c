@@ -65,8 +65,8 @@ qos_record_tc(vlib_buffer_t *b0, dpo_proto_t dproto, qos_bits_t qos, qos_bits_t 
     if(!(hi->flags &VNET_HW_INTERFACE_FLAG_USE_TC))
         return;
 
-    if(hi->flags & VLIB_BUFFER_ACL_SET_TC_VALID)
-        return;
+    if (b0->flags & VLIB_BUFFER_ACL_SET_TC_VALID)
+      return;
 
     if (is_l2)
     {
