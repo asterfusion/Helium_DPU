@@ -520,7 +520,7 @@ VLIB_NODE_FN (lcp_nat_miss_node)
 	  u32 bi = from[0];
 	  vlib_buffer_t *b = vlib_get_buffer (vm, bi);
 	  u32 original_next = LCP_NAT_MISS_NEXT_DROP;
-	  u32 next;
+	  u32 next = LCP_NAT_MISS_NEXT_DROP;
 	  lcp_action_result_t action_result;
 
 	  action_result = lcp_punt_process_with_default (
