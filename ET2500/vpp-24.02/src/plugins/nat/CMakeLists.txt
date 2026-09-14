@@ -171,6 +171,29 @@ add_vpp_plugin(pnat
   pnat/pnat.api
 )
 
+add_vpp_plugin(cgnat
+  SOURCES
+  cgnat/cgnat.c
+  cgnat/cgnat_log.c
+  cgnat/cgnat_config.c
+  cgnat/cgnat_cli.c
+  cgnat/cgnat_api.c
+  cgnat/cgnat_pba.c
+  cgnat/cgnat_session.c
+  cgnat/cgnat_in2out_policy.c
+  cgnat/cgnat_in2out.c
+  cgnat/cgnat_out2in.c
+
+  MULTIARCH_SOURCES
+  cgnat/cgnat_in2out.c
+  cgnat/cgnat_out2in.c
+
+  API_FILES
+  cgnat/cgnat.api
+
+  LINK_LIBRARIES nat
+)
+
 # Unit tests
 set (PACKET_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/pnat/tests/test_packets.h)
 set (PACKET_DEFS

@@ -70,9 +70,19 @@ typedef struct
   u8 server_mac[6];
   u8 client_mac[6];
 
+  /* BNG-local LCP magic (host byte order) for Echo-Reply proxy (scheme C). */
+  u32 lcp_magic;
+  u8 lcp_magic_valid;
+
   /* vnet intfc index */
   u32 sw_if_index;
   u32 hw_if_index;
+
+  /* Scheme A: set when a subscriber /32 host route was installed in the FIB
+   * during session creation.  The address is client_ip.ip4 and the FIB is
+   * decap_fib_index — both already present in this struct.  The route is
+   * removed on session deletion iff this flag is set. */
+  u8  client_route_valid;
 
 } pppoe_session_t;
 
@@ -80,7 +90,8 @@ typedef struct
 _(DROP, "error-drop")                  \
 _(IP4_INPUT, "ip4-input")              \
 _(IP6_INPUT, "ip6-input" )             \
-_(CP_INPUT, "lcp-pppoe-punt" )      \
+_(CP_INPUT, "lcp-pppoe-punt" )         \
+_(ECHO_REPLY, "interface-output")      \
 
 typedef enum
 {
@@ -97,6 +108,9 @@ typedef enum
     pppoe_error (CONTROL_PLANE, "control plane packet")
     pppoe_error (NO_SUCH_SESSION, "no such sessions")
     pppoe_error (BAD_VER_TYPE, "bad version and type in pppoe header")
+    pppoe_error (ECHO_REPLIED, "LCP echo-request answered locally")
+    pppoe_error (ECHO_PROXY_NO_SESSION, "LCP echo-proxy: no session")
+    pppoe_error (ECHO_PROXY_NO_MAGIC, "LCP echo-proxy: magic not set")
 #undef pppoe_error
   PPPOE_N_ERROR,
 } pppoe_input_error_t;
@@ -191,6 +205,20 @@ typedef struct
   vnet_main_t *vnet_main;
 
   u32 policer_id;
+
+  /* Runtime toggle for stateful LCP Echo proxy (scheme C). */
+  u8 echo_proxy_enable;
+
+  /* Monotonic pppN naming counter, decoupled from session pool index. */
+  u32 next_pppoe_dev_instance;
+  /* Target total warm hw-if count for lcp_pppoe_hw_if_pool_ensure(). */
+  u32 hw_if_pool_target;
+  /* Batch size for the background pool grow process (default 256). */
+  u32 hw_if_pool_batch;
+  /* 1 while pppoe-hw-if-pool-process is creating interfaces. */
+  u8 hw_if_pool_growing;
+  /* Registered process node index for pool grow events. */
+  u32 hw_if_pool_process_node_index;
 } pppoe_main_t;
 
 extern pppoe_main_t pppoe_main;
@@ -357,7 +385,18 @@ pppoe_update_1 (BVT (clib_bihash) * table,
 
 }
 
-extern int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_index, u32 *p_sw_if_index, u8 *sw_if_name, u8 is_add);
+extern int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id,
+				 u32 encap_sw_if_index, u32 *p_sw_if_index,
+				 u8 *sw_if_name, u8 is_add, u32 lcp_magic,
+				 u32 client_ip4, u32 client_table_id);
+extern int lcp_pppoe_session_add_bulk(u8 *server_mac, u16 ppp_session_id,
+				      u32 encap_sw_if_index, u32 *p_sw_if_index,
+				      u8 *sw_if_name, u8 is_add, u8 *is_new_if,
+				      u32 lcp_magic, u32 client_ip4,
+				      u32 client_table_id);
+extern void lcp_pppoe_setup_new_if_features(u32 sw_if_index);
+extern int lcp_pppoe_hw_if_create_one (u32 *hw_if_index_out);
+extern int lcp_pppoe_hw_if_pool_ensure (u32 target, u32 batch);
 
 extern fib_source_t pppoe_fib_src;
 #endif /* _PPPOE_H */
