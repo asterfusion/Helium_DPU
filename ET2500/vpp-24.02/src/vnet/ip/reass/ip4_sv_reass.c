@@ -105,6 +105,7 @@ typedef struct
   u16 l4_src_port;
   // l4 dst port
   u16 l4_dst_port;
+  u8 l4_layer_truncated;
   u32 next_index;
   // lru indexes
   u32 lru_prev;
@@ -314,6 +315,75 @@ ip4_sv_reass_init (ip4_sv_reass_t * reass)
   reass->is_complete = false;
 }
 
+static_always_inline void
+ip4_sv_reass_key_init (ip4_sv_reass_kv_t *kv, vlib_buffer_t *b,
+		       const ip4_header_t *ip)
+{
+  clib_memset (kv, 0, sizeof (*kv));
+  kv->k.as_u64[0] =
+    (u64) vec_elt (ip4_main.fib_index_by_sw_if_index,
+		   vnet_buffer (b)->sw_if_index[VLIB_RX]) |
+    (u64) ip->src_address.as_u32 << 32;
+  kv->k.as_u64[1] = (u64) ip->dst_address.as_u32 |
+		      (u64) ip->fragment_id << 32 |
+		      (u64) ip->protocol << 48;
+}
+
+#ifndef CLIB_MARCH_VARIANT
+bool
+ip4_sv_reass_find_metadata (vlib_main_t *vm, vlib_buffer_t *b,
+			    ip4_sv_reass_metadata_t *metadata)
+{
+  ip4_sv_reass_main_t *rm = &ip4_sv_reass_main;
+  const ip4_header_t *ip = vlib_buffer_get_current (b);
+  ip4_sv_reass_kv_t kv;
+  ip4_sv_reass_per_thread_t *rt;
+  ip4_sv_reass_t *reass;
+  bool found = false;
+
+  clib_memset (metadata, 0, sizeof (*metadata));
+  if (b->current_length < sizeof (*ip) || !ip4_is_fragment (ip))
+    return false;
+
+  ip4_sv_reass_key_init (&kv, b, ip);
+  if (clib_bihash_search_16_8 (&rm->hash, &kv.kv, &kv.kv) ||
+      kv.v.thread_index >= vec_len (rm->per_thread_data))
+    return false;
+
+  rt = &rm->per_thread_data[kv.v.thread_index];
+  clib_spinlock_lock (&rt->lock);
+  if (!clib_bihash_search_16_8 (&rm->hash, &kv.kv, &kv.kv) &&
+      kv.v.thread_index < vec_len (rm->per_thread_data) &&
+      kv.v.thread_index == rt - rm->per_thread_data &&
+      !pool_is_free_index (rt->pool, kv.v.reass_index))
+    {
+      reass = pool_elt_at_index (rt->pool, kv.v.reass_index);
+      if (reass->is_complete &&
+	  reass->key.as_u64[0] == kv.k.as_u64[0] &&
+	  reass->key.as_u64[1] == kv.k.as_u64[1] &&
+	  vlib_time_now (vm) <= reass->last_heard + rm->timeout)
+	{
+	  metadata->ip_proto = reass->ip_proto;
+	  metadata->l4_src_port = reass->l4_src_port;
+	  metadata->l4_dst_port = reass->l4_dst_port;
+	  metadata->icmp_type_or_tcp_flags = reass->icmp_type_or_tcp_flags;
+	  metadata->l4_layer_truncated = reass->l4_layer_truncated;
+	  metadata->valid_fields = IP4_SV_REASS_METADATA_FIELD_IP_PROTOCOL;
+	  if (!reass->l4_layer_truncated &&
+	      (reass->ip_proto == IP_PROTOCOL_TCP ||
+	       reass->ip_proto == IP_PROTOCOL_UDP))
+	    metadata->valid_fields |= IP4_SV_REASS_METADATA_FIELD_L4_PORTS;
+	  if (!reass->l4_layer_truncated &&
+	      reass->ip_proto == IP_PROTOCOL_ICMP)
+	    metadata->valid_fields |= IP4_SV_REASS_METADATA_FIELD_ICMP_TYPE;
+	  found = true;
+	}
+    }
+  clib_spinlock_unlock (&rt->lock);
+  return found;
+}
+#endif /* CLIB_MARCH_VARIANT */
+
 always_inline ip4_sv_reass_t *
 ip4_sv_reass_find_or_create (vlib_main_t * vm, ip4_sv_reass_main_t * rm,
 			     ip4_sv_reass_per_thread_t * rt,
@@ -391,6 +461,8 @@ again:
   return reass;
 }
 
+always_inline int l4_layer_truncated (ip4_header_t *ip);
+
 always_inline ip4_sv_reass_rc_t
 ip4_sv_reass_update (vlib_main_t *vm, vlib_node_runtime_t *node,
 		     ip4_sv_reass_main_t *rm, ip4_header_t *ip0,
@@ -404,6 +476,7 @@ ip4_sv_reass_update (vlib_main_t *vm, vlib_node_runtime_t *node,
       reass->ip_proto = ip0->protocol;
       reass->l4_src_port = ip4_get_port (ip0, 1);
       reass->l4_dst_port = ip4_get_port (ip0, 0);
+      reass->l4_layer_truncated = l4_layer_truncated (ip0);
 
       if (IP_PROTOCOL_TCP == reass->ip_proto)
 	{
@@ -807,16 +880,15 @@ slow_path:
 	  u8 do_handoff = 0;
 
 	  if (with_custom_context)
-	    kv.k.as_u64[0] = (u64) *context | (u64) ip0->src_address.as_u32
-						<< 32;
+	    {
+	      kv.k.as_u64[0] = (u64) *context |
+			       (u64) ip0->src_address.as_u32 << 32;
+	      kv.k.as_u64[1] = (u64) ip0->dst_address.as_u32 |
+			       (u64) ip0->fragment_id << 32 |
+			       (u64) ip0->protocol << 48;
+	    }
 	  else
-	    kv.k.as_u64[0] =
-	      (u64) vec_elt (ip4_main.fib_index_by_sw_if_index,
-			     vnet_buffer (b0)->sw_if_index[VLIB_RX]) |
-	      (u64) ip0->src_address.as_u32 << 32;
-	  kv.k.as_u64[1] = (u64) ip0->dst_address.as_u32 |
-			   (u64) ip0->fragment_id << 32 |
-			   (u64) ip0->protocol << 48;
+	    ip4_sv_reass_key_init (&kv, b0, ip0);
 
 	  ip4_sv_reass_t *reass =
 	    ip4_sv_reass_find_or_create (vm, rm, rt, &kv, &do_handoff);
