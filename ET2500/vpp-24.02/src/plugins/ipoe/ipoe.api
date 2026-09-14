@@ -1,0 +1,128 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+option version = "1.0.1";
+
+import "vnet/interface_types.api";
+import "vnet/ip/ip_types.api";
+import "vnet/ethernet/ethernet_types.api";
+
+enum ipoe_access_mode : u8
+{
+  IPOE_ACCESS_MODE_L2 = 1,
+  IPOE_ACCESS_MODE_L3 = 2,
+};
+
+enum ipoe_input_path : u8
+{
+  IPOE_INPUT_PATH_L2_INPUT = 1,
+  IPOE_INPUT_PATH_IP4_INPUT = 2,
+};
+
+autoreply define ipoe_interface_enable_disable
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_ipoe_access_mode_t access_mode;
+  vl_api_ipoe_input_path_t input_path;
+  bool enable;
+};
+
+define ipoe_session_add_del
+{
+  u32 client_index;
+  u32 context;
+  u64 index;
+  u64 generation;
+  u64 lease_expiry;
+  u32 lease_timeout_sec;
+  bool is_add;
+  bool admin_state;
+  vl_api_ipoe_access_mode_t access_mode;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_ip4_address_t user_ip4;
+  bool has_user_mac;
+  vl_api_mac_address_t user_mac;
+};
+
+define ipoe_session_add_del_reply
+{
+  u32 context;
+  i32 retval;
+  u32 counter_index;
+};
+
+typedef ipoe_session_add_batch_entry
+{
+  u64 index;
+  u64 generation;
+  u64 lease_expiry;
+  u32 lease_timeout_sec;
+  vl_api_ipoe_access_mode_t access_mode;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_ip4_address_t user_ip4;
+  bool has_user_mac;
+  vl_api_mac_address_t user_mac;
+  bool admin_state;
+};
+
+typedef ipoe_session_add_batch_result
+{
+  u64 index;
+  u64 generation;
+  i32 retval;
+  u32 counter_index;
+};
+
+define ipoe_session_add_batch
+{
+  u32 client_index;
+  u32 context;
+  u32 count;
+  vl_api_ipoe_session_add_batch_entry_t entries[count];
+};
+
+define ipoe_session_add_batch_reply
+{
+  u32 context;
+  i32 retval;
+  u32 count;
+  vl_api_ipoe_session_add_batch_result_t results[count];
+};
+
+typedef ipoe_session_snapshot_result
+{
+  u64 index;
+  u64 generation;
+  i32 retval;
+};
+
+typedef ipoe_session_quiesce_entry
+{
+  u64 index;
+  u64 generation;
+};
+
+define ipoe_session_quiesce_snapshot_batch
+{
+  u32 client_index;
+  u32 context;
+  u32 count;
+  vl_api_ipoe_session_quiesce_entry_t entries[count];
+};
+
+define ipoe_session_quiesce_snapshot_batch_reply
+{
+  u32 context;
+  i32 retval;
+  u32 count;
+  vl_api_ipoe_session_snapshot_result_t results[count];
+};
+
+autoreply define ipoe_session_set_state
+{
+  u32 client_index;
+  u32 context;
+  u64 index;
+  u64 generation;
+  bool admin_state;
+};
