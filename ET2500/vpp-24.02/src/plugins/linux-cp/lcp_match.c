@@ -724,6 +724,44 @@ lcp_match_select (const lcp_packet_view_t *view, lcp_match_result_t *result)
   return lcp_trap_candidate_select (candidates, result);
 }
 
+bool
+lcp_packet_matches_egress_copp (vlib_main_t *vm, vlib_buffer_t *b,
+				u32 context, lcp_match_result_t *result)
+{
+  lcp_packet_view_t view;
+  lcp_trap_candidate_t candidates[LCP_TRAP_N_TYPES] = { 0 };
+  lcp_match_result_t local_result = { 0 };
+
+  if (result == NULL)
+    result = &local_result;
+  else
+    clib_memset (result, 0, sizeof (*result));
+
+  if (!lcp_packet_parse (vm, b, context, NULL, &view))
+    return false;
+
+  /* Host-originated IP packets can match routed and local-service rules. */
+  if (context == LCP_MATCH_CTX_IP4)
+    view.context = LCP_MATCH_CTX_IP4 | LCP_MATCH_CTX_LOCAL4;
+  else if (context == LCP_MATCH_CTX_IP6)
+    view.context = LCP_MATCH_CTX_IP6 | LCP_MATCH_CTX_LOCAL6;
+
+  lcp_match_rules_collect (&view, candidates);
+
+  /* Local-service and routed UDP rules commonly describe the ingress
+   * destination port. Reverse ports as a second pass for Linux replies. */
+  if (view.valid_fields & LCP_MATCH_FIELD_L4_PORTS)
+    {
+      u16 src_port = view.l4_src_port;
+
+      view.l4_src_port = view.l4_dst_port;
+      view.l4_dst_port = src_port;
+      lcp_match_rules_collect (&view, candidates);
+    }
+
+  return lcp_trap_candidate_select (candidates, result);
+}
+
 static clib_error_t *
 lcp_match_init (vlib_main_t *vm)
 {

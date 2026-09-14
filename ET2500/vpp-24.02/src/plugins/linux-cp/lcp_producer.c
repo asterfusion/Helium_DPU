@@ -699,7 +699,9 @@ lcp_l2_producer_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 		{
 		  word len = (u8 *) vlib_buffer_get_current (b) -
 			     (u8 *) ethernet_buffer_get_header (b);
-		  lcp_set_max_tc (b);
+		  if (lcp_packet_matches_egress_copp (
+			vm, b, LCP_MATCH_CTX_L2_DIRECT, NULL))
+		    lcp_set_max_tc (b);
 		  vnet_buffer (b)->sw_if_index[VLIB_TX] =
 		    lip->lip_phy_sw_if_index;
 		  vlib_buffer_advance (b, -len);
@@ -902,6 +904,9 @@ VLIB_NODE_FN (lcp_igmp_xc_node)
 		{
 		  word len = (u8 *) vlib_buffer_get_current (b) -
 			     (u8 *) ethernet_buffer_get_header (b);
+		  if (lcp_packet_matches_egress_copp (
+			vm, b, LCP_MATCH_CTX_IP4, NULL))
+		    lcp_set_max_tc (b);
 		  vnet_buffer (b)->sw_if_index[VLIB_TX] =
 		    lip->lip_phy_sw_if_index;
 		  vlib_buffer_advance (b, -len);

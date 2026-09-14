@@ -119,6 +119,11 @@ void lcp_packet_view_apply_ip_metadata (lcp_packet_view_t *view,
 					const lcp_ip_metadata_t *metadata);
 bool lcp_match_select (const lcp_packet_view_t *view,
 		       lcp_match_result_t *result);
+/* Classify a host-originated packet without applying the selected CoPP
+ * action. RESULT may be NULL when the caller only needs the match status. */
+bool lcp_packet_matches_egress_copp (vlib_main_t *vm, vlib_buffer_t *b,
+				    u32 context,
+				    lcp_match_result_t *result);
 const lcp_match_rule_t *lcp_match_rule_find (u16 rule_id);
 u32 lcp_match_rule_count (void);
 const lcp_match_rule_t *lcp_match_rule_get (u32 index);

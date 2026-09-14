@@ -1782,8 +1782,9 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
                   if (lipi0 != INDEX_INVALID)
                   {
                       is_host0 = 1;
-                      //set max tc priority
-                      lcp_set_max_tc(b0);
+                      /* PPPoE control-plane traffic from Linux uses the
+                       * control traffic class. */
+                      lcp_set_max_tc (b0);
                   }
               }
           }
@@ -1827,8 +1828,9 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
                   if (lipi1 != INDEX_INVALID)
                   {
                       is_host1 = 1;
-                      //set max tc priority
-                      lcp_set_max_tc(b1);
+                      /* PPPoE control-plane traffic from Linux uses the
+                       * control traffic class. */
+                      lcp_set_max_tc (b1);
                   }
               }
           }
@@ -1922,8 +1924,9 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
                   if (lipi0 != INDEX_INVALID)
                   {
                       is_host0 = 1;
-                      //set max tc priority
-                      lcp_set_max_tc(b0);
+                      /* PPPoE control-plane traffic from Linux uses the
+                       * control traffic class. */
+                      lcp_set_max_tc (b0);
                   }
               }
           }

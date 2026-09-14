@@ -22,6 +22,7 @@
 #include <vnet/tcp/tcp_packet.h>
 #include <vnet/udp/udp_packet.h>
 
+#include <linux-cp/lcp.h>
 #include <linux-cp/lcp_match.h>
 #include <linux-cp/lcp_punt.h>
 #include <linux-cp/lcp_policy.h>
@@ -511,6 +512,179 @@ VLIB_CLI_COMMAND (lcp_copp_l2_parse_command, static) = {
   .path = "test lcp copp l2 parse",
   .short_help = "test lcp copp l2 parse",
   .function = lcp_copp_l2_parse_command_fn,
+};
+
+static void
+lcp_copp_egress_ip_reset (vlib_buffer_t *b, bool is_ip6, u8 protocol,
+			  u16 src_port, u16 dst_port)
+{
+  udp_header_t *l4;
+
+  vlib_buffer_reset (b);
+  clib_memset (b->data, 0, VLIB_BUFFER_DEFAULT_DATA_SIZE);
+  if (is_ip6)
+    {
+      ip6_header_t *ip6 = vlib_buffer_get_current (b);
+      u16 payload_length =
+	(protocol == IP_PROTOCOL_TCP || protocol == IP_PROTOCOL_UDP) ?
+	  sizeof (*l4) :
+	  0;
+
+      ip6->ip_version_traffic_class_and_flow_label =
+	clib_host_to_net_u32 (0x60000000);
+      ip6->payload_length = clib_host_to_net_u16 (payload_length);
+      ip6->protocol = protocol;
+      ip6->hop_limit = 64;
+      b->current_length = sizeof (*ip6) + payload_length;
+      l4 = (udp_header_t *) (ip6 + 1);
+    }
+  else
+    {
+      ip4_header_t *ip4 = vlib_buffer_get_current (b);
+      u16 payload_length =
+	(protocol == IP_PROTOCOL_TCP || protocol == IP_PROTOCOL_UDP) ?
+	  sizeof (*l4) :
+	  0;
+
+      ip4->ip_version_and_header_length = 0x45;
+      ip4->length = clib_host_to_net_u16 (sizeof (*ip4) + payload_length);
+      ip4->ttl = 64;
+      ip4->protocol = protocol;
+      b->current_length = sizeof (*ip4) + payload_length;
+      l4 = (udp_header_t *) (ip4 + 1);
+    }
+
+  if (protocol == IP_PROTOCOL_TCP || protocol == IP_PROTOCOL_UDP)
+    {
+      l4->src_port = clib_host_to_net_u16 (src_port);
+      l4->dst_port = clib_host_to_net_u16 (dst_port);
+    }
+}
+
+static void
+lcp_copp_egress_l2_reset (vlib_buffer_t *b, u16 ethertype,
+			  const u8 dst[6], u8 subtype)
+{
+  ethernet_header_t *eh;
+
+  vlib_buffer_reset (b);
+  clib_memset (b->data, 0, VLIB_BUFFER_DEFAULT_DATA_SIZE);
+  b->flags |= VNET_BUFFER_F_L2_HDR_OFFSET_VALID;
+  vnet_buffer (b)->l2_hdr_offset = b->current_data;
+  eh = vlib_buffer_get_current (b);
+  clib_memcpy_fast (eh->dst_address, dst, sizeof (eh->dst_address));
+  eh->type = clib_host_to_net_u16 (ethertype);
+  ((u8 *) (eh + 1))[0] = subtype;
+  b->current_length = sizeof (*eh) + 2;
+}
+
+static clib_error_t *
+lcp_copp_egress_control_command_fn (vlib_main_t *vm,
+				   unformat_input_t *input,
+				   vlib_cli_command_t *cmd)
+{
+  CLIB_UNUSED (unformat_input_t *unused_input) = input;
+  CLIB_UNUSED (vlib_cli_command_t *unused_cmd) = cmd;
+  static const struct
+  {
+    const char *name;
+    bool is_ip6;
+    u8 protocol;
+    u16 src_port;
+    u16 dst_port;
+    vl_api_lcp_trap_type_t trap;
+  } ip_cases[] = {
+    { "BGP", false, IP_PROTOCOL_TCP, 179, 50000, LCP_TRAP_BGP },
+    { "OSPF", false, IP_PROTOCOL_OSPF, 0, 0, LCP_TRAP_OSPF },
+    { "BFD", false, IP_PROTOCOL_UDP, 3784, 50000, LCP_TRAP_BFD },
+    { "DHCP", false, IP_PROTOCOL_UDP, 67, 68, LCP_TRAP_DHCP },
+    { "VRRP", false, IP_PROTOCOL_VRRP, 0, 0, LCP_TRAP_VRRP },
+    { "BGPv6", true, IP_PROTOCOL_TCP, 179, 50000, LCP_TRAP_BGPV6 },
+    { "OSPFv6", true, IP_PROTOCOL_OSPF, 0, 0, LCP_TRAP_OSPFV6 },
+    { "BFDv6", true, IP_PROTOCOL_UDP, 3785, 50000, LCP_TRAP_BFDV6 },
+    { "DHCPv6", true, IP_PROTOCOL_UDP, 547, 546, LCP_TRAP_DHCPV6 },
+    { "VRRPv6", true, IP_PROTOCOL_VRRP, 0, 0, LCP_TRAP_VRRPV6 },
+  };
+  static const u8 l2_control_mac[6] = { 0x01, 0x80, 0xc2, 0, 0, 0 };
+  static const u8 l2_slow_mac[6] = { 0x01, 0x80, 0xc2, 0, 0, 2 };
+  u32 bi;
+  vlib_buffer_t *b;
+  lcp_match_result_t result;
+  clib_error_t *err = 0;
+
+  if (vlib_buffer_alloc (vm, &bi, 1) != 1)
+    return clib_error_return (0, "buffer allocation failed");
+  b = vlib_get_buffer (vm, bi);
+
+  for (u32 i = 0; i < ARRAY_LEN (ip_cases); i++)
+    {
+      lcp_copp_egress_ip_reset (b, ip_cases[i].is_ip6,
+				ip_cases[i].protocol, ip_cases[i].src_port,
+				ip_cases[i].dst_port);
+      if (!lcp_packet_matches_egress_copp (
+		    vm, b,
+		    ip_cases[i].is_ip6 ? LCP_MATCH_CTX_IP6 : LCP_MATCH_CTX_IP4,
+		    &result) ||
+	  result.trap_type != ip_cases[i].trap)
+	{
+	  err = clib_error_return (0, "%s not classified", ip_cases[i].name);
+	  goto done;
+	}
+    }
+
+  lcp_copp_egress_l2_reset (b, ETHERNET_TYPE_802_1_LLDP, l2_slow_mac, 0);
+  if (!lcp_packet_matches_egress_copp (vm, b, LCP_MATCH_CTX_L2_DIRECT,
+				      &result) ||
+      result.trap_type != LCP_TRAP_LLDP)
+    {
+      err = clib_error_return (0, "LLDP not classified");
+      goto done;
+    }
+
+  lcp_copp_egress_l2_reset (b, ETHERNET_TYPE_SLOW_PROTOCOLS, l2_slow_mac,
+			    1);
+  if (!lcp_packet_matches_egress_copp (vm, b, LCP_MATCH_CTX_L2_DIRECT,
+				      &result) ||
+      result.trap_type != LCP_TRAP_LACP)
+    {
+      err = clib_error_return (0, "LACP not classified");
+      goto done;
+    }
+
+  lcp_copp_egress_l2_reset (b, 0, l2_control_mac, 0);
+  if (!lcp_packet_matches_egress_copp (vm, b, LCP_MATCH_CTX_L2_DIRECT,
+				      &result) ||
+      result.trap_type != LCP_TRAP_STP)
+    {
+      err = clib_error_return (0, "BPDU not classified");
+      goto done;
+    }
+
+  lcp_copp_egress_ip_reset (b, false, IP_PROTOCOL_TCP, 40000, 50000);
+  if (lcp_packet_matches_egress_copp (vm, b, LCP_MATCH_CTX_IP4, NULL))
+    {
+      err = clib_error_return (0, "ordinary TCP classified");
+      goto done;
+    }
+
+  b->flags &= ~VLIB_BUFFER_ACL_SET_TC_VALID;
+  vnet_buffer2 (b)->tc_index = 0;
+  lcp_set_max_tc (b);
+  if (vnet_buffer2 (b)->tc_index != LCP_CONTROL_TC ||
+      !(b->flags & VLIB_BUFFER_ACL_SET_TC_VALID))
+    err = clib_error_return (0, "control TC metadata is invalid");
+
+done:
+  vlib_buffer_free_one (vm, bi);
+  if (!err)
+    vlib_cli_output (vm, "egress control classification passed");
+  return err;
+}
+
+VLIB_CLI_COMMAND (lcp_copp_egress_control_command, static) = {
+  .path = "test lcp copp egress control",
+  .short_help = "test lcp copp egress control",
+  .function = lcp_copp_egress_control_command_fn,
 };
 
 static clib_error_t *

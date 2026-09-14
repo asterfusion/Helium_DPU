@@ -765,6 +765,11 @@ lcp_xc_inline (vlib_main_t *vm, vlib_node_runtime_t *node, vlib_frame_t *frame,
 
 	  b0 = vlib_get_buffer (vm, bi0);
 
+	  if (lcp_packet_matches_egress_copp (
+		vm, b0, AF_IP4 == af ? LCP_MATCH_CTX_IP4 : LCP_MATCH_CTX_IP6,
+		NULL))
+	    lcp_set_max_tc (b0);
+
 	  lipi =
 	    lcp_itf_pair_find_by_host (vnet_buffer (b0)->sw_if_index[VLIB_RX]);
 	  lip = lcp_itf_pair_get (lipi);
@@ -1006,6 +1011,11 @@ lcp_xc_l3_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  n_left_to_next -= 1;
 
 	  b0 = vlib_get_buffer (vm, bi0);
+
+	  if (lcp_packet_matches_egress_copp (
+		vm, b0, AF_IP4 == af ? LCP_MATCH_CTX_IP4 : LCP_MATCH_CTX_IP6,
+		NULL))
+	    lcp_set_max_tc (b0);
 
 	  /* Flag buffers as locally originated. Otherwise their TTL will
 	   * be checked & decremented. That would break services like BGP
@@ -1408,8 +1418,9 @@ VLIB_NODE_FN (lcp_arp_host_node)
 	  next0 = LCP_ARP_HOST_NEXT_IO;
 	  vnet_buffer (b0)->sw_if_index[VLIB_TX] = lip0->lip_phy_sw_if_index;
 
-	  //set max tc priority
-	  lcp_set_max_tc(b0);
+	  if (lcp_packet_matches_egress_copp (vm, b0, LCP_MATCH_CTX_ARP,
+					       NULL))
+	    lcp_set_max_tc (b0);
 
 	  len0 = ((u8 *) vlib_buffer_get_current (b0) -
 		  (u8 *) ethernet_buffer_get_header (b0));
