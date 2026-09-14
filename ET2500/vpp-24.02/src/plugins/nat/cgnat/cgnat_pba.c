@@ -259,7 +259,7 @@ cgnat_pool_free_port_bitmap_init (cgnat_pool_t *pool)
 
   for (i = 0; i < pool->block_size; i++)
     pool->free_port_offset_bitmap[i & 1] =
-      clib_bitmap_set (pool->free_port_offset_bitmap[i & 1], i, 1);
+      clib_bitmap_set (pool->free_port_offset_bitmap[i & 1], i >> 1, 1);
 }
 
 static void
@@ -590,8 +590,8 @@ cgnat_public_ip_alloc_block (cgnat_pool_t *pool, cgnat_public_ip_t *ip,
   block->gen_id = ++ip->alloc_gen;
   /* Port bitmaps stay NULL here: they are materialized lazily per
    * protocol/parity on first use (see cgnat_alloc_port_from_block), saving
-   * 6 bitmap dups (~1.6KB at block_size 2048) per block that never sees
-   * that traffic class. */
+   * six compact bitmap dups (~768B of bitmap data at block_size 2048) per
+   * block that never sees that traffic class. */
   ip->block_index_by_id[block_id] = block - ip->blocks;
   ip->free_block_bitmap =
     clib_bitmap_set (ip->free_block_bitmap, block_id, 0);
@@ -607,7 +607,7 @@ cgnat_alloc_port_from_block (cgnat_instance_t *instance,
 			     cgnat_block_t *block, u16 private_port,
 			     u8 protocol, u16 *public_port)
 {
-  u32 block_start, offset = ~0;
+  u32 bitmap_index = ~0, block_start, offset, parity_size;
   u8 offset_odd;
   int proto_index;
   clib_bitmap_t *free_ports;
@@ -621,6 +621,7 @@ cgnat_alloc_port_from_block (cgnat_instance_t *instance,
 
   block_start = cgnat_block_start_port (pool, block->block_id);
   offset_odd = (private_port ^ block_start) & 1;
+  parity_size = (pool->block_size + 1 - offset_odd) >> 1;
   free_ports = block->free_port_bitmap[proto_index][offset_odd];
   if (PREDICT_FALSE (!free_ports))
     {
@@ -634,22 +635,24 @@ cgnat_alloc_port_from_block (cgnat_instance_t *instance,
 
   if (pool->port_alloc_mode == CGNAT_PORT_ALLOC_MODE_RANDOM)
   {
-    u32 start = cgnat_instance_random_u32 (instance) % pool->block_size;
-    offset = clib_bitmap_next_set (free_ports, start);
+    u32 start = cgnat_instance_random_u32 (instance) % parity_size;
+    bitmap_index = clib_bitmap_next_set (free_ports, start);
 
-    if (offset == ~0)
-      offset = clib_bitmap_first_set (free_ports);
+    if (bitmap_index == ~0)
+      bitmap_index = clib_bitmap_first_set (free_ports);
   }
   else
-    offset = clib_bitmap_first_set (free_ports);
+    bitmap_index = clib_bitmap_first_set (free_ports);
 
-  if (offset == ~0)
+  if (bitmap_index == ~0)
     return VNET_API_ERROR_LIMIT_EXCEEDED;
 
   block->free_port_bitmap[proto_index][offset_odd] =
-    clib_bitmap_set (block->free_port_bitmap[proto_index][offset_odd], offset, 0);
+    clib_bitmap_set (block->free_port_bitmap[proto_index][offset_odd],
+		     bitmap_index, 0);
 
   block->active_ports[proto_index]++;
+  offset = (bitmap_index << 1) | offset_odd;
   *public_port = block_start + offset;
   return 0;
 }
@@ -1997,7 +2000,8 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
   cgnat_public_ip_t *ip;
   cgnat_block_t *block;
   cgnat_user_t *user;
-  u32 block_id, port_offset, block_index;
+  u32 bitmap_index, block_id, port_offset, block_index;
+  u8 offset_odd;
   u16 pool_start;
   int proto_index;
 
@@ -2019,6 +2023,8 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
 
   block_id = (port - pool_start) / pool->block_size;
   port_offset = (port - pool_start) % pool->block_size;
+  offset_odd = port_offset & 1;
+  bitmap_index = port_offset >> 1;
   ip = vec_elt_at_index (pool->public_ips, public_ip_index);
 
   cgnat_user_lock (instance, inside_fib_index, private_ip);
@@ -2045,9 +2051,9 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
    * from this block (bitmaps are materialized lazily) - the port cannot be
    * in use, so this release is stale. */
   if (block->state != CGNAT_BLOCK_ALLOCATED ||
-      !block->free_port_bitmap[proto_index][port_offset & 1] ||
-      clib_bitmap_get (block->free_port_bitmap[proto_index][port_offset & 1],
-		       port_offset))
+      !block->free_port_bitmap[proto_index][offset_odd] ||
+      clib_bitmap_get (block->free_port_bitmap[proto_index][offset_odd],
+		       bitmap_index))
     {
       cgnat_user_unlock (instance, inside_fib_index, private_ip);
       return VNET_API_ERROR_NO_SUCH_ENTRY;
@@ -2061,9 +2067,9 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
       return VNET_API_ERROR_NO_SUCH_ENTRY;
     }
 
-  block->free_port_bitmap[proto_index][port_offset & 1] =
-    clib_bitmap_set (block->free_port_bitmap[proto_index][port_offset & 1],
-		     port_offset, 1);
+  block->free_port_bitmap[proto_index][offset_odd] =
+    clib_bitmap_set (block->free_port_bitmap[proto_index][offset_odd],
+		     bitmap_index, 1);
   block->active_ports[proto_index]--;
   user->active_ports[proto_index]--;
 

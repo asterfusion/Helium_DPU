@@ -310,7 +310,8 @@ typedef struct
   /*
    * Present only while the block is allocated; bit 1 means the port offset is
    * free. First dimension indexes protocol (TCP/UDP/ICMP), second stores
-   * even/odd offsets.
+   * even/odd offsets.  Each parity bitmap uses compact indices: bit N maps to
+   * offset (N << 1) | parity, so no storage is spent on the opposite parity.
    */
   clib_bitmap_t *free_port_bitmap[CGNAT_PBA_PROTO_COUNT][2];
 } cgnat_block_t;
@@ -486,8 +487,9 @@ typedef struct
 {
   u32 generation;
   u32 refcnt;
-  clib_bihash_kv_24_8_t kv;
 } cgnat_adf_remote_t;
+
+STATIC_ASSERT_SIZEOF (cgnat_adf_remote_t, 8);
 
 typedef struct
 {

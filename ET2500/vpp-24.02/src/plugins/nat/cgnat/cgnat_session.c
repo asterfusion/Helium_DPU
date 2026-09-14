@@ -806,9 +806,10 @@ cgnat_adf_remote_ref_locked (cgnat_main_t *cm, clib_bihash_kv_24_8_t *kv)
     remote->generation = ++cm->adf_remote_generation_by_index[remote_index];
   clib_spinlock_unlock (&cm->adf_remote_pool_lock);
 
-  /* Element-local init does not need the pool lock. */
+  /* Element-local init does not need the pool lock.  The authoritative key
+   * remains in adf_remote_table; the compact pool object only tracks the
+   * generation and the number of sessions sharing that permission. */
   remote->refcnt = 1;
-  remote->kv = *kv;
 
   kv->value = cgnat_index_to_value (remote_index, remote->generation);
   if (clib_bihash_add_del_24_8 (&cm->adf_remote_table, kv, 1))
@@ -878,7 +879,10 @@ cgnat_adf_remote_unref_locked (cgnat_main_t *cm, clib_bihash_kv_24_8_t *kv)
 
   if (!remote->refcnt)
     {
-      clib_bihash_add_del_24_8 (&cm->adf_remote_table, &remote->kv, 0);
+      /* The caller built this same key to find the record and still holds its
+       * stripe lock, so storing another 24_8 KV in every pool object is
+       * unnecessary. */
+      clib_bihash_add_del_24_8 (&cm->adf_remote_table, kv, 0);
       clib_spinlock_lock (&cm->adf_remote_pool_lock);
       pool_put (cm->adf_remotes, remote);
       clib_spinlock_unlock (&cm->adf_remote_pool_lock);
