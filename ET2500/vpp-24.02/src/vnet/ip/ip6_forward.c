@@ -1448,9 +1448,13 @@ ip6_local_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  u8 unroutable[2];
 	  unroutable[0] = error[0] == IP6_ERROR_UNKNOWN_PROTOCOL
 	    && type[0] != IP_BUILTIN_PROTOCOL_ICMP
+            && ip[0]->protocol != IP_PROTOCOL_IPSEC_ESP
+            && ip[0]->protocol != IP_PROTOCOL_IPSEC_AH
 	    && !ip6_address_is_link_local_unicast (&ip[0]->src_address);
 	  unroutable[1] = error[1] == IP6_ERROR_UNKNOWN_PROTOCOL
 	    && type[1] != IP_BUILTIN_PROTOCOL_ICMP
+            && ip[1]->protocol != IP_PROTOCOL_IPSEC_ESP
+            && ip[1]->protocol != IP_PROTOCOL_IPSEC_AH
 	    && !ip6_address_is_link_local_unicast (&ip[1]->src_address);
 	  if (PREDICT_FALSE (unroutable[0]))
 	    {
@@ -1606,6 +1610,8 @@ ip6_local_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  /* If this is a neighbor solicitation (ICMP), skip source RPF check */
 	  u8 unroutable = error == IP6_ERROR_UNKNOWN_PROTOCOL
 	    && type != IP_BUILTIN_PROTOCOL_ICMP
+            && ip->protocol != IP_PROTOCOL_IPSEC_ESP
+            && ip->protocol != IP_PROTOCOL_IPSEC_AH
 	    && !ip6_address_is_link_local_unicast (&ip->src_address);
 	  if (PREDICT_FALSE (unroutable))
 	    {

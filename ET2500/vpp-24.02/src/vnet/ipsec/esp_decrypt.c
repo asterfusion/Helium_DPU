@@ -928,6 +928,12 @@ esp_decrypt_post_crypto (vlib_main_t *vm, vlib_node_runtime_t *node,
       if (PREDICT_TRUE (next_header == IP_PROTOCOL_IP_IN_IP))
 	{
 	  next[0] = ESP_DECRYPT_NEXT_IP4_INPUT;
+	  b->flags |= VLIB_BUFFER_PUNT_FROM_VPN;
+          /* keep the physical ingress interface saved by ipsecX-tun-input */
+          if (0 == vnet_buffer2 (b)->l2_rx_sw_if_index ||
+              ~0 == vnet_buffer2 (b)->l2_rx_sw_if_index)
+            vnet_buffer2 (b)->l2_rx_sw_if_index =
+              vnet_buffer (b)->sw_if_index[VLIB_RX];
 	  b->current_data = pd->current_data + adv;
 	  b->current_length = pd->current_length - adv;
 	  esp_remove_tail_and_tfc_padding (vm, node, pd, b, lb, next, tail,
@@ -936,6 +942,12 @@ esp_decrypt_post_crypto (vlib_main_t *vm, vlib_node_runtime_t *node,
       else if (next_header == IP_PROTOCOL_IPV6)
 	{
 	  next[0] = ESP_DECRYPT_NEXT_IP6_INPUT;
+	  b->flags |= VLIB_BUFFER_PUNT_FROM_VPN;
+          /* keep the physical ingress interface saved by ipsecX-tun-input */
+          if (0 == vnet_buffer2 (b)->l2_rx_sw_if_index ||
+              ~0 == vnet_buffer2 (b)->l2_rx_sw_if_index)
+          vnet_buffer2 (b)->l2_rx_sw_if_index =
+             vnet_buffer (b)->sw_if_index[VLIB_RX];
 	  b->current_data = pd->current_data + adv;
 	  b->current_length = pd->current_length - adv;
 	  esp_remove_tail_and_tfc_padding (vm, node, pd, b, lb, next, tail,

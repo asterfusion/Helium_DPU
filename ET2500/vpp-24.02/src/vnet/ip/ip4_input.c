@@ -70,6 +70,7 @@ ip4_input_set_next (u32 sw_if_index, vlib_buffer_t * b, int arc_enabled)
   u32 next;
   u8 arc;
   u32 wg_sw_if_index = 0;
+  u32 ipsec_sw_if_index = 0;
   u32 ai = 0;
   u32 peeri = INDEX_INVALID;
 
@@ -89,6 +90,11 @@ ip4_input_set_next (u32 sw_if_index, vlib_buffer_t * b, int arc_enabled)
   if (PREDICT_FALSE(im->get_wg4_callback && (b->flags & VLIB_BUFFER_RECV_FROM_TAP)))
   {
       peeri = im->get_wg4_callback((u8 *)(&ip->dst_address), &ai, &wg_sw_if_index);
+  }
+
+  if (PREDICT_FALSE(peeri == INDEX_INVALID && im->get_ipsec4_callback && (b->flags & VLIB_BUFFER_RECV_FROM_TAP)))
+  {
+      peeri = im->get_ipsec4_callback((u8 *)(&ip->dst_address), &ai, &ipsec_sw_if_index);
   }
 
   if (PREDICT_TRUE(arc_enabled && (peeri == INDEX_INVALID)))

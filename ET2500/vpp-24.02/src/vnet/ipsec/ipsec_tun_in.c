@@ -317,6 +317,16 @@ ipsec_tun_protect_input_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
       vnet_buffer (b[0])->ipsec.sad_index = itr0.sa_index;
       vnet_buffer (b[0])->ipsec.protect_index = itr0.tun_index;
 
+      /* Save the physical ingress interface before it is overwritten below,
+       * so that a packet punted later (e.g. one destined to the tunnel
+       * interface address itself) can be redirected to the host interface
+       * paired with the physical interface.  esp decrypt will otherwise
+       * record the tunnel interface here. */
+      if (0 == vnet_buffer2 (b[0])->l2_rx_sw_if_index ||
+         ~0 == vnet_buffer2 (b[0])->l2_rx_sw_if_index)
+       vnet_buffer2 (b[0])->l2_rx_sw_if_index =
+         vnet_buffer (b[0])->sw_if_index[VLIB_RX];
+
       sw_if_index0 = itr0.sw_if_index;
       vnet_buffer (b[0])->sw_if_index[VLIB_RX] = sw_if_index0;
 
