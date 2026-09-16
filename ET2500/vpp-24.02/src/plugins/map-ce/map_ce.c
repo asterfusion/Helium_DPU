@@ -980,7 +980,7 @@ map_ce_icmp_unreachables_command_fn (vlib_main_t * vm,
 				  vlib_cli_command_t * cmd)
 {
     unformat_input_t _line_input, *line_input = &_line_input;
-    int num_m_args = 0;
+    int num_m_args __attribute__((unused)) = 0;
     clib_error_t *error = NULL;
     bool enabled = false;
 
@@ -1022,7 +1022,7 @@ map_ce_domain_icmp_unreachables_command_fn (vlib_main_t * vm,
 				  vlib_cli_command_t * cmd)
 {
     unformat_input_t _line_input, *line_input = &_line_input;
-    int num_m_args = 0;
+    int num_m_args __attribute__((unused)) = 0;
     clib_error_t *error = NULL;
     bool enabled = false;
     bool is_clean = false;
