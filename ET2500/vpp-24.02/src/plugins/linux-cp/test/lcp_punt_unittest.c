@@ -239,6 +239,106 @@ lcp_copp_match_arbitration_command_fn (vlib_main_t *vm,
       result.trap_type != LCP_TRAP_DHCPV6_L2)
     err = clib_error_return (0, "L2 DHCPv6 context isolation failed");
 
+  if (err)
+    goto done;
+
+  /* BFD is a local-IP trap.  Transit packets and UDP/3785 (BFD echo)
+   * must not be classified as SAI BFD traffic. */
+  view = (lcp_packet_view_t) {
+    .context = LCP_MATCH_CTX_LOCAL4,
+    .valid_fields = LCP_MATCH_FIELD_IP | LCP_MATCH_FIELD_IP_PROTOCOL |
+		    LCP_MATCH_FIELD_L4_PORTS,
+    .ip_protocol = IP_PROTOCOL_UDP,
+    .l4_src_port = 50000,
+    .l4_dst_port = 3784,
+  };
+  if (!lcp_match_select (&view, &result) || result.trap_type != LCP_TRAP_BFD ||
+      result.evidence_rule_id != 212)
+    {
+      err = clib_error_return (0, "local IPv4 BFD/3784 not classified");
+      goto done;
+    }
+  view.l4_dst_port = 4784;
+  if (!lcp_match_select (&view, &result) || result.trap_type != LCP_TRAP_BFD ||
+      result.evidence_rule_id != 220)
+    {
+      err = clib_error_return (0, "local IPv4 BFD/4784 not classified");
+      goto done;
+    }
+  view.l4_dst_port = 3785;
+  if (lcp_match_select (&view, &result))
+    {
+      err = clib_error_return (0, "IPv4 BFD echo classified as BFD");
+      goto done;
+    }
+  view.context = LCP_MATCH_CTX_IP4;
+  view.l4_dst_port = 3784;
+  if (lcp_match_select (&view, &result))
+    {
+      err = clib_error_return (0, "transit IPv4 BFD classified");
+      goto done;
+    }
+
+  view.context = LCP_MATCH_CTX_LOCAL6;
+  if (!lcp_match_select (&view, &result) ||
+      result.trap_type != LCP_TRAP_BFDV6 || result.evidence_rule_id != 316)
+    {
+      err = clib_error_return (0, "local IPv6 BFD/3784 not classified");
+      goto done;
+    }
+  view.l4_dst_port = 4784;
+  if (!lcp_match_select (&view, &result) ||
+      result.trap_type != LCP_TRAP_BFDV6 || result.evidence_rule_id != 322)
+    {
+      err = clib_error_return (0, "local IPv6 BFD/4784 not classified");
+      goto done;
+    }
+  view.context = LCP_MATCH_CTX_IP6;
+  if (lcp_match_select (&view, &result))
+    {
+      err = clib_error_return (0, "transit IPv6 BFD classified");
+      goto done;
+    }
+
+  /* LDP TCP is local-only.  IPv4 LDP UDP matches either port 646. */
+  view = (lcp_packet_view_t) {
+    .context = LCP_MATCH_CTX_LOCAL4,
+    .valid_fields = LCP_MATCH_FIELD_IP | LCP_MATCH_FIELD_IP_PROTOCOL |
+		    LCP_MATCH_FIELD_L4_PORTS,
+    .ip_protocol = IP_PROTOCOL_TCP,
+    .l4_src_port = 646,
+    .l4_dst_port = 50000,
+  };
+  if (!lcp_match_select (&view, &result) || result.trap_type != LCP_TRAP_LDP ||
+      result.evidence_rule_id != 215)
+    {
+      err = clib_error_return (0, "local IPv4 LDP TCP not classified");
+      goto done;
+    }
+  view.context = LCP_MATCH_CTX_IP4;
+  if (lcp_match_select (&view, &result))
+    {
+      err = clib_error_return (0, "transit IPv4 LDP TCP classified");
+      goto done;
+    }
+  view.ip_protocol = IP_PROTOCOL_UDP;
+  view.l4_src_port = 50000;
+  view.l4_dst_port = 646;
+  if (!lcp_match_select (&view, &result) || result.trap_type != LCP_TRAP_LDP ||
+      result.evidence_rule_id != 214)
+    {
+      err = clib_error_return (0, "IPv4 LDP UDP destination not classified");
+      goto done;
+    }
+  view.l4_src_port = 646;
+  view.l4_dst_port = 50000;
+  if (!lcp_match_select (&view, &result) || result.trap_type != LCP_TRAP_LDP ||
+      result.evidence_rule_id != 214)
+    {
+      err = clib_error_return (0, "IPv4 LDP UDP source not classified");
+      goto done;
+    }
+
   /* IS-IS LLC classification must keep SNP and ordinary IS-IS PDUs
    * mutually exclusive. */
   view = (lcp_packet_view_t) {
@@ -601,7 +701,7 @@ lcp_copp_egress_control_command_fn (vlib_main_t *vm,
     { "VRRP", false, IP_PROTOCOL_VRRP, 0, 0, LCP_TRAP_VRRP },
     { "BGPv6", true, IP_PROTOCOL_TCP, 179, 50000, LCP_TRAP_BGPV6 },
     { "OSPFv6", true, IP_PROTOCOL_OSPF, 0, 0, LCP_TRAP_OSPFV6 },
-    { "BFDv6", true, IP_PROTOCOL_UDP, 3785, 50000, LCP_TRAP_BFDV6 },
+    { "BFDv6", true, IP_PROTOCOL_UDP, 4784, 50000, LCP_TRAP_BFDV6 },
     { "DHCPv6", true, IP_PROTOCOL_UDP, 547, 546, LCP_TRAP_DHCPV6 },
     { "VRRPv6", true, IP_PROTOCOL_VRRP, 0, 0, LCP_TRAP_VRRPV6 },
   };
