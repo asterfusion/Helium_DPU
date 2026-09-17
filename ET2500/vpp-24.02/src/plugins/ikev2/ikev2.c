@@ -24,6 +24,8 @@
 #include <vnet/ipsec/ipsec.h>
 #include <vnet/ipsec/ipsec_tun.h>
 #include <vnet/ipip/ipip.h>
+#include <vnet/ip/ip4.h>
+#include <vnet/ip/ip6.h>
 #include <plugins/ikev2/ikev2.h>
 #include <plugins/ikev2/ikev2_priv.h>
 #include <plugins/dns/dns.h>
@@ -4269,6 +4271,8 @@ ikev2_profile_free (ikev2_profile_t * p)
 {
   vec_free (p->name);
 
+  vec_free (p->route_dst_ips);
+
   vec_free (p->auth.data);
   if (p->auth.key)
     EVP_PKEY_free (p->auth.key);
@@ -4605,6 +4609,105 @@ ikev2_set_profile_tunnel_interface (vlib_main_t * vm,
   p->tun_itf = sw_if_index;
 
   return 0;
+}
+
+clib_error_t *
+ikev2_set_profile_route_dst (vlib_main_t * vm, u8 * name,
+			     fib_prefix_t * route_dst_ips)
+{
+  ikev2_profile_t *p;
+  clib_error_t *r;
+  u32 ii;
+
+  p = ikev2_profile_index_by_name (name);
+
+  if (!p)
+    {
+      r = clib_error_return (0, "unknown profile %v", name);
+      return r;
+    }
+
+  if (route_dst_ips && vec_len (route_dst_ips) > 0)
+    {
+      vec_validate (p->route_dst_ips, vec_len (route_dst_ips) - 1);
+      vec_set_len (p->route_dst_ips, vec_len (route_dst_ips));
+      vec_foreach_index (ii, route_dst_ips)
+	{
+	  p->route_dst_ips[ii] = route_dst_ips[ii];
+	}
+    }
+
+  else
+    {
+      vec_free (p->route_dst_ips);
+      p->route_dst_ips = NULL;
+    }
+
+  if (NULL == ip4_main.get_ipsec4_callback)
+    {
+      ip4_main.get_ipsec4_callback = ipsec_dst_ip4_match;
+    }
+
+  if (NULL == ip6_main.get_ipsec6_callback)
+    {
+      ip6_main.get_ipsec6_callback = ipsec_dst_ip6_match;
+    }
+
+  return 0;
+}
+
+u32
+ipsec_dst_ip4_match (u8 * dst_ip, u32 * ai, u32 * ipsec_sw_if_index)
+{
+  ikev2_main_t *km = &ikev2_main;
+  ikev2_profile_t *p;
+  fib_prefix_t *route_dst_ips;
+  ip4_address_t *dst = (ip4_address_t *) dst_ip;
+
+  /* *INDENT-OFF* */
+  pool_foreach (p, km->profiles)
+    {
+      vec_foreach (route_dst_ips, p->route_dst_ips)
+	{
+	  if (route_dst_ips->fp_proto == FIB_PROTOCOL_IP4 &&
+	      ip4_destination_matches_route (&ip4_main, &route_dst_ips->fp_addr.ip4,
+					     dst, route_dst_ips->fp_len))
+	    {
+	      *ipsec_sw_if_index = p->tun_itf;
+	      return 0;
+	    }
+	}
+    }
+  /* *INDENT-ON* */
+
+  return INDEX_INVALID;
+}
+
+u32
+ipsec_dst_ip6_match (u8 * dst_ip, u32 * ai, u32 * ipsec_sw_if_index)
+{
+  ikev2_main_t *km = &ikev2_main;
+  ikev2_profile_t *p;
+  fib_prefix_t *route_dst_ips;
+  ip6_address_t *dst = (ip6_address_t *) dst_ip;
+
+  /* *INDENT-OFF* */
+  pool_foreach (p, km->profiles)
+    {
+      vec_foreach (route_dst_ips, p->route_dst_ips)
+	{
+	  if (route_dst_ips->fp_proto == FIB_PROTOCOL_IP6 &&
+	      ip6_destination_matches_route (&ip6_main, &route_dst_ips->fp_addr.ip6,
+					     dst, route_dst_ips->fp_len))
+	    {
+	      *ipsec_sw_if_index = p->tun_itf;
+	      return 0;
+	    }
+	}
+    }
+  /* *INDENT-ON* */
+
+  return INDEX_INVALID;
 }
 
 vnet_api_error_t

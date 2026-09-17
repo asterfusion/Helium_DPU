@@ -1112,8 +1112,25 @@ static void
   u8 *tmp = format (0, "%s", mp->name);
   clib_error_t *error;
 
-  error = ikev2_set_profile_tunnel_interface (vlib_get_main (), tmp,
-					      ntohl (mp->sw_if_index));
+  if (mp->n_route_dst_ips > 0)
+    {
+      fib_prefix_t *route_dst_ips = NULL;
+      vec_validate (route_dst_ips, mp->n_route_dst_ips - 1);
+      for (int i = 0; i < mp->n_route_dst_ips; i++)
+	{
+	  ip_prefix_decode (&mp->route_dst_ips[i], &route_dst_ips[i]);
+	}
+
+      error = ikev2_set_profile_route_dst (vlib_get_main (), tmp,
+					   route_dst_ips);
+      vec_free (route_dst_ips);
+    }
+
+  else
+    {
+      error = ikev2_set_profile_tunnel_interface (vlib_get_main (), tmp,
+						  ntohl (mp->sw_if_index));
+    }
 
   if (error)
     {

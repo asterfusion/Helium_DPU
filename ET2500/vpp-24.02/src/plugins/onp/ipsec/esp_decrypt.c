@@ -272,9 +272,21 @@ onp_esp_dec_post_process (vlib_main_t *vm, ipsec_sa_t *sa, vlib_buffer_t *b,
     {
     case IP_PROTOCOL_IP_IN_IP:
       *next = ONP_ESP_DECRYPT_NEXT_IP4_INPUT;
+      b->flags |= VLIB_BUFFER_PUNT_FROM_WG;
+      /* keep the physical ingress interface saved by ipsecX-tun-input */
+      if (0 == vnet_buffer2 (b)->l2_rx_sw_if_index ||
+         ~0 == vnet_buffer2 (b)->l2_rx_sw_if_index)
+       vnet_buffer2 (b)->l2_rx_sw_if_index =
+         vnet_buffer (b)->sw_if_index[VLIB_RX];
       return 0;
     case IP_PROTOCOL_IPV6:
       *next = ONP_ESP_DECRYPT_NEXT_IP6_INPUT;
+      b->flags |= VLIB_BUFFER_PUNT_FROM_WG;
+      /* keep the physical ingress interface saved by ipsecX-tun-input */
+      if (0 == vnet_buffer2 (b)->l2_rx_sw_if_index ||
+         ~0 == vnet_buffer2 (b)->l2_rx_sw_if_index)
+       vnet_buffer2 (b)->l2_rx_sw_if_index =
+         vnet_buffer (b)->sw_if_index[VLIB_RX];
       return 0;
     case IP_PROTOCOL_MPLS_IN_IP:
       *next = ONP_ESP_DECRYPT_NEXT_MPLS_INPUT;
