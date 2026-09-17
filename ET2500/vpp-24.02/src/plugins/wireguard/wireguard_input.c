@@ -409,7 +409,7 @@ wg_input_post_process (vlib_main_t *vm, vlib_buffer_t *b, u16 *next,
           vnet_buffer2 (b)->l2_rx_sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
       }
 
-      b->flags |= VLIB_BUFFER_PUNT_FROM_WG;
+      b->flags |= VLIB_BUFFER_PUNT_FROM_VPN;
       vnet_buffer (b)->sw_if_index[VLIB_RX] = peer->wg_sw_if_index;
       next[0] =
 	is_ip4_inner ? WG_INPUT_NEXT_IP4_INPUT : WG_INPUT_NEXT_IP6_INPUT;
