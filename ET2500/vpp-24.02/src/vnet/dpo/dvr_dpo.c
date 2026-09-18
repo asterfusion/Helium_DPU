@@ -327,7 +327,7 @@ dvr_dpo_inline (vlib_main_t * vm,
                     (u8*)ethernet_buffer_get_header(b0));
             len1 = ((u8*)vlib_buffer_get_current(b1) -
                     (u8*)ethernet_buffer_get_header(b1));
-            if (PREDICT_FALSE(b0->flags & VLIB_BUFFER_PUNT_FROM_WG))
+            if (PREDICT_FALSE(b0->flags & VLIB_BUFFER_PUNT_FROM_VPN))
             {
                 memcpy((u8*)vlib_buffer_get_current(b0) - 14, (u8*)ethernet_buffer_get_header(b0), 14);
                 len0 = 14; //size of l2 header
@@ -343,7 +343,7 @@ dvr_dpo_inline (vlib_main_t * vm,
                 }
                 b0->flags &= ~(VNET_BUFFER_F_GSO | VNET_BUFFER_F_OFFLOAD);
             }
-            if (PREDICT_FALSE(b1->flags & VLIB_BUFFER_PUNT_FROM_WG))
+            if (PREDICT_FALSE(b1->flags & VLIB_BUFFER_PUNT_FROM_VPN))
             {
                 memcpy((u8*)vlib_buffer_get_current(b1) - 14, (u8*)ethernet_buffer_get_header(b1), 14);
                 len1 = 14; //size of l2 header
@@ -426,7 +426,7 @@ dvr_dpo_inline (vlib_main_t * vm,
             len0 = ((u8*)vlib_buffer_get_current(b0) -
                     (u8*)ethernet_buffer_get_header(b0));
 
-            if (PREDICT_FALSE(b0->flags & VLIB_BUFFER_PUNT_FROM_WG))
+            if (PREDICT_FALSE(b0->flags & VLIB_BUFFER_PUNT_FROM_VPN))
             {
                 memcpy((u8*)vlib_buffer_get_current(b0) - 14, (u8*)ethernet_buffer_get_header(b0), 14);
                 len0 = 14; //size of l2 header

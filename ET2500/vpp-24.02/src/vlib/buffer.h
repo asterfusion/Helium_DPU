@@ -102,7 +102,7 @@ enum
 };
 
 /*punt-from-wg and dpu-to-host-hdr-valid use the same vlue for dpu-to-host-hdr-valid is currently not being used*/
-#define VLIB_BUFFER_PUNT_FROM_WG      VLIB_BUFFER_DPU_TO_HOST_HDR_VALID
+#define VLIB_BUFFER_PUNT_FROM_VPN      VLIB_BUFFER_DPU_TO_HOST_HDR_VALID
 
 /*recv-from-tap and domain-valid use the same vlue for domain-valid is currently not being used*/
 #define VLIB_BUFFER_DOMAIN_VALID      VLIB_BUFFER_RECV_FROM_TAP

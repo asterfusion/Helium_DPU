@@ -33,6 +33,7 @@
 #include <sys/time.h>
 
 #include <vcl/vcl_locked.h>
+#include <vcl/vcl_private.h>
 #include <vppinfra/time.h>
 #include <vppinfra/bitmap.h>
 #include <vppinfra/lock.h>
@@ -155,6 +156,57 @@ static inline ldp_worker_ctx_t *
 ldp_worker_get_current (void)
 {
   return (ldp->workers + vppcom_worker_index ());
+}
+
+/*
+ * Get the mq epoll fd. The ldp worker ctx is inherited across fork() and
+ * may hold a stale epfd from the parent or a previous worker generation, so
+ * prefer the current vcl worker's mqs_epfd which is authoritative.
+ */
+static inline int
+ldp_get_mq_epfd (ldp_worker_ctx_t * ldpw)
+{
+  vcl_worker_t *wrk;
+
+  if (vppcom_worker_index () != ~0 &&
+      (wrk = vcl_worker_get_if_valid (vppcom_worker_index ())) &&
+      wrk->mqs_epfd > 0)
+    return wrk->mqs_epfd;
+  return ldpw->vcl_mq_epfd;
+}
+
+/*
+ * Nest the vcl mq epoll fd into a vep's libc epoll fd, so that mq events
+ * wake up the app's epoll_wait. The mq_epfd_added flag that used to gate
+ * this is per-process and inherited across fork(), while libc epfds are
+ * per-vep and get recreated, so the flag can be stale - just add and
+ * tolerate EEXIST.
+ */
+static inline int
+ldp_nest_mq_epfd (ldp_worker_ctx_t * ldpw, int epfd, int libc_epfd)
+{
+  struct epoll_event e = { 0 };
+  int mq_epfd;
+
+  if (libc_epfd <= 0 || vppcom_worker_index () == ~0)
+    return 0;
+
+  mq_epfd = ldp_get_mq_epfd (ldpw);
+  if (mq_epfd <= 0)
+    return 0;
+
+  e.events = EPOLLIN;
+  e.data.fd = mq_epfd;
+  if (libc_epoll_ctl (libc_epfd, EPOLL_CTL_ADD, mq_epfd, &e) < 0)
+    {
+      if (errno == EEXIST)
+	return 0;
+      LDBG (0, "epfd %d, add mq epoll fd %d to libc epoll fd %d failed: "
+	    "errno %d", epfd, mq_epfd, libc_epfd, errno);
+      return -1;
+    }
+
+  return 1;
 }
 
 /*
@@ -2493,6 +2545,9 @@ epoll_ctl (int epfd, int op, int fd, struct epoll_event *event)
 	      rv = -1;
 	      goto done;
 	    }
+
+	  /* New libc epfd: nest the mq epoll fd so mq events wake the app */
+	  ldp_nest_mq_epfd (ldp_worker_get_current (), epfd, libc_epfd);
 	}
       else if (PREDICT_FALSE (libc_epfd < 0))
 	{
@@ -2532,7 +2587,7 @@ ldp_epoll_pwait (int epfd, struct epoll_event *events, int maxevents,
     vls_register_vcl_worker ();
 
   ldpw = ldp_worker_get_current ();
-  if (epfd == ldpw->vcl_mq_epfd)
+  if (epfd == ldp_get_mq_epfd (ldpw))
     return libc_epoll_pwait (epfd, events, maxevents, timeout, sigmask);
 
   ep_vlsh = ldp_fd_to_vlsh (epfd);
@@ -2615,7 +2670,7 @@ ldp_epoll_pwait_eventfd (int epfd, struct epoll_event *events,
     vls_register_vcl_worker ();
 
   ldpw = ldp_worker_get_current ();
-  if (epfd == ldpw->vcl_mq_epfd)
+  if (epfd == ldp_get_mq_epfd (ldpw))
     return libc_epoll_pwait (epfd, events, maxevents, timeout, sigmask);
 
   ep_vlsh = ldp_fd_to_vlsh (epfd);
@@ -2647,6 +2702,9 @@ ldp_epoll_pwait_eventfd (int epfd, struct epoll_event *events,
 	  rv = -1;
 	  goto done;
 	}
+
+      /* New libc epfd: nest the mq epoll fd so mq events wake the app */
+      ldp_nest_mq_epfd (ldpw, epfd, libc_epfd);
     }
   if (PREDICT_FALSE (libc_epfd <= 0))
     {
@@ -2657,14 +2715,9 @@ ldp_epoll_pwait_eventfd (int epfd, struct epoll_event *events,
 
   if (PREDICT_FALSE (!ldpw->mq_epfd_added))
     {
-      struct epoll_event e = { 0 };
-      e.events = EPOLLIN;
-      e.data.fd = ldpw->vcl_mq_epfd;
-      if (libc_epoll_ctl (libc_epfd, EPOLL_CTL_ADD, ldpw->vcl_mq_epfd, &e) <
-	  0)
+      /* Idempotent: fine if the create path above already nested it */
+      if (ldp_nest_mq_epfd (ldpw, epfd, libc_epfd) < 0)
 	{
-	  LDBG (0, "epfd %d, add libc mq epoll fd %d to libc epoll fd %d",
-		epfd, ldpw->vcl_mq_epfd, libc_epfd);
 	  rv = -1;
 	  goto done;
 	}
@@ -2700,7 +2753,7 @@ epoll_again:
 
   for (int i = 0; i < libc_num_ev; i++)
     {
-      if (libc_evts[i].data.fd == ldpw->vcl_mq_epfd)
+      if (libc_evts[i].data.fd == ldp_get_mq_epfd (ldpw))
 	{
 	  /* We should remove mq epoll fd from events. */
 	  libc_num_ev--;

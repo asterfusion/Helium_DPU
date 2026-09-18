@@ -160,6 +160,16 @@ typedef struct session_worker_
   u16 batch_num;
   vlib_dma_batch_t *batch;
 
+  /** Time when sessions entered ACCEPTING state, indexed by session
+   * index. Used to reap sessions the app never accepted/rejected */
+  f64 *accepting_since;
+
+  /** Number of sessions in ACCEPTING state. Gates accepting sweeps */
+  u32 n_accepting;
+
+  /** Last time accepting sessions were swept */
+  f64 last_accepting_sweep;
+
   session_wrk_stats_t stats;
 
 #if SESSION_DEBUG
@@ -519,6 +529,13 @@ int session_stream_accept (transport_connection_t * tc, u32 listener_index,
 			   u32 thread_index, u8 notify);
 int session_dgram_accept (transport_connection_t * tc, u32 listener_index,
 			  u32 thread_index);
+
+/**
+ * Stop tracking a session that left ACCEPTING state
+ *
+ * @param s			session to stop tracking
+ */
+void session_accepting_untrack (session_t *s);
 
 /**
  * Initialize session layer for given transport proto and ip version

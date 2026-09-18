@@ -765,6 +765,9 @@ int vcl_segment_attach_session (uword segment_handle, uword rxf_offset,
 				u32 mq_index, u8 is_ct, vcl_session_t *s);
 int vcl_segment_attach_mq (uword segment_handle, uword mq_offset, u32 mq_index,
 			   svm_msg_q_t **mq);
+int vppcom_wait_for_session_state_change (u32 session_index,
+					  vcl_session_state_t state,
+					  f64 wait_for_time);
 int vcl_segment_discover_mqs (uword segment_handle, int *fds, u32 n_fds);
 svm_fifo_chunk_t *vcl_segment_alloc_chunk (uword segment_handle,
 					   u32 slice_index, u32 size,

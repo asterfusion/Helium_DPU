@@ -79,7 +79,8 @@ vcl_mq_epoll_add_evfd (vcl_worker_t * wrk, svm_msg_q_t * mq)
   e.data.u32 = mqc_index;
   if (epoll_ctl (wrk->mqs_epfd, EPOLL_CTL_ADD, mq_fd, &e) < 0)
     {
-      VDBG (0, "failed to add mq eventfd to mq epoll fd");
+      VDBG (0, "failed to add mq eventfd %d to mq epoll fd %d errno %d",
+	    mq_fd, wrk->mqs_epfd, errno);
       return -1;
     }
 

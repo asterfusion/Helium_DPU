@@ -17,9 +17,84 @@
  * limitations under the License.
  */
 
-option version = "1.0.0";
+option version = "1.3.0";
 
 import "vnet/interface_types.api";
+
+enum lcp_copp_action : u8
+{
+  LCP_COPP_ACTION_DROP = 0,
+  LCP_COPP_ACTION_FORWARD = 1,
+  LCP_COPP_ACTION_COPY = 2,
+  LCP_COPP_ACTION_TRAP = 3,
+};
+
+enum lcp_trap_type : u8
+{
+  LCP_TRAP_INVALID = 0,
+  LCP_TRAP_DEFAULT,
+  LCP_TRAP_STP,
+  LCP_TRAP_LACP,
+  LCP_TRAP_LLDP,
+  LCP_TRAP_IGMP_QUERY,
+  LCP_TRAP_IGMP_LEAVE,
+  LCP_TRAP_IGMP_V1_REPORT,
+  LCP_TRAP_IGMP_V2_REPORT,
+  LCP_TRAP_IGMP_V3_REPORT,
+  LCP_TRAP_PTP,
+  LCP_TRAP_PTP_TX_EVENT,
+  LCP_TRAP_DHCP_L2,
+  LCP_TRAP_DHCPV6_L2,
+  LCP_TRAP_ICCP,
+  LCP_TRAP_SNP,
+  LCP_TRAP_TELNET,
+  LCP_TRAP_ICMP_ECHO,
+  LCP_TRAP_ACL,
+  LCP_TRAP_PPPOE_DISCOVERY,
+  LCP_TRAP_PPPOE_CONTROL,
+  LCP_TRAP_PPPOE_SESSION_MISS,
+  LCP_TRAP_ARP_REQUEST,
+  LCP_TRAP_ARP_RESPONSE,
+  LCP_TRAP_DHCP,
+  LCP_TRAP_OSPF,
+  LCP_TRAP_PIM,
+  LCP_TRAP_VRRP,
+  LCP_TRAP_DHCPV6,
+  LCP_TRAP_OSPFV6,
+  LCP_TRAP_VRRPV6,
+  LCP_TRAP_IPV6_NEIGHBOR_DISCOVERY,
+  LCP_TRAP_IPV6_MLD_V1_V2,
+  LCP_TRAP_IPV6_MLD_V1_REPORT,
+  LCP_TRAP_IPV6_MLD_V1_DONE,
+  LCP_TRAP_MLD_V2_REPORT,
+  LCP_TRAP_UNKNOWN_L3_MULTICAST,
+  LCP_TRAP_SNAT_MISS,
+  LCP_TRAP_DNAT_MISS,
+  LCP_TRAP_NAT_HAIRPIN,
+  LCP_TRAP_IPV6_NEIGHBOR_SOLICITATION,
+  LCP_TRAP_IPV6_NEIGHBOR_ADVERTISEMENT,
+  LCP_TRAP_ISIS,
+  LCP_TRAP_IP2ME,
+  LCP_TRAP_SSH,
+  LCP_TRAP_SNMP,
+  LCP_TRAP_BGP,
+  LCP_TRAP_BGPV6,
+  LCP_TRAP_BFD,
+  LCP_TRAP_BFDV6,
+  LCP_TRAP_BFD_MICRO,
+  LCP_TRAP_BFDV6_MICRO,
+  LCP_TRAP_LDP,
+  LCP_TRAP_GNMI,
+  LCP_TRAP_P4RT,
+  LCP_TRAP_NTPCLIENT,
+  LCP_TRAP_NTPSERVER,
+  LCP_TRAP_HTTPCLIENT,
+  LCP_TRAP_HTTPSERVER,
+  LCP_TRAP_STATIC_FDB_MOVE,
+  LCP_TRAP_TFTP,
+  LCP_TRAP_FTP,
+  LCP_TRAP_N_TYPES,
+};
 
 /** \brief Set the default Linux Control Plane netns
     @param client_index - opaque cookie to identify the sender
@@ -284,6 +359,84 @@ autoreply define lcp_set_interface_pvlan
   u32 context;
   vl_api_interface_index_t sw_if_index;
   u16 pvlan;
+};
+
+/** \brief Add a CoPP trap policy. */
+autoreply autoendian define lcp_copp_trap_add
+{
+  u32 client_index;
+  u32 context;
+  vl_api_lcp_trap_type_t trap_id;
+  vl_api_lcp_copp_action_t action;
+  u32 priority;
+  u32 policer_index;
+};
+
+/** \brief Replace an existing CoPP trap policy. */
+autoreply autoendian define lcp_copp_trap_update
+{
+  u32 client_index;
+  u32 context;
+  vl_api_lcp_trap_type_t trap_id;
+  vl_api_lcp_copp_action_t action;
+  u32 priority;
+  u32 policer_index;
+};
+
+/** \brief Delete a CoPP trap policy. */
+autoreply autoendian define lcp_copp_trap_del
+{
+  u32 client_index;
+  u32 context;
+  vl_api_lcp_trap_type_t trap_id;
+};
+
+/** \brief Dump all configured CoPP trap policies. */
+autoendian define lcp_copp_trap_dump
+{
+  u32 client_index;
+  u32 context;
+};
+
+/** \brief CoPP trap policy details. */
+autoendian define lcp_copp_trap_details
+{
+  u32 context;
+  vl_api_lcp_trap_type_t trap_id;
+  vl_api_lcp_copp_action_t action;
+  u32 priority;
+  u32 policer_index;
+};
+
+/** \brief Clear all CoPP statistics. */
+autoreply autoendian define lcp_copp_stats_clear
+{
+  u32 client_index;
+  u32 context;
+};
+
+/** \brief Idempotently enable or disable shallow reassembly for LCP CoPP. */
+autoreply autoendian define lcp_copp_reassembly_enable_disable
+{
+  u32 client_index;
+  u32 context;
+  bool enable;
+};
+
+/** \brief Get the LCP CoPP shallow reassembly state. */
+autoendian define lcp_copp_reassembly_get
+{
+  u32 client_index;
+  u32 context;
+};
+
+/** \brief LCP CoPP shallow reassembly state. */
+autoendian define lcp_copp_reassembly_get_reply
+{
+  u32 context;
+  i32 retval;
+  bool enabled;
+  u32 enabled_interfaces;
 };
 
 /*

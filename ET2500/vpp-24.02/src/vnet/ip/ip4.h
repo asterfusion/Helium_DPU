@@ -165,6 +165,8 @@ typedef struct ip4_main_t
   u16 msg_id_base;
 
   u32 (*get_wg4_callback) (u8 *, u32 *, u32 *);
+
+  u32 (*get_ipsec4_callback) (u8 *, u32 *, u32 *);
 } ip4_main_t;
 
 #define ARP_THROTTLE_BITS	(512)

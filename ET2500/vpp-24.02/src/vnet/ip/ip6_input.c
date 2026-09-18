@@ -103,6 +103,8 @@ VLIB_NODE_FN (ip6_input_node) (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  u8 arc0, arc1;
           u32 wg_sw_if_index0 = 0;
           u32 wg_sw_if_index1 = 0;
+          u32 ipsec_sw_if_index0 = 0;
+          u32 ipsec_sw_if_index1 = 0;
           u32 ai0 = 0;
           u32 ai1 = 0;
           u32 peeri0 = INDEX_INVALID;
@@ -186,6 +188,19 @@ VLIB_NODE_FN (ip6_input_node) (vlib_main_t * vm, vlib_node_runtime_t * node,
               }
           }
 
+          if (PREDICT_FALSE(NULL != im->get_ipsec6_callback))
+          {
+              if (PREDICT_FALSE(peeri0 == INDEX_INVALID && (p0->flags & VLIB_BUFFER_RECV_FROM_TAP)))
+              {
+                  peeri0 = im->get_ipsec6_callback((u8 *)(&ip0->dst_address), &ai0, &ipsec_sw_if_index0);
+              }
+
+              if (PREDICT_FALSE(peeri1 == INDEX_INVALID && (p1->flags & VLIB_BUFFER_RECV_FROM_TAP)))
+              {
+                  peeri1 = im->get_ipsec6_callback((u8 *)(&ip1->dst_address), &ai1, &ipsec_sw_if_index1);
+              }
+          }
+
           if (PREDICT_TRUE(peeri0 == INDEX_INVALID))
           {
               vnet_feature_arc_start (arc0, sw_if_index0, &next0, p0);
@@ -215,6 +230,7 @@ VLIB_NODE_FN (ip6_input_node) (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  u8 arc0;
           ip6_main_t *im = &ip6_main;
           u32 wg_sw_if_index0 = 0;
+          u32 ipsec_sw_if_index0 = 0;
           u32 ai0 = 0;
           u32 peeri0 = INDEX_INVALID;
 
@@ -246,6 +262,11 @@ VLIB_NODE_FN (ip6_input_node) (vlib_main_t * vm, vlib_node_runtime_t * node,
           if (PREDICT_FALSE(im->get_wg6_callback && (p0->flags & VLIB_BUFFER_RECV_FROM_TAP)))
           {
               peeri0 = im->get_wg6_callback((u8 *)(&ip0->dst_address), &ai0, &wg_sw_if_index0);
+          }
+
+          if (PREDICT_FALSE(peeri0 == INDEX_INVALID && im->get_ipsec6_callback && (p0->flags & VLIB_BUFFER_RECV_FROM_TAP)))
+          {
+              peeri0 = im->get_ipsec6_callback((u8 *)(&ip0->dst_address), &ai0, &ipsec_sw_if_index0);
           }
 
           if (PREDICT_TRUE(peeri0 == INDEX_INVALID))

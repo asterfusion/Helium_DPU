@@ -539,6 +539,7 @@ typedef struct
   * Set by linux-cp-arp-phy when an ARP packet or a NDP packet has been
   * successfully copied and queued for the Linux host interface.*/
   u8 lcp_host_copy_done : 1;
+  u8 trap_id; /* store the CoPP trap ID */
   };
 
   u32 unused[8];

@@ -165,6 +165,8 @@ typedef struct ip6_main_t
   u8 hbh_enabled;
 
   u32 (*get_wg6_callback) (u8 *, u32 *, u32 *);
+
+  u32 (*get_ipsec6_callback) (u8 *, u32 *, u32 *);
 } ip6_main_t;
 
 #define ND_THROTTLE_BITS 512

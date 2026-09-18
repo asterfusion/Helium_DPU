@@ -17,6 +17,7 @@
 
 #include <vnet/vnet.h>
 #include <vnet/ip/ip.h>
+#include <vnet/fib/fib_types.h>
 
 #include <vppinfra/error.h>
 
@@ -409,6 +410,10 @@ clib_error_t *ikev2_set_profile_sa_lifetime (vlib_main_t * vm, u8 * name,
 					     u32 handover, u64 maxdata);
 clib_error_t *ikev2_set_profile_tunnel_interface (vlib_main_t * vm, u8 * name,
 						  u32 sw_if_index);
+clib_error_t *ikev2_set_profile_route_dst (vlib_main_t * vm, u8 * name,
+					   fib_prefix_t * route_dst_ips);
+u32 ipsec_dst_ip4_match (u8 * dst_ip, u32 * ai, u32 * ipsec_sw_if_index);
+u32 ipsec_dst_ip6_match (u8 * dst_ip, u32 * ai, u32 * ipsec_sw_if_index);
 vnet_api_error_t ikev2_set_profile_ipsec_udp_port (vlib_main_t * vm,
 						   u8 * name, u16 port,
 						   u8 is_set);

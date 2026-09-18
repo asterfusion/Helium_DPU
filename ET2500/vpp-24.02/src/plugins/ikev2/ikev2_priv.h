@@ -17,6 +17,7 @@
 
 #include <vnet/vnet.h>
 #include <vnet/ip/ip.h>
+#include <vnet/fib/fib_types.h>
 #include <vnet/ethernet/ethernet.h>
 
 #include <plugins/ikev2/ikev2.h>
@@ -375,6 +376,9 @@ typedef struct
   u32 tun_itf;
   u8 udp_encap;
   u8 natt_disabled;
+
+  /* flow redirect ip prefixes */
+  fib_prefix_t *route_dst_ips;
 } ikev2_profile_t;
 
 typedef enum

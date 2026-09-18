@@ -270,7 +270,30 @@ app_worker_start_listen (app_worker_t *app_wrk, app_listener_t *app_listener)
   int rv;
 
   if (clib_bitmap_get (app_listener->workers, app_wrk->wrk_map_index))
-    return SESSION_E_ALREADY_LISTENING;
+    {
+      /* The workers bitmap is indexed by map index, which is recycled as
+       * app workers are freed and reallocated. A set bit can therefore be
+       * stale, left behind by a previous holder of this map index that was
+       * freed without an unlisten. Trust it only if this worker actually
+       * tracks the listener; otherwise clear the bit and continue, or a
+       * recycled map index could never listen again. */
+      if (app_listener->session_index != SESSION_INVALID_INDEX)
+	{
+	  ls = session_get (app_listener->session_index, 0);
+	  if (hash_get (app_wrk->listeners_table,
+			listen_session_get_handle (ls)))
+	    return SESSION_E_ALREADY_LISTENING;
+	}
+      if (app_listener->local_index != SESSION_INVALID_INDEX)
+	{
+	  ls = session_get (app_listener->local_index, 0);
+	  if (hash_get (app_wrk->listeners_table,
+			listen_session_get_handle (ls)))
+	    return SESSION_E_ALREADY_LISTENING;
+	}
+      clib_bitmap_set_no_check (app_listener->workers,
+				app_wrk->wrk_map_index, 0);
+    }
 
   app_listener->workers = clib_bitmap_set (app_listener->workers,
 					   app_wrk->wrk_map_index, 1);
@@ -279,17 +302,24 @@ app_worker_start_listen (app_worker_t *app_wrk, app_listener_t *app_listener)
     {
       ls = session_get (app_listener->session_index, 0);
       if ((rv = app_worker_init_listener (app_wrk, ls)))
-	return rv;
+	goto error;
     }
 
   if (app_listener->local_index != SESSION_INVALID_INDEX)
     {
       ls = session_get (app_listener->local_index, 0);
       if ((rv = app_worker_init_listener (app_wrk, ls)))
-	return rv;
+	goto error;
     }
 
   return 0;
+
+error:
+  /* Rollback worker bit or listener ends up with a worker that has no
+   * segment manager for it */
+  app_listener->workers = clib_bitmap_set (app_listener->workers,
+					   app_wrk->wrk_map_index, 0);
+  return rv;
 }
 
 static void
@@ -344,8 +374,11 @@ app_worker_stop_listen_session (app_worker_t * app_wrk, session_t * ls)
 	}
       else
 	{
-	  /* Delete sessions in CREATED state */
+	  /* Delete sessions in CREATED state. Also cleanup sessions in
+	   * ACCEPTING state: the listener is going away so their ACCEPTED
+	   * notifications can no longer be acted upon by the app */
 	  vec_add1 (states, SESSION_STATE_CREATED);
+	  vec_add1 (states, SESSION_STATE_ACCEPTING);
 	  segment_manager_del_sessions_filter (sm, states);
 	  vec_free (states);
 
@@ -804,6 +837,7 @@ app_wrk_send_ctrl_evt_inline (app_worker_t *app_wrk, u8 evt_type, void *msg,
   session_event_t *evt;
 
   ASSERT (!svm_msg_q_or_ring_is_full (mq, SESSION_MQ_CTRL_EVT_RING));
+
   *mq_msg = svm_msg_q_alloc_msg_w_ring (mq, SESSION_MQ_CTRL_EVT_RING);
 
   evt = svm_msg_q_msg_data (mq, mq_msg);
