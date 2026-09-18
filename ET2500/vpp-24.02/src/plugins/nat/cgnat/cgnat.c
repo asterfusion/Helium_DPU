@@ -180,6 +180,9 @@ cgnat_init (vlib_main_t *vm)
   node = vlib_get_node_by_name (vm, (u8 *) "cgnat-out2in");
   cm->out2in_node_index = node->index;
 
+  node = vlib_get_node_by_name (vm, (u8 *) "cgnat-out2in-slow");
+  cm->out2in_slow_node_index = node->index;
+
   return cgnat_api_hookup (vm);
 }
 

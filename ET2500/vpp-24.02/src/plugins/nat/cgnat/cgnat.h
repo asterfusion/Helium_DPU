@@ -54,19 +54,19 @@
  * edge.  (The template ASSERTs slow_ring_offset < 512, so 262144 must not
  * be armed directly.) */
 #define CGNAT_TIMER_MAX_DELAY 262143
-#define CGNAT_SESSION_TIMER_MAX_EXPIRATIONS 32768
+#define CGNAT_SESSION_TIMER_MAX_EXPIRATIONS (256 * 1024)
 #define CGNAT_COOLING_TIMER_MAX_EXPIRATIONS 1024
 /* Safety cap on total expirations processed in one timer-process wakeup
  * (drain loop), so an expiry storm cannot starve other main-thread
  * processes. */
-#define CGNAT_SESSION_TIMER_DRAIN_CAP (128 * 1024)
+#define CGNAT_SESSION_TIMER_DRAIN_CAP (256 * 1024)
 #define CGNAT_COOLING_TIMER_DRAIN_CAP (16 * 1024)
 #define CGNAT_SESSION_TIMER_VEC (1024 * 1024)
 /* Fixed margin over max_sessions for timer bookkeeping pools: covers one
  * in-flight drain round plus re-arm races (double occupancy while the old
  * entry awaits processing).  Operator-scale mass deletes may exceed it and
  * fall back to pool growth, which is a one-time transient. */
-#define CGNAT_SESSION_TIMER_POOL_MARGIN (128 * 1024)
+#define CGNAT_SESSION_TIMER_POOL_MARGIN (256 * 1024)
 #define CGNAT_COOLING_TIMER_VEC (1024 * 16)
 #define CGNAT_LOG_FIFO_SIZE (256 * 1024)
 #define CGNAT_LOG_POLL_INTERVAL_DEFAULT (0.01)
@@ -289,7 +289,13 @@ typedef enum
   CGNAT_SESSION_FLAG_SEEN_OUT2IN = 2,
   CGNAT_SESSION_FLAG_DELETING = 4,
   CGNAT_SESSION_FLAG_ADF_REMOTE_RECORDED = 8,
+  /* Allocated from the VPP pool and parked in a worker-local create cache,
+   * but not yet published in the session bihash. */
+  CGNAT_SESSION_FLAG_RESERVED = 16,
 } cgnat_session_flags_t;
+
+#define CGNAT_SESSION_CACHE_BATCH_DEFAULT 128
+#define CGNAT_SESSION_CACHE_BATCH_MAX 1024
 
 typedef struct
 {
@@ -318,6 +324,8 @@ typedef struct
 
 typedef struct
 {
+  /* Keep each public-IP lock on its own cache line in the pool. */
+  CLIB_CACHE_LINE_ALIGN_MARK (cacheline0);
   ip4_address_t addr;
 
   u16 total_blocks;
@@ -341,6 +349,8 @@ typedef struct
   /* Contains only ALLOCATED and COOLING blocks. FREE has no structure. */
   cgnat_block_t *blocks;
 } cgnat_public_ip_t;
+
+STATIC_ASSERT_SIZEOF (cgnat_public_ip_t, 64);
 
 typedef struct
 {
@@ -547,6 +557,13 @@ typedef struct
   u16 public_port;
   u8 protocol;
 } cgnat_session_filter_t;
+
+typedef struct
+{
+  /* Session indices already reserved from cm->sessions by this thread.
+   * They remain allocated in the VPP pool and carry RESERVED until used. */
+  u32 *indices;
+} cgnat_session_cache_t;
 
 typedef struct
 {
@@ -757,6 +774,7 @@ typedef struct
 
   cgnat_interface_t *interfaces;
   u32 *interface_index_by_sw_if_index;
+  u8 *interface_roles;
 
   cgnat_instance_t *instances;
   uword *instance_index_by_id;
@@ -785,6 +803,8 @@ typedef struct
    * writes are plain (non-atomic) increments of the calling thread's slot;
    * readers aggregate via cgnat_session_counts(). */
   cgnat_session_counters_t *session_counters_per_thread;
+  cgnat_session_cache_t *session_caches;
+  u32 session_cache_batch_size;
   clib_spinlock_t mapping_table_locks[CGNAT_MAPPING_TABLE_LOCK_BUCKETS];
   clib_spinlock_t session_table_locks[CGNAT_SESSION_TABLE_LOCK_BUCKETS];
   clib_spinlock_t adf_remote_locks[CGNAT_ADF_REMOTE_LOCK_BUCKETS];
@@ -824,6 +844,7 @@ typedef struct
   u32 in2out_node_index;
   u32 in2out_slow_node_index;
   u32 out2in_node_index;
+  u32 out2in_slow_node_index;
 
   u16 msg_id_base;
   vlib_log_class_t log_class_dynamic;
@@ -950,6 +971,26 @@ typedef enum
   CGNAT_INTERFACE_ROLE_INSIDE = 1,
   CGNAT_INTERFACE_ROLE_OUTSIDE = 2,
 } cgnat_interface_role_t;
+
+static_always_inline u8
+cgnat_get_interface_role (cgnat_main_t *cm, u32 sw_if_index)
+{
+  if (PREDICT_FALSE (sw_if_index >= vec_len (cm->interface_roles)))
+    return CGNAT_INTERFACE_ROLE_NONE;
+  return cm->interface_roles[sw_if_index];
+}
+
+static_always_inline u8
+cgnat_interface_role_is_inside (u8 role)
+{
+  return (role & CGNAT_INTERFACE_FLAG_IS_INSIDE) != 0;
+}
+
+static_always_inline u8
+cgnat_interface_role_is_outside (u8 role)
+{
+  return (role & CGNAT_INTERFACE_FLAG_IS_OUTSIDE) != 0;
+}
 
 static_always_inline cgnat_interface_t *
 cgnat_get_interface (cgnat_main_t *cm, u32 sw_if_index)
@@ -1162,6 +1203,7 @@ void cgnat_session_expire_timers (f64 now);
 void cgnat_reap (cgnat_main_t *cm);
 void cgnat_session_counts (cgnat_main_t *cm, u64 *total, u64 *tcp, u64 *udp,
 			   u64 *icmp);
+int cgnat_session_cache_set_batch_size (u32 batch_size);
 cgnat_session_t *cgnat_session_snapshot (cgnat_session_filter_t *filter);
 u32 cgnat_session_delete_matching (cgnat_session_filter_t *filter);
 

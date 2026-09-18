@@ -33,7 +33,19 @@ typedef struct
   _ (PACKETS, "in2out slow-path packets")                                   \
   _ (TRANSLATED, "in2out slow-path packets translated")                     \
   _ (BYPASSED, "in2out slow-path packets bypassed")                         \
-  _ (DROPS, "in2out slow-path packets dropped")
+  _ (DROPS, "in2out slow-path packets dropped")                              \
+  _ (DROP_ICMP_ERROR, "in2out slow-path drops: ICMP error translation")     \
+  _ (DROP_L4_PARSE, "in2out slow-path drops: L4 parse")                     \
+  _ (DROP_INSTANCE, "in2out slow-path drops: missing instance")             \
+  _ (DROP_STATIC_MAPPING, "in2out slow-path drops: static mapping")         \
+  _ (DROP_MAPPING_POOL, "in2out slow-path drops: mapping pool exhausted")   \
+  _ (DROP_PORT_ALLOC, "in2out slow-path drops: port allocation")            \
+  _ (DROP_IN2OUT_MAPPING_PUBLISH,                                            \
+     "in2out slow-path drops: in2out mapping publish")                      \
+  _ (DROP_OUT2IN_MAPPING_PUBLISH,                                            \
+     "in2out slow-path drops: out2in mapping publish")                      \
+  _ (DROP_SESSION_CREATE, "in2out slow-path drops: session create")         \
+  _ (DROP_UNKNOWN, "in2out slow-path drops: unknown")
 
 typedef enum
 {
@@ -48,6 +60,37 @@ static char *cgnat_in2out_slow_error_strings[] = {
   foreach_cgnat_in2out_slow_error
 #undef _
 };
+
+static_always_inline cgnat_in2out_slow_error_t
+cgnat_in2out_slow_drop_error (cgnat_in2out_slow_drop_reason_t reason)
+{
+  switch (reason)
+    {
+    case CGNAT_IN2OUT_SLOW_DROP_ICMP_ERROR:
+      return CGNAT_IN2OUT_SLOW_ERROR_DROP_ICMP_ERROR;
+    case CGNAT_IN2OUT_SLOW_DROP_L4_PARSE:
+      return CGNAT_IN2OUT_SLOW_ERROR_DROP_L4_PARSE;
+    case CGNAT_IN2OUT_SLOW_DROP_INSTANCE:
+      return CGNAT_IN2OUT_SLOW_ERROR_DROP_INSTANCE;
+    case CGNAT_IN2OUT_SLOW_DROP_STATIC_MAPPING:
+      return CGNAT_IN2OUT_SLOW_ERROR_DROP_STATIC_MAPPING;
+    case CGNAT_IN2OUT_SLOW_DROP_MAPPING_POOL:
+      return CGNAT_IN2OUT_SLOW_ERROR_DROP_MAPPING_POOL;
+    case CGNAT_IN2OUT_SLOW_DROP_PORT_ALLOC:
+      return CGNAT_IN2OUT_SLOW_ERROR_DROP_PORT_ALLOC;
+    case CGNAT_IN2OUT_SLOW_DROP_IN2OUT_MAPPING_PUBLISH:
+      return CGNAT_IN2OUT_SLOW_ERROR_DROP_IN2OUT_MAPPING_PUBLISH;
+    case CGNAT_IN2OUT_SLOW_DROP_OUT2IN_MAPPING_PUBLISH:
+      return CGNAT_IN2OUT_SLOW_ERROR_DROP_OUT2IN_MAPPING_PUBLISH;
+    case CGNAT_IN2OUT_SLOW_DROP_SESSION_CREATE:
+      return CGNAT_IN2OUT_SLOW_ERROR_DROP_SESSION_CREATE;
+    case CGNAT_IN2OUT_SLOW_DROP_NONE:
+    case CGNAT_IN2OUT_SLOW_DROP_N:
+      return CGNAT_IN2OUT_SLOW_ERROR_DROP_UNKNOWN;
+    }
+
+  return CGNAT_IN2OUT_SLOW_ERROR_DROP_UNKNOWN;
+}
 
 static u8 *
 format_cgnat_in2out_slow_trace (u8 *s, va_list *args)
@@ -71,9 +114,7 @@ VLIB_NODE_FN (cgnat_in2out_slow_node) (vlib_main_t *vm,
   u32 *from = vlib_frame_vector_args (frame);
   u32 n_left = frame->n_vectors;
   u16 nexts[VLIB_FRAME_SIZE], *next = nexts;
-  u32 translated = 0;
-  u32 bypassed = 0;
-  u32 drops = 0;
+  u32 counters[CGNAT_IN2OUT_SLOW_N_ERROR] = { 0 };
   f64 now = vlib_time_now (vm);
 
   while (n_left > 0)
@@ -84,26 +125,29 @@ VLIB_NODE_FN (cgnat_in2out_slow_node) (vlib_main_t *vm,
       u32 next0 = CGNAT_IN2OUT_SLOW_NEXT_LOOKUP;
       u8 context_valid0 = instance_index0 != CGNAT_INVALID_INDEX;
       int rv0 = VNET_API_ERROR_UNSUPPORTED;
+      cgnat_in2out_slow_drop_reason_t drop_reason0 =
+	CGNAT_IN2OUT_SLOW_DROP_NONE;
 
       if (context_valid0)
 	inside_fib_index0 = cgnat_buffer_inside_fib_index (b0);
 
       if (PREDICT_TRUE (cm->enabled && context_valid0))
 	{
-	  rv0 = cgnat_session_in2out_slow (
-	    vm, b0, instance_index0, inside_fib_index0, now);
+	rv0 = cgnat_session_in2out_slow (
+	  vm, b0, instance_index0, inside_fib_index0, now, &drop_reason0);
 	  if (PREDICT_FALSE (rv0 && rv0 != VNET_API_ERROR_UNSUPPORTED))
 	    {
 	      next0 = CGNAT_IN2OUT_SLOW_NEXT_DROP;
-	      drops++;
+	      counters[CGNAT_IN2OUT_SLOW_ERROR_DROPS]++;
+	      counters[cgnat_in2out_slow_drop_error (drop_reason0)]++;
 	    }
 	  else if (rv0 == VNET_API_ERROR_UNSUPPORTED)
-	    bypassed++;
+	    counters[CGNAT_IN2OUT_SLOW_ERROR_BYPASSED]++;
 	  else
-	    translated++;
+	    counters[CGNAT_IN2OUT_SLOW_ERROR_TRANSLATED]++;
 	}
       else
-	bypassed++;
+	counters[CGNAT_IN2OUT_SLOW_ERROR_BYPASSED]++;
 
       if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
 			 (b0->flags & VLIB_BUFFER_IS_TRACED)))
@@ -127,15 +171,11 @@ VLIB_NODE_FN (cgnat_in2out_slow_node) (vlib_main_t *vm,
 
   vlib_buffer_enqueue_to_next (vm, node, vlib_frame_vector_args (frame),
 			       nexts, frame->n_vectors);
-  vlib_node_increment_counter (vm, cm->in2out_slow_node_index,
-			       CGNAT_IN2OUT_SLOW_ERROR_PACKETS,
-			       frame->n_vectors);
-  vlib_node_increment_counter (vm, cm->in2out_slow_node_index,
-			       CGNAT_IN2OUT_SLOW_ERROR_TRANSLATED, translated);
-  vlib_node_increment_counter (vm, cm->in2out_slow_node_index,
-			       CGNAT_IN2OUT_SLOW_ERROR_BYPASSED, bypassed);
-  vlib_node_increment_counter (vm, cm->in2out_slow_node_index,
-			       CGNAT_IN2OUT_SLOW_ERROR_DROPS, drops);
+  counters[CGNAT_IN2OUT_SLOW_ERROR_PACKETS] = frame->n_vectors;
+  for (u32 i = 0; i < CGNAT_IN2OUT_SLOW_N_ERROR; i++)
+    if (counters[i])
+      vlib_node_increment_counter (vm, cm->in2out_slow_node_index, i,
+				   counters[i]);
 
   return frame->n_vectors;
 }

@@ -185,11 +185,13 @@ add_vpp_plugin(cgnat
   cgnat/cgnat_in2out.c
   cgnat/cgnat_in2out_slow.c
   cgnat/cgnat_out2in.c
+  cgnat/cgnat_out2in_slow.c
 
   MULTIARCH_SOURCES
   cgnat/cgnat_in2out.c
   cgnat/cgnat_in2out_slow.c
   cgnat/cgnat_out2in.c
+  cgnat/cgnat_out2in_slow.c
 
   API_FILES
   cgnat/cgnat.api

@@ -1555,13 +1555,28 @@ cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
 	  match->sw_if_index = sw_if_index;
 	  vec_validate_init_empty (cm->interface_index_by_sw_if_index,
 				   sw_if_index, CGNAT_INVALID_INDEX);
+	  vec_validate_init_empty (cm->interface_roles,
+				   sw_if_index, CGNAT_INTERFACE_ROLE_NONE);
 	  match->flags |= flag;
 	  cm->interface_index_by_sw_if_index[sw_if_index] =
 	    match - cm->interfaces;
+	  cm->interface_roles[sw_if_index] = match->flags;
 	  vlib_worker_thread_barrier_release (cm->vlib_main);
 	}
       else
-	match->flags |= flag;
+	{
+	  vlib_worker_thread_barrier_sync (cm->vlib_main);
+	  match->flags |= flag;
+	  if (sw_if_index < vec_len (cm->interface_roles))
+	    cm->interface_roles[sw_if_index] = match->flags;
+	  else
+	    {
+	      vec_validate_init_empty (cm->interface_roles, sw_if_index,
+				       CGNAT_INTERFACE_ROLE_NONE);
+	      cm->interface_roles[sw_if_index] = match->flags;
+	    }
+	  vlib_worker_thread_barrier_release (cm->vlib_main);
+	}
 
       /* Make VPP answer ARP for all pool public IPs and static mapping
        * outside IPs on this outside interface. */
@@ -1590,17 +1605,18 @@ cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
 	  cgnat_del_static_fib_entries_for_sw_if (cm, sw_if_index);
 	}
 
+      vlib_worker_thread_barrier_sync (cm->vlib_main);
       match->flags &= ~flag;
+      if (sw_if_index < vec_len (cm->interface_roles))
+	cm->interface_roles[sw_if_index] = match->flags;
       if (!match->flags)
 	{
-	  /* Pause workers before unlinking and freeing the interface entry;
-	   * the packet path reads it lock-free. */
-	  vlib_worker_thread_barrier_sync (cm->vlib_main);
+	  /* Interface is fully disabled; unlink and free it. */
 	  cm->interface_index_by_sw_if_index[sw_if_index] =
 	    CGNAT_INVALID_INDEX;
 	  pool_put (cm->interfaces, match);
-	  vlib_worker_thread_barrier_release (cm->vlib_main);
 	}
+      vlib_worker_thread_barrier_release (cm->vlib_main);
     }
 
   return 0;

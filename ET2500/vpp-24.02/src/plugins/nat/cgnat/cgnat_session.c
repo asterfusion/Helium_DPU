@@ -44,13 +44,13 @@ static_always_inline void
 cgnat_make_static_rule_key (clib_bihash_kv_24_8_t *kv,
 			    cgnat_static_rule_t *rule)
 {
-  clib_memset (kv, 0, sizeof (*kv));
   kv->key[0] = (u64) rule->instance_index << 32 |
 	       (u64) rule->type << 24 | (u64) rule->protocol << 16;
   kv->key[1] = (u64) rule->outside_ip.as_u32 << 32 |
 	       rule->inside_ip.as_u32;
   kv->key[2] = (u64) rule->outside_port << 48 |
 	       (u64) rule->inside_port << 32;
+  kv->value = 0;
 }
 
 static_always_inline void
@@ -140,15 +140,30 @@ cgnat_session_counts (cgnat_main_t *cm, u64 *total, u64 *tcp, u64 *udp,
     *icmp = i;
 }
 
+int
+cgnat_session_cache_set_batch_size (u32 batch_size)
+{
+  cgnat_main_t *cm = &cgnat_main;
+
+  if (batch_size < 1 || batch_size > CGNAT_SESSION_CACHE_BATCH_MAX)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  vlib_worker_thread_barrier_sync (cm->vlib_main);
+  cm->session_cache_batch_size = batch_size;
+  vlib_worker_thread_barrier_release (cm->vlib_main);
+  return 0;
+}
+
 static_always_inline void
 cgnat_make_adf_remote_key (clib_bihash_kv_24_8_t *kv,
 			   u32 outside_fib_index, ip4_address_t nat_ip,
 			   u16 nat_port, u8 protocol, ip4_address_t remote_ip)
 {
-  clib_memset (kv, 0, sizeof (*kv));
   kv->key[0] = (u64) outside_fib_index << 32 | nat_ip.as_u32;
   kv->key[1] = (u64) remote_ip.as_u32 << 32 | (u64) nat_port << 16 |
 	       protocol;
+  kv->key[2] = 0;
+  kv->value = 0;
 }
 
 static_always_inline void
@@ -713,22 +728,62 @@ cgnat_mapping_alloc (cgnat_main_t *cm, u32 *mapping_index)
 static cgnat_session_t *
 cgnat_session_alloc (cgnat_main_t *cm, u32 *session_index)
 {
+  u32 thread_index = vlib_get_main ()->thread_index;
+  cgnat_session_cache_t *cache;
   cgnat_session_t *session;
+  u32 generation;
+  u32 n_refill, i;
 
-  clib_spinlock_lock (&cm->session_pool_lock);
-  /* Same fixed-capacity rule as cgnat_mapping_alloc: never move the base
-   * under lock-free readers. */
-  if (PREDICT_FALSE (pool_free_elts (cm->sessions) == 0))
+  if (PREDICT_FALSE (thread_index >= vec_len (cm->session_caches)))
     {
+      clib_spinlock_lock (&cm->session_pool_lock);
+      if (PREDICT_FALSE (pool_free_elts (cm->sessions) == 0))
+	{
+	  clib_spinlock_unlock (&cm->session_pool_lock);
+	  return 0;
+	}
+      pool_get_zero (cm->sessions, session);
+      *session_index = session - cm->sessions;
+      vec_validate (cm->session_generation_by_index, *session_index);
+      session->generation = ++cm->session_generation_by_index[*session_index];
+      session->timer_handle = CGNAT_INVALID_INDEX;
       clib_spinlock_unlock (&cm->session_pool_lock);
-      return 0;
+      return session;
     }
-  pool_get_zero (cm->sessions, session);
-  *session_index = session - cm->sessions;
+
+  cache = vec_elt_at_index (cm->session_caches, thread_index);
+  if (PREDICT_FALSE (vec_len (cache->indices) == 0))
+    {
+      clib_spinlock_lock (&cm->session_pool_lock);
+      n_refill = pool_free_elts (cm->sessions);
+      if (n_refill > cm->session_cache_batch_size)
+	n_refill = cm->session_cache_batch_size;
+      else if (n_refill > 1)
+	n_refill = 1;
+      for (i = 0; i < n_refill; i++)
+	{
+	  pool_get (cm->sessions, session);
+	  session->flags = CGNAT_SESSION_FLAG_RESERVED;
+	  session->mapping_index = CGNAT_INVALID_INDEX;
+	  session->timer_handle = CGNAT_INVALID_INDEX;
+	  vec_add1 (cache->indices, session - cm->sessions);
+	}
+      clib_spinlock_unlock (&cm->session_pool_lock);
+
+      if (PREDICT_FALSE (vec_len (cache->indices) == 0))
+	return 0;
+    }
+
+  *session_index = vec_pop (cache->indices);
+  session = pool_elt_at_index (cm->sessions, *session_index);
   vec_validate (cm->session_generation_by_index, *session_index);
-  session->generation = ++cm->session_generation_by_index[*session_index];
+  generation = ++cm->session_generation_by_index[*session_index];
+
+  clib_memset (session, 0, sizeof (*session));
+  session->generation = generation;
+  session->flags = CGNAT_SESSION_FLAG_RESERVED;
+  session->mapping_index = CGNAT_INVALID_INDEX;
   session->timer_handle = CGNAT_INVALID_INDEX;
-  clib_spinlock_unlock (&cm->session_pool_lock);
 
   return session;
 }
@@ -737,6 +792,7 @@ static_always_inline void
 cgnat_session_free_unpublished (cgnat_main_t *cm, cgnat_session_t *session)
 {
   clib_spinlock_lock (&cm->session_pool_lock);
+  session->flags = 0;
   pool_put (cm->sessions, session);
   clib_spinlock_unlock (&cm->session_pool_lock);
 }
@@ -1312,6 +1368,9 @@ static_always_inline int
 cgnat_session_filter_match (cgnat_session_t *session,
 			    cgnat_session_filter_t *filter)
 {
+  if (session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			CGNAT_SESSION_FLAG_RESERVED))
+    return 0;
   if (!filter)
     return 1;
   if ((filter->flags & CGNAT_SESSION_FILTER_INSIDE_IP) &&
@@ -1340,8 +1399,7 @@ cgnat_session_snapshot (cgnat_session_filter_t *filter)
 
   vlib_worker_thread_barrier_sync (cm->vlib_main);
   pool_foreach (session, cm->sessions)
-    if (!(session->flags & CGNAT_SESSION_FLAG_DELETING) &&
-	cgnat_session_filter_match (session, filter))
+    if (cgnat_session_filter_match (session, filter))
       vec_add1 (snapshot, *session);
   vlib_worker_thread_barrier_release (cm->vlib_main);
   return snapshot;
@@ -1362,8 +1420,7 @@ cgnat_session_delete_matching (cgnat_session_filter_t *filter)
     {
       cgnat_session_t *session = pool_elt_at_index (cm->sessions, session_index);
       next_index = pool_next_index (cm->sessions, session_index);
-      if (!(session->flags & CGNAT_SESSION_FLAG_DELETING) &&
-	  cgnat_session_filter_match (session, filter))
+      if (cgnat_session_filter_match (session, filter))
 	{
 	  cgnat_session_delete (cm, session, "force_delete");
 	  deleted++;
@@ -1444,7 +1501,8 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 
       if (session->generation != entry->session_generation ||
 	  session->timer_handle != entry->wheel_handle ||
-	  (session->flags & CGNAT_SESSION_FLAG_DELETING))
+	  (session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			     CGNAT_SESSION_FLAG_RESERVED)))
 	{
 	  vec_add1 (pending_put, entry_index);
 	  continue;
@@ -1516,7 +1574,8 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 	  session = pool_elt_at_index (cm->sessions, entry->session_index);
 	  if (session->generation != entry->session_generation ||
 	      session->timer_handle != entry->wheel_handle ||
-	      (session->flags & CGNAT_SESSION_FLAG_DELETING))
+	      (session->flags & (CGNAT_SESSION_FLAG_DELETING |
+				 CGNAT_SESSION_FLAG_RESERVED)))
 	    {
 	      vec_add1 (pending_put, *pi);
 	      continue;
@@ -2103,12 +2162,13 @@ cgnat_session_reap (cgnat_main_t *cm)
 	continue;
       session = pool_elt_at_index (cm->sessions, session_index);
       if (session->generation != generation ||
-	  !(session->flags & CGNAT_SESSION_FLAG_DELETING))
+	  !(session->flags & CGNAT_SESSION_FLAG_DELETING) ||
+	  (session->flags & CGNAT_SESSION_FLAG_RESERVED))
 	continue;
 
-      clib_spinlock_lock (&cm->session_pool_lock);
+      /* cgnat_session_reap is strictly executed under worker barrier,
+       * so pool_put does not need session_pool_lock. */
       pool_put (cm->sessions, session);
-      clib_spinlock_unlock (&cm->session_pool_lock);
     }
   vec_free (pending);
 }
@@ -2213,7 +2273,8 @@ cgnat_static_replace_runtime_mappings (cgnat_main_t *cm,
     {
       u64 value;
 
-      if ((session->flags & CGNAT_SESSION_FLAG_DELETING) ||
+      if ((session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			     CGNAT_SESSION_FLAG_RESERVED)) ||
 	  session->mapping_index == CGNAT_INVALID_INDEX)
 	continue;
       value = cgnat_index_to_value (session->mapping_index,
@@ -2235,7 +2296,8 @@ cgnat_static_replace_runtime_mappings (cgnat_main_t *cm,
 	continue;
       session = pool_elt_at_index (cm->sessions, session_index);
       if (session->generation == session_generation &&
-	  !(session->flags & CGNAT_SESSION_FLAG_DELETING))
+	  !(session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			      CGNAT_SESSION_FLAG_RESERVED)))
 	cgnat_session_delete (cm, session, "static_replace");
     }
 
@@ -2423,7 +2485,9 @@ cgnat_static_mapping_delete_exact (cgnat_main_t *cm, cgnat_mapping_t *mapping)
 
   pool_foreach (session, cm->sessions)
     {
-      if (session->mapping_index == (u32) (mapping - cm->mappings) &&
+      if (!(session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			      CGNAT_SESSION_FLAG_RESERVED)) &&
+	  session->mapping_index == (u32) (mapping - cm->mappings) &&
 	  session->mapping_generation == mapping->generation)
 	vec_add1 (session_indices, session - cm->sessions);
     }
@@ -2433,7 +2497,9 @@ cgnat_static_mapping_delete_exact (cgnat_main_t *cm, cgnat_mapping_t *mapping)
       if (!pool_is_free_index (cm->sessions, *session_index))
 	{
 	  session = pool_elt_at_index (cm->sessions, *session_index);
-	  cgnat_session_delete (cm, session, "static_delete");
+	  if (!(session->flags & (CGNAT_SESSION_FLAG_DELETING |
+				  CGNAT_SESSION_FLAG_RESERVED)))
+	    cgnat_session_delete (cm, session, "static_delete");
 	}
     }
   vec_free (session_indices);
@@ -2744,7 +2810,8 @@ cgnat_instance_delete_sessions (cgnat_main_t *cm, cgnat_instance_t *instance)
   pool_foreach (session, cm->sessions)
     {
       if (session->instance_index == instance_index &&
-	  !(session->flags & CGNAT_SESSION_FLAG_DELETING))
+	  !(session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			      CGNAT_SESSION_FLAG_RESERVED)))
 	vec_add1 (session_indices, session - cm->sessions);
     }
 
@@ -2900,7 +2967,8 @@ cgnat_pool_delete_sessions_of_pool (cgnat_main_t *cm, u32 pool_index)
 
   pool_foreach (session, cm->sessions)
     {
-      if (session->flags & CGNAT_SESSION_FLAG_DELETING)
+      if (session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			    CGNAT_SESSION_FLAG_RESERVED))
 	continue;
       if (pool_is_free_index (cm->mappings, session->mapping_index))
 	continue;
@@ -3064,6 +3132,13 @@ cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings)
   vec_validate_aligned (cm->session_counters_per_thread,
 			vlib_get_thread_main ()->n_vlib_mains - 1,
 			CLIB_CACHE_LINE_BYTES);
+  vec_validate_aligned (cm->session_caches,
+			vlib_get_thread_main ()->n_vlib_mains - 1,
+			CLIB_CACHE_LINE_BYTES);
+  for (i = 0; i < vec_len (cm->session_caches); i++)
+    vec_alloc (cm->session_caches[i].indices,
+	       CGNAT_SESSION_CACHE_BATCH_MAX);
+  cm->session_cache_batch_size = CGNAT_SESSION_CACHE_BATCH_DEFAULT;
 
   /* BIHASH_USE_HEAP=1 in this tree: the memory_size argument is ignored,
    * so pass 0 (same as the static/adf tables). */
@@ -3171,6 +3246,10 @@ cgnat_session_reset (cgnat_main_t *cm)
   cm->session_tables_initialized = 0;
 
   vec_free (cm->session_counters_per_thread);
+  for (i = 0; i < vec_len (cm->session_caches); i++)
+    vec_free (cm->session_caches[i].indices);
+  vec_free (cm->session_caches);
+  cm->session_cache_batch_size = 0;
 }
 
 void
