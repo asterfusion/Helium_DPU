@@ -78,10 +78,10 @@ cgnat_make_in2out_mapping_key (clib_bihash_kv_16_8_t *kv,
 			       ip4_address_t inside_ip, u16 inside_port,
 			       u8 protocol)
 {
-  clib_memset (kv, 0, sizeof (*kv));
   kv->key[0] = (u64) instance_index << 32 | inside_fib_index;
   kv->key[1] = (u64) inside_ip.as_u32 << 32 | (u64) inside_port << 16 |
 	       protocol;
+  kv->value = 0;
 }
 
 static_always_inline void
@@ -89,18 +89,18 @@ cgnat_make_out2in_mapping_key (clib_bihash_kv_16_8_t *kv,
 			       u32 outside_fib_index, ip4_address_t nat_ip,
 			       u16 nat_port, u8 protocol)
 {
-  clib_memset (kv, 0, sizeof (*kv));
   kv->key[0] = (u64) outside_fib_index << 32 | nat_ip.as_u32;
   kv->key[1] = (u64) nat_port << 48 | (u64) protocol << 40;
+  kv->value = 0;
 }
 
 static_always_inline void
 cgnat_make_static_addr_key (clib_bihash_kv_16_8_t *kv, u32 fib_index,
 			    ip4_address_t ip, u8 protocol)
 {
-  clib_memset (kv, 0, sizeof (*kv));
   kv->key[0] = (u64) fib_index << 32 | ip.as_u32;
   kv->key[1] = (u64) protocol << 40;
+  kv->value = 0;
 }
 
 static_always_inline void
@@ -109,11 +109,11 @@ cgnat_make_flow_key (clib_bihash_kv_24_8_t *kv, u32 instance_index,
 		     ip4_address_t remote_ip, u16 inside_port,
 		     u16 remote_port, u8 protocol)
 {
-  clib_memset (kv, 0, sizeof (*kv));
   kv->key[0] = (u64) instance_index << 32 | inside_fib_index;
   kv->key[1] = (u64) inside_ip.as_u32 << 32 | remote_ip.as_u32;
   kv->key[2] = (u64) inside_port << 48 | (u64) remote_port << 32 |
 	       (u64) protocol << 24;
+  kv->value = 0;
 }
 
 /* Reverse flow key, stored in the SAME session table: the 5-tuple as seen
@@ -129,11 +129,11 @@ cgnat_make_reverse_flow_key (clib_bihash_kv_24_8_t *kv, u32 outside_fib_index,
 			     ip4_address_t nat_ip, ip4_address_t remote_ip,
 			     u16 nat_port, u16 remote_port, u8 protocol)
 {
-  clib_memset (kv, 0, sizeof (*kv));
   kv->key[0] = CGNAT_SESSION_KEY_FLAG_REVERSE | outside_fib_index;
   kv->key[1] = (u64) nat_ip.as_u32 << 32 | remote_ip.as_u32;
   kv->key[2] = (u64) nat_port << 48 | (u64) remote_port << 32 |
 	       (u64) protocol << 24;
+  kv->value = 0;
 }
 
 static_always_inline u32
@@ -316,12 +316,42 @@ cgnat_extract_l4 (vlib_buffer_t *b, ip4_header_t *ip, u16 *src_port,
   *tcp = 0;
   *udp = 0;
 
-  /* Non-first fragments carry no L4 header.  Interfaces with CGNAT enabled
-   * get shallow virtual reassembly automatically, so a raw non-first
-   * fragment here means reassembly is off or failed: drop it instead of
-   * reading payload bytes as port numbers. */
+  /* Shallow virtual reassembly holds an out-of-order non-first fragment
+   * until the first fragment arrives, then copies the first fragment's L4
+   * metadata to every fragment.  A non-first fragment has no physical L4
+   * header: use only that metadata and leave tcp/udp NULL so the rewrite
+   * path changes the IP header but never treats payload bytes as ports. */
   if (PREDICT_FALSE (ip4_is_fragment (ip) && !ip4_is_first_fragment (ip)))
-    return VNET_API_ERROR_INVALID_VALUE;
+    {
+      if (PREDICT_FALSE (
+	    !vnet_buffer (b)->ip.reass.is_non_first_fragment ||
+	    vnet_buffer (b)->ip.reass.ip_proto != ip->protocol))
+	return VNET_API_ERROR_INVALID_VALUE;
+
+      if (ip->protocol == IP_PROTOCOL_TCP ||
+	  ip->protocol == IP_PROTOCOL_UDP)
+	{
+	  *src_port = clib_net_to_host_u16 (
+	    vnet_buffer (b)->ip.reass.l4_src_port);
+	  *dst_port = clib_net_to_host_u16 (
+	    vnet_buffer (b)->ip.reass.l4_dst_port);
+	  return 0;
+	}
+
+      if (ip->protocol == IP_PROTOCOL_ICMP &&
+	  (vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags ==
+	     ICMP4_echo_request ||
+	   vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags ==
+	     ICMP4_echo_reply))
+	{
+	  *src_port = clib_net_to_host_u16 (
+	    vnet_buffer (b)->ip.reass.l4_src_port);
+	  *dst_port = *src_port;
+	  return 0;
+	}
+
+      return VNET_API_ERROR_UNSUPPORTED;
+    }
 
   if (ip->protocol == IP_PROTOCOL_TCP)
     l4_len = sizeof (tcp_header_t);
@@ -384,70 +414,165 @@ cgnat_extract_l4 (vlib_buffer_t *b, ip4_header_t *ip, u16 *src_port,
   }
 }
 
+static_always_inline int
+cgnat_is_icmp_error (vlib_buffer_t *b, ip4_header_t *ip)
+{
+  icmp46_header_t *icmp;
+
+  if (ip->protocol != IP_PROTOCOL_ICMP)
+    return 0;
+
+  if (ip4_is_fragment (ip) && !ip4_is_first_fragment (ip))
+    return vnet_buffer (b)->ip.reass.is_non_first_fragment &&
+	   icmp_type_is_error_message (
+	     vnet_buffer (b)->ip.reass.icmp_type_or_tcp_flags);
+
+  icmp = (icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
+  return (u8 *) (icmp + 1) <=
+	   (u8 *) vlib_buffer_get_current (b) + b->current_length &&
+	 icmp_type_is_error_message (icmp->type);
+}
+
 static_always_inline u16
 cgnat_session_remote_port (u8 protocol, u16 remote_port)
 {
   return protocol == IP_PROTOCOL_ICMP ? 0 : remote_port;
 }
 
-/* Stage-ahead prefetch: hash the packet's forward flow key and prefetch the
- * session-table bucket and KV page.  Called for the *next* packet while the
- * current one is processed, hiding the longest dependent cache miss in the
- * lookup chain.  Read-only; packets that can't be keyed simply skip. */
-static_always_inline void
-cgnat_prefetch_session_in2out (cgnat_main_t *cm, vlib_buffer_t *b)
+/* Per-packet state carried between the in2out node's prepare, lookup and
+ * execute pipeline stages.  It lives only on the node stack; no pointer to it
+ * is stored in buffer metadata or passed to another node. */
+typedef struct
 {
-  ip4_header_t *ip = vlib_buffer_get_current (b);
-  clib_bihash_kv_24_8_t kv;
+  vlib_buffer_t *b;
+  ip4_header_t *ip;
   tcp_header_t *tcp;
   udp_header_t *udp;
+  clib_bihash_kv_24_8_t session_key;
+  u64 session_value;
+  u64 hash;
+  u16 inside_port;
+  u16 remote_port;
+  i32 parse_rv;
+} cgnat_in2out_ctx_t;
+
+/* Pipeline prepare stage: parse L4 once, retain every value needed by the
+ * later lookup/execute stages, build the flow key and prefetch its bucket. */
+static_always_inline void
+cgnat_in2out_ctx_prepare (cgnat_main_t *cm, vlib_buffer_t *b,
+			  cgnat_in2out_ctx_t *ctx)
+{
   u32 instance_index = cgnat_buffer_instance_index (b);
-  u16 inside_port, remote_port;
   u64 hash;
 
+  ctx->b = b;
+  ctx->ip = vlib_buffer_get_current (b);
+  ctx->tcp = 0;
+  ctx->udp = 0;
+  ctx->session_value = 0;
+
   if (PREDICT_FALSE (instance_index == CGNAT_INVALID_INDEX))
-    return;
-  if (PREDICT_FALSE (cgnat_extract_l4 (b, ip, &inside_port, &remote_port,
-				       &tcp, &udp)))
+    {
+      ctx->parse_rv = VNET_API_ERROR_NO_SUCH_ENTRY;
+      return;
+    }
+  ctx->parse_rv =
+    cgnat_extract_l4 (b, ctx->ip, &ctx->inside_port, &ctx->remote_port,
+		      &ctx->tcp, &ctx->udp);
+  if (PREDICT_FALSE (ctx->parse_rv))
     return;
 
-  cgnat_make_flow_key (&kv, instance_index, cgnat_buffer_inside_fib_index (b),
-		       ip->src_address, ip->dst_address, inside_port,
-		       cgnat_session_remote_port (ip->protocol, remote_port),
-		       ip->protocol);
-  hash = clib_bihash_hash_24_8 (&kv);
+  cgnat_make_flow_key (
+    &ctx->session_key, instance_index, cgnat_buffer_inside_fib_index (b),
+    ctx->ip->src_address, ctx->ip->dst_address, ctx->inside_port,
+    cgnat_session_remote_port (ctx->ip->protocol, ctx->remote_port),
+    ctx->ip->protocol);
+  hash = clib_bihash_hash_24_8 (&ctx->session_key);
+  ctx->hash = hash;
   clib_bihash_prefetch_bucket_24_8 (&cm->session_table, hash);
   clib_bihash_prefetch_data_24_8 (&cm->session_table, hash);
 }
 
-/* Same for the out2in direction: hash the reverse flow key and prefetch the
- * session-table bucket and KV page (the out2in fast path looks the session
- * up by its reverse key first). */
+/* Pipeline lookup stage: consume the prefetched key and prefetch the resolved
+ * session object for the execute stage.  session_value remains zero on miss
+ * or when prepare could not construct a valid flow key. */
 static_always_inline void
-cgnat_prefetch_session_out2in (cgnat_main_t *cm, vlib_buffer_t *b)
+cgnat_in2out_ctx_lookup (cgnat_main_t *cm, cgnat_in2out_ctx_t *ctx)
 {
-  ip4_header_t *ip = vlib_buffer_get_current (b);
-  clib_bihash_kv_24_8_t kv;
-  tcp_header_t *tcp;
-  udp_header_t *udp;
-  u16 remote_port, nat_port;
-  u32 outside_fib_index;
-  u64 hash;
+  clib_bihash_kv_24_8_t value;
 
-  if (PREDICT_FALSE (cgnat_extract_l4 (b, ip, &remote_port, &nat_port,
-				       &tcp, &udp)))
+  if (PREDICT_FALSE (ctx->parse_rv))
+    return;
+  if (clib_bihash_search_inline_2_with_hash_24_8 (&cm->session_table,
+						 ctx->hash,
+						 &ctx->session_key, &value))
     return;
 
-  outside_fib_index = fib_table_get_index_for_sw_if_index (
+  ctx->session_value = value.value;
+  if (cgnat_value_get_index (value.value) < pool_len (cm->sessions))
+    clib_prefetch_load (pool_elt_at_index (
+      cm->sessions, cgnat_value_get_index (value.value)));
+}
+
+/* Out2in mirrors the in2out context pipeline.  Keeping parse results,
+ * FIB and the reverse key in this stack-local context avoids redoing all
+ * three in the prefetch, lookup and execute stages of a session hit. */
+typedef struct
+{
+  vlib_buffer_t *b;
+  ip4_header_t *ip;
+  tcp_header_t *tcp;
+  udp_header_t *udp;
+  clib_bihash_kv_24_8_t session_key;
+  u64 session_value;
+  u64 hash;
+  u32 outside_fib_index;
+  u16 remote_port;
+  u16 nat_port;
+  i32 parse_rv;
+} cgnat_out2in_ctx_t;
+
+static_always_inline void
+cgnat_out2in_ctx_prepare (cgnat_main_t *cm, vlib_buffer_t *b,
+			  cgnat_out2in_ctx_t *ctx)
+{
+  ctx->b = b;
+  ctx->ip = vlib_buffer_get_current (b);
+  ctx->tcp = 0;
+  ctx->udp = 0;
+  ctx->session_value = 0;
+  ctx->parse_rv = cgnat_extract_l4 (b, ctx->ip, &ctx->remote_port,
+				     &ctx->nat_port, &ctx->tcp, &ctx->udp);
+  if (PREDICT_FALSE (ctx->parse_rv))
+    return;
+
+  ctx->outside_fib_index = fib_table_get_index_for_sw_if_index (
     FIB_PROTOCOL_IP4, vnet_buffer (b)->sw_if_index[VLIB_RX]);
-  cgnat_make_reverse_flow_key (&kv, outside_fib_index, ip->dst_address,
-			       ip->src_address, nat_port,
-			       cgnat_session_remote_port (ip->protocol,
-							  remote_port),
-			       ip->protocol);
-  hash = clib_bihash_hash_24_8 (&kv);
-  clib_bihash_prefetch_bucket_24_8 (&cm->session_table, hash);
-  clib_bihash_prefetch_data_24_8 (&cm->session_table, hash);
+  cgnat_make_reverse_flow_key (
+    &ctx->session_key, ctx->outside_fib_index, ctx->ip->dst_address,
+    ctx->ip->src_address, ctx->nat_port,
+    cgnat_session_remote_port (ctx->ip->protocol, ctx->remote_port),
+    ctx->ip->protocol);
+  ctx->hash = clib_bihash_hash_24_8 (&ctx->session_key);
+  clib_bihash_prefetch_bucket_24_8 (&cm->session_table, ctx->hash);
+  clib_bihash_prefetch_data_24_8 (&cm->session_table, ctx->hash);
+}
+
+static_always_inline void
+cgnat_out2in_ctx_lookup (cgnat_main_t *cm, cgnat_out2in_ctx_t *ctx)
+{
+  clib_bihash_kv_24_8_t value;
+
+  if (PREDICT_FALSE (ctx->parse_rv))
+    return;
+  if (clib_bihash_search_inline_2_with_hash_24_8 (
+	&cm->session_table, ctx->hash, &ctx->session_key, &value))
+    return;
+
+  ctx->session_value = value.value;
+  if (cgnat_value_get_index (value.value) < pool_len (cm->sessions))
+    clib_prefetch_load (pool_elt_at_index (
+      cm->sessions, cgnat_value_get_index (value.value)));
 }
 
 static_always_inline void
@@ -564,7 +689,8 @@ cgnat_session_get_if_valid (cgnat_main_t *cm, u64 value)
 
   session = pool_elt_at_index (cm->sessions, session_index);
   if (PREDICT_FALSE (session->generation != generation ||
-		     (session->flags & CGNAT_SESSION_FLAG_DELETING)))
+		     (session->flags & (CGNAT_SESSION_FLAG_DELETING |
+					CGNAT_SESSION_FLAG_RESERVED))))
     return NULL;
 
   return session;
@@ -610,7 +736,8 @@ cgnat_l4_rewrite_in2out (ip4_header_t *ip, tcp_header_t *tcp, udp_header_t *udp,
     }
   else if (udp)
     udp->src_port = new_port;
-  else if (ip->protocol == IP_PROTOCOL_ICMP)
+  else if (ip->protocol == IP_PROTOCOL_ICMP &&
+	   (!ip4_is_fragment (ip) || ip4_is_first_fragment (ip)))
     {
       icmp46_header_t *icmp = (icmp46_header_t *) ((u8 *) ip +
 						     ip4_header_bytes (ip));
@@ -665,7 +792,8 @@ cgnat_l4_rewrite_out2in (ip4_header_t *ip, tcp_header_t *tcp, udp_header_t *udp,
     }
   else if (udp)
     udp->dst_port = new_port;
-  else if (ip->protocol == IP_PROTOCOL_ICMP)
+  else if (ip->protocol == IP_PROTOCOL_ICMP &&
+	   (!ip4_is_fragment (ip) || ip4_is_first_fragment (ip)))
     {
       icmp46_header_t *icmp = (icmp46_header_t *) ((u8 *) ip +
 						     ip4_header_bytes (ip));
@@ -748,14 +876,15 @@ cgnat_l4_rewrite_hairpin (ip4_header_t *ip, tcp_header_t *tcp,
       udp->src_port = new_src_port;
       udp->dst_port = new_dst_port;
     }
-  else if (ip->protocol == IP_PROTOCOL_ICMP)
+  else if (ip->protocol == IP_PROTOCOL_ICMP &&
+	   (!ip4_is_fragment (ip) || ip4_is_first_fragment (ip)))
     {
       icmp46_header_t *icmp = (icmp46_header_t *) ((u8 *) ip +
 						     ip4_header_bytes (ip));
       nat_icmp_echo_header_t *echo = (nat_icmp_echo_header_t *) (icmp + 1);
 
       /* Currently unreachable: ICMP echo hairpinning is disabled at the
-       * call site (see cgnat_session_in2out).  Kept correct for when it is
+       * call site (see cgnat_session_in2out_slow).  Kept correct for when it is
        * revisited: the ICMP checksum covers only the ICMP message itself,
        * so the rewritten IP addresses must NOT be folded into it - only
        * the identifier change matters. */
@@ -767,59 +896,6 @@ cgnat_l4_rewrite_hairpin (ip4_header_t *ip, tcp_header_t *tcp,
 			    nat_icmp_echo_header_t, identifier);
       icmp->checksum = ip_csum_fold (sum);
     }
-}
-
-/* Pipeline stage 1 (node loop, one iteration ahead of use): resolve the
- * session-table value for a packet without touching the session itself.
- * Pure read; the execute stage revalidates generation + DELETING when it
- * dereferences the value.  Returns the raw bihash value, 0 on miss. */
-static_always_inline u64
-cgnat_in2out_session_peek (cgnat_main_t *cm, vlib_buffer_t *b)
-{
-  ip4_header_t *ip = vlib_buffer_get_current (b);
-  clib_bihash_kv_24_8_t kv, value;
-  tcp_header_t *tcp;
-  udp_header_t *udp;
-  u32 instance_index = cgnat_buffer_instance_index (b);
-  u16 inside_port, remote_port;
-
-  if (PREDICT_FALSE (instance_index == CGNAT_INVALID_INDEX))
-    return 0;
-  if (PREDICT_FALSE (cgnat_extract_l4 (b, ip, &inside_port, &remote_port,
-				       &tcp, &udp)))
-    return 0;
-
-  cgnat_make_flow_key (&kv, instance_index, cgnat_buffer_inside_fib_index (b),
-		       ip->src_address, ip->dst_address, inside_port,
-		       cgnat_session_remote_port (ip->protocol, remote_port),
-		       ip->protocol);
-  if (clib_bihash_search_24_8 (&cm->session_table, &kv, &value))
-    return 0;
-  return value.value;
-}
-
-/* Look a session up by its forward flow key.  Returns the session without
- * touching it, or 0 to fall back to the full slow path. */
-static_always_inline cgnat_session_t *
-cgnat_in2out_session_find (cgnat_main_t *cm, u32 instance_index,
-			   u32 inside_fib_index, ip4_header_t *ip,
-			   u16 inside_port, u16 remote_port)
-{
-  clib_bihash_kv_24_8_t kv, value;
-
-  cgnat_make_flow_key (&kv, instance_index, inside_fib_index,
-		       ip->src_address, ip->dst_address, inside_port,
-		       cgnat_session_remote_port (ip->protocol, remote_port),
-		       ip->protocol);
-
-  /* Lock-free lookup: bihash readers need no lock (bihash_doc.h), and the
-   * resolved session pointer stays dereferenceable because deleted slots are
-   * recycled only by cgnat_session_reap() under a worker barrier.  The
-   * generation + DELETING check in cgnat_session_get_if_valid() is the
-   * authoritative revalidation. */
-  if (clib_bihash_search_24_8 (&cm->session_table, &kv, &value))
-    return 0;
-  return cgnat_session_get_if_valid (cm, value.value);
 }
 
 /* Fast-path translation from a resolved session.  The session caches every
@@ -886,35 +962,6 @@ cgnat_in2out_translate_session (cgnat_main_t *cm, cgnat_instance_t *instance,
   return 0;
 }
 
-/* Out2in pipeline stage 1: resolve the session-table value by the reverse
- * (translated) 5-tuple without touching the session.  Pure read; the
- * execute stage revalidates.  Returns the raw bihash value, 0 on miss. */
-static_always_inline u64
-cgnat_out2in_session_peek (cgnat_main_t *cm, vlib_buffer_t *b)
-{
-  ip4_header_t *ip = vlib_buffer_get_current (b);
-  clib_bihash_kv_24_8_t rkv, value;
-  tcp_header_t *tcp;
-  udp_header_t *udp;
-  u32 outside_fib_index;
-  u16 remote_port, nat_port;
-
-  if (PREDICT_FALSE (cgnat_extract_l4 (b, ip, &remote_port, &nat_port,
-				       &tcp, &udp)))
-    return 0;
-
-  outside_fib_index = fib_table_get_index_for_sw_if_index (
-    FIB_PROTOCOL_IP4, vnet_buffer (b)->sw_if_index[VLIB_RX]);
-  cgnat_make_reverse_flow_key (&rkv, outside_fib_index, ip->dst_address,
-			       ip->src_address, nat_port,
-			       cgnat_session_remote_port (ip->protocol,
-							  remote_port),
-			       ip->protocol);
-  if (clib_bihash_search_24_8 (&cm->session_table, &rkv, &value))
-    return 0;
-  return value.value;
-}
-
 /* Look a session up by its reverse flow key.  Returns the session without
  * touching it, or 0 to fall back to the full slow path. */
 static_always_inline cgnat_session_t *
@@ -922,7 +969,7 @@ cgnat_out2in_session_find (cgnat_main_t *cm, clib_bihash_kv_24_8_t *rkv)
 {
   clib_bihash_kv_24_8_t value;
 
-  /* Lock-free lookup, same rationale as cgnat_in2out_session_find. */
+  /* Lock-free lookup, same rationale as cgnat_in2out_ctx_lookup. */
   if (clib_bihash_search_24_8 (&cm->session_table, rkv, &value))
     return 0;
   return cgnat_session_get_if_valid (cm, value.value);
@@ -966,9 +1013,31 @@ cgnat_out2in_translate_session (cgnat_main_t *cm, vlib_buffer_t *b,
   return 0;
 }
 
+/* The slow node owns the counters, while this helper knows which creation
+ * stage failed.  Keep the reason separate from the VNET_API_ERROR value:
+ * several resource and validation failures intentionally share an API code. */
+typedef enum
+{
+  CGNAT_IN2OUT_SLOW_DROP_NONE,
+  CGNAT_IN2OUT_SLOW_DROP_ICMP_ERROR,
+  CGNAT_IN2OUT_SLOW_DROP_L4_PARSE,
+  CGNAT_IN2OUT_SLOW_DROP_INSTANCE,
+  CGNAT_IN2OUT_SLOW_DROP_STATIC_MAPPING,
+  CGNAT_IN2OUT_SLOW_DROP_MAPPING_POOL,
+  CGNAT_IN2OUT_SLOW_DROP_PORT_ALLOC,
+  CGNAT_IN2OUT_SLOW_DROP_IN2OUT_MAPPING_PUBLISH,
+  CGNAT_IN2OUT_SLOW_DROP_OUT2IN_MAPPING_PUBLISH,
+  CGNAT_IN2OUT_SLOW_DROP_SESSION_CREATE,
+  CGNAT_IN2OUT_SLOW_DROP_N,
+} cgnat_in2out_slow_drop_reason_t;
+
+/* Called only after cgnat-in2out reports a real session-table miss.  Do not
+ * repeat that lookup here: cgnat_session_lookup_or_create() performs the
+ * locked publish-time check that resolves concurrent first packets. */
 static_always_inline int
-cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
-		      u32 instance_index, u32 inside_fib_index, f64 now)
+cgnat_session_in2out_slow (vlib_main_t *vm, vlib_buffer_t *b,
+			   u32 instance_index, u32 inside_fib_index, f64 now,
+			   cgnat_in2out_slow_drop_reason_t *drop_reason)
 {
   cgnat_main_t *cm = &cgnat_main;
   ip4_header_t *ip = vlib_buffer_get_current (b);
@@ -976,7 +1045,6 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
   udp_header_t *udp;
   cgnat_mapping_t *mapping = 0;
   cgnat_mapping_t *hairpin_dst_mapping = 0;
-  cgnat_session_t *session0 = 0;
   u8 static_addr_hit = 0;
   u8 dynamic_mapping_created = 0;
   cgnat_instance_t *instance;
@@ -986,53 +1054,46 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
   u16 inside_port, remote_port, session_remote_port;
   int rv;
 
-  /* ICMP Error Messages carry an inner IP datagram; translate them through
-   * the mapping that owns the public address embedded in that inner packet.
-   * Errors are not fragmented in normal operation; drop fragments to avoid
-   * reading partial ICMP headers. */
-  if (ip->protocol == IP_PROTOCOL_ICMP && !ip4_is_fragment (ip))
-    {
-      icmp46_header_t *icmp =
-	(icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
+  *drop_reason = CGNAT_IN2OUT_SLOW_DROP_NONE;
 
-      /* The buffer must actually carry the ICMP header before we read the
-       * type: truncated packets must not be dereferenced past the segment. */
-      if ((u8 *) (icmp + 1) <=
-	    (u8 *) vlib_buffer_get_current (b) + b->current_length &&
-	  icmp_type_is_error_message (icmp->type))
-	return cgnat_icmp_error_translate_in2out (cm, vm, b, ip,
-						  instance_index,
-						  inside_fib_index);
+  /* For non-first fragments, the translator consumes only virtual
+   * reassembly metadata and rewrites only the outer IP header. */
+  if (cgnat_is_icmp_error (b, ip))
+    {
+      rv = cgnat_icmp_error_translate_in2out (
+	cm, vm, b, ip, instance_index, inside_fib_index);
+      if (rv)
+	*drop_reason = CGNAT_IN2OUT_SLOW_DROP_ICMP_ERROR;
+      return rv;
     }
 
   rv = cgnat_extract_l4 (b, ip, &inside_port, &remote_port, &tcp, &udp);
   if (rv)
-    return rv;
+    {
+      *drop_reason = CGNAT_IN2OUT_SLOW_DROP_L4_PARSE;
+      return rv;
+    }
   session_remote_port = cgnat_session_remote_port (ip->protocol, remote_port);
 
   instance = cgnat_instance_get_by_index (cm, instance_index);
   if (!instance)
-    return VNET_API_ERROR_NO_SUCH_ENTRY;
+    {
+      *drop_reason = CGNAT_IN2OUT_SLOW_DROP_INSTANCE;
+      return VNET_API_ERROR_NO_SUCH_ENTRY;
+    }
   // if (!cgnat_instance_inside_fib_matches (instance, inside_fib_index))
   //   return VNET_API_ERROR_UNSUPPORTED;
 
-  /* Fast path: an existing session makes the mapping lookup unnecessary. */
-  session0 = cgnat_in2out_session_find (cm, instance_index, inside_fib_index,
-					ip, inside_port, remote_port);
-  if (PREDICT_TRUE (session0 != 0))
-    return cgnat_in2out_translate_session (cm, instance, b, ip, inside_port,
-					   remote_port, tcp, udp, now, session0);
-
   cgnat_make_in2out_mapping_key (&kv, instance_index, inside_fib_index,
 				 ip->src_address, inside_port, ip->protocol);
-  
+
   // hit mapping table ?
   if (!cgnat_mapping_table_search (cm, &cm->in2out_mapping_table, &kv,
 				   &value))
     mapping = cgnat_mapping_get_if_valid (cm, value.value);
 
   // hit static rule ?
-  if (!mapping) 
+  if (!mapping)
   {
     cgnat_static_rule_t *rule = 0;
     if (!cgnat_static_addr_lookup (cm, &cm->static_addr_in2out_table,
@@ -1046,7 +1107,10 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
   }
 
   if (static_addr_hit && !mapping)
-    return VNET_API_ERROR_BUG;
+    {
+      *drop_reason = CGNAT_IN2OUT_SLOW_DROP_STATIC_MAPPING;
+      return VNET_API_ERROR_BUG;
+    }
 
   // not hit static rule, begin dynamic/deterministic allocation
   if (!mapping)
@@ -1061,7 +1125,10 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
        * port resource has been attached to it yet. */
       new_mapping = cgnat_mapping_alloc (cm, &mapping_index);
       if (PREDICT_FALSE (!new_mapping))
-	return VNET_API_ERROR_LIMIT_EXCEEDED;
+	{
+	  *drop_reason = CGNAT_IN2OUT_SLOW_DROP_MAPPING_POOL;
+	  return VNET_API_ERROR_LIMIT_EXCEEDED;
+	}
 
       cgnat_user_lock (instance, inside_fib_index, ip->src_address);
       if (!cgnat_mapping_table_search (cm, &cm->in2out_mapping_table, &kv,
@@ -1087,6 +1154,7 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
 	    {
 	      cgnat_mapping_free_unpublished (cm, new_mapping);
 	      cgnat_user_unlock (instance, inside_fib_index, ip->src_address);
+	      *drop_reason = CGNAT_IN2OUT_SLOW_DROP_PORT_ALLOC;
 	      return rv;
 	    }
 
@@ -1120,6 +1188,7 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
 	      cgnat_mapping_table_locks_unlock (cm, &kv, &value);
 	      cgnat_dynamic_mapping_schedule_delete (cm, mapping);
 	      cgnat_user_unlock (instance, inside_fib_index, ip->src_address);
+	      *drop_reason = CGNAT_IN2OUT_SLOW_DROP_IN2OUT_MAPPING_PUBLISH;
 	      return VNET_API_ERROR_BUG;
 	    }
 
@@ -1129,6 +1198,7 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
 	      cgnat_mapping_table_locks_unlock (cm, &kv, &value);
 	      cgnat_dynamic_mapping_schedule_delete (cm, mapping);
 	      cgnat_user_unlock (instance, inside_fib_index, ip->src_address);
+	      *drop_reason = CGNAT_IN2OUT_SLOW_DROP_OUT2IN_MAPPING_PUBLISH;
 	      return VNET_API_ERROR_BUG;
 	    }
 	  cgnat_mapping_table_locks_unlock (cm, &kv, &value);
@@ -1150,6 +1220,7 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
     {
       if (dynamic_mapping_created)
 	cgnat_dynamic_mapping_schedule_delete (cm, mapping);
+      *drop_reason = CGNAT_IN2OUT_SLOW_DROP_SESSION_CREATE;
       return rv;
     }
 
@@ -1188,38 +1259,28 @@ cgnat_session_in2out (vlib_main_t *vm, vlib_buffer_t *b,
   return 0;
 }
 
-/* Node-loop execute stage: sval is the session-table value peeked for this
- * buffer one iteration ago (0 = miss).  The value is revalidated now (the
- * session may have been deleted in between; the pool slot cannot have been
- * recycled without a worker barrier, which the datapath never crosses
- * here).  Falls back to the full slow path on miss/stale/parse failure. */
+/* Execute a session hit resolved by the fast node.  The raw lookup value is
+ * revalidated here because another worker may have deleted the session after
+ * the lookup.  A stale value is an error; only a real hash miss is eligible for
+ * the slow node. */
 static_always_inline int
-cgnat_in2out_execute (vlib_main_t *vm, vlib_buffer_t *b, u64 sval, f64 now)
+cgnat_in2out_fast_execute (cgnat_in2out_ctx_t *ctx, f64 now)
 {
   cgnat_main_t *cm = &cgnat_main;
-  ip4_header_t *ip;
-  tcp_header_t *tcp;
-  udp_header_t *udp;
   cgnat_session_t *session;
   cgnat_instance_t *instance;
-  u32 instance_index = cgnat_buffer_instance_index (b);
-  u16 inside_port, remote_port;
 
-  session = sval ? cgnat_session_get_if_valid (cm, sval) : 0;
-  if (PREDICT_TRUE (session != 0))
-    {
-      instance = cgnat_instance_get_by_index (cm, session->instance_index);
-      ip = vlib_buffer_get_current (b);
-      if (PREDICT_TRUE (instance != 0) &&
-	  PREDICT_TRUE (cgnat_extract_l4 (b, ip, &inside_port, &remote_port,
-					  &tcp, &udp) == 0))
-	return cgnat_in2out_translate_session (cm, instance, b, ip,
-					       inside_port, remote_port, tcp,
-					       udp, now, session);
-    }
+  session = cgnat_session_get_if_valid (cm, ctx->session_value);
+  if (PREDICT_FALSE (!session))
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
 
-  return cgnat_session_in2out (vm, b, instance_index,
-			       cgnat_buffer_inside_fib_index (b), now);
+  instance = cgnat_instance_get_by_index (cm, session->instance_index);
+  if (PREDICT_FALSE (!instance))
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  return cgnat_in2out_translate_session (
+    cm, instance, ctx->b, ctx->ip, ctx->inside_port, ctx->remote_port,
+    ctx->tcp, ctx->udp, now, session);
 }
 
 static_always_inline int
@@ -1239,21 +1300,8 @@ cgnat_session_out2in (vlib_main_t *vm, vlib_buffer_t *b, f64 now)
   u32 outside_fib_index;
   int rv;
 
-  /* ICMP Error Messages carry an inner IP datagram; translate them through
-   * the mapping that owns the public address embedded in that inner packet.
-   * Errors are not fragmented in normal operation; drop fragments to avoid
-   * reading partial ICMP headers. */
-  if (ip->protocol == IP_PROTOCOL_ICMP && !ip4_is_fragment (ip))
-    {
-      icmp46_header_t *icmp =
-	(icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
-
-      /* Same truncated-packet guard as the in2out side. */
-      if ((u8 *) (icmp + 1) <=
-	    (u8 *) vlib_buffer_get_current (b) + b->current_length &&
-	  icmp_type_is_error_message (icmp->type))
-	return cgnat_icmp_error_translate_out2in (cm, vm, b, ip);
-    }
+  if (cgnat_is_icmp_error (b, ip))
+    return cgnat_icmp_error_translate_out2in (cm, vm, b, ip);
 
   rv = cgnat_extract_l4 (b, ip, &remote_port, &nat_port, &tcp, &udp);
   if (rv)
@@ -1343,32 +1391,6 @@ rewrite:
 			   mapping->inside_port, instance->tcp_mss);
   vnet_buffer (b)->sw_if_index[VLIB_TX] = mapping->inside_fib_index;
   return 0;
-}
-
-/* Node-loop execute stage: sval is the session-table value peeked for this
- * buffer one iteration ago (0 = miss).  Same revalidation rationale as
- * cgnat_in2out_execute. */
-static_always_inline int
-cgnat_out2in_execute (vlib_main_t *vm, vlib_buffer_t *b, u64 sval, f64 now)
-{
-  cgnat_main_t *cm = &cgnat_main;
-  ip4_header_t *ip;
-  tcp_header_t *tcp;
-  udp_header_t *udp;
-  cgnat_session_t *session;
-  u16 remote_port, nat_port;
-
-  session = sval ? cgnat_session_get_if_valid (cm, sval) : 0;
-  if (PREDICT_TRUE (session != 0))
-    {
-      ip = vlib_buffer_get_current (b);
-      if (PREDICT_TRUE (cgnat_extract_l4 (b, ip, &remote_port, &nat_port,
-					  &tcp, &udp) == 0))
-	return cgnat_out2in_translate_session (cm, b, ip, tcp, udp, now,
-					       session);
-    }
-
-  return cgnat_session_out2in (vm, b, now);
 }
 
 #endif /* included_cgnat_session_inlines_h */

@@ -99,8 +99,11 @@ static_always_inline u16
 cgnat_blocks_needed_for_new_user (cgnat_instance_t *instance,
 				  cgnat_pool_t *pool)
 {
+  /* max-blocks/max-ports are hard limits. A larger pre-allocation setting is
+   * therefore clamped here as well as when user->min_blocks is initialized. */
   if (pool->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_PRE_ALLOC)
-    return cgnat_prealloc_blocks (pool);
+    return clib_min (cgnat_prealloc_blocks (pool),
+		     cgnat_effective_max_blocks (instance, pool));
 
   return cgnat_effective_max_blocks (instance, pool);
 }
@@ -214,6 +217,7 @@ cgnat_block_start_port (cgnat_pool_t *pool, u16 block_id)
 
 static_always_inline void
 cgnat_log_pba_block (cgnat_instance_t *instance, char *event, char *reason,
+		     cgnat_ipfix_event_t ipfix_event,
 		     ip4_address_t private_ip, ip4_address_t public_ip,
 		     cgnat_pool_t *pool, cgnat_block_t *block,
 		     u32 pool_index)
@@ -223,17 +227,21 @@ cgnat_log_pba_block (cgnat_instance_t *instance, char *event, char *reason,
 
   (void) pool_index;
 
-  if (!instance || !pool || !block || !instance->syslog_enabled ||
+  if (!instance || !pool || !block ||
+      (!instance->syslog_enabled && !instance->ipfix_enabled) ||
       instance->log_mode != CGNAT_LOG_MODE_PORT_BLOCK)
     return;
 
   block_start = cgnat_block_start_port (pool, block->block_id);
   block_end = clib_min (block_start + pool->block_size - 1,
-			(u32) cgnat_pool_end_port (pool));
+				(u32) cgnat_pool_end_port (pool));
 
+  /* Snapshot allocation state while it is valid; the asynchronous consumer
+   * must not dereference user/pool/block objects after they can be reused. */
   clib_memset (&log_event, 0, sizeof (log_event));
   log_event.kind = CGNAT_LOG_EVENT_KIND_PBA_BLOCK;
-  cgnat_log_event_set_common (&log_event, instance, event, reason);
+  cgnat_log_event_set_common (&log_event, instance, event, reason,
+			      ipfix_event);
   log_event.block.private_ip = private_ip;
   log_event.block.public_ip = public_ip;
   log_event.block.public_port_start = (u16) block_start;
@@ -251,7 +259,7 @@ cgnat_pool_free_port_bitmap_init (cgnat_pool_t *pool)
 
   for (i = 0; i < pool->block_size; i++)
     pool->free_port_offset_bitmap[i & 1] =
-      clib_bitmap_set (pool->free_port_offset_bitmap[i & 1], i, 1);
+      clib_bitmap_set (pool->free_port_offset_bitmap[i & 1], i >> 1, 1);
 }
 
 static void
@@ -563,7 +571,7 @@ cgnat_fallback_select_public_ip (cgnat_main_t *cm, cgnat_instance_t *instance,
 
 static cgnat_block_t *
 cgnat_public_ip_alloc_block (cgnat_pool_t *pool, cgnat_public_ip_t *ip,
-			     u32 user_index)
+			     u32 user_index, u16 flags)
 {
   cgnat_block_t *block;
   uword block_id = clib_bitmap_first_set (ip->free_block_bitmap);
@@ -573,6 +581,7 @@ cgnat_public_ip_alloc_block (cgnat_pool_t *pool, cgnat_public_ip_t *ip,
 
   pool_get_zero (ip->blocks, block);
   block->block_id = block_id;
+  block->flags = flags;
   block->state = CGNAT_BLOCK_ALLOCATED;
   block->owner_user_index = user_index;
   /* Monotonic incarnation id: pool_get_zero reset it, so assign from the
@@ -581,8 +590,8 @@ cgnat_public_ip_alloc_block (cgnat_pool_t *pool, cgnat_public_ip_t *ip,
   block->gen_id = ++ip->alloc_gen;
   /* Port bitmaps stay NULL here: they are materialized lazily per
    * protocol/parity on first use (see cgnat_alloc_port_from_block), saving
-   * 6 bitmap dups (~1.6KB at block_size 2048) per block that never sees
-   * that traffic class. */
+   * six compact bitmap dups (~768B of bitmap data at block_size 2048) per
+   * block that never sees that traffic class. */
   ip->block_index_by_id[block_id] = block - ip->blocks;
   ip->free_block_bitmap =
     clib_bitmap_set (ip->free_block_bitmap, block_id, 0);
@@ -598,7 +607,7 @@ cgnat_alloc_port_from_block (cgnat_instance_t *instance,
 			     cgnat_block_t *block, u16 private_port,
 			     u8 protocol, u16 *public_port)
 {
-  u32 block_start, offset = ~0;
+  u32 bitmap_index = ~0, block_start, offset, parity_size;
   u8 offset_odd;
   int proto_index;
   clib_bitmap_t *free_ports;
@@ -612,6 +621,7 @@ cgnat_alloc_port_from_block (cgnat_instance_t *instance,
 
   block_start = cgnat_block_start_port (pool, block->block_id);
   offset_odd = (private_port ^ block_start) & 1;
+  parity_size = (pool->block_size + 1 - offset_odd) >> 1;
   free_ports = block->free_port_bitmap[proto_index][offset_odd];
   if (PREDICT_FALSE (!free_ports))
     {
@@ -625,22 +635,24 @@ cgnat_alloc_port_from_block (cgnat_instance_t *instance,
 
   if (pool->port_alloc_mode == CGNAT_PORT_ALLOC_MODE_RANDOM)
   {
-    u32 start = cgnat_instance_random_u32 (instance) % pool->block_size;
-    offset = clib_bitmap_next_set (free_ports, start);
+    u32 start = cgnat_instance_random_u32 (instance) % parity_size;
+    bitmap_index = clib_bitmap_next_set (free_ports, start);
 
-    if (offset == ~0)
-      offset = clib_bitmap_first_set (free_ports);
+    if (bitmap_index == ~0)
+      bitmap_index = clib_bitmap_first_set (free_ports);
   }
   else
-    offset = clib_bitmap_first_set (free_ports);
+    bitmap_index = clib_bitmap_first_set (free_ports);
 
-  if (offset == ~0)
+  if (bitmap_index == ~0)
     return VNET_API_ERROR_LIMIT_EXCEEDED;
 
   block->free_port_bitmap[proto_index][offset_odd] =
-    clib_bitmap_set (block->free_port_bitmap[proto_index][offset_odd], offset, 0);
+    clib_bitmap_set (block->free_port_bitmap[proto_index][offset_odd],
+		     bitmap_index, 0);
 
   block->active_ports[proto_index]++;
+  offset = (bitmap_index << 1) | offset_odd;
   *public_port = block_start + offset;
   return 0;
 }
@@ -739,13 +751,21 @@ cgnat_prealloc_user_idle (cgnat_user_t *user)
 	 vec_len (user->owned_block_ids);
 }
 
+static_always_inline u8
+cgnat_block_is_elastic (cgnat_block_t *block)
+{
+  return !!(block->flags & CGNAT_BLOCK_FLAG_ELASTIC);
+}
+
 static void
-cgnat_reactivate_prealloc_user_blocks (cgnat_instance_t *instance,
+cgnat_reactivate_prealloc_base_blocks (cgnat_instance_t *instance,
 				       cgnat_pool_t *pool, cgnat_public_ip_t *ip,
 				       cgnat_user_t *user)
 {
   u16 *block_id;
 
+  /* Base blocks preserve the original PRE_ALLOC group-revival behavior.
+   * Elastic cooling blocks are intentionally left for single-block revival. */
   vec_foreach (block_id, user->owned_block_ids)
     {
       u32 block_index;
@@ -760,11 +780,13 @@ cgnat_reactivate_prealloc_user_blocks (cgnat_instance_t *instance,
 
       block = pool_elt_at_index (ip->blocks, block_index);
       if (block->owner_user_index != cgnat_user_to_index (instance, user) ||
-	  block->state != CGNAT_BLOCK_COOLING)
+	  block->state != CGNAT_BLOCK_COOLING ||
+	  cgnat_block_is_elastic (block))
 	continue;
 
       cgnat_reactivate_cooling_block (pool, ip, block);
       cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
+			   CGNAT_IPFIX_EVENT_PBA_ALLOC,
 			   user->key.private_ip, ip->addr, pool, block,
 			   user->pool_index);
     }
@@ -875,7 +897,9 @@ cgnat_cooling_process_expired (u32 *expired_timers)
 		    }
 		}
 	      cgnat_log_pba_block (instance, "PBA_BLOCK_RELEASE",
-				   "cooling_expire", entry->private_ip,
+				   "cooling_expire",
+				   CGNAT_IPFIX_EVENT_PBA_RELEASE,
+				   entry->private_ip,
 				   ip->addr, pool, block, entry->pool_index);
 	      cgnat_block_return_free (pool, ip, block, 1);
 	    }
@@ -944,7 +968,8 @@ cgnat_start_block_cooling (cgnat_main_t *cm, u32 instance_index,
       }
 
       cgnat_log_pba_block (instance, "PBA_BLOCK_RELEASE", "idle",
-			   private_ip, ip->addr, pool, block, pool_index);
+			   CGNAT_IPFIX_EVENT_PBA_RELEASE, private_ip,
+			   ip->addr, pool, block, pool_index);
       cgnat_block_return_free (pool, ip, block, 0);
       return;
     }
@@ -958,8 +983,9 @@ cgnat_start_block_cooling (cgnat_main_t *cm, u32 instance_index,
   cgnat_pool_allocated_blocks_add (pool, -1);
   cgnat_pool_cooling_blocks_add (pool, 1);
   cgnat_log_pba_block (cgnat_instance_get_by_index (cm, instance_index),
-		       "PBA_BLOCK_RELEASE", "idle", private_ip, ip->addr,
-		       pool, block, pool_index);
+		       "PBA_BLOCK_RELEASE", "idle",
+		       CGNAT_IPFIX_EVENT_PBA_RELEASE, private_ip, ip->addr, pool,
+		       block, pool_index);
   clib_spinlock_lock (&cm->cooling_timer_lock);
   pool_get_zero (cm->cooling_timers, entry);
   entry_index = entry - cm->cooling_timers;
@@ -1236,24 +1262,60 @@ cgnat_pba_release_user_if_idle (u32 instance_index, u32 inside_fib_index,
 }
 
 static u16
-cgnat_prealloc_blocks_for_user (cgnat_instance_t *instance,
-				cgnat_pool_t *pool, cgnat_public_ip_t *ip,
-				cgnat_user_t *user, u32 pool_index)
+cgnat_user_base_block_count (cgnat_instance_t *instance,
+			     cgnat_public_ip_t *ip, cgnat_user_t *user)
 {
-  cgnat_block_t *block;
+  u32 user_index = cgnat_user_to_index (instance, user);
+  u16 *block_id;
   u16 count = 0;
 
-  while (vec_len (user->owned_block_ids) < user->max_blocks &&
+  vec_foreach (block_id, user->owned_block_ids)
+    {
+      u32 block_index;
+      cgnat_block_t *block;
+
+      if (*block_id >= vec_len (ip->block_index_by_id))
+	continue;
+      block_index = ip->block_index_by_id[*block_id];
+      if (block_index == CGNAT_INVALID_INDEX ||
+	  pool_is_free_index (ip->blocks, block_index))
+	continue;
+
+      block = pool_elt_at_index (ip->blocks, block_index);
+      if (block->owner_user_index == user_index &&
+	  !cgnat_block_is_elastic (block))
+	count++;
+    }
+
+  return count;
+}
+
+static u16
+cgnat_prealloc_base_blocks_for_user (cgnat_instance_t *instance,
+				     cgnat_pool_t *pool,
+				     cgnat_public_ip_t *ip,
+				     cgnat_user_t *user, u32 pool_index)
+{
+  cgnat_block_t *block;
+  u16 base_blocks = cgnat_user_base_block_count (instance, ip, user);
+  u16 count = 0;
+
+  /* Restore only the reserved floor. Capacity above it is allocated one
+   * block at a time by the elastic path in cgnat_alloc_port_for_user. */
+  while (base_blocks < user->min_blocks &&
 	 cgnat_public_ip_free_blocks (ip))
     {
-      block = cgnat_public_ip_alloc_block (pool, ip, cgnat_user_to_index (instance, user));
+      block = cgnat_public_ip_alloc_block (
+	pool, ip, cgnat_user_to_index (instance, user), 0);
       if (!block)
         break;
 
       vec_add1 (user->owned_block_ids, block->block_id);
       cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
+			   CGNAT_IPFIX_EVENT_PBA_ALLOC,
 			   user->key.private_ip, ip->addr, pool, block,
 			   pool_index);
+      base_blocks++;
       count++;
     }
 
@@ -1271,41 +1333,32 @@ cgnat_bind_user_to_public_ip (cgnat_instance_t *instance, u32 instance_index,
   user->instance_index = instance_index;
   user->pool_index = pool_index;
   user->public_ip_index = public_ip_index;
-  if (pool->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_PRE_ALLOC)
-  {
-    user->max_blocks = cgnat_prealloc_blocks (pool);
-  }
-  else
-  {
-    user->max_blocks = cgnat_effective_max_blocks (instance, pool);
-    user->max_ports = cgnat_effective_max_ports (instance, pool);
-  }
+  user->max_blocks = cgnat_effective_max_blocks (instance, pool);
+  user->max_ports = cgnat_effective_max_ports (instance, pool);
+  /* PRE_ALLOC reserves only the configured floor. For example, prealloc=3
+   * and max=5 creates three base blocks now and leaves two elastic slots. If
+   * prealloc exceeds max, all max blocks are base and no elastic slot exists. */
+  user->min_blocks =
+    pool->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_PRE_ALLOC ?
+      clib_min (cgnat_prealloc_blocks (pool), user->max_blocks) :
+      0;
   user->block_alloc_mode = pool->block_alloc_mode;
 
   clib_spinlock_lock (&ip->lock);
   if (pool->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_PRE_ALLOC)
   {
-    u16 allocated_blocks =
-    cgnat_prealloc_blocks_for_user (instance, pool, ip, user, pool_index);
+    u16 allocated_blocks = cgnat_prealloc_base_blocks_for_user (
+      instance, pool, ip, user, pool_index);
     if (!allocated_blocks)
     {
       clib_spinlock_unlock (&ip->lock);
       return VNET_API_ERROR_LIMIT_EXCEEDED;
     }
-
-    /* Cap the quota at the configured effective maximum, and compute the
-     * port quota in u32 before clamping to u16 - a plain
-     * allocated_blocks * block_size product can exceed 65535 and would be
-     * truncated when stored into the u16 max_ports. */
-    user->max_blocks = clib_min (allocated_blocks,
-				 cgnat_effective_max_blocks (instance, pool));
-    user->max_ports =
-      (u16) clib_min ((u32) user->max_blocks * pool->block_size,
-		      (u32) cgnat_effective_max_ports (instance, pool));
   }
   else
   {
-    block = cgnat_public_ip_alloc_block (pool, ip, cgnat_user_to_index (instance, user));
+    block = cgnat_public_ip_alloc_block (
+      pool, ip, cgnat_user_to_index (instance, user), 0);
     if (!block)
     {
       clib_spinlock_unlock (&ip->lock);
@@ -1313,8 +1366,9 @@ cgnat_bind_user_to_public_ip (cgnat_instance_t *instance, u32 instance_index,
     }
     vec_add1 (user->owned_block_ids, block->block_id);
     cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
-        user->key.private_ip, ip->addr, pool, block,
-        pool_index);
+			 CGNAT_IPFIX_EVENT_PBA_ALLOC,
+			 user->key.private_ip, ip->addr, pool, block,
+			 pool_index);
   }
 
   clib_atomic_fetch_add (&ip->active_users, 1);
@@ -1348,6 +1402,7 @@ cgnat_rollback_new_user (cgnat_instance_t *instance, cgnat_pool_t *pool,
 	  cgnat_block_has_active_ports (block))
 	continue;
       cgnat_log_pba_block (instance, "PBA_BLOCK_RELEASE", "force_delete",
+			   CGNAT_IPFIX_EVENT_PBA_RELEASE,
 			   user->key.private_ip, ip->addr, pool, block,
 			   user->pool_index);
       cgnat_block_return_free (pool, ip, block, 0);
@@ -1366,7 +1421,7 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
   cgnat_pool_t *pool;
   cgnat_public_ip_t *ip;
   cgnat_block_t *block = 0;
-  u16 public_port;
+  u16 public_port, old_owned;
   u32 i, bi;
   int proto_index;
   int rv = VNET_API_ERROR_LIMIT_EXCEEDED;
@@ -1417,74 +1472,43 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
   /* Phase 2: state changes under ip->lock. */
   clib_spinlock_lock (&ip->lock);
 
-  /* Wake cooling blocks owned by this user and retry the allocation. */
-  for (i = 0; i < vec_len (user->owned_block_ids); i++)
+  if (user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_PRE_ALLOC)
     {
-      u16 block_id = user->owned_block_ids[i];
-      if (block_id >= vec_len (ip->block_index_by_id))
-	continue;
-      bi = ip->block_index_by_id[block_id];
-      if (bi == CGNAT_INVALID_INDEX)
-	continue;
-      block = pool_elt_at_index (ip->blocks, bi);
-      if (block->owner_user_index != cgnat_user_to_index (instance, user) ||
-	  block->state != CGNAT_BLOCK_COOLING)
-	continue;
-
-      if (user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_PRE_ALLOC)
-	cgnat_reactivate_prealloc_user_blocks (instance, pool, ip, user);
-      else
+      /* Reserved blocks retain pre-allocation semantics: after an idle
+       * period they are revived as a group before elastic capacity. */
+      for (i = 0; i < vec_len (user->owned_block_ids); i++)
 	{
-	  cgnat_reactivate_cooling_block (pool, ip, block);
-	  cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
-			       user->key.private_ip, ip->addr, pool, block,
-			       user->pool_index);
+	  u16 block_id = user->owned_block_ids[i];
+
+	  if (block_id >= vec_len (ip->block_index_by_id))
+	    continue;
+	  bi = ip->block_index_by_id[block_id];
+	  if (bi == CGNAT_INVALID_INDEX)
+	    continue;
+	  block = pool_elt_at_index (ip->blocks, bi);
+	  if (block->owner_user_index !=
+		cgnat_user_to_index (instance, user) ||
+	      block->state != CGNAT_BLOCK_COOLING ||
+	      cgnat_block_is_elastic (block))
+	    continue;
+
+	  cgnat_reactivate_prealloc_base_blocks (instance, pool, ip, user);
+	  rv = cgnat_alloc_port_from_block (instance, pool, block,
+					    private_port, protocol,
+					    &public_port);
+	  if (!rv)
+	    {
+	      clib_spinlock_unlock (&ip->lock);
+	      goto done;
+	    }
 	}
 
-      rv = cgnat_alloc_port_from_block (instance, pool, block, private_port,
-					protocol, &public_port);
-      if (!rv)
-	{
-	  clib_spinlock_unlock (&ip->lock);
-	  goto done;
-	}
-    }
+      /* Cooling expiry removes blocks from owned_block_ids. Rebuild only
+       * the reserved floor; blocks above it must remain demand driven. */
+      old_owned = vec_len (user->owned_block_ids);
 
-  if (user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_ON_DEMAND &&
-      vec_len (user->owned_block_ids) < user->max_blocks)
-    {
-      block = cgnat_public_ip_alloc_block (pool, ip, cgnat_user_to_index (instance, user));
-      if (!block)
-	{
-	  clib_spinlock_unlock (&ip->lock);
-	  rv = VNET_API_ERROR_LIMIT_EXCEEDED;
-	  goto done;
-	}
-
-      vec_add1 (user->owned_block_ids, block->block_id);
-      cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
-			   user->key.private_ip, ip->addr, pool, block,
-			   user->pool_index);
-      rv = cgnat_alloc_port_from_block (instance, pool, block, private_port,
-					protocol, &public_port);
-      if (!rv)
-	{
-	  clib_spinlock_unlock (&ip->lock);
-	  goto done;
-	}
-    }
-
-  /* PRE_ALLOC: blocks reclaimed by the cooling timer are removed from
-   * owned_block_ids, so a user returning after an idle period would
-   * otherwise keep a permanently shrunken capacity.  Top back up to the
-   * user's quota before giving up. */
-  if (user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_PRE_ALLOC &&
-      vec_len (user->owned_block_ids) < user->max_blocks)
-    {
-      u16 old_owned = vec_len (user->owned_block_ids);
-
-      cgnat_prealloc_blocks_for_user (instance, pool, ip, user,
-				      user->pool_index);
+      cgnat_prealloc_base_blocks_for_user (instance, pool, ip, user,
+					   user->pool_index);
       for (i = old_owned; i < vec_len (user->owned_block_ids); i++)
 	{
 	  u16 block_id = user->owned_block_ids[i];
@@ -1499,6 +1523,100 @@ cgnat_alloc_port_for_user (cgnat_main_t *cm, cgnat_instance_t *instance,
 	      block->state != CGNAT_BLOCK_ALLOCATED)
 	    continue;
 
+	  rv = cgnat_alloc_port_from_block (instance, pool, block,
+					    private_port, protocol,
+					    &public_port);
+	  if (!rv)
+	    {
+	      clib_spinlock_unlock (&ip->lock);
+	      goto done;
+	    }
+	}
+
+      /* Elastic blocks use on-demand revival: wake at most the one needed
+       * for this allocation instead of reviving all previous burst space. */
+      for (i = 0; i < vec_len (user->owned_block_ids); i++)
+	{
+	  u16 block_id = user->owned_block_ids[i];
+
+	  if (block_id >= vec_len (ip->block_index_by_id))
+	    continue;
+	  bi = ip->block_index_by_id[block_id];
+	  if (bi == CGNAT_INVALID_INDEX)
+	    continue;
+	  block = pool_elt_at_index (ip->blocks, bi);
+	  if (block->owner_user_index !=
+		cgnat_user_to_index (instance, user) ||
+	      block->state != CGNAT_BLOCK_COOLING ||
+	      !cgnat_block_is_elastic (block))
+	    continue;
+
+	  cgnat_reactivate_cooling_block (pool, ip, block);
+	  cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
+			       CGNAT_IPFIX_EVENT_PBA_ALLOC,
+			       user->key.private_ip, ip->addr, pool, block,
+			       user->pool_index);
+	  rv = cgnat_alloc_port_from_block (instance, pool, block,
+					    private_port, protocol,
+					    &public_port);
+	  if (!rv)
+	    {
+	      clib_spinlock_unlock (&ip->lock);
+	      goto done;
+	    }
+	}
+    }
+  else
+    {
+      /* On-demand users revive one cooling block at a time. */
+      for (i = 0; i < vec_len (user->owned_block_ids); i++)
+	{
+	  u16 block_id = user->owned_block_ids[i];
+
+	  if (block_id >= vec_len (ip->block_index_by_id))
+	    continue;
+	  bi = ip->block_index_by_id[block_id];
+	  if (bi == CGNAT_INVALID_INDEX)
+	    continue;
+	  block = pool_elt_at_index (ip->blocks, bi);
+	  if (block->owner_user_index !=
+		cgnat_user_to_index (instance, user) ||
+	      block->state != CGNAT_BLOCK_COOLING)
+	    continue;
+
+	  cgnat_reactivate_cooling_block (pool, ip, block);
+	  cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
+			       CGNAT_IPFIX_EVENT_PBA_ALLOC,
+			       user->key.private_ip, ip->addr, pool, block,
+			       user->pool_index);
+	  rv = cgnat_alloc_port_from_block (instance, pool, block,
+					    private_port, protocol,
+					    &public_port);
+	  if (!rv)
+	    {
+	      clib_spinlock_unlock (&ip->lock);
+	      goto done;
+	    }
+	}
+    }
+
+  /* Allocate one block for this request. In pre-allocation mode, anything
+   * above min_blocks is elastic and is reclaimed independently when idle. */
+  if (vec_len (user->owned_block_ids) < user->max_blocks)
+    {
+      u16 flags = user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_PRE_ALLOC ?
+		    CGNAT_BLOCK_FLAG_ELASTIC :
+		    0;
+
+      block = cgnat_public_ip_alloc_block (
+	pool, ip, cgnat_user_to_index (instance, user), flags);
+      if (block)
+	{
+	  vec_add1 (user->owned_block_ids, block->block_id);
+	  cgnat_log_pba_block (instance, "PBA_BLOCK_ALLOC", 0,
+			       CGNAT_IPFIX_EVENT_PBA_ALLOC,
+			       user->key.private_ip, ip->addr, pool, block,
+			       user->pool_index);
 	  rv = cgnat_alloc_port_from_block (instance, pool, block,
 					    private_port, protocol,
 					    &public_port);
@@ -1882,7 +2000,8 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
   cgnat_public_ip_t *ip;
   cgnat_block_t *block;
   cgnat_user_t *user;
-  u32 block_id, port_offset, block_index;
+  u32 bitmap_index, block_id, port_offset, block_index;
+  u8 offset_odd;
   u16 pool_start;
   int proto_index;
 
@@ -1904,6 +2023,8 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
 
   block_id = (port - pool_start) / pool->block_size;
   port_offset = (port - pool_start) % pool->block_size;
+  offset_odd = port_offset & 1;
+  bitmap_index = port_offset >> 1;
   ip = vec_elt_at_index (pool->public_ips, public_ip_index);
 
   cgnat_user_lock (instance, inside_fib_index, private_ip);
@@ -1930,9 +2051,9 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
    * from this block (bitmaps are materialized lazily) - the port cannot be
    * in use, so this release is stale. */
   if (block->state != CGNAT_BLOCK_ALLOCATED ||
-      !block->free_port_bitmap[proto_index][port_offset & 1] ||
-      clib_bitmap_get (block->free_port_bitmap[proto_index][port_offset & 1],
-		       port_offset))
+      !block->free_port_bitmap[proto_index][offset_odd] ||
+      clib_bitmap_get (block->free_port_bitmap[proto_index][offset_odd],
+		       bitmap_index))
     {
       cgnat_user_unlock (instance, inside_fib_index, private_ip);
       return VNET_API_ERROR_NO_SUCH_ENTRY;
@@ -1946,9 +2067,9 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
       return VNET_API_ERROR_NO_SUCH_ENTRY;
     }
 
-  block->free_port_bitmap[proto_index][port_offset & 1] =
-    clib_bitmap_set (block->free_port_bitmap[proto_index][port_offset & 1],
-		     port_offset, 1);
+  block->free_port_bitmap[proto_index][offset_odd] =
+    clib_bitmap_set (block->free_port_bitmap[proto_index][offset_odd],
+		     bitmap_index, 1);
   block->active_ports[proto_index]--;
   user->active_ports[proto_index]--;
 
@@ -1959,7 +2080,10 @@ cgnat_pba_release_port (u32 instance_index, u32 pool_index,
 	cgnat_start_prealloc_user_cooling (cm, instance, instance_index,
 					   pool_index, public_ip_index, pool, ip,
 					   user);
-      else if (user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_ON_DEMAND)
+	/* Elastic pre-allocation capacity follows on-demand block lifetime:
+	 * reclaim it independently while the reserved floor remains owned. */
+      else if (user->block_alloc_mode == CGNAT_BLOCK_ALLOC_MODE_ON_DEMAND ||
+	       cgnat_block_is_elastic (block))
 	cgnat_start_block_cooling (cm, instance_index, pool_index,
 				   public_ip_index, pool, ip, block,
 				   user->key.private_ip);

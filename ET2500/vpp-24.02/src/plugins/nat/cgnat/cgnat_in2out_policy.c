@@ -85,7 +85,7 @@ static_always_inline u8
 cgnat_in2out_policy_inline (cgnat_main_t *cm, vlib_buffer_t *b0, u16 *next0,
 			    u16 *arc_next0)
 {
-  cgnat_interface_t *i;
+
   cgnat_instance_t *instance;
   u32 sw_if_index = vnet_buffer (b0)->sw_if_index[VLIB_RX];
   u32 packet_fib_index;
@@ -95,8 +95,8 @@ cgnat_in2out_policy_inline (cgnat_main_t *cm, vlib_buffer_t *b0, u16 *next0,
   vnet_feature_next_u16 (arc_next0, b0);
   *next0 = *arc_next0;
 
-  i = cgnat_get_interface (cm, sw_if_index);
-  if (PREDICT_FALSE (!i || !cgnat_interface_is_inside (i)))
+  if (PREDICT_FALSE (!cgnat_interface_role_is_inside (
+	cgnat_get_interface_role (cm, sw_if_index))))
     return CGNAT_IN2OUT_POLICY_ERROR_BYPASS_NO_INTERFACE;
 
   if (PREDICT_FALSE ((b0->flags & VLIB_BUFFER_NO_NAT_VALID) && b0->no_nat))
@@ -196,8 +196,15 @@ VLIB_NODE_FN (cgnat_in2out_policy_node) (vlib_main_t *vm,
       u16 arc_next0, arc_next1;
       u8 err0, err1;
 
+      /* Keep the usual two-packet pipeline for short frames.  Larger frames
+       * have enough independent policy work to hide four header loads. */
       vlib_prefetch_buffer_header (vlib_get_buffer (vm, from[2]), LOAD);
       vlib_prefetch_buffer_header (vlib_get_buffer (vm, from[3]), LOAD);
+      if (n_left >= 6)
+        {
+          vlib_prefetch_buffer_header (vlib_get_buffer (vm, from[4]), LOAD);
+          vlib_prefetch_buffer_header (vlib_get_buffer (vm, from[5]), LOAD);
+        }
 
       b0 = vlib_get_buffer (vm, from[0]);
       b1 = vlib_get_buffer (vm, from[1]);

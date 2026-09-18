@@ -12,6 +12,7 @@
 #include <vnet/tcp/tcp_packet.h>
 #include <vnet/udp/udp_packet.h>
 #include <vnet/ip/icmp46_packet.h>
+#include <vnet/fib/fib_table.h>
 
 #include <nat/lib/nat_inlines.h>
 #include <nat/lib/inlines.h>
@@ -43,13 +44,13 @@ static_always_inline void
 cgnat_make_static_rule_key (clib_bihash_kv_24_8_t *kv,
 			    cgnat_static_rule_t *rule)
 {
-  clib_memset (kv, 0, sizeof (*kv));
   kv->key[0] = (u64) rule->instance_index << 32 |
 	       (u64) rule->type << 24 | (u64) rule->protocol << 16;
   kv->key[1] = (u64) rule->outside_ip.as_u32 << 32 |
 	       rule->inside_ip.as_u32;
   kv->key[2] = (u64) rule->outside_port << 48 |
 	       (u64) rule->inside_port << 32;
+  kv->value = 0;
 }
 
 static_always_inline void
@@ -139,15 +140,30 @@ cgnat_session_counts (cgnat_main_t *cm, u64 *total, u64 *tcp, u64 *udp,
     *icmp = i;
 }
 
+int
+cgnat_session_cache_set_batch_size (u32 batch_size)
+{
+  cgnat_main_t *cm = &cgnat_main;
+
+  if (batch_size < 1 || batch_size > CGNAT_SESSION_CACHE_BATCH_MAX)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  vlib_worker_thread_barrier_sync (cm->vlib_main);
+  cm->session_cache_batch_size = batch_size;
+  vlib_worker_thread_barrier_release (cm->vlib_main);
+  return 0;
+}
+
 static_always_inline void
 cgnat_make_adf_remote_key (clib_bihash_kv_24_8_t *kv,
 			   u32 outside_fib_index, ip4_address_t nat_ip,
 			   u16 nat_port, u8 protocol, ip4_address_t remote_ip)
 {
-  clib_memset (kv, 0, sizeof (*kv));
   kv->key[0] = (u64) outside_fib_index << 32 | nat_ip.as_u32;
   kv->key[1] = (u64) remote_ip.as_u32 << 32 | (u64) nat_port << 16 |
 	       protocol;
+  kv->key[2] = 0;
+  kv->value = 0;
 }
 
 static_always_inline void
@@ -226,23 +242,28 @@ cgnat_mapping_get_for_session_delete (cgnat_main_t *cm, u64 value)
 static_always_inline int
 cgnat_icmp_error_extract_inner (vlib_buffer_t *b, ip4_header_t *ip,
 				ip4_header_t **inner_ip, u8 *inner_protocol,
-				u16 *inner_src_port, u16 *inner_dst_port)
+				u16 *quoted_src_port, u16 *quoted_dst_port,
+				u32 *inner_l4_available)
 {
   icmp46_header_t *icmp;
   nat_icmp_echo_header_t *echo;
   ip4_header_t *inner;
   u8 *l4;
-  u16 inner_l4_len;
+  u16 inner_l4_min_len;
   u32 icmp_payload_len;
+  u32 outer_header_len = ip4_header_bytes (ip);
+  u32 ip_len = clib_net_to_host_u16 (ip->length);
 
   icmp = (icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
   echo = (nat_icmp_echo_header_t *) (icmp + 1);
   inner = (ip4_header_t *) (echo + 1);
 
   /* The ICMP payload must carry at least the original IP header + 8 bytes. */
+  if (PREDICT_FALSE (ip_len < outer_header_len + sizeof (*icmp) +
+			      sizeof (*echo)))
+    return VNET_API_ERROR_INVALID_VALUE;
   icmp_payload_len =
-    clib_net_to_host_u16 (ip->length) - ip4_header_bytes (ip) -
-    sizeof (*icmp) - sizeof (*echo);
+    ip_len - outer_header_len - sizeof (*icmp) - sizeof (*echo);
   if (PREDICT_FALSE (icmp_payload_len < sizeof (ip4_header_t) + 8))
     return VNET_API_ERROR_INVALID_VALUE;
 
@@ -254,14 +275,21 @@ cgnat_icmp_error_extract_inner (vlib_buffer_t *b, ip4_header_t *ip,
   *inner_ip = inner;
   *inner_protocol = inner->protocol;
 
+  if (PREDICT_FALSE ((inner->ip_version_and_header_length >> 4) != 4 ||
+		     ip4_header_bytes (inner) < sizeof (*inner) ||
+		     ip4_header_bytes (inner) > icmp_payload_len))
+    return VNET_API_ERROR_INVALID_VALUE;
+
   l4 = (u8 *) inner + ip4_header_bytes (inner);
+  *inner_l4_available = icmp_payload_len - ip4_header_bytes (inner);
 
   if (inner->protocol == IP_PROTOCOL_TCP)
-    inner_l4_len = sizeof (tcp_header_t);
+    inner_l4_min_len = 2 * sizeof (u16);
   else if (inner->protocol == IP_PROTOCOL_UDP)
-    inner_l4_len = sizeof (udp_header_t);
+    inner_l4_min_len = sizeof (udp_header_t);
   else if (inner->protocol == IP_PROTOCOL_ICMP)
-    inner_l4_len = sizeof (icmp46_header_t) + sizeof (nat_icmp_echo_header_t);
+    inner_l4_min_len =
+      sizeof (icmp46_header_t) + sizeof (nat_icmp_echo_header_t);
   else
     return VNET_API_ERROR_UNSUPPORTED;
 
@@ -269,29 +297,30 @@ cgnat_icmp_error_extract_inner (vlib_buffer_t *b, ip4_header_t *ip,
    * trust inner->length (some implementations truncate it, others keep the
    * original value).  Only verify the data we actually have in the buffer. */
   if (PREDICT_FALSE
-      (l4 + inner_l4_len >
+      (*inner_l4_available < inner_l4_min_len ||
+       l4 + inner_l4_min_len >
        (u8 *) vlib_buffer_get_current (b) + b->current_length))
     return VNET_API_ERROR_INVALID_VALUE;
 
   if (inner->protocol == IP_PROTOCOL_TCP)
     {
       tcp_header_t *tcp = (tcp_header_t *) l4;
-      *inner_src_port = clib_net_to_host_u16 (tcp->src_port);
-      *inner_dst_port = clib_net_to_host_u16 (tcp->dst_port);
+      *quoted_src_port = clib_net_to_host_u16 (tcp->src_port);
+      *quoted_dst_port = clib_net_to_host_u16 (tcp->dst_port);
     }
   else if (inner->protocol == IP_PROTOCOL_UDP)
     {
       udp_header_t *udp = (udp_header_t *) l4;
-      *inner_src_port = clib_net_to_host_u16 (udp->src_port);
-      *inner_dst_port = clib_net_to_host_u16 (udp->dst_port);
+      *quoted_src_port = clib_net_to_host_u16 (udp->src_port);
+      *quoted_dst_port = clib_net_to_host_u16 (udp->dst_port);
     }
   else
     {
       icmp46_header_t *inner_icmp = (icmp46_header_t *) l4;
       nat_icmp_echo_header_t *inner_echo =
 	(nat_icmp_echo_header_t *) (inner_icmp + 1);
-      *inner_src_port = clib_net_to_host_u16 (inner_echo->identifier);
-      *inner_dst_port = *inner_src_port;
+      *quoted_src_port = clib_net_to_host_u16 (inner_echo->identifier);
+      *quoted_dst_port = *quoted_src_port;
     }
   return 0;
 }
@@ -313,6 +342,65 @@ cgnat_icmp_error_validate_checksum (vlib_main_t *vm, vlib_buffer_t *b,
   return 0;
 }
 
+/* An unfragmented ICMP checksum can be validated and recomputed normally.
+ * For a fragmented ICMP message the checksum covers bytes in later
+ * fragments, so retain the checksum of the quoted bytes that this fragment
+ * carries and apply only their before/after delta. */
+static_always_inline int
+cgnat_icmp_error_checksum_prepare (vlib_main_t *vm, vlib_buffer_t *b,
+				   ip4_header_t *ip, ip4_header_t *inner_ip,
+				   u32 *inner_offset, u32 *inner_len,
+				   ip_csum_t *old_inner_sum)
+{
+  u32 ip_len = clib_net_to_host_u16 (ip->length);
+  u32 inner_ip_offset;
+
+  if (!ip4_is_fragment (ip))
+    return cgnat_icmp_error_validate_checksum (vm, b, ip);
+
+  inner_ip_offset = (u8 *) inner_ip - (u8 *) ip;
+  if (PREDICT_FALSE (inner_ip_offset >= ip_len))
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  *inner_offset = (u8 *) inner_ip - (u8 *) vlib_buffer_get_current (b);
+  *inner_len = ip_len - inner_ip_offset;
+  *old_inner_sum = ip_incremental_checksum_buffer (
+    vm, b, *inner_offset, *inner_len, 0);
+  return 0;
+}
+
+static_always_inline void
+cgnat_icmp_error_checksum_finish (vlib_main_t *vm, vlib_buffer_t *b,
+				  ip4_header_t *ip, u32 inner_offset,
+				  u32 inner_len, ip_csum_t old_inner_sum)
+{
+  icmp46_header_t *icmp =
+    (icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
+
+  if (ip4_is_fragment (ip))
+    {
+      ip_csum_t new_inner_sum = ip_incremental_checksum_buffer (
+	vm, b, inner_offset, inner_len, 0);
+      ip_csum_t sum = icmp->checksum;
+
+      sum = ip_csum_sub_even (sum, ip_csum_fold (old_inner_sum));
+      sum = ip_csum_add_even (sum, ip_csum_fold (new_inner_sum));
+      icmp->checksum = ip_csum_fold (sum);
+      return;
+    }
+
+  {
+    u32 icmp_len =
+      clib_net_to_host_u16 (ip->length) - ip4_header_bytes (ip);
+    ip_csum_t sum;
+
+    icmp->checksum = 0;
+    sum = ip_incremental_checksum_buffer (
+      vm, b, (u8 *) icmp - (u8 *) vlib_buffer_get_current (b), icmp_len, 0);
+    icmp->checksum = ~ip_csum_fold (sum);
+  }
+}
+
 static_always_inline ip_csum_t
 cgnat_ip_csum_delta_for_ip4_address (ip4_address_t old_addr,
 				     ip4_address_t new_addr)
@@ -331,7 +419,8 @@ cgnat_ip_csum_delta_for_ip4_address (ip4_address_t old_addr,
 
 static_always_inline void
 cgnat_icmp_error_rewrite_inner_l4 (ip4_header_t *inner_ip, void *inner_l4,
-				   u8 inner_protocol, ip4_address_t new_src_ip,
+				   u32 inner_l4_available, u8 inner_protocol,
+				   ip4_address_t new_src_ip,
 				   u16 new_src_port, ip4_address_t new_dst_ip,
 				   u16 new_dst_port)
 {
@@ -365,10 +454,14 @@ cgnat_icmp_error_rewrite_inner_l4 (ip4_header_t *inner_ip, void *inner_l4,
       /* Apply the two deltas separately: ip_csum_sub_even() folds the
        * end-around carry of each addition, while "l3_delta + l4_delta"
        * would lose a carry out of bit 63. */
-      ip_csum_t sum = tcp->checksum;
-      sum = ip_csum_sub_even (sum, l3_delta);
-      sum = ip_csum_sub_even (sum, l4_delta);
-      tcp->checksum = ip_csum_fold (sum);
+      if (inner_l4_available >=
+	    STRUCT_OFFSET_OF (tcp_header_t, checksum) + sizeof (tcp->checksum))
+	{
+	  ip_csum_t sum = tcp->checksum;
+	  sum = ip_csum_sub_even (sum, l3_delta);
+	  sum = ip_csum_sub_even (sum, l4_delta);
+	  tcp->checksum = ip_csum_fold (sum);
+	}
     }
   else if (inner_protocol == IP_PROTOCOL_UDP)
     {
@@ -406,19 +499,48 @@ cgnat_icmp_error_translate_out2in (cgnat_main_t *cm, vlib_main_t *vm,
 				   vlib_buffer_t *b, ip4_header_t *ip)
 {
   ip4_header_t *inner_ip;
+  ip4_address_t nat_ip;
   u8 inner_protocol;
-  u16 inner_src_port, inner_dst_port;
+  u16 quoted_src_port, quoted_dst_port;
   clib_bihash_kv_16_8_t kv, value;
   cgnat_mapping_t *mapping;
   cgnat_instance_t *instance;
   u32 outside_fib_index;
+  u32 inner_offset = 0, inner_len = 0;
+  u32 inner_l4_available = 0;
+  ip_csum_t old_inner_sum = 0;
   void *inner_l4;
+  u8 non_first_fragment =
+    ip4_is_fragment (ip) && !ip4_is_first_fragment (ip);
   int rv;
 
-  rv = cgnat_icmp_error_extract_inner (b, ip, &inner_ip, &inner_protocol,
-				       &inner_src_port, &inner_dst_port);
-  if (rv)
-    return rv;
+  if (non_first_fragment)
+    {
+      inner_ip = 0;
+      nat_ip = ip->dst_address;
+      inner_protocol =
+	vnet_buffer (b)->ip.reass.icmp_error_inner_protocol;
+      /* Shallow reassembly stores ICMP quoted ports in ip4_get_port()
+	 * sender/receiver order (quoted dst/src).  Reverse them here to recover
+	 * the original quoted flow: NAT source -> remote destination. */
+      quoted_src_port = clib_net_to_host_u16 (
+	vnet_buffer (b)->ip.reass.l4_dst_port);
+      quoted_dst_port = clib_net_to_host_u16 (
+	vnet_buffer (b)->ip.reass.l4_src_port);
+      if (PREDICT_FALSE (inner_protocol != IP_PROTOCOL_TCP &&
+			 inner_protocol != IP_PROTOCOL_UDP &&
+			 inner_protocol != IP_PROTOCOL_ICMP))
+	return VNET_API_ERROR_INVALID_VALUE;
+    }
+  else
+    {
+      rv = cgnat_icmp_error_extract_inner (
+	b, ip, &inner_ip, &inner_protocol, &quoted_src_port, &quoted_dst_port,
+	&inner_l4_available);
+      if (rv)
+	return rv;
+      nat_ip = inner_ip->src_address;
+    }
 
   outside_fib_index = fib_table_get_index_for_sw_if_index (
     FIB_PROTOCOL_IP4, vnet_buffer (b)->sw_if_index[VLIB_RX]);
@@ -426,8 +548,8 @@ cgnat_icmp_error_translate_out2in (cgnat_main_t *cm, vlib_main_t *vm,
   /* The original packet was inside -> remote; after CGNAT its source became
    * the public side.  The ICMP error is coming back to that public source,
    * so look it up in the out2in table. */
-  cgnat_make_out2in_mapping_key (&kv, outside_fib_index, inner_ip->src_address,
-				 inner_src_port, inner_protocol);
+  cgnat_make_out2in_mapping_key (&kv, outside_fib_index, nat_ip,
+				 quoted_src_port, inner_protocol);
   if (cgnat_mapping_table_search (cm, &cm->out2in_mapping_table, &kv, &value))
     return VNET_API_ERROR_NO_SUCH_ENTRY;
 
@@ -439,7 +561,17 @@ cgnat_icmp_error_translate_out2in (cgnat_main_t *cm, vlib_main_t *vm,
   if (!instance)
     return VNET_API_ERROR_NO_SUCH_ENTRY;
 
-  rv = cgnat_icmp_error_validate_checksum (vm, b, ip);
+  /* Later fragments contain neither the ICMP header nor quoted ports. */
+  if (non_first_fragment)
+    {
+      ip->dst_address = mapping->inside_ip;
+      ip->checksum = ip4_header_checksum (ip);
+      vnet_buffer (b)->sw_if_index[VLIB_TX] = mapping->inside_fib_index;
+      return 0;
+    }
+
+  rv = cgnat_icmp_error_checksum_prepare (
+    vm, b, ip, inner_ip, &inner_offset, &inner_len, &old_inner_sum);
   if (rv)
     return rv;
 
@@ -450,26 +582,14 @@ cgnat_icmp_error_translate_out2in (cgnat_main_t *cm, vlib_main_t *vm,
   ip->checksum = ip4_header_checksum (ip);
 
   /* Rewrite inner IP source and L4 source to the inside values. */
-  cgnat_icmp_error_rewrite_inner_l4 (inner_ip, inner_l4, inner_protocol,
+  cgnat_icmp_error_rewrite_inner_l4 (inner_ip, inner_l4,
+				     inner_l4_available, inner_protocol,
 				     mapping->inside_ip, mapping->inside_port,
-				     inner_ip->dst_address, inner_dst_port);
+				     inner_ip->dst_address, quoted_dst_port);
   inner_ip->checksum = ip4_header_checksum (inner_ip);
 
-  /* Recompute outer ICMP checksum over the rewritten payload.  Zero the
-   * checksum field before summing and store the one's complement of the
-   * folded sum. */
-  {
-    icmp46_header_t *icmp =
-      (icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
-    u32 icmp_len =
-      clib_net_to_host_u16 (ip->length) - ip4_header_bytes (ip);
-    ip_csum_t sum;
-
-    icmp->checksum = 0;
-    sum = ip_incremental_checksum_buffer (
-      vm, b, (u8 *) icmp - (u8 *) vlib_buffer_get_current (b), icmp_len, 0);
-    icmp->checksum = ~ip_csum_fold (sum);
-  }
+  cgnat_icmp_error_checksum_finish (
+    vm, b, ip, inner_offset, inner_len, old_inner_sum);
 
   vnet_buffer (b)->sw_if_index[VLIB_TX] = mapping->inside_fib_index;
   return 0;
@@ -481,18 +601,48 @@ cgnat_icmp_error_translate_in2out (cgnat_main_t *cm, vlib_main_t *vm,
 				   u32 instance_index, u32 inside_fib_index)
 {
   ip4_header_t *inner_ip;
+  ip4_address_t inner_dst_address;
   u8 inner_protocol;
-  u16 inner_src_port, inner_dst_port;
+  u16 quoted_src_port, quoted_dst_port;
   clib_bihash_kv_16_8_t kv, value;
   cgnat_mapping_t *mapping;
   cgnat_instance_t *instance;
+  u32 inner_offset = 0, inner_len = 0;
+  u32 inner_l4_available = 0;
+  ip_csum_t old_inner_sum = 0;
   void *inner_l4;
+  u8 non_first_fragment =
+    ip4_is_fragment (ip) && !ip4_is_first_fragment (ip);
   int rv;
 
-  rv = cgnat_icmp_error_extract_inner (b, ip, &inner_ip, &inner_protocol,
-				       &inner_src_port, &inner_dst_port);
-  if (rv)
-    return rv;
+  if (non_first_fragment)
+    {
+      inner_ip = 0;
+      inner_protocol =
+	vnet_buffer (b)->ip.reass.icmp_error_inner_protocol;
+      inner_dst_address.as_u32 =
+	vnet_buffer (b)->ip.reass.icmp_error_inner_dst_address;
+      /* Recover quoted src/dst ports from the same reversed representation
+	 * used by ip4_get_port(); inner dst + quoted dst identifies the inside
+	 * endpoint for the in2out mapping lookup below. */
+      quoted_src_port = clib_net_to_host_u16 (
+	vnet_buffer (b)->ip.reass.l4_dst_port);
+      quoted_dst_port = clib_net_to_host_u16 (
+	vnet_buffer (b)->ip.reass.l4_src_port);
+      if (PREDICT_FALSE (inner_protocol != IP_PROTOCOL_TCP &&
+			 inner_protocol != IP_PROTOCOL_UDP &&
+			 inner_protocol != IP_PROTOCOL_ICMP))
+	return VNET_API_ERROR_INVALID_VALUE;
+    }
+  else
+    {
+      rv = cgnat_icmp_error_extract_inner (
+	b, ip, &inner_ip, &inner_protocol, &quoted_src_port, &quoted_dst_port,
+	&inner_l4_available);
+      if (rv)
+	return rv;
+      inner_dst_address = inner_ip->dst_address;
+    }
 
   instance = cgnat_instance_get_by_index (cm, instance_index);
   if (!instance)
@@ -504,7 +654,7 @@ cgnat_icmp_error_translate_in2out (cgnat_main_t *cm, vlib_main_t *vm,
    * the out2in table is keyed by public values and can never match the
    * private inside address quoted here. */
   cgnat_make_in2out_mapping_key (&kv, instance_index, inside_fib_index,
-				 inner_ip->dst_address, inner_dst_port,
+				 inner_dst_address, quoted_dst_port,
 				 inner_protocol);
   if (cgnat_mapping_table_search (cm, &cm->in2out_mapping_table, &kv, &value))
     return VNET_API_ERROR_NO_SUCH_ENTRY;
@@ -513,7 +663,16 @@ cgnat_icmp_error_translate_in2out (cgnat_main_t *cm, vlib_main_t *vm,
   if (!mapping)
     return VNET_API_ERROR_NO_SUCH_ENTRY;
 
-  rv = cgnat_icmp_error_validate_checksum (vm, b, ip);
+  if (non_first_fragment)
+    {
+      ip->src_address = mapping->nat_ip;
+      ip->checksum = ip4_header_checksum (ip);
+      vnet_buffer (b)->sw_if_index[VLIB_TX] = mapping->outside_fib_index;
+      return 0;
+    }
+
+  rv = cgnat_icmp_error_checksum_prepare (
+    vm, b, ip, inner_ip, &inner_offset, &inner_len, &old_inner_sum);
   if (rv)
     return rv;
 
@@ -522,8 +681,9 @@ cgnat_icmp_error_translate_in2out (cgnat_main_t *cm, vlib_main_t *vm,
   /* Rewrite the inner destination back to the public endpoint the remote
    * peer originally addressed (nat_ip:nat_port); the inner source (remote
    * endpoint) is left untouched. */
-  cgnat_icmp_error_rewrite_inner_l4 (inner_ip, inner_l4, inner_protocol,
-				     inner_ip->src_address, inner_src_port,
+  cgnat_icmp_error_rewrite_inner_l4 (inner_ip, inner_l4,
+				     inner_l4_available, inner_protocol,
+				     inner_ip->src_address, quoted_src_port,
 				     mapping->nat_ip, mapping->nat_port);
   inner_ip->checksum = ip4_header_checksum (inner_ip);
 
@@ -534,21 +694,8 @@ cgnat_icmp_error_translate_in2out (cgnat_main_t *cm, vlib_main_t *vm,
   ip->src_address = mapping->nat_ip;
   ip->checksum = ip4_header_checksum (ip);
 
-  /* Recompute outer ICMP checksum over the rewritten payload.  Zero the
-   * checksum field before summing and store the one's complement of the
-   * folded sum. */
-  {
-    icmp46_header_t *icmp =
-      (icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
-    u32 icmp_len =
-      clib_net_to_host_u16 (ip->length) - ip4_header_bytes (ip);
-    ip_csum_t sum;
-
-    icmp->checksum = 0;
-    sum = ip_incremental_checksum_buffer (
-      vm, b, (u8 *) icmp - (u8 *) vlib_buffer_get_current (b), icmp_len, 0);
-    icmp->checksum = ~ip_csum_fold (sum);
-  }
+  cgnat_icmp_error_checksum_finish (
+    vm, b, ip, inner_offset, inner_len, old_inner_sum);
 
   /* The packet continues toward the remote destination on the outside fib. */
   vnet_buffer (b)->sw_if_index[VLIB_TX] = mapping->outside_fib_index;
@@ -581,22 +728,62 @@ cgnat_mapping_alloc (cgnat_main_t *cm, u32 *mapping_index)
 static cgnat_session_t *
 cgnat_session_alloc (cgnat_main_t *cm, u32 *session_index)
 {
+  u32 thread_index = vlib_get_main ()->thread_index;
+  cgnat_session_cache_t *cache;
   cgnat_session_t *session;
+  u32 generation;
+  u32 n_refill, i;
 
-  clib_spinlock_lock (&cm->session_pool_lock);
-  /* Same fixed-capacity rule as cgnat_mapping_alloc: never move the base
-   * under lock-free readers. */
-  if (PREDICT_FALSE (pool_free_elts (cm->sessions) == 0))
+  if (PREDICT_FALSE (thread_index >= vec_len (cm->session_caches)))
     {
+      clib_spinlock_lock (&cm->session_pool_lock);
+      if (PREDICT_FALSE (pool_free_elts (cm->sessions) == 0))
+	{
+	  clib_spinlock_unlock (&cm->session_pool_lock);
+	  return 0;
+	}
+      pool_get_zero (cm->sessions, session);
+      *session_index = session - cm->sessions;
+      vec_validate (cm->session_generation_by_index, *session_index);
+      session->generation = ++cm->session_generation_by_index[*session_index];
+      session->timer_handle = CGNAT_INVALID_INDEX;
       clib_spinlock_unlock (&cm->session_pool_lock);
-      return 0;
+      return session;
     }
-  pool_get_zero (cm->sessions, session);
-  *session_index = session - cm->sessions;
+
+  cache = vec_elt_at_index (cm->session_caches, thread_index);
+  if (PREDICT_FALSE (vec_len (cache->indices) == 0))
+    {
+      clib_spinlock_lock (&cm->session_pool_lock);
+      n_refill = pool_free_elts (cm->sessions);
+      if (n_refill > cm->session_cache_batch_size)
+	n_refill = cm->session_cache_batch_size;
+      else if (n_refill > 1)
+	n_refill = 1;
+      for (i = 0; i < n_refill; i++)
+	{
+	  pool_get (cm->sessions, session);
+	  session->flags = CGNAT_SESSION_FLAG_RESERVED;
+	  session->mapping_index = CGNAT_INVALID_INDEX;
+	  session->timer_handle = CGNAT_INVALID_INDEX;
+	  vec_add1 (cache->indices, session - cm->sessions);
+	}
+      clib_spinlock_unlock (&cm->session_pool_lock);
+
+      if (PREDICT_FALSE (vec_len (cache->indices) == 0))
+	return 0;
+    }
+
+  *session_index = vec_pop (cache->indices);
+  session = pool_elt_at_index (cm->sessions, *session_index);
   vec_validate (cm->session_generation_by_index, *session_index);
-  session->generation = ++cm->session_generation_by_index[*session_index];
+  generation = ++cm->session_generation_by_index[*session_index];
+
+  clib_memset (session, 0, sizeof (*session));
+  session->generation = generation;
+  session->flags = CGNAT_SESSION_FLAG_RESERVED;
+  session->mapping_index = CGNAT_INVALID_INDEX;
   session->timer_handle = CGNAT_INVALID_INDEX;
-  clib_spinlock_unlock (&cm->session_pool_lock);
 
   return session;
 }
@@ -605,6 +792,7 @@ static_always_inline void
 cgnat_session_free_unpublished (cgnat_main_t *cm, cgnat_session_t *session)
 {
   clib_spinlock_lock (&cm->session_pool_lock);
+  session->flags = 0;
   pool_put (cm->sessions, session);
   clib_spinlock_unlock (&cm->session_pool_lock);
 }
@@ -674,9 +862,10 @@ cgnat_adf_remote_ref_locked (cgnat_main_t *cm, clib_bihash_kv_24_8_t *kv)
     remote->generation = ++cm->adf_remote_generation_by_index[remote_index];
   clib_spinlock_unlock (&cm->adf_remote_pool_lock);
 
-  /* Element-local init does not need the pool lock. */
+  /* Element-local init does not need the pool lock.  The authoritative key
+   * remains in adf_remote_table; the compact pool object only tracks the
+   * generation and the number of sessions sharing that permission. */
   remote->refcnt = 1;
-  remote->kv = *kv;
 
   kv->value = cgnat_index_to_value (remote_index, remote->generation);
   if (clib_bihash_add_del_24_8 (&cm->adf_remote_table, kv, 1))
@@ -746,7 +935,10 @@ cgnat_adf_remote_unref_locked (cgnat_main_t *cm, clib_bihash_kv_24_8_t *kv)
 
   if (!remote->refcnt)
     {
-      clib_bihash_add_del_24_8 (&cm->adf_remote_table, &remote->kv, 0);
+      /* The caller built this same key to find the record and still holds its
+       * stripe lock, so storing another 24_8 KV in every pool object is
+       * unnecessary. */
+      clib_bihash_add_del_24_8 (&cm->adf_remote_table, kv, 0);
       clib_spinlock_lock (&cm->adf_remote_pool_lock);
       pool_put (cm->adf_remotes, remote);
       clib_spinlock_unlock (&cm->adf_remote_pool_lock);
@@ -911,13 +1103,13 @@ cgnat_session_start_timer (cgnat_main_t *cm, cgnat_session_t *session, f64 now)
 
 static void
 cgnat_log_session (cgnat_main_t *cm, char *event, char *reason,
-		   cgnat_session_t *session)
+		   cgnat_ipfix_event_t ipfix_event, cgnat_session_t *session)
 {
   cgnat_instance_t *instance;
   cgnat_log_event_t log_event;
 
   instance = cgnat_instance_get_by_index (cm, session->instance_index);
-  if (!instance || !instance->syslog_enabled ||
+  if (!instance || (!instance->syslog_enabled && !instance->ipfix_enabled) ||
       instance->log_mode != CGNAT_LOG_MODE_SESSION)
     return;
 
@@ -925,7 +1117,11 @@ cgnat_log_session (cgnat_main_t *cm, char *event, char *reason,
    * fixed-size event and hand it to the main-thread log process. */
   clib_memset (&log_event, 0, sizeof (log_event));
   log_event.kind = CGNAT_LOG_EVENT_KIND_SESSION;
-  cgnat_log_event_set_common (&log_event, instance, event, reason);
+  cgnat_log_event_set_common (&log_event, instance, event, reason,
+			      ipfix_event);
+  log_event.inside_vrf_id =
+    session->inside_fib_index == CGNAT_INVALID_INDEX ? 0 :
+      fib_table_get_table_id (session->inside_fib_index, FIB_PROTOCOL_IP4);
   log_event.session.private_ip = session->inside_ip;
   log_event.session.private_port = session->inside_port;
   log_event.session.public_ip = session->nat_ip;
@@ -1113,7 +1309,8 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
 	  clib_spinlock_unlock (&cm->session_timer_lock);
 	}
     }
-  cgnat_log_session (cm, "SESSION_DELETE", reason, session);
+  cgnat_log_session (cm, "SESSION_DELETE", reason,
+		     CGNAT_IPFIX_EVENT_SESSION_DELETE, session);
 
   if (release_user_instance_index != CGNAT_INVALID_INDEX)
     cgnat_pba_release_user_if_idle (release_user_instance_index,
@@ -1171,6 +1368,9 @@ static_always_inline int
 cgnat_session_filter_match (cgnat_session_t *session,
 			    cgnat_session_filter_t *filter)
 {
+  if (session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			CGNAT_SESSION_FLAG_RESERVED))
+    return 0;
   if (!filter)
     return 1;
   if ((filter->flags & CGNAT_SESSION_FILTER_INSIDE_IP) &&
@@ -1199,8 +1399,7 @@ cgnat_session_snapshot (cgnat_session_filter_t *filter)
 
   vlib_worker_thread_barrier_sync (cm->vlib_main);
   pool_foreach (session, cm->sessions)
-    if (!(session->flags & CGNAT_SESSION_FLAG_DELETING) &&
-	cgnat_session_filter_match (session, filter))
+    if (cgnat_session_filter_match (session, filter))
       vec_add1 (snapshot, *session);
   vlib_worker_thread_barrier_release (cm->vlib_main);
   return snapshot;
@@ -1221,8 +1420,7 @@ cgnat_session_delete_matching (cgnat_session_filter_t *filter)
     {
       cgnat_session_t *session = pool_elt_at_index (cm->sessions, session_index);
       next_index = pool_next_index (cm->sessions, session_index);
-      if (!(session->flags & CGNAT_SESSION_FLAG_DELETING) &&
-	  cgnat_session_filter_match (session, filter))
+      if (cgnat_session_filter_match (session, filter))
 	{
 	  cgnat_session_delete (cm, session, "force_delete");
 	  deleted++;
@@ -1303,7 +1501,8 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 
       if (session->generation != entry->session_generation ||
 	  session->timer_handle != entry->wheel_handle ||
-	  (session->flags & CGNAT_SESSION_FLAG_DELETING))
+	  (session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			     CGNAT_SESSION_FLAG_RESERVED)))
 	{
 	  vec_add1 (pending_put, entry_index);
 	  continue;
@@ -1375,7 +1574,8 @@ cgnat_session_process_expired_timers (u32 *expired_timers)
 	  session = pool_elt_at_index (cm->sessions, entry->session_index);
 	  if (session->generation != entry->session_generation ||
 	      session->timer_handle != entry->wheel_handle ||
-	      (session->flags & CGNAT_SESSION_FLAG_DELETING))
+	      (session->flags & (CGNAT_SESSION_FLAG_DELETING |
+				 CGNAT_SESSION_FLAG_RESERVED)))
 	    {
 	      vec_add1 (pending_put, *pi);
 	      continue;
@@ -1650,7 +1850,8 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
 	  return rv;
 	}
     }
-  cgnat_log_session (cm, "SESSION_CREATE", 0, session);
+  cgnat_log_session (cm, "SESSION_CREATE", 0,
+		     CGNAT_IPFIX_EVENT_SESSION_CREATE, session);
   cgnat_session_start_timer (cm, session, now);
   return 0;
 }
@@ -1694,24 +1895,35 @@ cgnat_static_protocol_conflict (u8 a, u8 b)
 
 static int
 cgnat_static_rule_conflict (cgnat_instance_t *instance,
-			    cgnat_static_rule_t *candidate,
-			    u32 skip_index)
+			    cgnat_static_rule_t *candidate)
 {
   cgnat_static_rule_t *rule;
 
   pool_foreach (rule, instance->static_rules)
     {
-      if ((u32) (rule - instance->static_rules) == skip_index)
-	continue;
-
       if (!cgnat_static_protocol_conflict (rule->protocol,
 					   candidate->protocol))
 	continue;
 
+      /* A port mapping for the same inside address is an exact exception to
+       * an address-level mapping.  The datapath checks exact mappings before
+       * the address fallback, so either configuration order is valid.
+       * Sharing only the outside address with a different inside host stays
+       * a conflict: the address rule's port-preserving fallback could not
+       * provide an unambiguous bidirectional mapping for that port. */
+      if ((rule->type == CGNAT_STATIC_PORT_MAP) !=
+	  (candidate->type == CGNAT_STATIC_PORT_MAP))
+	{
+	  if (rule->inside_ip.as_u32 == candidate->inside_ip.as_u32)
+	    continue;
+	  if (rule->outside_ip.as_u32 == candidate->outside_ip.as_u32)
+	    return 1;
+	  continue;
+	}
+
       if (rule->outside_ip.as_u32 == candidate->outside_ip.as_u32)
 	{
 	  if (rule->type != CGNAT_STATIC_PORT_MAP ||
-	      candidate->type != CGNAT_STATIC_PORT_MAP ||
 	      rule->outside_port == candidate->outside_port)
 	    return 1;
 	}
@@ -1719,7 +1931,6 @@ cgnat_static_rule_conflict (cgnat_instance_t *instance,
       if (rule->inside_ip.as_u32 == candidate->inside_ip.as_u32)
 	{
 	  if (rule->type != CGNAT_STATIC_PORT_MAP ||
-	      candidate->type != CGNAT_STATIC_PORT_MAP ||
 	      rule->inside_port == candidate->inside_port)
 	    return 1;
 	}
@@ -1951,12 +2162,13 @@ cgnat_session_reap (cgnat_main_t *cm)
 	continue;
       session = pool_elt_at_index (cm->sessions, session_index);
       if (session->generation != generation ||
-	  !(session->flags & CGNAT_SESSION_FLAG_DELETING))
+	  !(session->flags & CGNAT_SESSION_FLAG_DELETING) ||
+	  (session->flags & CGNAT_SESSION_FLAG_RESERVED))
 	continue;
 
-      clib_spinlock_lock (&cm->session_pool_lock);
+      /* cgnat_session_reap is strictly executed under worker barrier,
+       * so pool_put does not need session_pool_lock. */
       pool_put (cm->sessions, session);
-      clib_spinlock_unlock (&cm->session_pool_lock);
     }
   vec_free (pending);
 }
@@ -1971,36 +2183,142 @@ cgnat_static_rule_pool_put (cgnat_instance_t *instance,
 }
 
 static int
-cgnat_static_dynamic_mapping_conflict (cgnat_main_t *cm,
+cgnat_static_mapping_is_replaced (cgnat_main_t *cm,
+				  cgnat_static_rule_t *candidate,
+				  cgnat_mapping_t *mapping)
+{
+  cgnat_instance_t *instance;
+  cgnat_static_rule_t *owner;
+
+  if (mapping->instance_index != candidate->instance_index ||
+      (mapping->flags & CGNAT_MAPPING_FLAG_DELETING))
+    return 0;
+
+  if (candidate->protocol != CGNAT_STATIC_PROTO_ALL &&
+      mapping->protocol != candidate->protocol)
+    return 0;
+
+  if (cgnat_mapping_is_auto (mapping))
+    {
+      if (candidate->type != CGNAT_STATIC_PORT_MAP)
+	return mapping->inside_ip.as_u32 == candidate->inside_ip.as_u32 ||
+	       mapping->nat_ip.as_u32 == candidate->outside_ip.as_u32;
+
+      return (mapping->inside_ip.as_u32 == candidate->inside_ip.as_u32 &&
+	      mapping->inside_port == candidate->inside_port) ||
+	     (mapping->nat_ip.as_u32 == candidate->outside_ip.as_u32 &&
+	      mapping->nat_port == candidate->outside_port);
+    }
+
+  /* Adding an address rule must leave existing port exceptions intact.
+   * Adding a port rule, however, may collide with an exact mapping that an
+   * address rule created lazily for earlier traffic.  Replace only that
+   * derived mapping; a port mapping owned by another port rule remains a
+   * configuration conflict and was rejected by cgnat_static_rule_conflict. */
+  if (candidate->type != CGNAT_STATIC_PORT_MAP ||
+      mapping->mapping_type != CGNAT_MAPPING_STATIC)
+    return 0;
+
+  instance = cgnat_instance_get_by_index (cm, mapping->instance_index);
+  if (!instance || mapping->static_rule_index == CGNAT_INVALID_INDEX ||
+      pool_is_free_index (instance->static_rules,
+			  mapping->static_rule_index))
+    return 0;
+  owner = pool_elt_at_index (instance->static_rules,
+			     mapping->static_rule_index);
+  if (owner->type == CGNAT_STATIC_PORT_MAP ||
+      mapping->protocol != candidate->protocol)
+    return 0;
+
+  return (mapping->inside_fib_index == candidate->inside_fib_index &&
+	  mapping->inside_ip.as_u32 == candidate->inside_ip.as_u32 &&
+	  mapping->inside_port == candidate->inside_port) ||
+	 (mapping->outside_fib_index == candidate->outside_fib_index &&
+	  mapping->nat_ip.as_u32 == candidate->outside_ip.as_u32 &&
+	  mapping->nat_port == candidate->outside_port);
+}
+
+/* Static configuration runs under a worker barrier.  Remove sessions first
+ * so their normal teardown updates user/session counters and schedules the
+ * now-idle mapping.  Zero-session mappings are scheduled explicitly. */
+static void
+cgnat_static_replace_runtime_mappings (cgnat_main_t *cm,
 				       cgnat_static_rule_t *candidate)
 {
   cgnat_mapping_t *mapping;
+  cgnat_session_t *session;
+  u64 *mapping_values = 0;
+  u64 *mapping_value;
+  u64 *session_values = 0;
+  u64 *session_value;
 
   pool_foreach (mapping, cm->mappings)
     {
-      if (!cgnat_mapping_is_auto (mapping) ||
-	  mapping->instance_index != candidate->instance_index ||
-	  (mapping->flags & CGNAT_MAPPING_FLAG_DELETING))
-	continue;
-
-      if (candidate->protocol != CGNAT_STATIC_PROTO_ALL &&
-	  mapping->protocol != candidate->protocol)
-	continue;
-
-      if (candidate->type != CGNAT_STATIC_PORT_MAP)
-	{
-	  if (mapping->inside_ip.as_u32 == candidate->inside_ip.as_u32 ||
-	      mapping->nat_ip.as_u32 == candidate->outside_ip.as_u32)
-	    return 1;
-	}
-      else if ((mapping->inside_ip.as_u32 == candidate->inside_ip.as_u32 &&
-		mapping->inside_port == candidate->inside_port) ||
-	       (mapping->nat_ip.as_u32 == candidate->outside_ip.as_u32 &&
-		mapping->nat_port == candidate->outside_port))
-	return 1;
+      if (cgnat_static_mapping_is_replaced (cm, candidate, mapping))
+	vec_add1 (mapping_values,
+		  cgnat_index_to_value (mapping - cm->mappings,
+					mapping->generation));
     }
 
-  return 0;
+  if (vec_len (mapping_values) == 0)
+    {
+      vec_free (mapping_values);
+      return;
+    }
+
+  /* Scan the session pool once.  A single address rule can replace many
+   * mappings, so rescanning all sessions for every mapping would hold the
+   * worker barrier for unnecessarily long on a busy appliance. */
+  pool_foreach (session, cm->sessions)
+    {
+      u64 value;
+
+      if ((session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			     CGNAT_SESSION_FLAG_RESERVED)) ||
+	  session->mapping_index == CGNAT_INVALID_INDEX)
+	continue;
+      value = cgnat_index_to_value (session->mapping_index,
+				    session->mapping_generation);
+      mapping = cgnat_mapping_get_if_valid (cm, value);
+      if (mapping &&
+	  cgnat_static_mapping_is_replaced (cm, candidate, mapping))
+	vec_add1 (session_values,
+		  cgnat_index_to_value (session - cm->sessions,
+					session->generation));
+    }
+
+  vec_foreach (session_value, session_values)
+    {
+      u32 session_index = cgnat_value_get_index (*session_value);
+      u32 session_generation = cgnat_value_get_generation (*session_value);
+
+      if (pool_is_free_index (cm->sessions, session_index))
+	continue;
+      session = pool_elt_at_index (cm->sessions, session_index);
+      if (session->generation == session_generation &&
+	  !(session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			      CGNAT_SESSION_FLAG_RESERVED)))
+	cgnat_session_delete (cm, session, "static_replace");
+    }
+
+  /* A conflicting mapping without sessions was not visited by session
+   * teardown, so place it on the same deferred-reap path explicitly. */
+  vec_foreach (mapping_value, mapping_values)
+    {
+      mapping = cgnat_mapping_get_if_valid (cm, *mapping_value);
+      if (!mapping)
+	continue;
+      if (cgnat_mapping_is_auto (mapping))
+	cgnat_dynamic_mapping_schedule_delete (cm, mapping);
+      else
+	cgnat_static_addr_mapping_schedule_delete (cm, mapping);
+    }
+
+  /* The barrier makes immediate reaping safe and frees mapping-table keys
+   * before the new exact port mapping is installed. */
+  cgnat_dynamic_mapping_reap (cm);
+  vec_free (session_values);
+  vec_free (mapping_values);
 }
 
 static int
@@ -2117,12 +2435,9 @@ cgnat_static_addr_get_or_create_mapping (cgnat_main_t *cm,
   if (!cgnat_mapping_table_search (cm, &cm->out2in_mapping_table, &kv, &value))
     return cgnat_mapping_get_if_valid (cm, value.value);
 
-  if (!cgnat_mapping_table_search (cm, &cm->out2in_mapping_table, &kv, &value))
-    {
-      mapping = cgnat_mapping_get_if_valid (cm, value.value);
-      return mapping;
-    }
-
+  /* Do not repeat the same lookup before create: exact_mapping_create
+   * rechecks both mapping keys.  If another worker wins after this miss, its
+   * VALUE_EXIST result is resolved by the retry lookup below. */
   rv = cgnat_static_exact_mapping_create (cm, rule, packet_port, packet_port,
 					  protocol, inside_fib_index,
 					  &mapping_index);
@@ -2170,7 +2485,9 @@ cgnat_static_mapping_delete_exact (cgnat_main_t *cm, cgnat_mapping_t *mapping)
 
   pool_foreach (session, cm->sessions)
     {
-      if (session->mapping_index == (u32) (mapping - cm->mappings) &&
+      if (!(session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			      CGNAT_SESSION_FLAG_RESERVED)) &&
+	  session->mapping_index == (u32) (mapping - cm->mappings) &&
 	  session->mapping_generation == mapping->generation)
 	vec_add1 (session_indices, session - cm->sessions);
     }
@@ -2180,7 +2497,9 @@ cgnat_static_mapping_delete_exact (cgnat_main_t *cm, cgnat_mapping_t *mapping)
       if (!pool_is_free_index (cm->sessions, *session_index))
 	{
 	  session = pool_elt_at_index (cm->sessions, *session_index);
-	  cgnat_session_delete (cm, session, "static_delete");
+	  if (!(session->flags & (CGNAT_SESSION_FLAG_DELETING |
+				  CGNAT_SESSION_FLAG_RESERVED)))
+	    cgnat_session_delete (cm, session, "static_delete");
 	}
     }
   vec_free (session_indices);
@@ -2366,17 +2685,13 @@ cgnat_static_mapping_add_del (u32 instance_index, ip4_address_t outside_ip,
       goto done;
     }
 
-  if (cgnat_static_rule_conflict (instance, &candidate, CGNAT_INVALID_INDEX))
+  if (cgnat_static_rule_conflict (instance, &candidate))
     {
       rv = VNET_API_ERROR_VALUE_EXIST;
       goto done;
     }
 
-  if (cgnat_static_dynamic_mapping_conflict (cm, &candidate))
-    {
-      rv = VNET_API_ERROR_VALUE_EXIST;
-      goto done;
-    }
+  cgnat_static_replace_runtime_mappings (cm, &candidate);
 
   pool_get_zero (instance->static_rules, rule);
   rule_index = rule - instance->static_rules;
@@ -2446,6 +2761,8 @@ cgnat_static_mapping_add_del (u32 instance_index, ip4_address_t outside_ip,
   cgnat_static_fib_add_for_rule (cm, rule);
 
 done:
+  if (!rv)
+    cgnat_recalculate_instance (cm, instance);
   vlib_worker_thread_barrier_release (cm->vlib_main);
   return rv;
 }
@@ -2493,7 +2810,8 @@ cgnat_instance_delete_sessions (cgnat_main_t *cm, cgnat_instance_t *instance)
   pool_foreach (session, cm->sessions)
     {
       if (session->instance_index == instance_index &&
-	  !(session->flags & CGNAT_SESSION_FLAG_DELETING))
+	  !(session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			      CGNAT_SESSION_FLAG_RESERVED)))
 	vec_add1 (session_indices, session - cm->sessions);
     }
 
@@ -2649,7 +2967,8 @@ cgnat_pool_delete_sessions_of_pool (cgnat_main_t *cm, u32 pool_index)
 
   pool_foreach (session, cm->sessions)
     {
-      if (session->flags & CGNAT_SESSION_FLAG_DELETING)
+      if (session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			    CGNAT_SESSION_FLAG_RESERVED))
 	continue;
       if (pool_is_free_index (cm->mappings, session->mapping_index))
 	continue;
@@ -2813,6 +3132,13 @@ cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings)
   vec_validate_aligned (cm->session_counters_per_thread,
 			vlib_get_thread_main ()->n_vlib_mains - 1,
 			CLIB_CACHE_LINE_BYTES);
+  vec_validate_aligned (cm->session_caches,
+			vlib_get_thread_main ()->n_vlib_mains - 1,
+			CLIB_CACHE_LINE_BYTES);
+  for (i = 0; i < vec_len (cm->session_caches); i++)
+    vec_alloc (cm->session_caches[i].indices,
+	       CGNAT_SESSION_CACHE_BATCH_MAX);
+  cm->session_cache_batch_size = CGNAT_SESSION_CACHE_BATCH_DEFAULT;
 
   /* BIHASH_USE_HEAP=1 in this tree: the memory_size argument is ignored,
    * so pass 0 (same as the static/adf tables). */
@@ -2920,6 +3246,10 @@ cgnat_session_reset (cgnat_main_t *cm)
   cm->session_tables_initialized = 0;
 
   vec_free (cm->session_counters_per_thread);
+  for (i = 0; i < vec_len (cm->session_caches); i++)
+    vec_free (cm->session_caches[i].indices);
+  vec_free (cm->session_caches);
+  cm->session_cache_batch_size = 0;
 }
 
 void

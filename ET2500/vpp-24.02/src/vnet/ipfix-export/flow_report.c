@@ -22,6 +22,82 @@
 
 flow_report_main_t flow_report_main;
 
+/* Resolve a retained exporter pool index without exposing pool internals. */
+ipfix_exporter_t *
+vnet_ipfix_exporter_get (u32 exporter_index)
+{
+  flow_report_main_t *frm = &flow_report_main;
+
+  if (exporter_index >= vec_len (frm->exporters) ||
+      pool_is_free_index (frm->exporters, exporter_index))
+    return 0;
+  return pool_elt_at_index (frm->exporters, exporter_index);
+}
+
+int
+vnet_ipfix_exporter_create (const vnet_ipfix_exporter_params_t *params,
+			    u32 *exporter_index)
+{
+  flow_report_main_t *frm = &flow_report_main;
+  ipfix_exporter_t *exp;
+  u32 ip_header_size;
+
+  if (!params || !exporter_index ||
+      ip_address_is_zero (&params->collector) ||
+      ip_address_is_zero (&params->src_address) ||
+      ip_addr_version (&params->collector) !=
+	ip_addr_version (&params->src_address) ||
+      !params->collector_port || params->path_mtu < 68 ||
+      params->path_mtu > 1450 || !params->template_interval)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  if (pool_elts (frm->exporters) >= IPFIX_EXPORTERS_MAX)
+    return VNET_API_ERROR_LIMIT_EXCEEDED;
+
+  /* Index 0 was preallocated at init for legacy single-exporter clients, so
+   * programmatic users receive a distinct pool entry and retain its index. */
+  pool_get_zero (frm->exporters, exp);
+  ip_header_size = ip_addr_version (&params->collector) == AF_IP4 ?
+		     sizeof (ip4_header_t) : sizeof (ip6_header_t);
+  exp->all_headers_size = ip_header_size + sizeof (udp_header_t) +
+			  sizeof (ipfix_message_header_t) +
+			  sizeof (ipfix_set_header_t);
+  exp->ipfix_collector = params->collector;
+  exp->collector_port = params->collector_port;
+  exp->src_address = params->src_address;
+  exp->fib_index = params->fib_index;
+  exp->path_mtu = params->path_mtu;
+  exp->template_interval = params->template_interval;
+  exp->udp_checksum = params->udp_checksum;
+  *exporter_index = exp - frm->exporters;
+
+  vlib_process_signal_event (frm->vlib_main, flow_report_process_node.index,
+			     1, 0);
+  return 0;
+}
+
+int
+vnet_ipfix_exporter_delete (u32 exporter_index)
+{
+  flow_report_main_t *frm = &flow_report_main;
+  ipfix_exporter_t *exp;
+
+  /* Never release the compatibility exporter, and never orphan reports that
+   * still refer to this exporter's stream vector. */
+  if (exporter_index == 0 || exporter_index >= vec_len (frm->exporters) ||
+      pool_is_free_index (frm->exporters, exporter_index))
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  exp = pool_elt_at_index (frm->exporters, exporter_index);
+  if (vec_len (exp->reports))
+    return VNET_API_ERROR_INSTANCE_IN_USE;
+
+  vec_free (exp->reports);
+  vec_free (exp->streams);
+  pool_put (frm->exporters, exp);
+  return 0;
+}
+
 static_always_inline u8
 stream_index_valid (ipfix_exporter_t *exp, u32 index)
 {
@@ -181,6 +257,33 @@ send_template_packet (flow_report_main_t *frm, ipfix_exporter_t *exp,
   return 0;
 }
 
+int
+vnet_ipfix_exp_send_template (ipfix_exporter_t *exp, flow_report_t *fr)
+{
+  flow_report_main_t *frm = &flow_report_main;
+  vlib_frame_t *f;
+  u32 *to_next;
+  u32 bi;
+  u32 node_index;
+  int rv;
+
+  if (!exp || !fr)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  rv = send_template_packet (frm, exp, fr, &bi);
+  if (rv)
+    return rv;
+
+  node_index = ip_addr_version (&exp->ipfix_collector) == AF_IP4 ?
+		 ip4_lookup_node.index : ip6_lookup_node.index;
+  f = vlib_get_frame_to_node (frm->vlib_main, node_index);
+  to_next = vlib_frame_vector_args (f);
+  to_next[0] = bi;
+  f->n_vectors = 1;
+  vlib_put_frame_to_node (frm->vlib_main, node_index, f);
+  return 0;
+}
+
 u32 always_inline
 ipfix_write_headers (ipfix_exporter_t *exp, void *data, void **ip,
 		     udp_header_t **udp, u32 len)
@@ -314,39 +417,53 @@ vlib_buffer_t *
 vnet_ipfix_exp_get_buffer (vlib_main_t *vm, ipfix_exporter_t *exp,
 			   flow_report_t *fr, u32 thread_index)
 {
+  flow_report_per_thread_t *ptd = &fr->per_thread_data[thread_index];
+  flow_report_stream_t *stream;
   u32 bi0;
   vlib_buffer_t *b0;
 
-  if (fr->per_thread_data[thread_index].buffer)
-    return fr->per_thread_data[thread_index].buffer;
+  /* data_record_size is fixed when the template is registered, so the
+   * framework can enforce path MTU without every producer duplicating it. */
+  if (ptd->buffer &&
+      ptd->next_data_offset + fr->data_record_size > exp->path_mtu)
+    {
+      /* Keep data queued until the first template can be put ahead of it by
+       * the flow-report process callback. */
+      if (fr->last_template_sent == 0)
+	return NULL;
+      stream = &exp->streams[fr->stream_index];
+      vnet_ipfix_exp_send_buffer (vm, exp, fr, stream, thread_index,
+				  ptd->buffer);
+    }
+
+  if (ptd->buffer)
+    return ptd->buffer;
 
   if (vlib_buffer_alloc (vm, &bi0, 1) != 1)
     return NULL;
 
   /* Initialize the buffer */
-  b0 = fr->per_thread_data[thread_index].buffer = vlib_get_buffer (vm, bi0);
+  b0 = ptd->buffer = vlib_get_buffer (vm, bi0);
 
   b0->current_data = 0;
   b0->current_length = exp->all_headers_size;
   b0->flags |= (VLIB_BUFFER_TOTAL_LENGTH_VALID | VNET_BUFFER_F_FLOW_REPORT);
   vnet_buffer (b0)->sw_if_index[VLIB_RX] = 0;
   vnet_buffer (b0)->sw_if_index[VLIB_TX] = exp->fib_index;
-  fr->per_thread_data[thread_index].next_data_offset = b0->current_length;
+  ptd->next_data_offset = b0->current_length;
+  ptd->n_data_records = 0;
 
   return b0;
 }
 
-/*
- * Send a buffer that is mostly populated. Has flow records but needs some
- * header fields updated.
- */
-void
-vnet_ipfix_exp_send_buffer (vlib_main_t *vm, ipfix_exporter_t *exp,
-			    flow_report_t *fr, flow_report_stream_t *stream,
-			    u32 thread_index, vlib_buffer_t *b0)
+u32
+vnet_ipfix_exp_finalize_buffer (vlib_main_t *vm, ipfix_exporter_t *exp,
+				flow_report_t *fr,
+				flow_report_stream_t *stream, u32 thread_index,
+				vlib_buffer_t *b0)
 {
   flow_report_main_t *frm = &flow_report_main;
-  vlib_frame_t *f;
+  flow_report_per_thread_t *ptd = &fr->per_thread_data[thread_index];
   ipfix_set_header_t *s;
   ipfix_message_header_t *h;
   ip4_header_t *ip4 = 0;
@@ -356,10 +473,11 @@ vnet_ipfix_exp_send_buffer (vlib_main_t *vm, ipfix_exporter_t *exp,
   int ip_len;
 
   /* nothing to send */
-  if (fr->per_thread_data[thread_index].next_data_offset <=
-      exp->all_headers_size)
-    return;
+  if (!b0 || ptd->next_data_offset <= exp->all_headers_size)
+    return ~0;
 
+  /* Records were written after reserved header space.  Build/fix all outer
+   * headers only when the batch is closed. */
   ip_len = ipfix_write_headers (exp, (void *) vlib_buffer_get_current (b0),
 				&ip, &udp, b0->current_length);
 
@@ -385,7 +503,7 @@ vnet_ipfix_exp_send_buffer (vlib_main_t *vm, ipfix_exporter_t *exp,
    */
   h->sequence_number =
     clib_atomic_fetch_add (&stream->sequence_number,
-			   fr->per_thread_data[thread_index].n_data_records);
+			   ptd->n_data_records);
   h->sequence_number = clib_host_to_net_u32 (h->sequence_number);
 
   /*
@@ -430,32 +548,46 @@ vnet_ipfix_exp_send_buffer (vlib_main_t *vm, ipfix_exporter_t *exp,
 	udp->checksum = 0xffff;
     }
 
-  /* Find or allocate a frame */
-  f = fr->per_thread_data[thread_index].frame;
-  if (PREDICT_FALSE (f == 0))
-    {
-      u32 *to_next;
-      if (ip_addr_version (&exp->ipfix_collector) == AF_IP4)
-	f = vlib_get_frame_to_node (vm, ip4_lookup_node.index);
-      else
-	f = vlib_get_frame_to_node (vm, ip6_lookup_node.index);
-      fr->per_thread_data[thread_index].frame = f;
-      u32 bi0 = vlib_get_buffer_index (vm, b0);
+  /* Detach before handing ownership to the caller; the next event allocates
+   * a fresh pending buffer and starts a new record count. */
+  u32 bi0 = vlib_get_buffer_index (vm, b0);
+  ptd->frame = NULL;
+  ptd->buffer = NULL;
+  ptd->next_data_offset = 0;
+  ptd->n_data_records = 0;
+  return bi0;
+}
 
-      /* Enqueue the buffer */
-      to_next = vlib_frame_vector_args (f);
-      to_next[0] = bi0;
-      f->n_vectors = 1;
-    }
+/*
+ * Send a buffer that is mostly populated. Has flow records but needs some
+ * header fields updated.
+ */
+void
+vnet_ipfix_exp_send_buffer (vlib_main_t *vm, ipfix_exporter_t *exp,
+			    flow_report_t *fr, flow_report_stream_t *stream,
+			    u32 thread_index, vlib_buffer_t *b0)
+{
+  vlib_frame_t *f;
+  u32 *to_next;
+  u32 bi0;
+
+  bi0 = vnet_ipfix_exp_finalize_buffer (vm, exp, fr, stream, thread_index,
+					b0);
+  if (bi0 == ~0)
+    return;
+
+  if (ip_addr_version (&exp->ipfix_collector) == AF_IP4)
+    f = vlib_get_frame_to_node (vm, ip4_lookup_node.index);
+  else
+    f = vlib_get_frame_to_node (vm, ip6_lookup_node.index);
+  to_next = vlib_frame_vector_args (f);
+  to_next[0] = bi0;
+  f->n_vectors = 1;
 
   if (ip_addr_version (&exp->ipfix_collector) == AF_IP4)
     vlib_put_frame_to_node (vm, ip4_lookup_node.index, f);
   else
     vlib_put_frame_to_node (vm, ip6_lookup_node.index, f);
-
-  fr->per_thread_data[thread_index].frame = NULL;
-  fr->per_thread_data[thread_index].buffer = NULL;
-  fr->per_thread_data[thread_index].next_data_offset = 0;
 }
 
 static void
@@ -636,6 +768,7 @@ vnet_flow_report_add_del (ipfix_exporter_t *exp,
 		  vlib_buffer_free (vm, &bi, 1);
 		}
 	    }
+	  vec_free (exp->reports[found_index].rewrite);
 	  vec_free (exp->reports[found_index].per_thread_data);
 
 	  vec_delete (exp->reports, 1, found_index);

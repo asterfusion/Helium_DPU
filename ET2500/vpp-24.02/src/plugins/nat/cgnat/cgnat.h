@@ -54,19 +54,19 @@
  * edge.  (The template ASSERTs slow_ring_offset < 512, so 262144 must not
  * be armed directly.) */
 #define CGNAT_TIMER_MAX_DELAY 262143
-#define CGNAT_SESSION_TIMER_MAX_EXPIRATIONS 32768
+#define CGNAT_SESSION_TIMER_MAX_EXPIRATIONS (256 * 1024)
 #define CGNAT_COOLING_TIMER_MAX_EXPIRATIONS 1024
 /* Safety cap on total expirations processed in one timer-process wakeup
  * (drain loop), so an expiry storm cannot starve other main-thread
  * processes. */
-#define CGNAT_SESSION_TIMER_DRAIN_CAP (128 * 1024)
+#define CGNAT_SESSION_TIMER_DRAIN_CAP (256 * 1024)
 #define CGNAT_COOLING_TIMER_DRAIN_CAP (16 * 1024)
 #define CGNAT_SESSION_TIMER_VEC (1024 * 1024)
 /* Fixed margin over max_sessions for timer bookkeeping pools: covers one
  * in-flight drain round plus re-arm races (double occupancy while the old
  * entry awaits processing).  Operator-scale mass deletes may exceed it and
  * fall back to pool growth, which is a one-time transient. */
-#define CGNAT_SESSION_TIMER_POOL_MARGIN (128 * 1024)
+#define CGNAT_SESSION_TIMER_POOL_MARGIN (256 * 1024)
 #define CGNAT_COOLING_TIMER_VEC (1024 * 16)
 #define CGNAT_LOG_FIFO_SIZE (256 * 1024)
 #define CGNAT_LOG_POLL_INTERVAL_DEFAULT (0.01)
@@ -134,6 +134,14 @@ typedef enum
 
 typedef enum
 {
+  /* Capacity above a pre-allocated user's reserved block floor. Keep this
+   * property on the block while it is COOLING: owned_block_ids can reorder
+   * when timers expire, so vector position cannot identify elastic blocks. */
+  CGNAT_BLOCK_FLAG_ELASTIC = (1 << 0),
+} cgnat_block_flags_t;
+
+typedef enum
+{
   CGNAT_MAPPING_FLAG_DELETING = 1,
 } cgnat_mapping_flags_t;
 
@@ -156,10 +164,34 @@ typedef enum
   CGNAT_LOG_EVENT_KIND_SESSION = 1,
 } cgnat_log_event_kind_t;
 
+typedef enum
+{
+  /* One event snapshot may be delivered to either or both consumers. */
+  CGNAT_EVENT_SINK_SYSLOG = (1 << 0),
+  CGNAT_EVENT_SINK_IPFIX = (1 << 1),
+} cgnat_event_sink_t;
+
+typedef enum
+{
+  /* IANA natEvent values.  Session events match RFC-defined NAT logging;
+   * 16/17 identify port-block allocation and release. */
+  CGNAT_IPFIX_EVENT_SESSION_CREATE = 4,
+  CGNAT_IPFIX_EVENT_SESSION_DELETE = 5,
+  CGNAT_IPFIX_EVENT_PBA_ALLOC = 16,
+  CGNAT_IPFIX_EVENT_PBA_RELEASE = 17,
+} cgnat_ipfix_event_t;
+
 typedef struct
 {
+  /* Fixed-size producer snapshot: workers enqueue it once and the main-thread
+   * log process fans it out to the selected syslog and IPFIX sinks. */
   u8 kind;
+  u8 sink_mask;
+  u8 ipfix_event;
+  u64 timestamp_ms;
+  u32 instance_index;
   u32 instance_id;
+  u32 inside_vrf_id;
   u8 event[CGNAT_LOG_EVENT_STR_LEN];
   u8 reason[CGNAT_LOG_REASON_STR_LEN];
   u8 instance_label[CGNAT_LOG_INSTANCE_LABEL_LEN];
@@ -187,6 +219,7 @@ typedef struct
       } session;
   };
 } __clib_aligned(256) cgnat_log_event_t;
+STATIC_ASSERT_SIZEOF (cgnat_log_event_t, 256);
 
 typedef enum
 {
@@ -256,11 +289,19 @@ typedef enum
   CGNAT_SESSION_FLAG_SEEN_OUT2IN = 2,
   CGNAT_SESSION_FLAG_DELETING = 4,
   CGNAT_SESSION_FLAG_ADF_REMOTE_RECORDED = 8,
+  /* Allocated from the VPP pool and parked in a worker-local create cache,
+   * but not yet published in the session bihash. */
+  CGNAT_SESSION_FLAG_RESERVED = 16,
 } cgnat_session_flags_t;
+
+#define CGNAT_SESSION_CACHE_BATCH_DEFAULT 128
+#define CGNAT_SESSION_CACHE_BATCH_MAX 1024
 
 typedef struct
 {
   u16 block_id;
+  /* cgnat_block_flags_t, stored as u16 to use the existing alignment hole. */
+  u16 flags;
   cgnat_block_state_t state;
 
   /* Active port allocations per protocol (TCP/UDP/ICMP). */
@@ -275,13 +316,16 @@ typedef struct
   /*
    * Present only while the block is allocated; bit 1 means the port offset is
    * free. First dimension indexes protocol (TCP/UDP/ICMP), second stores
-   * even/odd offsets.
+   * even/odd offsets.  Each parity bitmap uses compact indices: bit N maps to
+   * offset (N << 1) | parity, so no storage is spent on the opposite parity.
    */
   clib_bitmap_t *free_port_bitmap[CGNAT_PBA_PROTO_COUNT][2];
 } cgnat_block_t;
 
 typedef struct
 {
+  /* Keep each public-IP lock on its own cache line in the pool. */
+  CLIB_CACHE_LINE_ALIGN_MARK (cacheline0);
   ip4_address_t addr;
 
   u16 total_blocks;
@@ -305,6 +349,8 @@ typedef struct
   /* Contains only ALLOCATED and COOLING blocks. FREE has no structure. */
   cgnat_block_t *blocks;
 } cgnat_public_ip_t;
+
+STATIC_ASSERT_SIZEOF (cgnat_public_ip_t, 64);
 
 typedef struct
 {
@@ -331,9 +377,13 @@ typedef struct
   /* Active port allocations per protocol (TCP/UDP/ICMP). */
   u16 active_ports[CGNAT_PBA_PROTO_COUNT];
 
+  /* Hard ownership ceiling after applying max-blocks and max-ports. */
   u16 max_blocks;
   /* Per-protocol limit on active port allocations. */
   u16 max_ports;
+  /* PRE_ALLOC target: min(configured prealloc, max_blocks). Blocks between
+   * min_blocks and max_blocks are elastic; ON_DEMAND keeps this at zero. */
+  u16 min_blocks;
   cgnat_block_alloc_mode_t block_alloc_mode;
   /* Owned blocks include both ALLOCATED and user-revivable COOLING blocks. */
   u16 *owned_block_ids;
@@ -447,8 +497,9 @@ typedef struct
 {
   u32 generation;
   u32 refcnt;
-  clib_bihash_kv_24_8_t kv;
 } cgnat_adf_remote_t;
+
+STATIC_ASSERT_SIZEOF (cgnat_adf_remote_t, 8);
 
 typedef struct
 {
@@ -509,6 +560,13 @@ typedef struct
 
 typedef struct
 {
+  /* Session indices already reserved from cm->sessions by this thread.
+   * They remain allocated in the VPP pool and carry RESERVED until used. */
+  u32 *indices;
+} cgnat_session_cache_t;
+
+typedef struct
+{
   u8 type;
   u8 protocol;
   u8 flags;
@@ -542,10 +600,13 @@ typedef struct
 
 typedef struct
 {
+  /* Persistent operator configuration.  runtime_index is valid only while
+   * this collector has live flow-report exporter/stream/report state. */
   ip4_address_t collector_address;
   ip4_address_t src_address;
   u16 collector_port;
   u16 src_port;
+  u32 runtime_index;
 } cgnat_ipfix_exporter_t;
 
 typedef struct
@@ -627,10 +688,11 @@ typedef struct
   /* Global pool indices. Configuration updates run under a worker barrier. */
   u32 *pool_indices;
 
-  /* Envelope [min,max] over all attached pools' public address ranges,
+  /* Envelope [min,max] over attached pools and static outside addresses,
    * maintained by cgnat_recalculate_instance().  Used to cheaply skip the
    * hairpin destination lookup for packets whose destination cannot be one
-   * of our own public addresses.  min > max means "no pool attached". */
+   * of our own public addresses.  Holes are allowed; min > max means that
+   * neither a pool nor a static outside address is configured. */
   ip4_address_t pool_addr_min;
   ip4_address_t pool_addr_max;
 
@@ -712,6 +774,7 @@ typedef struct
 
   cgnat_interface_t *interfaces;
   u32 *interface_index_by_sw_if_index;
+  u8 *interface_roles;
 
   cgnat_instance_t *instances;
   uword *instance_index_by_id;
@@ -740,6 +803,8 @@ typedef struct
    * writes are plain (non-atomic) increments of the calling thread's slot;
    * readers aggregate via cgnat_session_counts(). */
   cgnat_session_counters_t *session_counters_per_thread;
+  cgnat_session_cache_t *session_caches;
+  u32 session_cache_batch_size;
   clib_spinlock_t mapping_table_locks[CGNAT_MAPPING_TABLE_LOCK_BUCKETS];
   clib_spinlock_t session_table_locks[CGNAT_SESSION_TABLE_LOCK_BUCKETS];
   clib_spinlock_t adf_remote_locks[CGNAT_ADF_REMOTE_LOCK_BUCKETS];
@@ -777,7 +842,9 @@ typedef struct
 
   u32 in2out_policy_node_index;
   u32 in2out_node_index;
+  u32 in2out_slow_node_index;
   u32 out2in_node_index;
+  u32 out2in_slow_node_index;
 
   u16 msg_id_base;
   vlib_log_class_t log_class_dynamic;
@@ -792,6 +859,15 @@ typedef struct
   u64 log_full;
   u64 log_sent;
   f64 log_poll_interval;
+
+  /* Runtime bridge from per-instance collector configuration to indices in
+   * the shared VPP flow-report subsystem. */
+  struct cgnat_ipfix_runtime *ipfix_runtimes;
+  /* Main-thread counters: encoded records, unavailable buffers (including
+   * waiting for the first template), and missing/stale runtime state. */
+  u64 ipfix_records_encoded;
+  u64 ipfix_no_buffer;
+  u64 ipfix_no_runtime;
 
   vlib_main_t *vlib_main;
   vnet_main_t *vnet_main;
@@ -846,7 +922,16 @@ void cgnat_log_enqueue (cgnat_log_event_t *event);
 void cgnat_log_emit (cgnat_log_event_t *event);
 void cgnat_log_event_set_common (cgnat_log_event_t *event,
 				 cgnat_instance_t *instance, char *event_name,
-				 char *reason);
+				 char *reason, cgnat_ipfix_event_t ipfix_event);
+void cgnat_log_drain (void);
+
+void cgnat_ipfix_init (cgnat_main_t *cm);
+int cgnat_ipfix_exporter_create (u32 instance_index,
+				 cgnat_ipfix_exporter_t *config);
+void cgnat_ipfix_exporter_destroy (cgnat_ipfix_exporter_t *config);
+int cgnat_ipfix_instance_enable (u32 instance_index);
+void cgnat_ipfix_instance_disable (cgnat_instance_t *instance);
+void cgnat_ipfix_emit (cgnat_log_event_t *event);
 
 #define cgnat_log_err(...)                                                    \
   vlib_log (VLIB_LOG_LEVEL_ERR, cgnat_main.log_class_dynamic, __VA_ARGS__)
@@ -886,6 +971,26 @@ typedef enum
   CGNAT_INTERFACE_ROLE_INSIDE = 1,
   CGNAT_INTERFACE_ROLE_OUTSIDE = 2,
 } cgnat_interface_role_t;
+
+static_always_inline u8
+cgnat_get_interface_role (cgnat_main_t *cm, u32 sw_if_index)
+{
+  if (PREDICT_FALSE (sw_if_index >= vec_len (cm->interface_roles)))
+    return CGNAT_INTERFACE_ROLE_NONE;
+  return cm->interface_roles[sw_if_index];
+}
+
+static_always_inline u8
+cgnat_interface_role_is_inside (u8 role)
+{
+  return (role & CGNAT_INTERFACE_FLAG_IS_INSIDE) != 0;
+}
+
+static_always_inline u8
+cgnat_interface_role_is_outside (u8 role)
+{
+  return (role & CGNAT_INTERFACE_FLAG_IS_OUTSIDE) != 0;
+}
 
 static_always_inline cgnat_interface_t *
 cgnat_get_interface (cgnat_main_t *cm, u32 sw_if_index)
@@ -1039,6 +1144,7 @@ cgnat_instance_index_by_acl (cgnat_main_t *cm, u32 acl_index)
 }
 
 extern vlib_node_registration_t cgnat_in2out_node;
+extern vlib_node_registration_t cgnat_in2out_slow_node;
 extern vlib_node_registration_t cgnat_in2out_policy_node;
 extern vlib_node_registration_t cgnat_out2in_node;
 extern vlib_node_registration_t cgnat_timer_process_node;
@@ -1097,6 +1203,7 @@ void cgnat_session_expire_timers (f64 now);
 void cgnat_reap (cgnat_main_t *cm);
 void cgnat_session_counts (cgnat_main_t *cm, u64 *total, u64 *tcp, u64 *udp,
 			   u64 *icmp);
+int cgnat_session_cache_set_batch_size (u32 batch_size);
 cgnat_session_t *cgnat_session_snapshot (cgnat_session_filter_t *filter);
 u32 cgnat_session_delete_matching (cgnat_session_filter_t *filter);
 

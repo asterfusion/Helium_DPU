@@ -9,6 +9,7 @@
 #include <vnet/fib/fib_table.h>
 
 #include <nat/cgnat/cgnat.h>
+#include <nat/cgnat/cgnat_ipfix.h>
 
 static clib_error_t *
 cgnat_enable_command_fn (vlib_main_t *vm, unformat_input_t *input,
@@ -1227,6 +1228,79 @@ cgnat_show_instance_config_one (vlib_main_t *vm, cgnat_instance_t *instance)
 }
 
 static clib_error_t *
+cgnat_show_ipfix_command_fn (vlib_main_t *vm, unformat_input_t *input,
+			     vlib_cli_command_t *cmd)
+{
+  cgnat_main_t *cm = &cgnat_main;
+  cgnat_instance_t *instance;
+  cgnat_ipfix_exporter_t *config;
+
+  (void) input;
+  (void) cmd;
+
+  vlib_cli_output (vm,
+		   "IPFIX records-encoded %llu no-buffer %llu no-runtime %llu "
+		   "queue-full %llu",
+		   cm->ipfix_records_encoded, cm->ipfix_no_buffer,
+		   cm->ipfix_no_runtime, cm->log_full);
+
+  vec_foreach (instance, cm->instances)
+    {
+      if (!instance->configured)
+	continue;
+      vec_foreach (config, instance->ipfix_exporters)
+	{
+	  if (config->runtime_index == CGNAT_INVALID_INDEX ||
+	      pool_is_free_index (cm->ipfix_runtimes,
+				  config->runtime_index))
+	    {
+	      vlib_cli_output (
+		vm, " instance %u collector %U:%u src %U:%u inactive",
+		instance->instance_id, format_ip4_address,
+		&config->collector_address, config->collector_port,
+		format_ip4_address, &config->src_address, config->src_port);
+	      continue;
+	    }
+
+	  cgnat_ipfix_runtime_t *runtime = pool_elt_at_index (
+	    cm->ipfix_runtimes, config->runtime_index);
+	  vlib_cli_output (
+	    vm, " instance %u collector %U:%u src %U:%u exporter %u "
+		"stream %u templates session %u pba %u",
+	    instance->instance_id, format_ip4_address,
+	    &config->collector_address, config->collector_port,
+	    format_ip4_address, &config->src_address, config->src_port,
+	    runtime->exporter_index, runtime->stream_index,
+	    runtime->session_template_id, runtime->pba_template_id);
+	}
+    }
+  return 0;
+}
+
+static clib_error_t *
+cgnat_show_session_cache_command_fn (vlib_main_t *vm, unformat_input_t *input,
+				     vlib_cli_command_t *cmd)
+{
+  cgnat_main_t *cm = &cgnat_main;
+  u32 i;
+
+  (void) input;
+  (void) cmd;
+
+  vlib_worker_thread_barrier_sync (cm->vlib_main);
+  vlib_cli_output (vm, "session cache:");
+  vlib_cli_output (vm, " refill batch-size %u",
+		   cm->session_cache_batch_size);
+  vlib_cli_output (vm, " max batch-size    %u",
+		   CGNAT_SESSION_CACHE_BATCH_MAX);
+  for (i = 0; i < vec_len (cm->session_caches); i++)
+    vlib_cli_output (vm, " thread %u cached %u", i,
+		     (u32) vec_len (cm->session_caches[i].indices));
+  vlib_worker_thread_barrier_release (cm->vlib_main);
+  return 0;
+}
+
+static clib_error_t *
 cgnat_show_instance_config_command_fn (vlib_main_t *vm, unformat_input_t *input,
 				       vlib_cli_command_t *cmd)
 {
@@ -1490,6 +1564,29 @@ cgnat_set_log_queue_command_fn (vlib_main_t *vm, unformat_input_t *input,
   return 0;
 }
 
+static clib_error_t *
+cgnat_set_session_cache_command_fn (vlib_main_t *vm, unformat_input_t *input,
+				    vlib_cli_command_t *cmd)
+{
+  u32 batch_size = 0;
+  int rv;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "batch-size %u", &batch_size))
+	;
+      else
+	return clib_error_return (0, "unknown input `%U'",
+				  format_unformat_error, input);
+    }
+
+  rv = cgnat_session_cache_set_batch_size (batch_size);
+  if (rv)
+    return clib_error_return (
+      0, "batch-size must be 1..%u", CGNAT_SESSION_CACHE_BATCH_MAX);
+  return 0;
+}
+
 /* *INDENT-OFF* */
 VLIB_CLI_COMMAND (cgnat_enable_command, static) = {
   .path = "cgnat enable",
@@ -1556,6 +1653,11 @@ VLIB_CLI_COMMAND (cgnat_set_log_queue_command, static) = {
   .short_help = "cgnat set log-queue poll-interval <ms>",
   .function = cgnat_set_log_queue_command_fn,
 };
+VLIB_CLI_COMMAND (cgnat_set_session_cache_command, static) = {
+  .path = "cgnat set session-cache",
+  .short_help = "cgnat set session-cache batch-size <1..1024>",
+  .function = cgnat_set_session_cache_command_fn,
+};
 VLIB_CLI_COMMAND (cgnat_set_interface_command, static) = {
   .path = "cgnat set interface",
   .short_help = "cgnat set interface <interface> <inside|outside|none>",
@@ -1599,6 +1701,16 @@ VLIB_CLI_COMMAND (cgnat_show_instance_stat_command, static) = {
   .path = "cgnat show instance stat",
   .short_help = "cgnat show instance stat <all>|instance <name>|<name>",
   .function = cgnat_show_instance_stat_command_fn,
+};
+VLIB_CLI_COMMAND (cgnat_show_ipfix_command, static) = {
+  .path = "cgnat show ipfix",
+  .short_help = "cgnat show ipfix",
+  .function = cgnat_show_ipfix_command_fn,
+};
+VLIB_CLI_COMMAND (cgnat_show_session_cache_command, static) = {
+  .path = "cgnat show session-cache",
+  .short_help = "cgnat show session-cache",
+  .function = cgnat_show_session_cache_command_fn,
 };
 VLIB_CLI_COMMAND (cgnat_show_pool_config_command, static) = {
   .path = "cgnat show pool config",

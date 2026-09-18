@@ -11,6 +11,7 @@
 #include <plugins/acl/public_inlines.h>
 
 #include <nat/cgnat/cgnat.h>
+#include <nat/cgnat/cgnat_ipfix.h>
 
 /* Owned by cgnat.c, used here to validate ACL existence on binding. */
 extern acl_plugin_methods_t cgnat_acl_plugin;
@@ -149,6 +150,7 @@ cgnat_pool_index_from_id (u32 pool_id, u32 *pool_index)
 void
 cgnat_recalculate_instance (cgnat_main_t *cm, cgnat_instance_t *instance)
 {
+  cgnat_static_rule_t *rule;
   u32 *pool_index;
   u32 addr_min = ~0u, addr_max = 0;
 
@@ -169,8 +171,16 @@ cgnat_recalculate_instance (cgnat_main_t *cm, cgnat_instance_t *instance)
       addr_max = clib_max (addr_max, clib_net_to_host_u32 (pool->last_ip.as_u32));
     }
 
-  /* Public-address envelope used by the hairpin pre-filter in
-   * cgnat_session_in2out(). */
+  pool_foreach (rule, instance->static_rules)
+    {
+      u32 outside_addr = clib_net_to_host_u32 (rule->outside_ip.as_u32);
+
+      addr_min = clib_min (addr_min, outside_addr);
+      addr_max = clib_max (addr_max, outside_addr);
+    }
+
+  /* Public-address envelope over dynamic pools and static outside addresses,
+   * used by the hairpin pre-filter in the in2out fast and slow paths. */
   instance->pool_addr_min.as_u32 = clib_host_to_net_u32 (addr_min);
   instance->pool_addr_max.as_u32 = clib_host_to_net_u32 (addr_max);
 }
@@ -321,6 +331,7 @@ cgnat_instance_free_runtime (cgnat_instance_t *instance)
   pool_free (instance->static_rules);
   vec_free (instance->acl_indices);
   vec_free (instance->syslog_servers);
+  cgnat_ipfix_instance_disable (instance);
   vec_free (instance->ipfix_exporters);
   vec_free (instance->pool_indices);
   vec_free (instance->inside_addresses);
@@ -1116,6 +1127,8 @@ cgnat_instance_add_del (u32 *instance_id, u8 *label, u32 inside_vrf_id,
 
   cgnat_instance_clear_acls_inline (cm, instance);
   cgnat_instance_cleanup_resources (cm, instance);
+  cgnat_log_drain ();
+  cgnat_ipfix_instance_disable (instance);
 
   /* Detach pools owned by this instance, but keep pool configuration. */
   {
@@ -1202,6 +1215,30 @@ cgnat_instance_set (u32 instance_id, cgnat_instance_config_t *config)
 
   vlib_worker_thread_barrier_sync (cm->vlib_main);
   cgnat_recalculate_instance (cm, instance);
+  if (config->flags & CGNAT_INSTANCE_SET_IPFIX)
+    {
+      int rv;
+
+      /* Create/destroy flow-report resources before publishing the new flag.
+       * The worker barrier keeps queued-event routing and configuration
+       * lifetime stable during the transition. */
+      if (config->ipfix_enabled && !instance->ipfix_enabled)
+	{
+	  rv = cgnat_ipfix_instance_enable (instance_index);
+	  if (rv)
+	    {
+	      vlib_worker_thread_barrier_release (cm->vlib_main);
+	      return rv;
+	    }
+	}
+	else if (!config->ipfix_enabled && instance->ipfix_enabled)
+	{
+	  /* Deliver snapshots produced under the old configuration before their
+	   * exporter/report runtime is torn down. */
+	  cgnat_log_drain ();
+	  cgnat_ipfix_instance_disable (instance);
+	}
+    }
 #define CGNAT_SET_FIELD(flag, dst, src)                                      \
   if (config->flags & (flag))                                                \
     instance->dst = config->src
@@ -1338,6 +1375,23 @@ cgnat_plugin_enable_disable (u8 enable, u32 max_sessions, u32 max_mappings)
 
       if (!ret)
 	{
+	  vec_foreach_index (ii, cm->instances)
+	    {
+	      instance = vec_elt_at_index (cm->instances, ii);
+	      if (instance->configured && instance->ipfix_enabled)
+		{
+		  rv = cgnat_ipfix_instance_enable (ii);
+		  if (rv)
+		    {
+		      ret = rv;
+		      break;
+		    }
+		}
+	    }
+	}
+
+      if (!ret)
+	{
 	  /* Re-register /32 local receive entries so VPP answers ARP for pool
 	   * public IPs and static mapping outside IPs on outside interfaces.
 	   * Done only after all features are up: registration cannot fail, so
@@ -1348,6 +1402,10 @@ cgnat_plugin_enable_disable (u8 enable, u32 max_sessions, u32 max_mappings)
 	}
       else
 	{
+	  vec_foreach (instance, cm->instances)
+	    if (instance->configured)
+	      cgnat_ipfix_instance_disable (instance);
+
 	  /* Feature enablement failed (recorded but the loop above runs to
 	   * completion, so every interface may be enabled): roll features
 	   * back, then reset pool runtime so a later enable starts clean.
@@ -1397,6 +1455,11 @@ cgnat_plugin_enable_disable (u8 enable, u32 max_sessions, u32 max_mappings)
       if (instance->configured)
 	cgnat_instance_runtime_reset (cm, instance, ii);
     }
+
+  cgnat_log_drain ();
+  vec_foreach (instance, cm->instances)
+    if (instance->configured)
+      cgnat_ipfix_instance_disable (instance);
 
   /* 2. Free per-pool runtime structures (public IPs, blocks, bitmaps). */
   vec_foreach_index (pi, cm->pools)
@@ -1492,13 +1555,28 @@ cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
 	  match->sw_if_index = sw_if_index;
 	  vec_validate_init_empty (cm->interface_index_by_sw_if_index,
 				   sw_if_index, CGNAT_INVALID_INDEX);
+	  vec_validate_init_empty (cm->interface_roles,
+				   sw_if_index, CGNAT_INTERFACE_ROLE_NONE);
 	  match->flags |= flag;
 	  cm->interface_index_by_sw_if_index[sw_if_index] =
 	    match - cm->interfaces;
+	  cm->interface_roles[sw_if_index] = match->flags;
 	  vlib_worker_thread_barrier_release (cm->vlib_main);
 	}
       else
-	match->flags |= flag;
+	{
+	  vlib_worker_thread_barrier_sync (cm->vlib_main);
+	  match->flags |= flag;
+	  if (sw_if_index < vec_len (cm->interface_roles))
+	    cm->interface_roles[sw_if_index] = match->flags;
+	  else
+	    {
+	      vec_validate_init_empty (cm->interface_roles, sw_if_index,
+				       CGNAT_INTERFACE_ROLE_NONE);
+	      cm->interface_roles[sw_if_index] = match->flags;
+	    }
+	  vlib_worker_thread_barrier_release (cm->vlib_main);
+	}
 
       /* Make VPP answer ARP for all pool public IPs and static mapping
        * outside IPs on this outside interface. */
@@ -1527,17 +1605,18 @@ cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
 	  cgnat_del_static_fib_entries_for_sw_if (cm, sw_if_index);
 	}
 
+      vlib_worker_thread_barrier_sync (cm->vlib_main);
       match->flags &= ~flag;
+      if (sw_if_index < vec_len (cm->interface_roles))
+	cm->interface_roles[sw_if_index] = match->flags;
       if (!match->flags)
 	{
-	  /* Pause workers before unlinking and freeing the interface entry;
-	   * the packet path reads it lock-free. */
-	  vlib_worker_thread_barrier_sync (cm->vlib_main);
+	  /* Interface is fully disabled; unlink and free it. */
 	  cm->interface_index_by_sw_if_index[sw_if_index] =
 	    CGNAT_INVALID_INDEX;
 	  pool_put (cm->interfaces, match);
-	  vlib_worker_thread_barrier_release (cm->vlib_main);
 	}
+      vlib_worker_thread_barrier_release (cm->vlib_main);
     }
 
   return 0;
@@ -1741,6 +1820,9 @@ cgnat_instance_ipfix_exporter_add_del (
       !src_port)
     return VNET_API_ERROR_INVALID_VALUE;
 
+  /* A collector is uniquely identified by the complete transport tuple, not
+   * collector address alone; equal destinations may use different VRFs,
+   * source addresses or UDP ports. */
   vec_foreach (exporter, instance->ipfix_exporters)
     if (exporter->collector_address.as_u32 == collector_address.as_u32 &&
 	exporter->collector_port == collector_port &&
@@ -1750,6 +1832,10 @@ cgnat_instance_ipfix_exporter_add_del (
 	if (is_add)
 	  return VNET_API_ERROR_VALUE_EXIST;
 	vlib_worker_thread_barrier_sync (cm->vlib_main);
+	/* Drain events that still target this collector before invalidating its
+	 * runtime index and compacting the configuration vector. */
+	cgnat_log_drain ();
+	cgnat_ipfix_exporter_destroy (exporter);
 	vec_del1 (instance->ipfix_exporters,
 		  exporter - instance->ipfix_exporters);
 	vlib_worker_thread_barrier_release (cm->vlib_main);
@@ -1760,11 +1846,26 @@ cgnat_instance_ipfix_exporter_add_del (
     return VNET_API_ERROR_NO_SUCH_ENTRY;
 
   vlib_worker_thread_barrier_sync (cm->vlib_main);
+  /* Keep pre-change events away from the newly added sink. */
+  cgnat_log_drain ();
   vec_add2 (instance->ipfix_exporters, exporter, 1);
   exporter->collector_address = collector_address;
   exporter->collector_port = collector_port;
   exporter->src_address = src_address;
   exporter->src_port = src_port;
+  exporter->runtime_index = CGNAT_INVALID_INDEX;
+  if (instance->ipfix_enabled)
+    {
+      int rv = cgnat_ipfix_exporter_create (instance_index, exporter);
+
+      if (rv)
+	{
+	  vec_del1 (instance->ipfix_exporters,
+		    exporter - instance->ipfix_exporters);
+	  vlib_worker_thread_barrier_release (cm->vlib_main);
+	  return rv;
+	}
+    }
   vlib_worker_thread_barrier_release (cm->vlib_main);
   return 0;
 }

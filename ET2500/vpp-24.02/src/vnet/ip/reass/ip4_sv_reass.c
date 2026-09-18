@@ -99,8 +99,16 @@ typedef struct
   // ip protocol
   u8 ip_proto;
   u8 icmp_type_or_tcp_flags;
-  u32 tcp_ack_number;
-  u32 tcp_seq_number;
+  union
+  {
+    u32 tcp_ack_number;
+    u8 icmp_error_inner_protocol;
+  };
+  union
+  {
+    u32 tcp_seq_number;
+    u32 icmp_error_inner_dst_address;
+  };
   // l4 src port
   u16 l4_src_port;
   // l4 dst port
@@ -111,6 +119,132 @@ typedef struct
   u32 lru_prev;
   u32 lru_next;
 } ip4_sv_reass_t;
+
+always_inline int l4_layer_truncated (ip4_header_t *ip);
+
+always_inline int
+ip4_sv_reass_is_icmp_error (u8 type)
+{
+  return type == ICMP4_destination_unreachable ||
+	 type == ICMP4_time_exceeded || type == ICMP4_parameter_problem ||
+	 type == ICMP4_source_quench || type == ICMP4_redirect ||
+	 type == ICMP4_alternate_host_address;
+}
+
+always_inline void
+ip4_sv_reass_set_icmp_error_metadata (vlib_buffer_t *b, ip4_header_t *ip,
+				      ip4_sv_reass_t *reass)
+{
+  u8 *segment_end = (u8 *) vlib_buffer_get_current (b) + b->current_length;
+  u8 *packet_end = (u8 *) ip + clib_net_to_host_u16 (ip->length);
+  icmp46_header_t *icmp =
+    (icmp46_header_t *) ((u8 *) ip + ip4_header_bytes (ip));
+  ip4_header_t *inner;
+  u8 *inner_l4;
+
+  if (packet_end > segment_end)
+    packet_end = segment_end;
+
+  if ((u8 *) (icmp + 1) > packet_end)
+    return;
+
+  if (!ip4_sv_reass_is_icmp_error (icmp->type) ||
+      (u8 *) (icmp + 2) + sizeof (ip4_header_t) > packet_end)
+    return;
+
+  inner = (ip4_header_t *) (icmp + 2);
+  if ((inner->ip_version_and_header_length >> 4) != 4 ||
+      ip4_header_bytes (inner) < sizeof (*inner) ||
+      (u8 *) inner + ip4_header_bytes (inner) + 4 > packet_end)
+    return;
+
+  inner_l4 = (u8 *) inner + ip4_header_bytes (inner);
+  if (inner->protocol == IP_PROTOCOL_TCP ||
+      inner->protocol == IP_PROTOCOL_UDP)
+    {
+      udp_header_t *ports = (udp_header_t *) inner_l4;
+
+      /* Preserve ip4_get_port() semantics: the ICMP sender is the receiver
+	 * of the quoted packet, so its sender/receiver ports are quoted dst/src.
+	 * CGNAT reverses these aliases when rebuilding the quoted flow key. */
+      reass->l4_src_port = ports->dst_port;
+      reass->l4_dst_port = ports->src_port;
+    }
+  else if (inner->protocol == IP_PROTOCOL_ICMP)
+    {
+      icmp46_header_t *inner_icmp = (icmp46_header_t *) inner_l4;
+
+      if ((u8 *) (inner_icmp + 2) > packet_end ||
+	  (inner_icmp->type != ICMP4_echo_request &&
+	   inner_icmp->type != ICMP4_echo_reply))
+	return;
+      reass->l4_src_port = *((u16 *) (inner_icmp + 1));
+      reass->l4_dst_port = reass->l4_src_port;
+    }
+  else
+    return;
+
+  reass->icmp_error_inner_protocol = inner->protocol;
+  reass->icmp_error_inner_dst_address = inner->dst_address.as_u32;
+}
+
+always_inline void
+ip4_sv_reass_set_l4_metadata (vlib_buffer_t *b, ip4_header_t *ip,
+			      ip4_sv_reass_t *reass)
+{
+  u8 *segment_end = (u8 *) vlib_buffer_get_current (b) + b->current_length;
+  u8 *packet_end = (u8 *) ip + clib_net_to_host_u16 (ip->length);
+  u8 *l4 = (u8 *) ip + ip4_header_bytes (ip);
+
+  if (packet_end > segment_end)
+    packet_end = segment_end;
+
+  reass->l4_src_port = 0;
+  reass->l4_dst_port = 0;
+  reass->l4_layer_truncated = l4_layer_truncated (ip);
+
+  if (l4 > packet_end)
+    return;
+
+  if (ip->protocol == IP_PROTOCOL_TCP)
+    {
+      tcp_header_t *tcp = (tcp_header_t *) l4;
+
+      if ((u8 *) (tcp + 1) > packet_end)
+	return;
+      reass->l4_src_port = tcp->src_port;
+      reass->l4_dst_port = tcp->dst_port;
+      reass->icmp_type_or_tcp_flags = tcp->flags;
+      reass->tcp_ack_number = tcp->ack_number;
+      reass->tcp_seq_number = tcp->seq_number;
+    }
+  else if (ip->protocol == IP_PROTOCOL_UDP)
+    {
+      udp_header_t *udp = (udp_header_t *) l4;
+
+      if ((u8 *) (udp + 1) > packet_end)
+	return;
+      reass->l4_src_port = udp->src_port;
+      reass->l4_dst_port = udp->dst_port;
+    }
+  else if (ip->protocol == IP_PROTOCOL_ICMP)
+    {
+      icmp46_header_t *icmp = (icmp46_header_t *) l4;
+
+      if ((u8 *) (icmp + 1) > packet_end)
+	return;
+      reass->icmp_type_or_tcp_flags = icmp->type;
+      if ((icmp->type == ICMP4_echo_request ||
+	   icmp->type == ICMP4_echo_reply) &&
+	  (u8 *) (icmp + 2) <= packet_end)
+	{
+	  reass->l4_src_port = *((u16 *) (icmp + 1));
+	  reass->l4_dst_port = reass->l4_src_port;
+	}
+      else if (ip4_sv_reass_is_icmp_error (icmp->type))
+	ip4_sv_reass_set_icmp_error_metadata (b, ip, reass);
+    }
+}
 
 typedef struct
 {
@@ -461,8 +595,6 @@ again:
   return reass;
 }
 
-always_inline int l4_layer_truncated (ip4_header_t *ip);
-
 always_inline ip4_sv_reass_rc_t
 ip4_sv_reass_update (vlib_main_t *vm, vlib_node_runtime_t *node,
 		     ip4_sv_reass_main_t *rm, ip4_header_t *ip0,
@@ -472,24 +604,14 @@ ip4_sv_reass_update (vlib_main_t *vm, vlib_node_runtime_t *node,
   ip4_sv_reass_rc_t rc = IP4_SV_REASS_RC_OK;
   const u32 fragment_first = ip4_get_fragment_offset_bytes (ip0);
   if (0 == fragment_first)
-    {
-      reass->ip_proto = ip0->protocol;
-      reass->l4_src_port = ip4_get_port (ip0, 1);
-      reass->l4_dst_port = ip4_get_port (ip0, 0);
-      reass->l4_layer_truncated = l4_layer_truncated (ip0);
-
-      if (IP_PROTOCOL_TCP == reass->ip_proto)
 	{
-	  reass->icmp_type_or_tcp_flags = ((tcp_header_t *) (ip0 + 1))->flags;
-	  reass->tcp_ack_number = ((tcp_header_t *) (ip0 + 1))->ack_number;
-	  reass->tcp_seq_number = ((tcp_header_t *) (ip0 + 1))->seq_number;
-	}
-      else if (IP_PROTOCOL_ICMP == reass->ip_proto)
-	{
-	  reass->icmp_type_or_tcp_flags =
-	    ((icmp46_header_t *) (ip0 + 1))->type;
-	}
-      reass->is_complete = true;
+	  reass->ip_proto = ip0->protocol;
+	  /* The first fragment is the only fragment carrying the transport (or
+	     * ICMP quoted-inner) header.  Save its lookup metadata before releasing
+	     * this fragment and any non-first fragments cached ahead of it.  This
+	     * also records whether the complete L4 header is present. */
+	  ip4_sv_reass_set_l4_metadata (b0, ip0, reass);
+	  reass->is_complete = true;
       vlib_buffer_t *b0 = vlib_get_buffer (vm, bi0);
       if (PREDICT_FALSE (b0->flags & VLIB_BUFFER_IS_TRACED))
 	{
