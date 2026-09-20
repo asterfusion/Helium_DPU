@@ -49,7 +49,7 @@ class LcpTrap(IntEnum):
     LCP_TRAP_DNAT_MISS = 39
     LCP_TRAP_NAT_HAIRPIN = 40
     LCP_TRAP_P4RT = 55
-    LCP_TRAP_N_TYPES = 61
+    LCP_TRAP_N_TYPES = 62
 
 
 LCP_TRAP = LcpTrap
@@ -345,7 +345,10 @@ class LinuxCpCoppTestCase(VppTestCase):
         default = trap["default_action"]
 
         if default == "copy":
-            self._send_and_check(ingress, pkt, True, has_egress, host, egress)
+            self._send_and_check(
+                ingress, pkt, original_host_count + 1, has_egress,
+                host, egress
+            )
             expected = {
                 "trap_hit": 1,
                 "punt_required": 1,
@@ -578,8 +581,16 @@ def make_bfd(self, dst_local=False):
     return _ip4_base(self, dst_local) / UDP(dport=3784) / Raw(b"bfd")
 
 
+def make_bfd_multihop(self, dst_local=False):
+    return _ip4_base(self, dst_local) / UDP(dport=4784) / Raw(b"bfd-multihop")
+
+
 def make_ldp(self, dst_local=False):
     return _ip4_base(self, dst_local) / UDP(sport=646) / Raw(b"ldp")
+
+
+def make_ldp_tcp(self, dst_local=False):
+    return _ip4_base(self, dst_local) / TCP(sport=646, dport=50000) / Raw(b"ldp-tcp")
 
 
 def make_bgp(self, dst_local=False):
@@ -631,8 +642,16 @@ def make_http_server(self, dst_local=False):
     return _ip4_base(self, dst_local) / TCP(sport=40000, dport=80) / Raw(b"https")
 
 
-def make_custom_iccp(self, dst_local=False):
-    return _ip4_base(self, dst_local) / TCP(dport=8888) / Raw(b"iccp")
+def make_iccp(self, dst_local=False):
+    payload = bytes.fromhex(
+        "00010016c000020100000700000c000000010005000400000001"
+    )
+    return _ip4_base(self, dst_local) / TCP(dport=646) / Raw(payload)
+
+
+def make_iccp_compat(self, dst_local=False):
+    payload = bytes.fromhex("0700000c000000010005000400000001")
+    return _ip4_base(self, dst_local) / TCP(dport=8888) / Raw(payload)
 
 
 def make_custom_telnet(self, dst_local=False):
@@ -736,8 +755,12 @@ def make_bfd_v6(self, dst_local=False):
     return _ip6_base(self, dst_local) / UDP(dport=3784) / Raw(b"bfd6")
 
 
-def make_ldp_v6(self, dst_local=False):
-    return _ip6_base(self, dst_local) / UDP(dport=646) / Raw(b"ldp6")
+def make_bfd_multihop_v6(self, dst_local=False):
+    return _ip6_base(self, dst_local) / UDP(dport=4784) / Raw(b"bfd6-multihop")
+
+
+def make_ldp_tcp_v6(self, dst_local=False):
+    return _ip6_base(self, dst_local) / TCP(sport=646, dport=50000) / Raw(b"ldp6-tcp")
 
 
 def make_bgp_v6(self, dst_local=False):
@@ -788,8 +811,16 @@ def make_http_server_v6(self, dst_local=False):
     return _ip6_base(self, dst_local) / TCP(sport=40000, dport=80) / Raw(b"https6")
 
 
-def make_custom_iccp_v6(self, dst_local=False):
-    return _ip6_base(self, dst_local) / TCP(dport=8888) / Raw(b"iccp6")
+def make_iccp_v6(self, dst_local=False):
+    payload = bytes.fromhex(
+        "00010016c000020100000700000c000000010005000400000001"
+    )
+    return _ip6_base(self, dst_local) / TCP(dport=646) / Raw(payload)
+
+
+def make_iccp_compat_v6(self, dst_local=False):
+    payload = bytes.fromhex("0700000c000000010005000400000001")
+    return _ip6_base(self, dst_local) / TCP(dport=8888) / Raw(payload)
 
 
 def make_custom_telnet_v6(self, dst_local=False):
@@ -855,16 +886,12 @@ IP4_TRAPS = [
     dict(id=9, name="IGMP_V3_REPORT", make_packet=make_igmp_v3_report,
          default_action="trap", has_egress=True, ingress="l2_phy",
          host="l2_host", egress="l2_egress"),
-    dict(id=24, name="DHCP", make_packet=make_dhcp,
-         default_action="trap", has_egress=True, exclusive_with=(12,)),
     dict(id=25, name="OSPF", make_packet=make_ospf,
          default_action="trap", has_egress=True),
     dict(id=26, name="PIM", make_packet=make_pim,
          default_action="copy", has_egress=True),
     dict(id=27, name="VRRP", make_packet=make_vrrp,
          default_action="copy", has_egress=True),
-    dict(id=48, name="BFD", make_packet=make_bfd,
-         default_action="trap", has_egress=True),
     dict(id=52, name="LDP", make_packet=make_ldp,
          default_action="trap", has_egress=True),
     dict(id=10, name="PTP", make_packet=make_ptp_v4,
@@ -879,8 +906,6 @@ IP4_TRAPS = [
 ]
 
 IP6_TRAPS = [
-    dict(id=28, name="DHCPV6", make_packet=make_dhcpv6,
-         default_action="trap", has_egress=True, exclusive_with=(13,)),
     dict(id=29, name="OSPFV6", make_packet=make_ospfv6,
          default_action="trap", has_egress=True),
     dict(id=30, name="VRRPV6", make_packet=make_vrrpv6,
@@ -903,10 +928,6 @@ IP6_TRAPS = [
     dict(id=35, name="MLD_V2_REPORT", make_packet=make_mld_v2_report,
          default_action="trap", has_egress=True, ingress="l2_phy",
          host="l2_host", egress="l2_egress"),
-    dict(id=49, name="BFDV6", make_packet=make_bfd_v6,
-         default_action="trap", has_egress=True),
-    dict(id=52, name="LDP", make_packet=make_ldp_v6,
-         default_action="trap", has_egress=True),
     dict(id=10, name="PTP", make_packet=make_ptp_v6,
          default_action="trap", has_egress=True),
     dict(id=26, name="PIM", make_packet=make_pim_v6,
@@ -925,6 +946,12 @@ def _local_wrap(factory):
     return wrapped
 
 LOCAL_TRAPS = [
+    dict(id=24, name="DHCP", make_packet=_local_wrap(make_dhcp),
+         default_action="copy", has_egress=False, original_host_count=1,
+         exclusive_with=(12,)),
+    dict(id=28, name="DHCPV6", make_packet=_local_wrap(make_dhcpv6),
+         default_action="copy", has_egress=False, original_host_count=1,
+         exclusive_with=(13,)),
     dict(id=43, name="IP2ME", make_packet=_local_wrap(make_ip2me_v4),
          default_action="trap", has_egress=False, original_host_count=1),
     dict(id=43, name="IP2ME_V6", make_packet=_local_wrap(make_ip2me_v6),
@@ -940,6 +967,18 @@ LOCAL_TRAPS = [
     dict(id=46, name="BGP", make_packet=_local_wrap(make_bgp),
          default_action="trap", has_egress=False, original_host_count=1),
     dict(id=47, name="BGPV6", make_packet=_local_wrap(make_bgp_v6),
+         default_action="trap", has_egress=False, original_host_count=1),
+    dict(id=48, name="BFD_3784", make_packet=_local_wrap(make_bfd),
+         default_action="trap", has_egress=False, original_host_count=1),
+    dict(id=48, name="BFD_4784", make_packet=_local_wrap(make_bfd_multihop),
+         default_action="trap", has_egress=False, original_host_count=1),
+    dict(id=49, name="BFDV6_3784", make_packet=_local_wrap(make_bfd_v6),
+         default_action="trap", has_egress=False, original_host_count=1),
+    dict(id=49, name="BFDV6_4784", make_packet=_local_wrap(make_bfd_multihop_v6),
+         default_action="trap", has_egress=False, original_host_count=1),
+    dict(id=52, name="LDP_TCP", make_packet=_local_wrap(make_ldp_tcp),
+         default_action="trap", has_egress=False, original_host_count=1),
+    dict(id=52, name="LDP_TCP_V6", make_packet=_local_wrap(make_ldp_tcp_v6),
          default_action="trap", has_egress=False, original_host_count=1),
     dict(id=50, name="BFD_MICRO", make_packet=_local_wrap(make_bfd_micro),
          default_action="trap", has_egress=False, original_host_count=1),
@@ -969,9 +1008,14 @@ LOCAL_TRAPS = [
          default_action="trap", has_egress=False, original_host_count=1),
     dict(id=58, name="HTTPSERVER_V6", make_packet=_local_wrap(make_http_server_v6),
          default_action="trap", has_egress=False, original_host_count=1),
-    dict(id=14, name="CUSTOM_ICCP", make_packet=_local_wrap(make_custom_iccp),
+    dict(id=14, name="ICCP", make_packet=_local_wrap(make_iccp),
          default_action="trap", has_egress=False, original_host_count=1),
-    dict(id=14, name="CUSTOM_ICCP_V6", make_packet=_local_wrap(make_custom_iccp_v6),
+    dict(id=14, name="ICCP_V6", make_packet=_local_wrap(make_iccp_v6),
+         default_action="trap", has_egress=False, original_host_count=1),
+    dict(id=14, name="ICCP_COMPAT", make_packet=_local_wrap(make_iccp_compat),
+         default_action="trap", has_egress=False, original_host_count=1),
+    dict(id=14, name="ICCP_COMPAT_V6",
+         make_packet=_local_wrap(make_iccp_compat_v6),
          default_action="trap", has_egress=False, original_host_count=1),
     dict(id=16, name="CUSTOM_TELNET", make_packet=_local_wrap(make_custom_telnet),
          default_action="trap", has_egress=False, original_host_count=1),

@@ -202,7 +202,7 @@ lcp_copp_match_arbitration_command_fn (vlib_main_t *vm,
   if (err)
     goto done;
 
-  view.context = LCP_MATCH_CTX_IP4;
+  view.context = LCP_MATCH_CTX_LOCAL4;
   view.valid_fields = LCP_MATCH_FIELD_IP_PROTOCOL |
 		      LCP_MATCH_FIELD_L4_PORTS;
   view.state = 0;
@@ -212,7 +212,14 @@ lcp_copp_match_arbitration_command_fn (vlib_main_t *vm,
   if (!lcp_match_select (&view, &result) ||
       result.trap_type != LCP_TRAP_DHCP)
     {
-      err = clib_error_return (0, "routed DHCP context isolation failed");
+      err = clib_error_return (0, "local DHCP context isolation failed");
+      goto done;
+    }
+
+  view.context = LCP_MATCH_CTX_IP4;
+  if (lcp_match_select (&view, &result))
+    {
+      err = clib_error_return (0, "transit DHCP must not match");
       goto done;
     }
 
@@ -224,13 +231,20 @@ lcp_copp_match_arbitration_command_fn (vlib_main_t *vm,
       goto done;
     }
 
-  view.context = LCP_MATCH_CTX_IP6;
+  view.context = LCP_MATCH_CTX_LOCAL6;
   view.l4_src_port = 547;
   view.l4_dst_port = 546;
   if (!lcp_match_select (&view, &result) ||
       result.trap_type != LCP_TRAP_DHCPV6)
     {
-      err = clib_error_return (0, "routed DHCPv6 context isolation failed");
+      err = clib_error_return (0, "local DHCPv6 context isolation failed");
+      goto done;
+    }
+
+  view.context = LCP_MATCH_CTX_IP6;
+  if (lcp_match_select (&view, &result))
+    {
+      err = clib_error_return (0, "transit DHCPv6 must not match");
       goto done;
     }
 
@@ -339,6 +353,35 @@ lcp_copp_match_arbitration_command_fn (vlib_main_t *vm,
       goto done;
     }
 
+  /* RFC 7275 ICCP evidence overrides the generic TCP/646 LDP match. */
+  view = (lcp_packet_view_t) {
+    .context = LCP_MATCH_CTX_LOCAL4,
+    .valid_fields = LCP_MATCH_FIELD_IP | LCP_MATCH_FIELD_IP_PROTOCOL |
+		    LCP_MATCH_FIELD_L4_PORTS | LCP_MATCH_FIELD_ICCP,
+    .ip_protocol = IP_PROTOCOL_TCP,
+    .l4_src_port = 50000,
+    .l4_dst_port = 646,
+  };
+  if (!lcp_match_select (&view, &result) ||
+      result.trap_type != LCP_TRAP_ICCP || result.evidence_rule_id != 215)
+    {
+      err = clib_error_return (0, "RFC 7275 ICCP not classified");
+      goto done;
+    }
+  view.l4_dst_port = 8888;
+  if (!lcp_match_select (&view, &result) ||
+      result.trap_type != LCP_TRAP_ICCP || result.evidence_rule_id != 323)
+    {
+      err = clib_error_return (0, "TCP/8888 ICCP not classified");
+      goto done;
+    }
+  view.valid_fields &= ~LCP_MATCH_FIELD_ICCP;
+  if (lcp_match_select (&view, &result))
+    {
+      err = clib_error_return (0, "ordinary TCP/8888 classified as ICCP");
+      goto done;
+    }
+
   /* IS-IS LLC classification must keep SNP and ordinary IS-IS PDUs
    * mutually exclusive. */
   view = (lcp_packet_view_t) {
@@ -357,6 +400,22 @@ lcp_copp_match_arbitration_command_fn (vlib_main_t *vm,
       err = clib_error_return (0, "IS-IS CSNP classification failed");
       goto done;
     }
+  view.dst_mac = 0x0180c2000015ULL;
+  if (lcp_match_select (&view, &result))
+    {
+      err = clib_error_return (0, "L1 CSNP accepted with AllL2IS MAC");
+      goto done;
+    }
+  view.dst_mac = 0x0180c2000014ULL;
+  view.llc_dsap = 0x14;
+  view.llc_ssap = 0x14;
+  if (lcp_match_select (&view, &result))
+    {
+      err = clib_error_return (0, "non-standard IS-IS LLC accepted");
+      goto done;
+    }
+  view.llc_dsap = 0xfe;
+  view.llc_ssap = 0xfe;
   view.isis_pdu_type = 15;
   if (!lcp_match_select (&view, &result) || result.trap_type != LCP_TRAP_ISIS)
     err = clib_error_return (0, "IS-IS non-SNP classification failed");
@@ -600,6 +659,25 @@ lcp_copp_l2_parse_command_fn (vlib_main_t *vm, unformat_input_t *input,
 	  goto done;
 	}
     }
+
+  {
+    ethernet_header_t *eh;
+    lcp_packet_view_t view;
+    lcp_match_result_t result = { 0 };
+
+    lcp_copp_l2_test_packet_reset (b, 0, 0, 0, 16);
+    eh = vlib_buffer_get_current (b);
+    eh->type = clib_host_to_net_u16 (0x888e);
+
+    if (!lcp_packet_parse (vm, b, LCP_MATCH_CTX_L2_DIRECT, NULL, &view) ||
+        !lcp_match_select (&view, &result) ||
+        result.trap_type != LCP_TRAP_EAPOL ||
+        result.evidence_rule_id != 106)
+      {
+        err = clib_error_return (0, "EAPOL rule not selected");
+        goto done;
+      }
+  }
 
 done:
   vlib_buffer_free_one (vm, bi);

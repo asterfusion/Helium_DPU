@@ -15,6 +15,32 @@ from linux_cp_copp_common import (
 class TestLinuxCpCoppIp4(LinuxCpCoppTestCase):
     """IPv4 CoPP tests."""
 
+    def test_transit_dhcp_ports_are_forwarded(self):
+        """Transit UDP/67 and UDP/68 must not enter the DHCP trap."""
+        for port in (67, 68):
+            pkt = (
+                Ether(src=self.phy.remote_mac, dst=self.phy.local_mac)
+                / IP(src=self.phy.remote_ip4, dst=self.egress.remote_ip4)
+                / UDP(sport=50000, dport=port)
+                / Raw(b"transit-dhcp")
+            )
+            before = self._copp_counter("trap_hit", 24)
+            self._send_and_check(self.phy, pkt, 0, 1)
+            self.assertEqual(self._copp_counter("trap_hit", 24), before)
+
+    def test_transit_bfd_ports_are_forwarded(self):
+        """Transit BFD and BFD echo traffic must not enter CoPP."""
+        for port in (3784, 4784, 3785):
+            pkt = (
+                Ether(src=self.phy.remote_mac, dst=self.phy.local_mac)
+                / IP(src=self.phy.remote_ip4, dst=self.egress.remote_ip4)
+                / UDP(sport=50000, dport=port)
+                / Raw(b"transit-bfd")
+            )
+            before = self._copp_counter("trap_hit", 48)
+            self._send_and_check(self.phy, pkt, 0, 1)
+            self.assertEqual(self._copp_counter("trap_hit", 48), before)
+
     def test_ptp_udp_ports(self):
         """Both UDP/319 and UDP/320 hit the PTP(10) trap."""
         pkts = [
@@ -53,23 +79,35 @@ class TestLinuxCpCoppIp4(LinuxCpCoppTestCase):
         self.host.get_capture(len(pkts))
         self.assertEqual(self._copp_counter("trap_hit", 47), before + len(pkts))
 
-    def test_ldp_udp_and_tcp(self):
-        """Both UDP/646 and TCP/646 hit LDP(53)."""
+    def test_ldp_udp_either_port(self):
+        """IPv4 UDP source or destination port 646 enters LDP CoPP."""
         pkts = [
             Ether(src=self.phy.remote_mac, dst=self.phy.local_mac)
             / IP(src=self.phy.remote_ip4, dst=self.egress.remote_ip4)
             / UDP(sport=646, dport=50000)
-            / Raw(b"ldp-udp"),
+            / Raw(b"ldp-udp-source"),
             Ether(src=self.phy.remote_mac, dst=self.phy.local_mac)
             / IP(src=self.phy.remote_ip4, dst=self.egress.remote_ip4)
-            / TCP(sport=646, dport=50000)
-            / Raw(b"ldp-tcp"),
+            / UDP(sport=50000, dport=646)
+            / Raw(b"ldp-udp-destination"),
         ]
-        before = self._copp_counter("trap_hit", 53)
+        before = self._copp_counter("trap_hit", 52)
         self.pg_enable_capture([self.host])
         self.pg_send(self.phy, pkts)
         self.host.get_capture(len(pkts))
-        self.assertEqual(self._copp_counter("trap_hit", 53), before + len(pkts))
+        self.assertEqual(self._copp_counter("trap_hit", 52), before + len(pkts))
+
+    def test_transit_ldp_tcp_is_forwarded(self):
+        """Transit TCP/646 must not enter CoPP."""
+        pkt = (
+            Ether(src=self.phy.remote_mac, dst=self.phy.local_mac)
+            / IP(src=self.phy.remote_ip4, dst=self.egress.remote_ip4)
+            / TCP(sport=646, dport=50000)
+            / Raw(b"ldp-tcp")
+        )
+        before = self._copp_counter("trap_hit", 52)
+        self._send_and_check(self.phy, pkt, 0, 1)
+        self.assertEqual(self._copp_counter("trap_hit", 52), before)
 
 
 generate_trap_methods(TestLinuxCpCoppIp4, IP4_TRAPS)

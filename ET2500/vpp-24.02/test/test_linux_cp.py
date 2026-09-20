@@ -701,7 +701,7 @@ class TestLinuxCP(VppTestCase):
             phy.unconfig_ip4()
 
     def test_linux_cp_copp_l2_actions(self):
-        """Linux CP CoPP LLDP/LACP/PTP actions and host bypass"""
+        """Linux CP CoPP LLDP/LACP/PTP/EAPOL actions and host bypass"""
 
         host = self.pg0
         phy = self.pg1
@@ -729,7 +729,10 @@ class TestLinuxCP(VppTestCase):
         )
 
         try:
-            for trap_id, packet in ((3, lacp), (4, lldp), (10, ptp)):
+            for trap_id, packet in (
+                (3, lacp), (4, lldp), (10, ptp),
+                (VppEnum.vl_api_lcp_trap_type_t.LCP_TRAP_EAPOL, eapol),
+            ):
                 self.vapi.lcp_copp_trap_del(trap_id=trap_id)
                 # An unconfigured policy preserves the legacy TRAP behavior.
                 self.send_and_expect_only(phy, [packet], host)
@@ -771,21 +774,13 @@ class TestLinuxCP(VppTestCase):
             # The shared EtherType nodes must not misclassify adjacent protocols.
             self.send_and_expect_only(phy, [marker], host)
 
-            # EAPOL has no approved trap type and must not enter CoPP or the
-            # shared direct-delivery adapter.
-            counters_before = {
-                trap_id: self._copp_counter("trap_hit", trap_id)
-                for trap_id in (3, 4, 10)
-            }
-            self.send_and_assert_no_replies(phy, [eapol])
-            for trap_id, counter_before in counters_before.items():
-                self.assertEqual(
-                    self._copp_counter("trap_hit", trap_id), counter_before
-                )
         finally:
             self.vapi.lcp_copp_trap_del(trap_id=3)
             self.vapi.lcp_copp_trap_del(trap_id=4)
             self.vapi.lcp_copp_trap_del(trap_id=10)
+            self.vapi.lcp_copp_trap_del(
+                trap_id=VppEnum.vl_api_lcp_trap_type_t.LCP_TRAP_EAPOL
+            )
 
     def test_linux_cp_copp_ospf_actions(self):
         """Linux CP CoPP OSPF actions and policer enforcement"""

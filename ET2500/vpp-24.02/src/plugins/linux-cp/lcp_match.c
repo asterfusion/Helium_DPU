@@ -140,24 +140,37 @@ static bool
 lcp_match_isis (const lcp_packet_view_t *view, const void *data)
 {
   const lcp_isis_match_data_t *d = data;
+  u64 expected_mac;
   bool snp;
 
   if (!(view->valid_fields & LCP_MATCH_FIELD_LLC) ||
       !(view->valid_fields & LCP_MATCH_FIELD_ISIS_PDU))
     return false;
-  if (!((view->dst_mac & 0xfffffffffffeULL) == 0x0180c2000014ULL))
-    return false;
-  if (!((view->llc_dsap == 0xfe && view->llc_ssap == 0xfe) ||
-        (view->llc_dsap == 0x14 && view->llc_ssap == 0x14)) ||
+  if (!((view->dst_mac & 0xfffffffffffeULL) == 0x0180c2000014ULL) ||
+      view->llc_dsap != 0xfe || view->llc_ssap != 0xfe ||
       view->llc_control != 0x03 || view->osi_protocol != 0x83)
     return false;
 
   snp = view->isis_pdu_type >= 24 && view->isis_pdu_type <= 27;
   if (d->snp)
-    return snp;
+    {
+      if (!snp)
+	return false;
+      expected_mac = (view->isis_pdu_type == 24 ||
+		      view->isis_pdu_type == 26) ?
+		       0x0180c2000014ULL : 0x0180c2000015ULL;
+      return view->dst_mac == expected_mac;
+    }
   return view->isis_pdu_type == 15 || view->isis_pdu_type == 16 ||
          view->isis_pdu_type == 17 || view->isis_pdu_type == 18 ||
          view->isis_pdu_type == 20;
+}
+
+static vl_api_lcp_trap_type_t
+lcp_classify_ldp (const lcp_packet_view_t *view)
+{
+  return (view->valid_fields & LCP_MATCH_FIELD_ICCP) ? LCP_TRAP_ICCP :
+						       LCP_TRAP_LDP;
 }
 
 #define LCP_CONTEXT_LOCAL4 LCP_MATCH_CTX_LOCAL4
@@ -239,6 +252,30 @@ lcp_match_isis (const lcp_packet_view_t *view, const void *data)
     .match_data = &(const lcp_l4_match_data_t) {                         \
       .protocol = LCP_PROTOCOL_##proto,                                  \
       .direction = LCP_DIRECTION_##dir, .port = pvalue,                  \
+    },                                                                   \
+  },
+#define LCP_LDP_RULE(id, rule_name, ctx)                                 \
+  {                                                                      \
+    .rule_id = id, .name = #rule_name, .trap_type = LCP_TRAP_LDP,       \
+    .context_mask = LCP_CONTEXT_##ctx,                                   \
+    .required_fields = LCP_MATCH_FIELD_IP_PROTOCOL |                     \
+		       LCP_MATCH_FIELD_L4_PORTS,                           \
+    .matches = lcp_match_l4_port, .classify = lcp_classify_ldp,          \
+    .match_data = &(const lcp_l4_match_data_t) {                         \
+      .protocol = IP_PROTOCOL_TCP, .direction = LCP_PORT_SRC_OR_DST,     \
+      .port = 646,                                                       \
+    },                                                                   \
+  },
+#define LCP_ICCP_COMPAT_RULE(id, rule_name, ctx)                         \
+  {                                                                      \
+    .rule_id = id, .name = #rule_name, .trap_type = LCP_TRAP_ICCP,      \
+    .context_mask = LCP_CONTEXT_##ctx,                                   \
+    .required_fields = LCP_MATCH_FIELD_IP_PROTOCOL |                     \
+		       LCP_MATCH_FIELD_L4_PORTS | LCP_MATCH_FIELD_ICCP,    \
+    .matches = lcp_match_l4_port,                                        \
+    .match_data = &(const lcp_l4_match_data_t) {                         \
+      .protocol = IP_PROTOCOL_TCP, .direction = LCP_PORT_SRC_OR_DST,     \
+      .port = 8888,                                                      \
     },                                                                   \
   },
 #define LCP_IP_RULE(id, rule_name, trap, ctx, proto)                     \
@@ -323,6 +360,8 @@ static const lcp_match_rule_t lcp_match_rules[] = {
 };
 
 #undef LCP_L4_RULE
+#undef LCP_LDP_RULE
+#undef LCP_ICCP_COMPAT_RULE
 #undef LCP_IP_RULE
 #undef LCP_L2_ETHERTYPE_RULE
 #undef LCP_L2_SUBTYPE_RULE
@@ -413,7 +452,7 @@ lcp_parse_ethernet (vlib_buffer_t *b, lcp_packet_view_t *view)
 
     if (declared < 3 + 5 || declared > 1500 ||
 	declared > payload_available ||
-        (llc[0] != 0xfe && llc[0] != 0x14) || llc[1] != llc[0] ||
+        llc[0] != 0xfe || llc[1] != 0xfe ||
         llc[2] != 0x03 || osi[0] != 0x83)
       return;
     view->llc_dsap = llc[0];
@@ -423,6 +462,97 @@ lcp_parse_ethernet (vlib_buffer_t *b, lcp_packet_view_t *view)
     view->isis_pdu_type = osi[4] & 0x1f;
     view->valid_fields |= LCP_MATCH_FIELD_LLC | LCP_MATCH_FIELD_ISIS_PDU;
   }
+}
+
+/* RFC 5036 LDP PDUs can contain multiple messages. RFC 7275 identifies
+ * ICCP by message types 0x0700-0x070f and capability TLV 0x0700. Only
+ * complete objects in this TCP segment are inspected; this fast-path
+ * classifier does not attempt TCP stream reassembly. */
+static bool
+lcp_tcp_payload_has_iccp (const u8 *data, u32 available)
+{
+  while (available >= 10)
+    {
+      u16 version = clib_net_to_host_u16 (clib_mem_unaligned (data, u16));
+      u16 pdu_length = clib_net_to_host_u16 (
+	clib_mem_unaligned (data + 2, u16));
+      u32 pdu_size = (u32) pdu_length + 4;
+      const u8 *message;
+      u32 messages_available;
+
+      if (version != 1 || pdu_length < 6 || pdu_size > available)
+	return false;
+
+      message = data + 10;
+      messages_available = pdu_size - 10;
+      while (messages_available >= 8)
+	{
+	  u16 message_type = clib_net_to_host_u16 (
+	    clib_mem_unaligned (message, u16)) & 0x7fff;
+	  u16 message_length = clib_net_to_host_u16 (
+	    clib_mem_unaligned (message + 2, u16));
+	  u32 message_size = (u32) message_length + 4;
+
+	  if (message_length < 4 || message_size > messages_available)
+	    return false;
+	  if (message_type >= 0x0700 && message_type <= 0x070f)
+	    return true;
+
+	  if (message_type == 0x0200 || message_type == 0x0202)
+	    {
+	      const u8 *tlv = message + 8;
+	      u32 tlvs_available = message_size - 8;
+
+	      while (tlvs_available >= 4)
+		{
+		  u16 tlv_type = clib_net_to_host_u16 (
+		    clib_mem_unaligned (tlv, u16)) & 0x3fff;
+		  u16 tlv_length = clib_net_to_host_u16 (
+		    clib_mem_unaligned (tlv + 2, u16));
+		  u32 tlv_size = (u32) tlv_length + 4;
+
+		  if (tlv_size > tlvs_available)
+		    return false;
+		  if (tlv_type == 0x0700)
+		    return true;
+		  tlv += tlv_size;
+		  tlvs_available -= tlv_size;
+		}
+	    }
+
+	  message += message_size;
+	  messages_available -= message_size;
+	}
+
+      data += pdu_size;
+      available -= pdu_size;
+    }
+
+  return false;
+}
+
+/* The in-tree iccpd TCP/8888 transport starts directly with RFC 5036 LDP
+ * message headers rather than an enclosing LDP PDU header. */
+static bool
+lcp_tcp_payload_has_bare_iccp (const u8 *data, u32 available)
+{
+  while (available >= 8)
+    {
+      u16 message_type = clib_net_to_host_u16 (
+	clib_mem_unaligned (data, u16)) & 0x7fff;
+      u16 message_length = clib_net_to_host_u16 (
+	clib_mem_unaligned (data + 2, u16));
+      u32 message_size = (u32) message_length + 4;
+
+      if (message_length < 4 || message_size > available)
+	return false;
+      if (message_type >= 0x0700 && message_type <= 0x070f)
+	return true;
+      data += message_size;
+      available -= message_size;
+    }
+
+  return false;
 }
 
 static void
@@ -466,6 +596,25 @@ lcp_parse_ip4 (const u8 *data, u32 available, lcp_packet_view_t *view)
       view->l4_dst_port = clib_net_to_host_u16 (l4->dst_port);
       view->valid_fields |= LCP_MATCH_FIELD_L4_PORTS;
       view->state |= LCP_MATCH_STATE_TRUSTED_L4;
+      if (ip4->protocol == IP_PROTOCOL_TCP &&
+	  ihl + sizeof (tcp_header_t) <= available)
+	{
+	  const tcp_header_t *tcp = (const void *) (data + ihl);
+	  u32 tcp_length = tcp_header_bytes ((tcp_header_t *) tcp);
+
+	  if (tcp_length >= sizeof (*tcp) && ihl + tcp_length <= available)
+	    {
+	      const u8 *payload = data + ihl + tcp_length;
+	      u32 payload_length = available - ihl - tcp_length;
+
+	      if (((view->l4_src_port == 646 || view->l4_dst_port == 646) &&
+		   lcp_tcp_payload_has_iccp (payload, payload_length)) ||
+		  ((view->l4_src_port == 8888 ||
+		    view->l4_dst_port == 8888) &&
+		   lcp_tcp_payload_has_bare_iccp (payload, payload_length)))
+		view->valid_fields |= LCP_MATCH_FIELD_ICCP;
+	    }
+	}
     }
   else if (ip4->protocol == IP_PROTOCOL_IGMP &&
 	   ihl + sizeof (igmp_header_t) <= available)
@@ -540,6 +689,25 @@ lcp_parse_ip6 (vlib_buffer_t *b, const u8 *data, u32 available,
       view->l4_dst_port = clib_net_to_host_u16 (l4->dst_port);
       view->valid_fields |= LCP_MATCH_FIELD_L4_PORTS;
       view->state |= LCP_MATCH_STATE_TRUSTED_L4;
+      if (protocol == IP_PROTOCOL_TCP &&
+	  offset + sizeof (tcp_header_t) <= available)
+	{
+	  const tcp_header_t *tcp = (const void *) (data + offset);
+	  u32 tcp_length = tcp_header_bytes ((tcp_header_t *) tcp);
+
+	  if (tcp_length >= sizeof (*tcp) && offset + tcp_length <= available)
+	    {
+	      const u8 *payload = data + offset + tcp_length;
+	      u32 payload_length = available - offset - tcp_length;
+
+	      if (((view->l4_src_port == 646 || view->l4_dst_port == 646) &&
+		   lcp_tcp_payload_has_iccp (payload, payload_length)) ||
+		  ((view->l4_src_port == 8888 ||
+		    view->l4_dst_port == 8888) &&
+		   lcp_tcp_payload_has_bare_iccp (payload, payload_length)))
+		view->valid_fields |= LCP_MATCH_FIELD_ICCP;
+	    }
+	}
     }
   else if (protocol == IP_PROTOCOL_ICMP6 &&
 	   offset + sizeof (icmp46_header_t) <= available)
@@ -652,9 +820,10 @@ typedef struct
 
 static_always_inline void
 lcp_candidate_add (lcp_trap_candidate_t *candidates,
-		   const lcp_match_rule_t *rule)
+		   const lcp_match_rule_t *rule,
+		   vl_api_lcp_trap_type_t trap_type)
 {
-  lcp_trap_candidate_t *candidate = &candidates[rule->trap_type];
+  lcp_trap_candidate_t *candidate = &candidates[trap_type];
 
   if (!candidate->matched || rule->rule_id < candidate->evidence_rule_id)
     {
@@ -677,7 +846,12 @@ lcp_match_rules_collect (const lcp_packet_view_t *view,
 	  !rule->matches (view, rule->match_data))
 	continue;
 
-      lcp_candidate_add (candidates, rule);
+      vl_api_lcp_trap_type_t trap_type =
+	rule->classify ? rule->classify (view) : rule->trap_type;
+
+      if (trap_type <= LCP_TRAP_INVALID || trap_type >= LCP_TRAP_N_TYPES)
+	continue;
+      lcp_candidate_add (candidates, rule, trap_type);
     }
 }
 
@@ -781,7 +955,8 @@ lcp_match_init (vlib_main_t *vm)
 			   LCP_MATCH_FIELD_ICMP_TYPE |
 			   LCP_MATCH_FIELD_IGMP_TYPE |
 			   LCP_MATCH_FIELD_HOST_BOUND |
-			   LCP_MATCH_FIELD_LLC | LCP_MATCH_FIELD_ISIS_PDU;
+			   LCP_MATCH_FIELD_LLC | LCP_MATCH_FIELD_ISIS_PDU |
+			   LCP_MATCH_FIELD_ICCP;
 
   for (u32 i = 0; i < ARRAY_LEN (lcp_match_rules); i++)
     {

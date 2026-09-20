@@ -93,6 +93,7 @@ enum lcp_trap_type : u8
   LCP_TRAP_STATIC_FDB_MOVE,
   LCP_TRAP_TFTP,
   LCP_TRAP_FTP,
+  LCP_TRAP_EAPOL,
   LCP_TRAP_N_TYPES,
 };
 

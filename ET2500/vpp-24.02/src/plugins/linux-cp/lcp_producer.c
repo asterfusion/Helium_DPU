@@ -8,6 +8,7 @@
 #include <vnet/ip/reass/ip4_sv_reass.h>
 #include <vnet/ip/reass/ip6_sv_reass.h>
 #include <vnet/llc/llc.h>
+#include <vnet/l2/l2_fib.h>
 #include <vnet/osi/osi.h>
 
 #include <linux-cp/lcp.api_enum.h>
@@ -24,6 +25,31 @@ lcp_trap_is_ndp (vl_api_lcp_trap_type_t trap_type)
   return trap_type == LCP_TRAP_IPV6_NEIGHBOR_DISCOVERY ||
 	 trap_type == LCP_TRAP_IPV6_NEIGHBOR_SOLICITATION ||
 	 trap_type == LCP_TRAP_IPV6_NEIGHBOR_ADVERTISEMENT;
+}
+
+/* DHCP packets addressed to a bridge-domain BVI are routed/local traffic.
+ * Do not let the earlier l2-input feature claim them as DHCP_L2; the local
+ * IP feature will classify them as DHCP/DHCPV6 after the BVI handoff. */
+static_always_inline bool
+lcp_l2_dhcp_is_bvi_bound (vlib_buffer_t *b,
+			  vl_api_lcp_trap_type_t trap_type)
+{
+  ethernet_header_t *eh;
+  l2fib_entry_result_t result = { .raw = ~0ULL };
+  BVT (clib_bihash_kv) lookup;
+
+  if (trap_type != LCP_TRAP_DHCP_L2 &&
+      trap_type != LCP_TRAP_DHCPV6_L2)
+    return false;
+
+  eh = vlib_buffer_get_current (b);
+  lookup.key = l2fib_make_key (eh->dst_address,
+			       vnet_buffer (b)->l2.bd_index);
+  lookup.value = ~0ULL;
+  if (BV (clib_bihash_search_inline) (&l2fib_main.mac_table, &lookup) == 0)
+    result.raw = lookup.value;
+
+  return l2fib_entry_result_is_set_BVI (&result);
 }
 
 #define foreach_lcp_ip4_producer_next                                    \
@@ -712,7 +738,8 @@ lcp_l2_producer_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 
 	  vnet_buffer2 (b)->trap_id = LCP_TRAP_INVALID;
 	  if (lcp_packet_parse (vm, b, context, NULL, &view) &&
-	      lcp_match_select (&view, &result))
+	      lcp_match_select (&view, &result) &&
+	      !lcp_l2_dhcp_is_bvi_bound (b, result.trap_type))
 	    {
 	      if (!is_feature && result.trap_type == LCP_TRAP_STP &&
 		  view.rx_sw_if_index < vec_len (bpdu_drop) &&
@@ -861,6 +888,8 @@ lcp_producer_init (vlib_main_t *vm)
   ethernet_register_input_type (vm, ETHERNET_TYPE_802_1_LLDP,
 				lcp_l2_direct_adapter_node.index);
   ethernet_register_input_type (vm, ETHERNET_TYPE_SLOW_PROTOCOLS,
+				lcp_l2_direct_adapter_node.index);
+  ethernet_register_input_type (vm, ETHERNET_TYPE_802_1X_AUTHENTICATION,
 				lcp_l2_direct_adapter_node.index);
   ethernet_register_input_type (vm, ETHERNET_TYPE_PTP,
 				lcp_l2_direct_adapter_node.index);
