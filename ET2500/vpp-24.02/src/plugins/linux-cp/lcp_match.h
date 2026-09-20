@@ -42,6 +42,7 @@ typedef enum
   LCP_MATCH_FIELD_HOST_BOUND = 1 << 9,
   LCP_MATCH_FIELD_LLC = 1 << 10,
   LCP_MATCH_FIELD_ISIS_PDU = 1 << 11,
+  LCP_MATCH_FIELD_ICCP = 1 << 12,
 } lcp_match_field_t;
 
 typedef enum
@@ -84,6 +85,8 @@ typedef struct
 
 typedef bool (*lcp_match_fn_t) (const lcp_packet_view_t *view,
 				const void *data);
+typedef vl_api_lcp_trap_type_t (*lcp_classify_fn_t) (
+  const lcp_packet_view_t *view);
 
 typedef struct
 {
@@ -93,6 +96,7 @@ typedef struct
   u32 context_mask;
   u32 required_fields;
   lcp_match_fn_t matches;
+  lcp_classify_fn_t classify;
   const void *match_data;
 } lcp_match_rule_t;
 

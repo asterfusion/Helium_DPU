@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""CoPP L2-direct protocol tests: STP, LACP, LLDP, PTP, ISIS."""
+"""CoPP L2-direct protocol tests: STP, LACP, LLDP, EAPOL, PTP, ISIS."""
 
 from scapy.layers.l2 import Ether, LLC
 from scapy.packet import Raw
+from vpp_papi import VppEnum
 
 from linux_cp_copp_common import (
     LinuxCpCoppTestCase,
@@ -46,23 +47,21 @@ class TestLinuxCpCoppL2(LinuxCpCoppTestCase):
 
         self.assertEqual(self._copp_counter("trap_hit", 3), before)
 
-    def test_l2_eapol_not_copp(self):
-        """EAPOL must not enter CoPP or the shared direct-delivery adapter."""
-        eapol = (
-            Ether(src=self.phy.remote_mac, dst="01:80:c2:00:00:03", type=0x888E)
-            / Raw(b"\x01\x00\x00\x00")
-        )
-        counters_before = {
-            trap_id: self._copp_counter("trap_hit", trap_id)
-            for trap_id in (2, 3, 4, 10, 43)
-        }
-
-        self.pg_enable_capture([self.host])
-        self.pg_send(self.phy, [eapol])
-        self.host.assert_nothing_captured()
-
-        for trap_id, before in counters_before.items():
-            self.assertEqual(self._copp_counter("trap_hit", trap_id), before)
+    def test_l2_eapol_delivery(self):
+        """Unicast and multicast EAPOL reach the host through the EAPOL trap."""
+        trap_id = VppEnum.vl_api_lcp_trap_type_t.LCP_TRAP_EAPOL
+        for dst in (self.phy.local_mac, "01:80:c2:00:00:03"):
+            with self.subTest(dst=dst):
+                eapol = (
+                    Ether(src=self.phy.remote_mac, dst=dst, type=0x888E)
+                    / Raw(b"\x01\x01\x00\x00")
+                )
+                before = self._copp_counter("trap_hit", trap_id)
+                self.pg_enable_capture([self.host])
+                self.pg_send(self.phy, [eapol])
+                captured = self.host.get_capture(1)
+                self.assertEqual(bytes(captured[0])[:len(eapol)], bytes(eapol))
+                self.assertEqual(self._copp_counter("trap_hit", trap_id), before + 1)
 
 
 generate_trap_methods(TestLinuxCpCoppL2, L2_DIRECT_TRAPS)

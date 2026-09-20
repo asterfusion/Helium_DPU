@@ -16,6 +16,32 @@ from linux_cp_copp_common import (
 class TestLinuxCpCoppIp6(LinuxCpCoppTestCase):
     """IPv6 CoPP tests."""
 
+    def test_transit_dhcpv6_ports_are_forwarded(self):
+        """Transit UDP/546 and UDP/547 must not enter the DHCPv6 trap."""
+        for port in (546, 547):
+            pkt = (
+                Ether(src=self.phy.remote_mac, dst=self.phy.local_mac)
+                / IPv6(src=self.phy.remote_ip6, dst=self.egress.remote_ip6)
+                / UDP(sport=50000, dport=port)
+                / Raw(b"transit-dhcpv6")
+            )
+            before = self._copp_counter("trap_hit", 28)
+            self._send_and_check(self.phy, pkt, 0, 1)
+            self.assertEqual(self._copp_counter("trap_hit", 28), before)
+
+    def test_transit_bfd_ports_are_forwarded(self):
+        """Transit BFD and BFD echo traffic must not enter CoPP."""
+        for port in (3784, 4784, 3785):
+            pkt = (
+                Ether(src=self.phy.remote_mac, dst=self.phy.local_mac)
+                / IPv6(src=self.phy.remote_ip6, dst=self.egress.remote_ip6)
+                / UDP(sport=50000, dport=port)
+                / Raw(b"transit-bfd6")
+            )
+            before = self._copp_counter("trap_hit", 49)
+            self._send_and_check(self.phy, pkt, 0, 1)
+            self.assertEqual(self._copp_counter("trap_hit", 49), before)
+
     def test_ptp_udp6_ports(self):
         """Both UDP/319 and UDP/320 over IPv6 hit the PTP(10) trap."""
         pkts = [
@@ -66,8 +92,8 @@ class TestLinuxCpCoppIp6(LinuxCpCoppTestCase):
         self.host.get_capture(1)
         self.assertEqual(self._copp_counter("trap_hit", 46), before + 1)
 
-    def test_ldp_udp_dport_and_tcp_either_port(self):
-        """IPv6 LDP matches UDP destination 646 and either TCP port 646."""
+    def test_transit_ldp_lookalikes_are_forwarded(self):
+        """IPv6 transit UDP/646 and TCP/646 must not enter CoPP."""
         pkts = [
             Ether(src=self.phy.remote_mac, dst=self.phy.local_mac)
             / IPv6(src=self.phy.remote_ip6, dst=self.egress.remote_ip6)
@@ -82,12 +108,11 @@ class TestLinuxCpCoppIp6(LinuxCpCoppTestCase):
             / TCP(sport=50000, dport=646)
             / Raw(b"ldp6-tcp-destination"),
         ]
-        before = self._copp_counter("trap_hit", 53)
+        before = self._copp_counter("trap_hit", 52)
 
-        self.pg_send(self.phy, pkts)
-        self.host.get_capture(len(pkts))
-
-        self.assertEqual(self._copp_counter("trap_hit", 53), before + len(pkts))
+        for pkt in pkts:
+            self._send_and_check(self.phy, pkt, 0, 1)
+        self.assertEqual(self._copp_counter("trap_hit", 52), before)
 
 
 generate_trap_methods(TestLinuxCpCoppIp6, IP6_TRAPS)
