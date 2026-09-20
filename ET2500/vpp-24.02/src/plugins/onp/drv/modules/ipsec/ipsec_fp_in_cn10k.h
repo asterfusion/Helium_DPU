@@ -462,7 +462,7 @@ cn10k_ipsec_enqueue_inbound (vlib_main_t *vm, vlib_node_runtime_t *node,
 			     cnxk_per_thread_data_t *ptd, const u32 flags)
 {
   u32 sa0_index, sa1_index, current_sa0_index = ~0, current_sa1_index = ~0;
-  u32 n_left = f->n_vectors, n_prep = 0, n_dec = 0, i = 0, count;
+  u32 n_left = f->n_vectors, n_prep = 0, n_dec = 0, count;
   struct cpt_inst_s *inst = (struct cpt_inst_s *) ptd->hw_inst;
   struct roc_cpt_lmtline *lmtline = &crypto_queue->lmtline;
   cn10k_ipsec_session_t *sess0 = NULL, *sess1 = NULL;
@@ -613,7 +613,6 @@ cn10k_ipsec_enqueue_inbound (vlib_main_t *vm, vlib_node_runtime_t *node,
       vec_header->buffer_indices[n_dec] = buffer_index;
       n_left--;
       n_dec++;
-      i++;
       b++;
     }
 
