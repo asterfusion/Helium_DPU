@@ -10,6 +10,7 @@
 #include <vnet/llc/llc.h>
 #include <vnet/l2/l2_fib.h>
 #include <vnet/osi/osi.h>
+#include <vnet/udp/udp_local.h>
 
 #include <linux-cp/lcp.api_enum.h>
 #include <linux-cp/lcp_interface.h>
@@ -35,7 +36,7 @@ lcp_l2_dhcp_is_bvi_bound (vlib_buffer_t *b,
 			  vl_api_lcp_trap_type_t trap_type)
 {
   ethernet_header_t *eh;
-  l2fib_entry_result_t result = { .raw = ~0ULL };
+  l2fib_entry_result_t result = { .raw = 0 };
   BVT (clib_bihash_kv) lookup;
 
   if (trap_type != LCP_TRAP_DHCP_L2 &&
@@ -46,9 +47,10 @@ lcp_l2_dhcp_is_bvi_bound (vlib_buffer_t *b,
   lookup.key = l2fib_make_key (eh->dst_address,
 			       vnet_buffer (b)->l2.bd_index);
   lookup.value = ~0ULL;
-  if (BV (clib_bihash_search_inline) (&l2fib_main.mac_table, &lookup) == 0)
-    result.raw = lookup.value;
+  if (BV (clib_bihash_search_inline) (&l2fib_main.mac_table, &lookup) != 0)
+    return false;
 
+  result.raw = lookup.value;
   return l2fib_entry_result_is_set_BVI (&result);
 }
 
@@ -306,6 +308,16 @@ lcp_ip_producer_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 		vlib_node_increment_counter (vm, node->node_index,
 					     LCP_IP_ERROR_SV_METADATA_MISS, 1);
 	    }
+
+	  /* A registered VPP UDP service owns this local packet. Generic
+	   * IP2ME is a Linux fallback, not an override for native consumers
+	   * such as DNS replies, IKE or WireGuard. Dedicated protocol rules
+	   * remain eligible and retain their configured CoPP policy. */
+	  if (parsed && adapter == LCP_IP_ADAPTER_LOCAL &&
+	      view.ip_protocol == IP_PROTOCOL_UDP &&
+	      (view.valid_fields & LCP_MATCH_FIELD_L4_PORTS) &&
+	      udp_is_valid_dst_port (view.l4_dst_port, !is_ip6))
+	    view.state &= ~LCP_MATCH_STATE_HOST_BOUND;
 
 	  if (!copp_processed && vnet_buffer2 (b)->trap_id == LCP_TRAP_INVALID &&
 	      parsed &&
@@ -640,6 +652,9 @@ VLIB_NODE_FN (lcp_l2_delivery_node)
 			 (u8 *) ethernet_buffer_get_header (b);
 	      vnet_buffer (b)->sw_if_index[VLIB_TX] = lip->lip_host_sw_if_index;
 	      vlib_buffer_advance (b, -len);
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+	      lcp_itf_host_vlan_tag_process (lip, b);
+#endif
 	      if (lcp_cpu_branch_pass (vm, b) ||
 		  vnet_buffer2 (b)->trap_id == LCP_TRAP_INVALID)
 		next = LCP_L2_DELIVERY_NEXT_IO;

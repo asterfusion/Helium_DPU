@@ -16,6 +16,24 @@ from linux_cp_copp_common import (
 class TestLinuxCpCoppIp6(LinuxCpCoppTestCase):
     """IPv6 CoPP tests."""
 
+    def test_dhcpv6_client_multicast(self):
+        """Client multicast reaches Linux before multicast FIB lookup."""
+        self.vapi.lcp_copp_trap_add(
+            trap_id=28, action=3, priority=100, policer_index=0xFFFFFFFF
+        )
+        try:
+            pkt = (
+                Ether(src=self.phy.remote_mac, dst="33:33:00:01:00:02")
+                / IPv6(src=self.phy.remote_ip6, dst="ff02::1:2")
+                / UDP(sport=546, dport=547)
+                / Raw(b"dhcpv6-client-multicast")
+            )
+            before = self._copp_counter("trap_hit", 28)
+            self._send_and_check(self.phy, pkt, 1, 0)
+            self.assertEqual(self._copp_counter("trap_hit", 28), before + 1)
+        finally:
+            self.vapi.lcp_copp_trap_del(trap_id=28)
+
     def test_transit_dhcpv6_ports_are_forwarded(self):
         """Transit UDP/546 and UDP/547 must not enter the DHCPv6 trap."""
         for port in (546, 547):

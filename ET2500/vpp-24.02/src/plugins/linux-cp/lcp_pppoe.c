@@ -311,32 +311,11 @@ pppoe_decap_next_is_valid (pppoe_main_t * pem, u32 is_ip6,
 }
 #endif
 
-/* Enable all feature arcs that every new PPPoE hw-interface needs.
- * Extracted so the bulk-add path can call this once per new interface
- * after the entire session batch is created, instead of inside the loop. */
+/* PPPoE sessions use only the IP CoPP arcs. */
 void
 lcp_pppoe_setup_new_if_features (u32 sw_if_index)
 {
-  vnet_feature_enable_disable ("ip4-multicast", "linux-cp-ospfv2-phy",
-			       sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable ("ip6-multicast", "linux-cp-ospfv3-phy",
-			       sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable ("ip4-unicast", "linux-cp-bfd-phy",
-			       sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable ("ip4-multicast", "linux-cp-bfd-phy",
-			       sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable ("ip6-unicast", "linux-cp-bfdv6-phy",
-			       sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable ("ip6-multicast", "linux-cp-bfdv6-phy",
-			       sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable ("ip4-multicast", "linux-cp-pim",
-			       sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable ("ip6-multicast", "linux-cp-pim6",
-			       sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable ("ip4-multicast", "linux-cp-igmp",
-			       sw_if_index, 1, NULL, 0);
-  vnet_feature_enable_disable ("ip6-multicast", "linux-cp-igmp6",
-			       sw_if_index, 1, NULL, 0);
+  lcp_copp_ip_features_set (sw_if_index, 1);
   vnet_feature_enable_disable ("ip4-unicast", "ip4-not-enabled",
 			       sw_if_index, 0, NULL, 0);
   vnet_feature_enable_disable ("ip4-multicast", "ip4-not-enabled",
@@ -1695,7 +1674,7 @@ lcp_pppoe_apply_copp (vlib_main_t *vm, vlib_buffer_t *b,
 typedef struct lcp_pppoe_trace_t_
 {
   u32 sw_if_index;
-  u8 is_ipv6;
+  u8 is_host;
 } lcp_pppoe_trace_t;
 
 /* packet trace format function */
@@ -1706,8 +1685,8 @@ format_lcp_pppoe_trace (u8 *s, va_list *args)
   CLIB_UNUSED (vlib_node_t * node) = va_arg (*args, vlib_node_t *);
   lcp_pppoe_trace_t *t = va_arg (*args, lcp_pppoe_trace_t *);
 
-  s = format (s, "pppoe: sw_if_index %d IPv%d\n",
-        t->sw_if_index, (t->is_ipv6) ? 6 : 4);
+  s = format (s, "pppoe: sw_if_index %d direction %s\n", t->sw_if_index,
+              t->is_host ? "host-to-phy" : "phy-to-host");
 
   return s;
 }
@@ -1774,7 +1753,8 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
                       l2_rx_sw_if_index0 = si0->sup_sw_if_index;
                   }
                   lipi0 = lcp_itf_pair_find_by_phy (l2_rx_sw_if_index0);
-                  vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
+                  /* CoPP delivery resolves the BVI ingress again. Keep the
+                   * physical/subinterface index until that CPU branch uses it. */
               }
               if (lipi0 == INDEX_INVALID)
               {
@@ -1802,11 +1782,18 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               vlib_buffer_advance (b0, -len0);
           }
 
-          copy_bi = lcp_pppoe_apply_copp (
-            vm, b0, LCP_TRAP_PPPOE_DISCOVERY, LCP_COPP_ACTION_TRAP, next0,
-            LCP_PPPOE_NEXT_DROP, LCP_PPPOE_NEXT_COPP_PUNT, &next0);
-          if (copy_bi != LCP_PUNT_BUFFER_INVALID)
-            copies[n_copies++] = copy_bi;
+          /* CoPP applies only to packets entering from the dataplane.  A
+           * packet injected by Linux must continue to the paired physical
+           * interface and must never be punted back to Linux. */
+          if (!is_host0)
+            {
+              copy_bi = lcp_pppoe_apply_copp (
+                vm, b0, LCP_TRAP_PPPOE_DISCOVERY, LCP_COPP_ACTION_TRAP,
+                next0, LCP_PPPOE_NEXT_DROP, LCP_PPPOE_NEXT_COPP_PUNT,
+                &next0);
+              if (copy_bi != LCP_PUNT_BUFFER_INVALID)
+                copies[n_copies++] = copy_bi;
+            }
 
 	      lipi1 = lcp_itf_pair_find_by_phy ( sw_if_index1);
           if (lipi1 == INDEX_INVALID)
@@ -1820,7 +1807,8 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
                       l2_rx_sw_if_index1 = si1->sup_sw_if_index;
                   }
                   lipi1 = lcp_itf_pair_find_by_phy (l2_rx_sw_if_index1);
-                  vnet_buffer2(b1)->l2_rx_sw_if_index = ~0;
+                  /* CoPP delivery resolves the BVI ingress again. Keep the
+                   * physical/subinterface index until that CPU branch uses it. */
               }
               if (lipi1 == INDEX_INVALID)
               {
@@ -1848,11 +1836,15 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               vlib_buffer_advance (b1, -len1);
           }
 
-          copy_bi = lcp_pppoe_apply_copp (
-            vm, b1, LCP_TRAP_PPPOE_DISCOVERY, LCP_COPP_ACTION_TRAP, next1,
-            LCP_PPPOE_NEXT_DROP, LCP_PPPOE_NEXT_COPP_PUNT, &next1);
-          if (copy_bi != LCP_PUNT_BUFFER_INVALID)
-            copies[n_copies++] = copy_bi;
+          if (!is_host1)
+            {
+              copy_bi = lcp_pppoe_apply_copp (
+                vm, b1, LCP_TRAP_PPPOE_DISCOVERY, LCP_COPP_ACTION_TRAP,
+                next1, LCP_PPPOE_NEXT_DROP, LCP_PPPOE_NEXT_COPP_PUNT,
+                &next1);
+              if (copy_bi != LCP_PUNT_BUFFER_INVALID)
+                copies[n_copies++] = copy_bi;
+            }
 
           if (b0->flags & VLIB_BUFFER_IS_TRACED)
           {
@@ -1860,6 +1852,7 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
                   vlib_add_trace (vm, node, b0, sizeof (*t));
 
               t->sw_if_index = sw_if_index0;
+              t->is_host = is_host0;
           }
 
           if (b1->flags & VLIB_BUFFER_IS_TRACED)
@@ -1868,6 +1861,7 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
                   vlib_add_trace (vm, node, b1, sizeof (*t));
 
               t->sw_if_index = sw_if_index1;
+              t->is_host = is_host1;
           }
 
           from += 2;
@@ -1916,7 +1910,8 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
                       l2_rx_sw_if_index0 = si0->sup_sw_if_index;
                   }
                   lipi0 = lcp_itf_pair_find_by_phy (l2_rx_sw_if_index0);
-                  vnet_buffer2(b0)->l2_rx_sw_if_index = ~0;
+                  /* CoPP delivery resolves the BVI ingress again. Keep the
+                   * physical/subinterface index until that CPU branch uses it. */
               }
               if (lipi0 == INDEX_INVALID)
               {
@@ -1944,11 +1939,15 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               vlib_buffer_advance (b0, -len0);
           }
 
-          copy_bi = lcp_pppoe_apply_copp (
-            vm, b0, LCP_TRAP_PPPOE_DISCOVERY, LCP_COPP_ACTION_TRAP, next0,
-            LCP_PPPOE_NEXT_DROP, LCP_PPPOE_NEXT_COPP_PUNT, &next0);
-          if (copy_bi != LCP_PUNT_BUFFER_INVALID)
-            copies[n_copies++] = copy_bi;
+          if (!is_host0)
+            {
+              copy_bi = lcp_pppoe_apply_copp (
+                vm, b0, LCP_TRAP_PPPOE_DISCOVERY, LCP_COPP_ACTION_TRAP,
+                next0, LCP_PPPOE_NEXT_DROP, LCP_PPPOE_NEXT_COPP_PUNT,
+                &next0);
+              if (copy_bi != LCP_PUNT_BUFFER_INVALID)
+                copies[n_copies++] = copy_bi;
+            }
 
           if (b0->flags & VLIB_BUFFER_IS_TRACED)
           {
@@ -1956,6 +1955,7 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
                   vlib_add_trace (vm, node, b0, sizeof (*t));
 
               t->sw_if_index = sw_if_index0;
+              t->is_host = is_host0;
           }
 
           from += 1;
@@ -2127,6 +2127,25 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               pppoe0 = (pppoe_header_t*)(h0+1);
           }
 
+          /* Frames received on an LCP host interface were originated by
+           * Linux.  Send them to the paired physical interface unchanged;
+           * parsing them as dataplane input can classify control/session
+           * misses and punt them straight back to Linux. */
+          {
+              u32 host_lipi = lcp_itf_pair_find_by_host (
+                vnet_buffer (b0)->sw_if_index[VLIB_RX]);
+              lcp_itf_pair_t *host_lip = lcp_itf_pair_get (host_lipi);
+
+              if (host_lip != NULL)
+                {
+                  lcp_set_max_tc (b0);
+                  vnet_buffer (b0)->sw_if_index[VLIB_TX] =
+                    host_lip->lip_phy_sw_if_index;
+                  next0 = PPPOE_INPUT_NEXT_OUTPUT;
+                  goto trace00;
+                }
+          }
+
           ppp_proto0 = clib_net_to_host_u16(pppoe0->ppp_proto);   
           if ((ppp_proto0 != PPP_PROTOCOL_ip4)
              && (ppp_proto0 != PPP_PROTOCOL_ip6))
@@ -2210,7 +2229,7 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 
                                   vnet_buffer (b0)->sw_if_index[VLIB_TX] =
                                     tx_sw_if_index;
-                                  next0 = PPPOE_INPUT_NEXT_ECHO_REPLY;
+                                  next0 = PPPOE_INPUT_NEXT_OUTPUT;
                                   error0 = PPPOE_ERROR_ECHO_REPLIED;
                                   goto trace00;
                                 }
