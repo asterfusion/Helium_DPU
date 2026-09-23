@@ -20,6 +20,7 @@
 
 #include <vnet/vnet.h>
 #include <vnet/plugin/plugin.h>
+#include <vnet/policer/policer.h>
 
 #include <vlibapi/api.h>
 #include <vlibmemory/api.h>
@@ -342,6 +343,24 @@ VLIB_CLI_COMMAND (lcp_itf_pair_show_cmd_node, static) = {
   .is_mp_safe = 1,
 };
 
+static const char *
+lcp_copp_action_name (u8 action)
+{
+  switch (action)
+    {
+    case LCP_COPP_ACTION_DROP:
+      return "drop";
+    case LCP_COPP_ACTION_FORWARD:
+      return "forward";
+    case LCP_COPP_ACTION_COPY:
+      return "copy";
+    case LCP_COPP_ACTION_TRAP:
+      return "trap";
+    default:
+      return "unknown";
+    }
+}
+
 static clib_error_t *
 lcp_copp_traps_show_cmd (vlib_main_t *vm, unformat_input_t *input,
 			 vlib_cli_command_t *cmd)
@@ -352,8 +371,8 @@ lcp_copp_traps_show_cmd (vlib_main_t *vm, unformat_input_t *input,
     return clib_error_return (0, "unknown input '%U'", format_unformat_error,
 			      input);
 
-  vlib_cli_output (vm, "%-7s %-24s %-10s %-8s %-10s %-8s %-8s", "trap_id",
-		   "name", "programmed", "action", "policer", "default",
+  vlib_cli_output (vm, "%-7s %-24s %-10s %-8s %-10s %-8s", "trap_id",
+		   "name", "programmed", "action", "policer",
 		   "priority");
 
   for (trap_id = LCP_TRAP_INVALID + 1; trap_id < LCP_POLICY_N_TRAPS;
@@ -366,20 +385,20 @@ lcp_copp_traps_show_cmd (vlib_main_t *vm, unformat_input_t *input,
       policy = lcp_policy_get ((vl_api_lcp_trap_type_t) trap_id);
       if (policy->policer_index == LCP_POLICY_INDEX_INVALID)
 	vlib_cli_output (
-	  vm, "%-7u %-24s %-10s %-8u %-10s %-8u %-8u", trap_id,
+	  vm, "%-7u %-24s %-10s %-8s %-10s %-8u", trap_id,
 	  desc->name,
 	  lcp_policy_is_configured ((vl_api_lcp_trap_type_t) trap_id) ?
 	    "yes" :
 	    "no",
-	  policy->action, "none", desc->default_priority, policy->priority);
+	  lcp_copp_action_name (policy->action), "none", policy->priority);
       else
 	vlib_cli_output (
-	  vm, "%-7u %-24s %-10s %-8u %-10u %-8u %-8u", trap_id,
+	  vm, "%-7u %-24s %-10s %-8s %-10u %-8u", trap_id,
 	  desc->name,
 	  lcp_policy_is_configured ((vl_api_lcp_trap_type_t) trap_id) ?
 	    "yes" :
 	    "no",
-	  policy->action, policy->policer_index, desc->default_priority,
+	  lcp_copp_action_name (policy->action), policy->policer_index,
 	  policy->priority);
     }
 
@@ -392,6 +411,37 @@ VLIB_CLI_COMMAND (lcp_copp_traps_show_cmd_node, static) = {
   .short_help = "show lcp copp traps",
 };
 
+typedef struct
+{
+  u32 bit;
+  const char *name;
+} lcp_cli_mask_name_t;
+
+static u8 *
+format_lcp_match_mask (u8 *s, va_list *args)
+{
+  u32 mask = va_arg (*args, u32);
+  const lcp_cli_mask_name_t *names =
+    va_arg (*args, const lcp_cli_mask_name_t *);
+  u32 count = va_arg (*args, u32);
+  const char *separator = "";
+
+  if (!mask)
+    return format (s, "none");
+
+  for (u32 i = 0; i < count; i++)
+    if (mask & names[i].bit)
+      {
+        s = format (s, "%s%s", separator, names[i].name);
+        separator = ",";
+        mask &= ~names[i].bit;
+      }
+
+  if (mask)
+    s = format (s, "%sunknown(0x%x)", separator, mask);
+  return s;
+}
+
 static clib_error_t *
 lcp_copp_matchers_show_cmd (vlib_main_t *vm, unformat_input_t *input,
 			    vlib_cli_command_t *cmd)
@@ -400,15 +450,49 @@ lcp_copp_matchers_show_cmd (vlib_main_t *vm, unformat_input_t *input,
     return clib_error_return (0, "unknown input '%U'", format_unformat_error,
 			      input);
 
-  vlib_cli_output (vm, "%-5s %-30s %-5s %-10s %-10s", "id", "name",
-		   "trap", "contexts", "fields");
+  static const lcp_cli_mask_name_t contexts[] = {
+    { LCP_MATCH_CTX_L2_DIRECT, "l2" },
+    { LCP_MATCH_CTX_L2_IP4, "l2-ipv4" },
+    { LCP_MATCH_CTX_L2_IP6, "l2-ipv6" },
+    { LCP_MATCH_CTX_IP4, "ipv4-punt" },
+    { LCP_MATCH_CTX_IP6, "ipv6-punt" },
+    { LCP_MATCH_CTX_LOCAL4, "ipv4-local" },
+    { LCP_MATCH_CTX_LOCAL6, "ipv6-local" },
+    { LCP_MATCH_CTX_ARP, "arp" },
+  };
+  static const lcp_cli_mask_name_t fields[] = {
+    { LCP_MATCH_FIELD_ETHERTYPE, "ethertype" },
+    { LCP_MATCH_FIELD_MAC, "mac" },
+    { LCP_MATCH_FIELD_SLOW_SUBTYPE, "slow-subtype" },
+    { LCP_MATCH_FIELD_ARP_OPCODE, "arp-opcode" },
+    { LCP_MATCH_FIELD_IP, "ip-addresses" },
+    { LCP_MATCH_FIELD_IP_PROTOCOL, "ip-protocol" },
+    { LCP_MATCH_FIELD_L4_PORTS, "l4-ports" },
+    { LCP_MATCH_FIELD_ICMP_TYPE, "icmp-type" },
+    { LCP_MATCH_FIELD_IGMP_TYPE, "igmp-type" },
+    { LCP_MATCH_FIELD_HOST_BOUND, "host-bound" },
+    { LCP_MATCH_FIELD_LLC, "llc" },
+    { LCP_MATCH_FIELD_ISIS_PDU, "isis-pdu" },
+    { LCP_MATCH_FIELD_ICCP, "iccp" },
+  };
+
+  vlib_cli_output (vm, "%-5s %-30s %-24s %-24s %s", "id", "name",
+                   "trap", "contexts", "required_fields");
   for (u32 i = 0; i < lcp_match_rule_count (); i++)
     {
       const lcp_match_rule_t *rule = lcp_match_rule_get (i);
 
-      vlib_cli_output (vm, "%-5u %-30s %-5u 0x%08x 0x%08x",
-		       rule->rule_id, rule->name, rule->trap_type,
-		       rule->context_mask, rule->required_fields);
+      const lcp_trap_desc_t *desc = lcp_trap_desc_get (rule->trap_type);
+      u8 *context_names =
+        format (0, "%U", format_lcp_match_mask, rule->context_mask,
+                contexts, (u32) ARRAY_LEN (contexts));
+
+      vlib_cli_output (vm, "%-5u %-30s %-24s %-24v %U",
+                       rule->rule_id, rule->name,
+                       desc ? desc->name : "unknown", context_names,
+                       format_lcp_match_mask, rule->required_fields,
+                       fields, (u32) ARRAY_LEN (fields));
+      vec_free (context_names);
     }
   return 0;
 }
@@ -436,17 +520,20 @@ lcp_copp_stats_show_cmd (vlib_main_t *vm, unformat_input_t *input,
     return clib_error_return (0, "unknown input '%U'", format_unformat_error,
 			      input);
 
-  vlib_cli_output (vm, "%-7s %-10s %-10s %-10s %-10s %-10s", "trap_id",
+  vlib_cli_output (vm, "%-7s %-24s %-10s %-13s %-10s %-10s %-13s", "trap_id",
+		   "name",
 		   counter_names[LCP_STATS_TRAP_HIT],
 		   counter_names[LCP_STATS_PUNT_REQUIRED],
 		   counter_names[LCP_STATS_PUNT_PASS],
 		   counter_names[LCP_STATS_PUNT_DROP],
 		   counter_names[LCP_STATS_DELIVERY_DROP]);
 
-  for (trap_id = 0; trap_id < LCP_POLICY_N_TRAPS; trap_id++)
+  for (trap_id = LCP_TRAP_INVALID + 1; trap_id < LCP_POLICY_N_TRAPS;
+       trap_id++)
     {
       vlib_cli_output (
-	vm, "%-7u %-10llu %-10llu %-10llu %-10llu %-10llu", trap_id,
+	vm, "%-7u %-24s %-10llu %-13llu %-10llu %-10llu %-13llu", trap_id,
+	(lcp_trap_desc_get ((vl_api_lcp_trap_type_t) trap_id))->name,
 	(long long) lcp_stats_get ((vl_api_lcp_trap_type_t) trap_id,
 				   LCP_STATS_TRAP_HIT),
 	(long long) lcp_stats_get ((vl_api_lcp_trap_type_t) trap_id,
@@ -568,6 +655,7 @@ lcp_copp_trap_set_command_fn (vlib_main_t *vm, unformat_input_t *input,
   u32 action = ~0;
   u32 priority = 0;
   u32 policer_index = ~0;
+  u8 *policer_name = 0;
   int rv;
 
   if (!unformat_user (input, unformat_line_input, line_input))
@@ -583,6 +671,21 @@ lcp_copp_trap_set_command_fn (vlib_main_t *vm, unformat_input_t *input,
 	;
       else if (unformat (line_input, "policer %u", &policer_index))
 	;
+      else if (unformat (line_input, "policer-name %s", &policer_name))
+        {
+          uword *p = hash_get_mem (vnet_policer_main.policer_index_by_name,
+                                   policer_name);
+          if (!p)
+            {
+              clib_error_t *error =
+                clib_error_return (0, "policer '%s' not found", policer_name);
+              vec_free (policer_name);
+              unformat_free (line_input);
+              return error;
+            }
+          policer_index = p[0];
+          vec_free (policer_name);
+        }
       else
 	return clib_error_return (0, "unknown input `%U'",
 				  format_unformat_error, line_input);
@@ -593,6 +696,8 @@ lcp_copp_trap_set_command_fn (vlib_main_t *vm, unformat_input_t *input,
     return clib_error_return (0, "trap_id required");
   if (action == ~0)
     return clib_error_return (0, "action required");
+  if (action > LCP_COPP_ACTION_TRAP)
+    return clib_error_return (0, "action must be in range 0..3");
 
   vlib_worker_thread_barrier_sync (vm);
   rv = lcp_policy_add ((vl_api_lcp_trap_type_t) trap_id, (u8) action, priority,
@@ -608,7 +713,7 @@ lcp_copp_trap_set_command_fn (vlib_main_t *vm, unformat_input_t *input,
 VLIB_CLI_COMMAND (lcp_copp_trap_set_command, static) = {
   .path = "set lcp copp trap",
   .short_help = "set lcp copp trap trap_id <id> action <0..3> "
-		"priority <n> policer <index>",
+		"priority <n> [policer <index> | policer-name <name>]",
   .function = lcp_copp_trap_set_command_fn,
 };
 
@@ -621,6 +726,7 @@ lcp_copp_trap_update_command_fn (vlib_main_t *vm, unformat_input_t *input,
   u32 action = ~0;
   u32 priority = 0;
   u32 policer_index = ~0;
+  u8 *policer_name = 0;
   int rv;
 
   if (!unformat_user (input, unformat_line_input, line_input))
@@ -636,6 +742,21 @@ lcp_copp_trap_update_command_fn (vlib_main_t *vm, unformat_input_t *input,
 	;
       else if (unformat (line_input, "policer %u", &policer_index))
 	;
+      else if (unformat (line_input, "policer-name %s", &policer_name))
+        {
+          uword *p = hash_get_mem (vnet_policer_main.policer_index_by_name,
+                                   policer_name);
+          if (!p)
+            {
+              clib_error_t *error =
+                clib_error_return (0, "policer '%s' not found", policer_name);
+              vec_free (policer_name);
+              unformat_free (line_input);
+              return error;
+            }
+          policer_index = p[0];
+          vec_free (policer_name);
+        }
       else
 	return clib_error_return (0, "unknown input `%U'",
 				  format_unformat_error, line_input);
@@ -646,6 +767,8 @@ lcp_copp_trap_update_command_fn (vlib_main_t *vm, unformat_input_t *input,
     return clib_error_return (0, "trap_id required");
   if (action == ~0)
     return clib_error_return (0, "action required");
+  if (action > LCP_COPP_ACTION_TRAP)
+    return clib_error_return (0, "action must be in range 0..3");
 
   vlib_worker_thread_barrier_sync (vm);
   rv = lcp_policy_update ((vl_api_lcp_trap_type_t) trap_id, (u8) action,
@@ -661,7 +784,7 @@ lcp_copp_trap_update_command_fn (vlib_main_t *vm, unformat_input_t *input,
 VLIB_CLI_COMMAND (lcp_copp_trap_update_command, static) = {
   .path = "update lcp copp trap",
   .short_help = "update lcp copp trap trap_id <id> action <0..3> "
-		"priority <n> policer <index>",
+		"priority <n> [policer <index> | policer-name <name>]",
   .function = lcp_copp_trap_update_command_fn,
 };
 

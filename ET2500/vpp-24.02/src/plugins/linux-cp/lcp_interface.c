@@ -73,6 +73,7 @@ u32 *lip_db_by_host;
  * reassembly features. */
 lcp_copp_reassembly_main_t lcp_copp_reassembly_main;
 static u32 *lcp_copp_input_feature_refcounts;
+static uword *lcp_copp_input_interfaces;
 
 static void
 lcp_copp_input_feature_set (u32 sw_if_index, u8 enable)
@@ -80,6 +81,9 @@ lcp_copp_input_feature_set (u32 sw_if_index, u8 enable)
   vnet_main_t *vnm = vnet_get_main ();
   vnet_hw_interface_t *hw = vnet_get_sup_hw_interface (vnm, sw_if_index);
   u32 input_sw_if_index = hw->sw_if_index;
+
+  if (!!clib_bitmap_get (lcp_copp_input_interfaces, sw_if_index) == !!enable)
+    return;
 
   vec_validate (lcp_copp_input_feature_refcounts, input_sw_if_index);
   if (enable)
@@ -97,6 +101,8 @@ lcp_copp_input_feature_set (u32 sw_if_index, u8 enable)
 				     "linux-cp-copp-input-init",
 				     input_sw_if_index, 0, NULL, 0);
     }
+  lcp_copp_input_interfaces = clib_bitmap_set (
+    lcp_copp_input_interfaces, sw_if_index, !!enable);
 }
 
 static int
@@ -406,10 +412,8 @@ lcp_itf_set_adjs (lcp_itf_pair_t *lip)
 }
 
 void
-lcp_copp_features_set (u32 phy_sw_if_index, u8 enable)
+lcp_copp_ip_features_set (u32 phy_sw_if_index, u8 enable)
 {
-  lcp_copp_input_feature_set (phy_sw_if_index, enable);
-
   vnet_feature_enable_disable ("ip4-unicast", "linux-cp-ip4-punt",
 			       phy_sw_if_index, enable, NULL, 0);
   vnet_feature_enable_disable ("ip4-multicast",
@@ -424,6 +428,14 @@ lcp_copp_features_set (u32 phy_sw_if_index, u8 enable)
 			       phy_sw_if_index, enable, NULL, 0);
   vnet_feature_enable_disable ("ip6-local", "linux-cp-ip6-local-punt",
 			       phy_sw_if_index, enable, NULL, 0);
+}
+
+void
+lcp_copp_features_set (u32 phy_sw_if_index, u8 enable)
+{
+  lcp_copp_input_feature_set (phy_sw_if_index, enable);
+  lcp_copp_ip_features_set (phy_sw_if_index, enable);
+
   vnet_l2_feature_enable_disable ("l2-input-ip4", "linux-cp-l2-punt",
 				  phy_sw_if_index, enable, NULL, 0);
   vnet_l2_feature_enable_disable ("l2-input-ip6", "linux-cp-l2-punt",

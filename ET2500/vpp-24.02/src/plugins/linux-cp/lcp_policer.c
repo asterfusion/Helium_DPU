@@ -14,6 +14,11 @@ lcp_policer_police (vlib_main_t *vm, vlib_buffer_t *b, u32 policer_index)
   if (policer_index == LCP_POLICY_INDEX_INVALID)
     return 1;
 
+  /* A policer may be deleted before its CoPP policy is removed. */
+  if (PREDICT_FALSE (
+        pool_is_free_index (vnet_policer_main.policers, policer_index)))
+    return 0;
+
   time_in_policer_periods =
     clib_cpu_time_now () >> POLICER_TICKS_PER_PERIOD_SHIFT;
   policer_action =
