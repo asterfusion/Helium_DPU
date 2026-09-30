@@ -110,6 +110,12 @@ typedef struct lcp_itf_pair_t_
   u16 lip_host_pvlan;         /* pvlan */
 #endif
 } lcp_itf_pair_t;
+
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+void lcp_itf_host_vlan_tag_process (const lcp_itf_pair_t *lip,
+				    vlib_buffer_t *b);
+#endif
+
 extern lcp_itf_pair_t *lcp_itf_pair_pool;
 
 extern vlib_node_registration_t lcp_ethernet_node;
@@ -140,6 +146,7 @@ extern int lcp_itf_pair_add (u32 host_sw_if_index, u32 phy_sw_if_index,
 			     u8 *host_name, u32 host_index,
 			     lip_host_type_t host_type, u8 *ns);
 extern int lcp_itf_pair_del (u32 phy_sw_if_index);
+void lcp_copp_ip_features_set (u32 sw_if_index, u8 enable);
 void lcp_copp_features_set (u32 phy_sw_if_index, u8 enable);
 
 /**
