@@ -69,7 +69,8 @@ format_lip_punt_trace (u8 *s, va_list *args)
 }
 
 #ifdef SUPPORT_LCP_VLAN_TAG_ACT
-static_always_inline void lip_punt_vlan_tag_proc(const lcp_itf_pair_t *lip, vlib_buffer_t *b)
+void
+lcp_itf_host_vlan_tag_process (const lcp_itf_pair_t *lip, vlib_buffer_t *b)
 {
     u8 *data = (u8 *) ethernet_buffer_get_header (b);
 
@@ -197,7 +198,7 @@ lcp_prepare_cpu_branch (vlib_main_t *vm, vlib_buffer_t *b,
     }
 
 #ifdef SUPPORT_LCP_VLAN_TAG_ACT
-  lip_punt_vlan_tag_proc (*lip, b);
+  lcp_itf_host_vlan_tag_process (*lip, b);
 #endif
   return lipi;
 
@@ -247,11 +248,11 @@ lip_punt_node_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 
 	  lipi0 = INDEX_INVALID;
 	  /* Account policy/policer success before attempting Linux delivery. */
-	  if (!is_copp || lcp_cpu_branch_pass (vm, b0))
+	  if (is_copp ? lcp_cpu_branch_pass (vm, b0) :
+			lcp_default_cpu_branch_pass (vm, b0))
 	    {
 	      lipi0 = lcp_prepare_cpu_branch (
-		vm, b0, is_copp ? LCP_DELIVERY_CONTEXT_COPP :
-			    LCP_DELIVERY_CONTEXT_LEGACY,
+		vm, b0, LCP_DELIVERY_CONTEXT_COPP,
 		&sw_if_index0, &lip0);
 	      if (lipi0 != INDEX_INVALID)
 		next0 = LIP_PUNT_NEXT_IO;
@@ -571,7 +572,9 @@ VLIB_REGISTER_NODE (lcp_nat_miss_node) = {
   },
 };
 
-#define foreach_lcp_punt_l3 _ (DROP, "unknown error")
+#define foreach_lcp_punt_l3 \
+  _ (DROP, "unknown error") \
+  _ (PUNT, "punt to host")
 
 typedef enum
 {
@@ -640,6 +643,7 @@ VLIB_NODE_FN (lcp_punt_l3_node)
 	       * are being punted to the local host.
 	       */
 	      lip0 = lcp_itf_pair_get (lipi0);
+	      next0 = LCP_LOCAL_NEXT_PUNT;
 	      if (lip0->lip_host_type == LCP_ITF_HOST_TUN)
 		b0->flags |= VNET_BUFFER_F_LOCALLY_ORIGINATED;
 	    }
@@ -667,9 +671,10 @@ VLIB_REGISTER_NODE (lcp_punt_l3_node) = {
   .format_trace = format_lcp_punt_l3_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
 
-  .n_next_nodes = 1,
+  .n_next_nodes = 2,
   .next_nodes = {
     [LCP_LOCAL_NEXT_DROP] = "error-drop",
+    [LCP_LOCAL_NEXT_PUNT] = "linux-cp-punt",
   },
 };
 
@@ -1226,7 +1231,7 @@ VLIB_NODE_FN (lcp_arp_copp_delivery_node)
 		lip0->lip_host_sw_if_index;
 	      vlib_buffer_advance (b0, -len0);
 #ifdef SUPPORT_LCP_VLAN_TAG_ACT
-	      lip_punt_vlan_tag_proc (lip0, b0);
+	      lcp_itf_host_vlan_tag_process (lip0, b0);
 #endif
 	      if (lcp_cpu_branch_pass (vm, b0))
 		next0 = LCP_ARP_DELIVERY_NEXT_IO;

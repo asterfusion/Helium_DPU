@@ -21,8 +21,11 @@
 #include <vnet/ip/ip6_packet.h>
 #include <vnet/tcp/tcp_packet.h>
 #include <vnet/udp/udp_packet.h>
+#include <vnet/fib/fib_table.h>
+#include <vnet/dpo/receive_dpo.h>
 
 #include <linux-cp/lcp.h>
+#include <linux-cp/lcp_interface.h>
 #include <linux-cp/lcp_match.h>
 #include <linux-cp/lcp_punt.h>
 #include <linux-cp/lcp_policy.h>
@@ -223,7 +226,77 @@ lcp_copp_match_arbitration_command_fn (vlib_main_t *vm,
       goto done;
     }
 
+  view.valid_fields |= LCP_MATCH_FIELD_IP;
+  view.src_ip.ip4.as_u32 = 0;
+  view.dst_ip.ip4.as_u32 = 0xffffffff;
+  if (!lcp_match_select (&view, &result) ||
+      result.trap_type != LCP_TRAP_DHCP || result.evidence_rule_id != 221)
+    {
+      err = clib_error_return (
+	0, "routed DHCP client limited broadcast must match");
+      goto done;
+    }
+
+  view.src_ip.ip4.as_u32 = clib_host_to_net_u32 (0x0a000001);
+  const u16 dhcp_ports[][2] = {
+    { 68, 67 }, { 67, 68 }, { 67, 67 },
+    { 67, 50000 }, { 68, 50000 }, { 50000, 67 }, { 50000, 68 },
+  };
+  for (u32 i = 0; i < ARRAY_LEN (dhcp_ports); i++)
+    {
+      view.l4_src_port = dhcp_ports[i][0];
+      view.l4_dst_port = dhcp_ports[i][1];
+      view.context = LCP_MATCH_CTX_IP4;
+      view.dst_ip.ip4.as_u32 = 0xffffffff;
+      if (!lcp_match_select (&view, &result) ||
+          result.trap_type != LCP_TRAP_DHCP || result.evidence_rule_id != 221)
+        {
+          err = clib_error_return (0, "DHCP broadcast ports case %u", i);
+          goto done;
+        }
+      view.dst_ip.ip4.as_u32 = clib_host_to_net_u32 (0x0a000002);
+      if (lcp_match_select (&view, &result))
+        {
+          err = clib_error_return (0, "transit DHCP ports case %u", i);
+          goto done;
+        }
+      view.context = LCP_MATCH_CTX_LOCAL4;
+      if (!lcp_match_select (&view, &result) ||
+          result.trap_type != LCP_TRAP_DHCP)
+        {
+          err = clib_error_return (0, "local DHCP ports case %u", i);
+          goto done;
+        }
+    }
+
+  view = (lcp_packet_view_t) {
+    .context = LCP_MATCH_CTX_IP6,
+    .valid_fields = LCP_MATCH_FIELD_IP | LCP_MATCH_FIELD_IP_PROTOCOL |
+		    LCP_MATCH_FIELD_L4_PORTS,
+    .ip_protocol = IP_PROTOCOL_UDP,
+    .l4_src_port = 546,
+    .l4_dst_port = 547,
+    .dst_ip.ip6 = {
+      .as_u8 = { 0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		  0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x02 },
+    },
+  };
+  if (!lcp_match_select (&view, &result) ||
+      result.trap_type != LCP_TRAP_DHCPV6 || result.evidence_rule_id != 325)
+    {
+      err = clib_error_return (0, "DHCPv6 client multicast not classified");
+      goto done;
+    }
+  view.dst_ip.ip6.as_u8[15] = 3;
+  if (lcp_match_select (&view, &result))
+    {
+      err = clib_error_return (0, "non-DHCPv6 multicast classified");
+      goto done;
+    }
+
   view.context = LCP_MATCH_CTX_L2_IP4;
+  view.l4_src_port = 68;
+  view.l4_dst_port = 67;
   if (!lcp_match_select (&view, &result) ||
       result.trap_type != LCP_TRAP_DHCP_L2)
     {
@@ -443,39 +516,41 @@ lcp_copp_legacy_actions_command_fn (vlib_main_t *vm,
   CLIB_UNUSED (unformat_input_t *unused_input) = input;
   CLIB_UNUSED (vlib_cli_command_t *unused_cmd) = cmd;
   const vl_api_lcp_trap_type_t forward_traps[] = {
+    LCP_TRAP_IPV6_MLD_V1_V2,
+    LCP_TRAP_IPV6_MLD_V1_REPORT,
+    LCP_TRAP_IPV6_MLD_V1_DONE,
+    LCP_TRAP_MLD_V2_REPORT,
+  };
+  const vl_api_lcp_trap_type_t copy_traps[] = {
+    LCP_TRAP_DHCP_L2,
+    LCP_TRAP_DHCPV6_L2,
+    LCP_TRAP_ARP_REQUEST,
+    LCP_TRAP_ARP_RESPONSE,
+    LCP_TRAP_DHCP,
+    LCP_TRAP_VRRP,
+    LCP_TRAP_DHCPV6,
+    LCP_TRAP_VRRPV6,
+    LCP_TRAP_IPV6_NEIGHBOR_DISCOVERY,
+    LCP_TRAP_IPV6_NEIGHBOR_SOLICITATION,
+    LCP_TRAP_IPV6_NEIGHBOR_ADVERTISEMENT,
+    LCP_TRAP_LDP,
+  };
+  const vl_api_lcp_trap_type_t trap_traps[] = {
     LCP_TRAP_IGMP_QUERY,
     LCP_TRAP_IGMP_LEAVE,
     LCP_TRAP_IGMP_V1_REPORT,
     LCP_TRAP_IGMP_V2_REPORT,
     LCP_TRAP_IGMP_V3_REPORT,
-    LCP_TRAP_DHCP_L2,
-    LCP_TRAP_DHCPV6_L2,
     LCP_TRAP_ICCP,
-    LCP_TRAP_ARP_REQUEST,
-    LCP_TRAP_ARP_RESPONSE,
-    LCP_TRAP_DHCP,
     LCP_TRAP_OSPF,
     LCP_TRAP_PIM,
-    LCP_TRAP_VRRP,
-    LCP_TRAP_DHCPV6,
     LCP_TRAP_OSPFV6,
-    LCP_TRAP_VRRPV6,
-    LCP_TRAP_IPV6_NEIGHBOR_DISCOVERY,
-    LCP_TRAP_IPV6_MLD_V1_V2,
-    LCP_TRAP_IPV6_MLD_V1_REPORT,
-    LCP_TRAP_IPV6_MLD_V1_DONE,
-    LCP_TRAP_MLD_V2_REPORT,
-    LCP_TRAP_IPV6_NEIGHBOR_SOLICITATION,
-    LCP_TRAP_IPV6_NEIGHBOR_ADVERTISEMENT,
     LCP_TRAP_ISIS,
-  };
-  const vl_api_lcp_trap_type_t drop_traps[] = {
     LCP_TRAP_STP,
     LCP_TRAP_LACP,
     LCP_TRAP_LLDP,
     LCP_TRAP_PTP,
     LCP_TRAP_PTP_TX_EVENT,
-    LCP_TRAP_LDP,
     LCP_TRAP_IP2ME,
     LCP_TRAP_SSH,
     LCP_TRAP_SNMP,
@@ -487,8 +562,6 @@ lcp_copp_legacy_actions_command_fn (vlib_main_t *vm,
     LCP_TRAP_BFDV6_MICRO,
     LCP_TRAP_GNMI,
     LCP_TRAP_P4RT,
-    LCP_TRAP_NTPCLIENT,
-    LCP_TRAP_NTPSERVER,
     LCP_TRAP_HTTPCLIENT,
     LCP_TRAP_HTTPSERVER,
     LCP_TRAP_STATIC_FDB_MOVE,
@@ -496,6 +569,8 @@ lcp_copp_legacy_actions_command_fn (vlib_main_t *vm,
     LCP_TRAP_SNAT_MISS,
     LCP_TRAP_DNAT_MISS,
     LCP_TRAP_NAT_HAIRPIN,
+    LCP_TRAP_NTPCLIENT,
+    LCP_TRAP_NTPSERVER,
   };
 
   for (u32 i = 0; i < ARRAY_LEN (forward_traps); i++)
@@ -503,10 +578,15 @@ lcp_copp_legacy_actions_command_fn (vlib_main_t *vm,
       return clib_error_return (0, "trap %u does not default to FORWARD",
 				forward_traps[i]);
 
-  for (u32 i = 0; i < ARRAY_LEN (drop_traps); i++)
-    if (lcp_legacy_action (drop_traps[i]) != LCP_COPP_ACTION_DROP)
-      return clib_error_return (0, "trap %u does not default to DROP",
-				drop_traps[i]);
+  for (u32 i = 0; i < ARRAY_LEN (copy_traps); i++)
+    if (lcp_legacy_action (copy_traps[i]) != LCP_COPP_ACTION_COPY)
+      return clib_error_return (0, "trap %u does not default to COPY",
+                               copy_traps[i]);
+
+  for (u32 i = 0; i < ARRAY_LEN (trap_traps); i++)
+    if (lcp_legacy_action (trap_traps[i]) != LCP_COPP_ACTION_TRAP)
+      return clib_error_return (0, "trap %u does not default to TRAP",
+				 trap_traps[i]);
 
   vlib_cli_output (vm, "legacy default actions passed");
   return 0;
@@ -1502,3 +1582,196 @@ VLIB_CLI_COMMAND (lcp_copp_ip6_ext_command, static) = {
  * eval: (c-set-style "gnu")
  * End:
  */
+
+/* Exercise generic CPU delivery independently of protocol classification. */
+static clib_error_t *
+lcp_copp_default_delivery_test (vlib_main_t *vm, unformat_input_t *input,
+                              vlib_cli_command_t *cmd)
+{
+  const lcp_policy_entry_t saved = *lcp_policy_get (LCP_TRAP_DEFAULT);
+  int configured = lcp_policy_is_configured (LCP_TRAP_DEFAULT);
+  clib_error_t *error = 0;
+  u32 bi;
+  const u8 actions[] = { LCP_COPP_ACTION_TRAP, LCP_COPP_ACTION_COPY,
+                         LCP_COPP_ACTION_DROP, LCP_COPP_ACTION_FORWARD };
+
+  if (vlib_buffer_alloc (vm, &bi, 1) != 1)
+    return clib_error_return (0, "buffer allocation failed");
+
+  vlib_worker_thread_barrier_sync (vm);
+  for (u32 i = 0; i < ARRAY_LEN (actions); i++)
+    {
+      vlib_buffer_t *b = vlib_get_buffer (vm, bi);
+      u64 before[LCP_STATS_N_COUNTERS];
+      int deliver = actions[i] == LCP_COPP_ACTION_TRAP ||
+                    actions[i] == LCP_COPP_ACTION_COPY;
+
+      lcp_policy_delete (LCP_TRAP_DEFAULT);
+      lcp_policy_add (LCP_TRAP_DEFAULT, actions[i], 0,
+                     LCP_POLICY_INDEX_INVALID);
+      for (u32 c = 0; c < LCP_STATS_N_COUNTERS; c++)
+        before[c] = lcp_stats_get (LCP_TRAP_DEFAULT, c);
+      vlib_buffer_reset (b);
+      b->current_length = 64;
+      /* Generic producers need not initialize CoPP metadata. */
+      vnet_buffer2 (b)->trap_id = 255;
+      if (lcp_default_cpu_branch_pass (vm, b) != deliver ||
+          vnet_buffer2 (b)->trap_id != LCP_TRAP_DEFAULT ||
+          lcp_stats_get (LCP_TRAP_DEFAULT, LCP_STATS_TRAP_HIT) !=
+            before[LCP_STATS_TRAP_HIT] + 1 ||
+          lcp_stats_get (LCP_TRAP_DEFAULT, LCP_STATS_PUNT_REQUIRED) !=
+            before[LCP_STATS_PUNT_REQUIRED] + deliver ||
+          lcp_stats_get (LCP_TRAP_DEFAULT, LCP_STATS_PUNT_PASS) !=
+            before[LCP_STATS_PUNT_PASS] + deliver ||
+          lcp_stats_get (LCP_TRAP_DEFAULT, LCP_STATS_PUNT_DROP) !=
+            before[LCP_STATS_PUNT_DROP] + (actions[i] == LCP_COPP_ACTION_DROP))
+        {
+          error = clib_error_return (0, "DEFAULT delivery action %u failed",
+                                     actions[i]);
+          break;
+        }
+    }
+  lcp_policy_delete (LCP_TRAP_DEFAULT);
+  if (configured)
+    lcp_policy_add (LCP_TRAP_DEFAULT, saved.action, saved.priority,
+                   saved.policer_index);
+  vlib_worker_thread_barrier_release (vm);
+  vlib_buffer_free_one (vm, bi);
+  if (!error)
+    vlib_cli_output (vm, "DEFAULT delivery actions passed");
+  return error;
+}
+
+VLIB_CLI_COMMAND (lcp_copp_default_delivery_command, static) = {
+  .path = "test lcp copp default delivery",
+  .short_help = "test lcp copp default delivery",
+  .function = lcp_copp_default_delivery_test,
+};
+
+/* Exercise fresh-interface setup and repeated enable/disable requests. */
+static clib_error_t *
+lcp_feature_setup_test (vlib_main_t *vm, unformat_input_t *input,
+                        vlib_cli_command_t *cmd)
+{
+  u32 sw_if_index;
+  u8 mac[6] = { 2, 0, 0, 0, 0, 1 };
+  clib_error_t *error = NULL;
+  int rv = vnet_create_loopback_interface (&sw_if_index, mac, 0, 0);
+  if (rv)
+    return clib_error_return (0, "loopback create failed: %d", rv);
+
+  for (u32 i = 0; i < 2; i++)
+    {
+      lcp_copp_features_set (sw_if_index, 1);
+      if (vnet_feature_is_enabled (
+                  "ip4-multicast", "linux-cp-ip4-multicast-punt",
+                  sw_if_index) != 1)
+        {
+          error = clib_error_return (0, "CoPP enable failed");
+          goto done;
+        }
+    }
+  for (u32 i = 0; i < 2; i++)
+    {
+      lcp_copp_features_set (sw_if_index, 0);
+      if (vnet_feature_is_enabled (
+                  "device-input", "linux-cp-copp-input-init", sw_if_index) != 0)
+        {
+          error = clib_error_return (0, "CoPP disable/refcount failed");
+          goto done;
+        }
+    }
+  lcp_copp_ip_features_set (sw_if_index, 1);
+  if (vnet_feature_is_enabled (
+              "ip6-multicast", "linux-cp-ip6-multicast-punt", sw_if_index) != 1 ||
+      vnet_feature_is_enabled ("l2-input-ip4", "linux-cp-l2-punt", sw_if_index) != 0)
+    error = clib_error_return (0, "IP-only feature setup failed");
+done:
+  lcp_copp_features_set (sw_if_index, 0);
+  vnet_delete_loopback_interface (sw_if_index);
+  if (!error)
+    vlib_cli_output (vm, "LCP feature setup tests passed");
+  return error;
+}
+
+VLIB_CLI_COMMAND (lcp_feature_setup_command, static) = {
+  .path = "test lcp copp feature setup",
+  .short_help = "test lcp copp feature setup",
+  .function = lcp_feature_setup_test,
+};
+
+/* Exercise FIB overrides directly: these are buffer metadata, not fields
+ * which can be supplied by a packet-generator stream. */
+static clib_error_t *
+lcp_bfd_echo_fib_test (vlib_main_t *vm, unformat_input_t *input,
+                       vlib_cli_command_t *cmd)
+{
+  u32 bi, local_fib, transit_fib;
+  vlib_buffer_t *b;
+  ip4_header_t *ip;
+  udp_header_t *udp;
+  lcp_packet_view_t view;
+  lcp_match_result_t result;
+  clib_error_t *error = NULL;
+  dpo_id_t receive = DPO_INVALID;
+  fib_prefix_t pfx = { .fp_proto = FIB_PROTOCOL_IP4, .fp_len = 32 };
+
+  if (vlib_buffer_alloc (vm, &bi, 1) != 1)
+    return clib_error_return (0, "buffer allocation failed");
+  local_fib = fib_table_create_and_lock (FIB_PROTOCOL_IP4, FIB_SOURCE_API,
+                                       "bfd-echo-local-test");
+  transit_fib = fib_table_create_and_lock (FIB_PROTOCOL_IP4, FIB_SOURCE_API,
+                                         "bfd-echo-transit-test");
+  pfx.fp_addr.ip4.as_u32 = clib_host_to_net_u32 (0xc6336401);
+  receive_dpo_add_or_lock (DPO_PROTO_IP4, ~0, &pfx.fp_addr, &receive);
+  fib_table_entry_special_dpo_add (local_fib, &pfx, FIB_SOURCE_API,
+                                  FIB_ENTRY_FLAG_EXCLUSIVE, &receive);
+  dpo_reset (&receive);
+  b = vlib_get_buffer (vm, bi);
+  b->current_data = 0;
+  b->current_length = sizeof (*ip) + sizeof (*udp) + 24;
+  clib_memset (vlib_buffer_get_current (b), 0, b->current_length);
+  ip = vlib_buffer_get_current (b);
+  ip->ip_version_and_header_length = 0x45;
+  ip->protocol = IP_PROTOCOL_UDP;
+  ip->ttl = 254;
+  ip->length = clib_host_to_net_u16 (b->current_length);
+  ip->src_address = ip->dst_address = pfx.fp_addr.ip4;
+  udp = (void *) (ip + 1);
+  udp->src_port = clib_host_to_net_u16 (50000);
+  udp->dst_port = clib_host_to_net_u16 (3785);
+  udp->length = clib_host_to_net_u16 (sizeof (*udp) + 24);
+  vnet_buffer (b)->sw_if_index[VLIB_RX] = ~0;
+
+  for (u32 i = 0; i < 3; i++)
+    {
+      vnet_buffer (b)->sw_if_index[VLIB_TX] =
+        i == 0 ? local_fib : i == 1 ? transit_fib : ~0;
+      vnet_buffer (b)->ip.fib_index = transit_fib;
+      clib_memset (&result, 0, sizeof (result));
+      bool matched =
+        lcp_packet_parse (vm, b, LCP_MATCH_CTX_IP4, NULL, &view) &&
+        lcp_match_select (&view, &result);
+      if ((i == 0 && (!matched || result.trap_type != LCP_TRAP_IP2ME ||
+                      result.evidence_rule_id != 326)) ||
+          (i != 0 && matched) ||
+          vnet_buffer (b)->ip.fib_index != transit_fib)
+        {
+          error = clib_error_return (0, "echo FIB case %u failed", i);
+          break;
+        }
+    }
+  fib_table_entry_special_remove (local_fib, &pfx, FIB_SOURCE_API);
+  fib_table_unlock (local_fib, FIB_PROTOCOL_IP4, FIB_SOURCE_API);
+  fib_table_unlock (transit_fib, FIB_PROTOCOL_IP4, FIB_SOURCE_API);
+  vlib_buffer_free (vm, &bi, 1);
+  if (!error)
+    vlib_cli_output (vm, "BFD echo FIB tests passed");
+  return error;
+}
+
+VLIB_CLI_COMMAND (lcp_bfd_echo_fib_command, static) = {
+  .path = "test lcp copp bfd echo fib",
+  .short_help = "test lcp copp bfd echo fib",
+  .function = lcp_bfd_echo_fib_test,
+};

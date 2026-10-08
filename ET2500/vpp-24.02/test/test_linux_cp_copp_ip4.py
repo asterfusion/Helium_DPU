@@ -15,6 +15,38 @@ from linux_cp_copp_common import (
 class TestLinuxCpCoppIp4(LinuxCpCoppTestCase):
     """IPv4 CoPP tests."""
 
+    def test_dhcp_l3_broadcast_ports(self):
+        """Limited and ingress subnet broadcasts use the L3 DHCP trap."""
+        from ipaddress import IPv4Interface
+
+        subnet = IPv4Interface(
+            "%s/%s" % (self.phy.local_ip4, self.phy.local_ip4_prefix_len)
+        ).network
+        self.vapi.lcp_copp_trap_add(
+            trap_id=24, action=3, priority=100, policer_index=0xFFFFFFFF
+        )
+        try:
+            for dst in ("255.255.255.255", str(subnet.broadcast_address)):
+                for src in ("0.0.0.0", self.phy.remote_ip4):
+                    for sport, dport in (
+                        (68, 67), (67, 68), (67, 67),
+                        (67, 50000), (68, 50000),
+                        (50000, 67), (50000, 68),
+                    ):
+                        pkt = (
+                            Ether(src=self.phy.remote_mac, dst="ff:ff:ff:ff:ff:ff")
+                            / IP(src=src, dst=dst)
+                            / UDP(sport=sport, dport=dport)
+                            / Raw(b"dhcp-broadcast")
+                        )
+                        before = self._copp_counter("trap_hit", 24)
+                        l2_before = self._copp_counter("trap_hit", 12)
+                        self._send_and_check(self.phy, pkt, 1, 0)
+                        self.assertEqual(self._copp_counter("trap_hit", 24), before + 1)
+                        self.assertEqual(self._copp_counter("trap_hit", 12), l2_before)
+        finally:
+            self.vapi.lcp_copp_trap_del(trap_id=24)
+
     def test_transit_dhcp_ports_are_forwarded(self):
         """Transit UDP/67 and UDP/68 must not enter the DHCP trap."""
         for port in (67, 68):

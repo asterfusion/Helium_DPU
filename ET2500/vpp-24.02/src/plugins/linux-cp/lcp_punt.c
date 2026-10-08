@@ -101,6 +101,35 @@ lcp_punt_process (vlib_main_t *vm, vlib_buffer_t *b)
     vm, b, LCP_COPP_ACTION_TRAP);
 }
 
+/* Apply DEFAULT to an existing CPU branch from a generic punt producer. */
+bool
+lcp_default_cpu_branch_pass (vlib_main_t *vm, vlib_buffer_t *b)
+{
+  const lcp_policy_entry_t *policy;
+
+  lcp_buffer_set_trap_id (b, LCP_TRAP_DEFAULT);
+  policy = lcp_policy_get (LCP_TRAP_DEFAULT);
+  if (PREDICT_FALSE (policy == 0))
+    return false;
+
+  lcp_stats_increment (vm, LCP_TRAP_DEFAULT, LCP_STATS_TRAP_HIT);
+  switch (policy->action)
+    {
+    case LCP_COPP_ACTION_TRAP:
+    case LCP_COPP_ACTION_COPY:
+      /* The producer already selected the CPU branch; no clone is needed. */
+      lcp_stats_increment (vm, LCP_TRAP_DEFAULT, LCP_STATS_PUNT_REQUIRED);
+      return lcp_cpu_branch_pass (vm, b);
+    case LCP_COPP_ACTION_DROP:
+      lcp_stats_increment (vm, LCP_TRAP_DEFAULT, LCP_STATS_PUNT_DROP);
+      return false;
+    case LCP_COPP_ACTION_FORWARD:
+      return false;
+    default:
+      return false;
+    }
+}
+
 bool
 lcp_cpu_branch_pass (vlib_main_t *vm, vlib_buffer_t *b)
 {

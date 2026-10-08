@@ -78,6 +78,7 @@ lcp_action_result_t lcp_punt_process (vlib_main_t *vm, vlib_buffer_t *b);
 lcp_action_result_t
 lcp_punt_process_with_default (vlib_main_t *vm, vlib_buffer_t *b,
 			       u8 default_action);
+bool lcp_default_cpu_branch_pass (vlib_main_t *vm, vlib_buffer_t *b);
 bool lcp_cpu_branch_pass (vlib_main_t *vm, vlib_buffer_t *b);
 
 #endif /* __LCP_PUNT_H__ */
