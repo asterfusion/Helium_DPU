@@ -2098,6 +2098,22 @@ map_ce_init (vlib_main_t * vm)
 
 VLIB_INIT_FUNCTION (map_ce_init);
 
+static clib_error_t *
+map_ce_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_add)
+{
+    map_ce_main_t *mm = &map_ce_main;
+
+    if (is_add)
+        return 0;
+
+    if (clib_bitmap_get (mm->bm_enabled_by_sw_if, sw_if_index))
+        map_ce_if_enable_disable (false, sw_if_index);
+
+    return 0;
+}
+
+VNET_SW_INTERFACE_ADD_DEL_FUNCTION (map_ce_sw_interface_add_del);
+
 /*
  * fd.io coding-style-patch-verification: ON
  *

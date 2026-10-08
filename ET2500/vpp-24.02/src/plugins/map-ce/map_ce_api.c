@@ -876,6 +876,9 @@ map_ce_if_enable_disable (bool is_enable, u32 sw_if_index)
 
     is_enable = ! !is_enable;
 
+    if (clib_bitmap_get (mm->bm_enabled_by_sw_if, sw_if_index) == is_enable)
+        return 0;
+
     ip4_sv_reass_enable_disable_with_refcnt (sw_if_index, is_enable);
     ip6_sv_reass_enable_disable_with_refcnt (sw_if_index, is_enable);
     ip6_full_reass_enable_disable_with_refcnt (sw_if_index, is_enable);
@@ -883,6 +886,10 @@ map_ce_if_enable_disable (bool is_enable, u32 sw_if_index)
             is_enable ? 1 : 0, 0, 0);
     vnet_feature_enable_disable ("ip6-unicast", "map-ce-ip6-classify", sw_if_index,
             is_enable ? 1 : 0, 0, 0);
+
+    mm->bm_enabled_by_sw_if =
+        clib_bitmap_set (mm->bm_enabled_by_sw_if, sw_if_index, is_enable);
+
     return 0;
 }
 
