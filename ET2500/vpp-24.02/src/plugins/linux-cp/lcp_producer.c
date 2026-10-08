@@ -602,11 +602,14 @@ VNET_FEATURE_INIT (lcp_local_ip6_feature, static) = {
 VNET_FEATURE_INIT (lcp_local_ip4_classify_feature, static) = {
   .arc_name = "ip4-local",
   .node_name = "linux-cp-ip4-local-punt",
+  .runs_after =
+    VNET_FEATURES ("linux-cp-igmp-xc", "lb-local4-input", "syn-filter-4"),
   .runs_before = VNET_FEATURES ("ip4-local-end-of-arc"),
 };
 VNET_FEATURE_INIT (lcp_local_ip6_classify_feature, static) = {
   .arc_name = "ip6-local",
   .node_name = "linux-cp-ip6-local-punt",
+  .runs_after = VNET_FEATURES ("lb-local6-input"),
   .runs_before = VNET_FEATURES ("ip6-local-end-of-arc"),
 };
 
