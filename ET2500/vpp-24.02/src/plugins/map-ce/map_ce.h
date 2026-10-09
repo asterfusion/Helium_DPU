@@ -236,6 +236,9 @@ typedef struct
   vlib_main_t *vlib_main;
   vnet_main_t *vnet_main;
 
+  /* Graph node state */
+  uword *bm_enabled_by_sw_if;
+
   /* Lookup tables */
   lpm_t *ip4_prefix_tbl;
   lpm_t *ip6_prefix_tbl;

@@ -2200,6 +2200,25 @@ map_init (vlib_main_t * vm)
 
 VLIB_INIT_FUNCTION (map_init);
 
+static clib_error_t *
+map_sw_interface_add_del (vnet_main_t * vnm, u32 sw_if_index, u32 is_add)
+{
+  map_main_t *mm = &map_main;
+
+  if (is_add)
+    return 0;
+
+  if (clib_bitmap_get (mm->bm_encap_enabled_by_sw_if, sw_if_index))
+    map_if_enable_disable (false, sw_if_index, false);
+
+  if (clib_bitmap_get (mm->bm_trans_enabled_by_sw_if, sw_if_index))
+    map_if_enable_disable (false, sw_if_index, true);
+
+  return 0;
+}
+
+VNET_SW_INTERFACE_ADD_DEL_FUNCTION (map_sw_interface_add_del);
+
 /*
  * fd.io coding-style-patch-verification: ON
  *
