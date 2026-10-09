@@ -91,7 +91,18 @@ show_or_clear_hw_interfaces (vlib_main_t * vm,
 
       /* See if user wants to show an interface with a specific hw_if_index. */
       else if (unformat (line_input, "%u", &hw_if_index))
+      {
+        if (pool_is_free_index (im->hw_interfaces, hw_if_index))
+        {
+            error = clib_error_return (
+                0, "unknown hardware interface index `%u'",
+                hw_if_index);
+            unformat_free (line_input);
+            goto done;
+        }
+
 	vec_add1 (hw_if_indices, hw_if_index);
+      }
 
       else if (unformat (line_input, "verbose"))
 	verbose = 1;		/* this is also the default */
