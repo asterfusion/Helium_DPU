@@ -471,13 +471,6 @@ int spi_feature_enable (spi_config_t *config)
             spim->fq_ip6_output_index = vlib_frame_queue_main_init (node->index, 0);
         }
     }
-    else 
-    {
-        spim->fq_ip4_input_index = ~0;
-        spim->fq_ip4_output_index = ~0;
-        spim->fq_ip6_input_index = ~0;
-        spim->fq_ip6_output_index = ~0;
-    }
 
     vlib_zero_simple_counter (&spim->total_sessions_counter, 0);
     vlib_zero_simple_counter (&spim->session_ip_type_counter, 0);
@@ -531,10 +524,8 @@ int spi_feature_disable ()
     if (rc)
         error = VNET_API_ERROR_BUG;
 
-    spim->fq_ip4_input_index = ~0;
-    spim->fq_ip4_output_index = ~0;
-    spim->fq_ip6_input_index = ~0;
-    spim->fq_ip6_output_index = ~0;
+    /* Keep the handoff frame queues allocated by spi_feature_enable;
+     * they are reused on the next enable instead of leaking. */
 
     clib_memset (&spim->spi_config, 0, sizeof (spi_config_t));
 

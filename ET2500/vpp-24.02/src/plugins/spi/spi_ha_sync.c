@@ -958,8 +958,6 @@ static_always_inline void spi_ha_sync_handoff_deinit()
 
 int spi_ha_sync_register (void)
 {
-    spi_ha_sync_handoff_init();
-
     spi_ha_sync_register_session_application_ptr =
         vlib_get_plugin_symbol ("ha_sync_plugin.so", "ha_sync_register_session_application");
 
@@ -968,7 +966,7 @@ int spi_ha_sync_register (void)
 
     if(spi_ha_sync_register_session_application_ptr == NULL)
     {
-        clib_warning ("ha_sync_plugin.so ha_sync_unregister_session_application is not found");
+        clib_warning ("ha_sync_plugin.so ha_sync_register_session_application is not found");
         spi_ha_sync_ctx.ha_sync_plugin_found = 0;
         return 0;
     }
@@ -982,11 +980,13 @@ int spi_ha_sync_register (void)
 
     spi_ha_sync_ctx.ha_sync_plugin_found = 1;
 
+    spi_ha_sync_handoff_init();
 
     if (((__typeof__ (ha_sync_register_session_application) *)spi_ha_sync_register_session_application_ptr) (&spi_ha_sync_registration))
     {
         clib_warning ("spi register ha sync failed");
         spi_ha_sync_ctx.ha_sync_register = 0;
+        spi_ha_sync_handoff_deinit();
         return 0;
     }
 
@@ -1006,14 +1006,15 @@ void spi_ha_sync_unregister (void)
     {
         clib_warning ("ha_sync_plugin.so ha_sync_unregister_session_application is not found");
         spi_ha_sync_ctx.ha_sync_plugin_found = 0;
-        return;
     }
-
-    spi_ha_sync_ctx.ha_sync_plugin_found = 1;
-
-    if (((__typeof__ (ha_sync_unregister_session_application) *)spi_ha_sync_unregister_session_application_ptr) (HA_SYNC_APP_SPI))
+    else
     {
-        clib_warning ("spi unregister ha sync failed");
+        spi_ha_sync_ctx.ha_sync_plugin_found = 1;
+
+        if (((__typeof__ (ha_sync_unregister_session_application) *)spi_ha_sync_unregister_session_application_ptr) (HA_SYNC_APP_SPI))
+        {
+            clib_warning ("spi unregister ha sync failed");
+        }
     }
     spi_ha_sync_ctx.ha_sync_register = 0;
 
