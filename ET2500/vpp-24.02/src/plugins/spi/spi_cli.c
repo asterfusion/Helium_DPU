@@ -349,7 +349,9 @@ spi_show_session_hash_command_fn (vlib_main_t * vm,
 
     if(unformat (input, "verbose")) verbose = 1;
 
-    vlib_cli_output (vm, "\n%U", spim->session_table.fmt_fn, &spim->exact_3tuple_timeout_table, verbose);
+    if(spim->session_table.instantiated && spim->session_table.fmt_fn)
+        vlib_cli_output (vm, "\n%U", spim->session_table.fmt_fn, &spim->exact_3tuple_timeout_table, verbose);
+
     return 0;
 }
 

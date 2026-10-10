@@ -490,6 +490,9 @@ __clib_export void TW (tw_timer_wheel_free) (TWT (tw_timer_wheel) * tw)
   pool_put (tw->timers, head);
 #endif
 
+  pool_free (tw->timers);
+  vec_free (tw->expired_timer_handles);
+
   clib_memset (tw, 0, sizeof (*tw));
 }
 
