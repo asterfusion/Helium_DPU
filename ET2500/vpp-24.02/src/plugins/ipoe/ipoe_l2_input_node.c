@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include <ipoe/ipoe.h>
+#include <ipoe/ipoe_packet.h>
 
 #include <vnet/feature/feature.h>
 #include <vnet/ip/ip4.h>
@@ -88,20 +89,21 @@ format_ipoe_l2_trace (u8 *s, va_list *args)
 }
 
 static_always_inline u8
-ipoe_l2_is_dhcp_client (vlib_buffer_t *b, const ip4_header_t *ip4,
-			u32 packet_bytes)
+ipoe_l2_is_dhcp_ingress (vlib_buffer_t *b, ip4_header_t *ip4,
+			 u32 packet_bytes)
 {
-  const udp_header_t *udp;
-  u32 ip4_bytes = ip4_header_bytes (ip4);
+  ipoe_ip4_view_t view = {
+    .ip4 = ip4,
+    .packet_ip4_bytes = clib_net_to_host_u16 (ip4->length),
+    .vlan_depth = 0,
+  };
+  u32 l2_bytes = vnet_buffer (b)->l2.l2_len;
 
-  if (ip4->protocol != IP_PROTOCOL_UDP || ip4_is_fragment (ip4) ||
-      ip4_bytes < sizeof (*ip4) ||
-      packet_bytes < vnet_buffer (b)->l2.l2_len + ip4_bytes + sizeof (*udp))
+  if (packet_bytes < l2_bytes || b->current_length < l2_bytes)
     return 0;
 
-  udp = (const udp_header_t *) ((const u8 *) ip4 + ip4_bytes);
-  return (clib_net_to_host_u16 (udp->src_port) == UDP_DST_PORT_dhcp_to_client &&
-	  clib_net_to_host_u16 (udp->dst_port) == UDP_DST_PORT_dhcp_to_server);
+  view.contiguous_ip4_bytes = b->current_length - l2_bytes;
+  return ipoe_ip4_is_dhcp_ingress (&view);
 }
 
 static_always_inline ipoe_l2_result_t
@@ -153,7 +155,7 @@ ipoe_l2_check_packet (vlib_main_t *vm, vlib_buffer_t *b,
     }
   intf = vec_elt_at_index (im->interfaces, sw_if_index);
   *packet_bytes = frame_bytes;
-  if (ipoe_l2_is_dhcp_client (b, ip4, frame_bytes))
+  if (ipoe_l2_is_dhcp_ingress (b, ip4, frame_bytes))
     return IPOE_L2_RESULT_DHCP_WHITELIST;
 
   p = hash_get (im->session_by_user,

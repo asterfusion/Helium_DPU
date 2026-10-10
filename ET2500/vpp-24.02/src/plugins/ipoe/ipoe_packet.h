@@ -8,6 +8,8 @@
 #include <vnet/udp/udp_local.h>
 #include <vnet/udp/udp_packet.h>
 
+#include <dhcp/dhcp4_packet.h>
+
 #define IPOE_MAX_VLAN_DEPTH 2
 
 typedef enum
@@ -121,6 +123,44 @@ ipoe_ip4_is_dhcp_client (const ipoe_ip4_view_t *view)
   return udp &&
     clib_net_to_host_u16 (udp->src_port) == UDP_DST_PORT_dhcp_to_client &&
     clib_net_to_host_u16 (udp->dst_port) == UDP_DST_PORT_dhcp_to_server;
+}
+
+static_always_inline u8
+ipoe_ip4_is_dhcp_relay (const ipoe_ip4_view_t *view)
+{
+  const udp_header_t *udp = ipoe_ip4_udp_header (view);
+  const dhcp_header_t *dhcp;
+  u32 ip4_bytes;
+  u16 udp_bytes;
+
+  if (!udp ||
+      clib_net_to_host_u16 (udp->src_port) !=
+	UDP_DST_PORT_dhcp_to_server ||
+      clib_net_to_host_u16 (udp->dst_port) !=
+	UDP_DST_PORT_dhcp_to_server)
+    return 0;
+
+  ip4_bytes = ip4_header_bytes (view->ip4);
+  udp_bytes = clib_net_to_host_u16 (udp->length);
+  if (udp_bytes < sizeof (*udp) + sizeof (*dhcp) ||
+      view->packet_ip4_bytes < ip4_bytes + udp_bytes ||
+      view->contiguous_ip4_bytes <
+	ip4_bytes + sizeof (*udp) + sizeof (*dhcp))
+    return 0;
+
+  dhcp = (const dhcp_header_t *) (udp + 1);
+  return (dhcp->opcode == 1 || dhcp->opcode == 2) &&
+    dhcp->hardware_type == 1 &&
+    dhcp->hardware_address_length == 6 &&
+    dhcp->gateway_ip_address.as_u32 != 0 &&
+    dhcp->magic_cookie.as_u32 == DHCP_MAGIC;
+}
+
+static_always_inline u8
+ipoe_ip4_is_dhcp_ingress (const ipoe_ip4_view_t *view)
+{
+  return ipoe_ip4_is_dhcp_client (view) ||
+    ipoe_ip4_is_dhcp_relay (view);
 }
 
 static_always_inline u8

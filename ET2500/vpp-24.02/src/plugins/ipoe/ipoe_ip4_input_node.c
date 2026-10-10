@@ -154,7 +154,7 @@ ipoe_ip4_check_packet (vlib_main_t *vm, vlib_buffer_t *b,
       return IPOE_IP4_RESULT_INTERFACE_DISABLED;
     }
   intf = vec_elt_at_index (im->interfaces, sw_if_index);
-  if (ipoe_ip4_is_dhcp_client (&view))
+  if (ipoe_ip4_is_dhcp_ingress (&view))
     return IPOE_IP4_RESULT_DHCP_WHITELIST;
 
   p = hash_get (im->session_by_user,
