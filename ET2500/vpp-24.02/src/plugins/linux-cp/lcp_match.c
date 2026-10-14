@@ -4,6 +4,7 @@
 #include <vnet/buffer.h>
 #include <vnet/ethernet/arp_packet.h>
 #include <vnet/ethernet/ethernet.h>
+#include <vnet/bonding/node.h>
 #include <vnet/ip/icmp46_packet.h>
 #include <vnet/ip/igmp_packet.h>
 #include <vnet/ip/ip.h>
@@ -15,6 +16,7 @@
 #include <vnet/fib/ip4_fib.h>
 
 #include <dhcp/dhcp4_packet.h>
+#include <dhcp/dhcp6_packet.h>
 #include <linux-cp/lcp_interface.h>
 #include <linux-cp/lcp_match.h>
 #include <linux-cp/lcp_policy.h>
@@ -173,9 +175,62 @@ lcp_match_bfd_echo4_local_return (const lcp_packet_view_t *view,
          load_balance_get_bucket_i (lb, 0)->dpoi_type == DPO_RECEIVE;
 }
 
+/* Resolve client identity independently of the TAP used for CPU delivery. */
+static vnet_hw_interface_t *
+lcp_dhcp_client_interface (const lcp_packet_view_t *view)
+{
+  vlib_buffer_t *b = view->buffer;
+  const ethernet_header_t *eth;
+  const lcp_itf_pair_t *lip;
+  vnet_hw_interface_t *hw;
+  u32 lipi;
+  i32 l2_offset;
+
+  if (!b || !(b->flags & VNET_BUFFER_F_L2_HDR_OFFSET_VALID))
+    return NULL;
+
+  lipi = lcp_itf_pair_find_by_phy (view->rx_sw_if_index);
+  if (lipi != INDEX_INVALID)
+    {
+      lip = lcp_itf_pair_get (lipi);
+      if (!lip || lip->lip_host_type != LCP_ITF_HOST_TAP)
+	return NULL;
+      hw = vnet_get_sup_hw_interface (vnet_get_main (),
+				    lip->lip_phy_sw_if_index);
+    }
+  else
+    {
+      vnet_main_t *vnm = vnet_get_main ();
+      vnet_sw_interface_t *si =
+	vnet_get_sw_interface_or_null (vnm, view->rx_sw_if_index);
+
+      if (si && si->type == VNET_SW_INTERFACE_TYPE_SUB)
+	si = vnet_get_sw_interface_or_null (vnm, si->sup_sw_if_index);
+      if (!si || si->type != VNET_SW_INTERFACE_TYPE_HARDWARE ||
+	  (si->flood_class != VNET_FLOOD_CLASS_BVI &&
+	   !bond_get_bond_if_by_sw_if_index (si->sw_if_index)))
+	return NULL;
+
+      /* BVI and bond clients use the logical interface MAC. Linux delivery
+       * resolves the TAP pair using the saved ingress/member interface. */
+      hw = vnet_get_sup_hw_interface (vnm, si->sw_if_index);
+    }
+  if (vec_len (hw->hw_address) != 6)
+    return NULL;
+
+  l2_offset = vnet_buffer (b)->l2_hdr_offset;
+  if (l2_offset < -(i32) VLIB_BUFFER_PRE_DATA_SIZE ||
+      l2_offset + (i32) sizeof (*eth) > b->current_data)
+    return NULL;
+  eth = ethernet_buffer_get_header (b);
+  if (memcmp (eth->dst_address, hw->hw_address, 6))
+    return NULL;
+  return hw;
+}
+
 /* A Linux DHCP client has no local IPv4 route while acquiring its lease.
  * Recognize replies before ip4-not-enabled/lookup, but require both the
- * Ethernet destination and BOOTP chaddr to identify this LCP interface.
+ * Ethernet destination and BOOTP chaddr to identify the receiving interface.
  * Port numbers or the destination MAC alone would also claim transit replies.
  */
 static bool
@@ -185,38 +240,20 @@ lcp_match_dhcp4_client_reply (const lcp_packet_view_t *view, const void *data)
   const ip4_header_t *ip;
   const udp_header_t *udp;
   const dhcp_header_t *dhcp;
-  const ethernet_header_t *eth;
-  const lcp_itf_pair_t *lip;
   vnet_hw_interface_t *hw;
-  u32 ihl, length, lipi;
-  i32 l2_offset;
+  u32 ihl, length;
 
   (void) data;
   if (!b || view->ip_version != 4 ||
       view->ip_protocol != IP_PROTOCOL_UDP || view->l4_src_port != 67 ||
       view->l4_dst_port != 68 ||
       (view->state & LCP_MATCH_STATE_FRAGMENT) ||
-      !(b->flags & VNET_BUFFER_F_L2_HDR_OFFSET_VALID) ||
       view->dst_ip.ip4.as_u32 == 0 || view->dst_ip.ip4.as_u32 == ~0 ||
       ip4_address_is_multicast (&view->dst_ip.ip4))
     return false;
 
-  lipi = lcp_itf_pair_find_by_phy (view->rx_sw_if_index);
-  if (lipi == INDEX_INVALID)
-    return false;
-  lip = lcp_itf_pair_get (lipi);
-  if (lip->lip_host_type != LCP_ITF_HOST_TAP)
-    return false;
-  hw = vnet_get_sup_hw_interface (vnet_get_main (), lip->lip_phy_sw_if_index);
-  if (vec_len (hw->hw_address) != 6)
-    return false;
-
-  l2_offset = vnet_buffer (b)->l2_hdr_offset;
-  if (l2_offset < -(i32) VLIB_BUFFER_PRE_DATA_SIZE ||
-      l2_offset + (i32) sizeof (*eth) > b->current_data)
-    return false;
-  eth = ethernet_buffer_get_header (b);
-  if (memcmp (eth->dst_address, hw->hw_address, 6))
+  hw = lcp_dhcp_client_interface (view);
+  if (!hw)
     return false;
 
   ip = vlib_buffer_get_current (b);
@@ -242,6 +279,63 @@ lcp_match_dhcp4_client_reply (const lcp_packet_view_t *view, const void *data)
          dhcp->hardware_address_length == 6 &&
          clib_net_to_host_u32 (dhcp->magic_cookie.as_u32) == 0x63825363 &&
          !memcmp (dhcp->client_hardware_address, hw->hw_address, 6);
+}
+
+/* Link-local replies cannot be routed to another link. Recognize replies
+ * addressed to this interface's MAC before IPv6 enable/lookup checks; the
+ * Linux client validates the destination address, DUID and transaction ID. */
+static bool
+lcp_match_dhcp6_client_reply (const lcp_packet_view_t *view, const void *data)
+{
+  vlib_buffer_t *b = view->buffer;
+  const ip6_header_t *ip;
+  const udp_header_t *udp;
+  const dhcpv6_header_t *dhcp;
+  ip6_ext_hdr_chain_t chain;
+  u32 length, offset;
+  int udp_index;
+
+  (void) data;
+  if (!b || view->ip_version != 6 ||
+      view->ip_protocol != IP_PROTOCOL_UDP || view->l4_src_port != 547 ||
+      view->l4_dst_port != 546 ||
+      (view->state & LCP_MATCH_STATE_FRAGMENT) ||
+      !ip6_address_is_link_local_unicast (&view->dst_ip.ip6) ||
+      !lcp_dhcp_client_interface (view))
+    return false;
+
+  ip = vlib_buffer_get_current (b);
+  if (b->current_length < sizeof (*ip) ||
+      (clib_net_to_host_u32 (ip->ip_version_traffic_class_and_flow_label) >>
+       28) != 6)
+    return false;
+  length = sizeof (*ip) + clib_net_to_host_u16 (ip->payload_length);
+  if (length > vlib_buffer_length_in_chain (view->vm, b))
+    return false;
+
+  udp_index = ip6_ext_header_walk (b, (ip6_header_t *) ip, IP_PROTOCOL_UDP,
+				  &chain);
+  if (udp_index < 0 || chain.length == 0 ||
+      chain.eh[udp_index].protocol != IP_PROTOCOL_UDP)
+    return false;
+  for (u32 i = 0; i < chain.length; i++)
+    if (chain.eh[i].protocol == IP_PROTOCOL_IPV6_FRAGMENTATION)
+      return false;
+
+  offset = chain.eh[udp_index].offset;
+  if (offset + sizeof (*udp) + sizeof (*dhcp) > b->current_length ||
+      offset + sizeof (*udp) + sizeof (*dhcp) > length)
+    return false;
+  udp = (const void *) ((const u8 *) ip + offset);
+  if (clib_net_to_host_u16 (udp->src_port) != 547 ||
+      clib_net_to_host_u16 (udp->dst_port) != 546 ||
+      clib_net_to_host_u16 (udp->length) != length - offset)
+    return false;
+
+  dhcp = (const void *) (udp + 1);
+  return dhcp->msg_type == DHCPV6_MSG_ADVERTISE ||
+         dhcp->msg_type == DHCPV6_MSG_REPLY ||
+         dhcp->msg_type == DHCPV6_MSG_RECONFIGURE;
 }
 
 /* Classify DHCP on the routed input path before the broadcast FIB drop.
@@ -473,6 +567,15 @@ lcp_classify_ldp (const lcp_packet_view_t *view)
 		       LCP_MATCH_FIELD_L4_PORTS,                         \
     .matches = lcp_match_dhcp6_client_multicast,                       \
   },
+#define LCP_DHCP6_CLIENT_REPLY_RULE(id, rule_name)                    \
+  {                                                                  \
+    .rule_id = id, .name = #rule_name, .trap_type = LCP_TRAP_DHCPV6,   \
+    .context_mask = LCP_MATCH_CTX_IP6,                                \
+    .required_fields = LCP_MATCH_FIELD_IP |                           \
+                       LCP_MATCH_FIELD_IP_PROTOCOL |                \
+                       LCP_MATCH_FIELD_L4_PORTS,                    \
+    .matches = lcp_match_dhcp6_client_reply,                          \
+  },
 #define LCP_LDP_RULE(id, rule_name, ctx)                                 \
   {                                                                      \
     .rule_id = id, .name = #rule_name, .trap_type = LCP_TRAP_LDP,       \
@@ -583,6 +686,7 @@ static const lcp_match_rule_t lcp_match_rules[] = {
 #undef LCP_DHCP4_BROADCAST_RULE
 #undef LCP_BFD_ECHO4_RETURN_RULE
 #undef LCP_DHCP6_MULTICAST_RULE
+#undef LCP_DHCP6_CLIENT_REPLY_RULE
 #undef LCP_LDP_RULE
 #undef LCP_ICCP_COMPAT_RULE
 #undef LCP_IP_RULE
