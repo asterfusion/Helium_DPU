@@ -243,8 +243,14 @@ VLIB_REGISTER_NODE (ipoe_output_node) = {
   },
 };
 
-VNET_FEATURE_INIT (ipoe_output, static) = {
-  .arc_name = "interface-output",
+VNET_FEATURE_INIT (ipoe_l2_output, static) = {
+  .arc_name = "l2-output-ip4",
   .node_name = "ipoe-output",
-  .runs_before = VNET_FEATURES ("interface-output-arc-end"),
+  .runs_before = VNET_FEATURES ("l2-output-feat-arc-end"),
+};
+
+VNET_FEATURE_INIT (ipoe_ip4_output, static) = {
+  .arc_name = "ip4-output",
+  .node_name = "ipoe-output",
+  .runs_before = VNET_FEATURES ("interface-output"),
 };
