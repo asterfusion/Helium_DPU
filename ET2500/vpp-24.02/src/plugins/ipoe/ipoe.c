@@ -69,13 +69,28 @@ ipoe_output_feature_enable_disable (u32 sw_if_index, u8 enable)
 {
   int rv;
 
-  rv = vnet_feature_enable_disable ("interface-output", "ipoe-output",
-				    sw_if_index, enable, 0, 0);
+  rv = vnet_l2_feature_enable_disable ("l2-output-ip4", "ipoe-output",
+				       sw_if_index, enable, 0, 0);
   if (rv)
     {
 #if 0
       clib_warning ("ipoe interface feature operation failed "
-		    "arc=interface-output node=ipoe-output "
+		    "arc=l2-output-ip4 node=ipoe-output "
+		    "sw_if_index=%u enable=%u rv=%d",
+		    sw_if_index, enable, rv);
+#endif
+      return IPOE_ERROR_FEATURE_FAILED;
+    }
+
+  rv = vnet_feature_enable_disable ("ip4-output", "ipoe-output",
+				    sw_if_index, enable, 0, 0);
+  if (rv)
+    {
+      vnet_l2_feature_enable_disable ("l2-output-ip4", "ipoe-output",
+				      sw_if_index, !enable, 0, 0);
+#if 0
+      clib_warning ("ipoe interface feature operation failed "
+		    "arc=ip4-output node=ipoe-output "
 		    "sw_if_index=%u enable=%u rv=%d",
 		    sw_if_index, enable, rv);
 #endif
