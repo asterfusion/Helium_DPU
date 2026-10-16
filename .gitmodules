@@ -1,0 +1,6 @@
+# Linux kernel source repository for Helium EC.
+# Contains multiple kernel versions maintained in separate branches.
+[submodule "Helium/Kernel/DPU_linux_kernel"]
+	path = Helium/Kernel/DPU_linux_kernel
+	url = https://github.com/asterfusion/DPU_linux_kernel.git
+	branch = Helium_kernel_6.1.67
