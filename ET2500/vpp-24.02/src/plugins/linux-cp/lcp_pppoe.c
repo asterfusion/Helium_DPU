@@ -43,31 +43,37 @@ pppoe_session_set_lcp_magic (pppoe_session_t *t, u32 lcp_magic)
     }
 }
 
-/* Scheme A: install (is_add=1) or remove (is_add=0) a subscriber /32 host
- * route via the PPPoE session interface.  Reuses the existing client_ip and
- * decap_fib_index fields from pppoe_session_t — no extra storage needed.
+/* Scheme A: install (is_add=1) or remove (is_add=0) a subscriber host
+ * route via the PPPoE session interface — /32 for FIB_PROTOCOL_IP4,
+ * /128 for FIB_PROTOCOL_IP6 (dual-stack v1.1.0).  Reuses the per-AF
+ * client address and decap FIB index fields from pppoe_session_t — no
+ * extra storage needed.
  *
  * The via address is left as all-zeros (zero_addr) so VPP creates an
- * "attached" FIB path (type NORMAL, nh=0.0.0.0, sw_if_index=session),
+ * "attached" FIB path (type NORMAL, nh=0.0.0.0/::, sw_if_index=session),
  * matching the semantics of connectRouteAddRemove in sairedis which also
  * sends via=0.0.0.0 through the binary API.  Both produce identical
- * forwarding: packets to client_ip/32 are sent out the PPPoE session
- * interface without any ARP resolution. */
+ * forwarding: packets to the client host route are sent out the PPPoE
+ * session interface without any ARP/neighbor resolution. */
 static void
-lcp_pppoe_client_route_add_del (u32 fib_index, ip4_address_t *client_ip4,
+lcp_pppoe_client_route_add_del (fib_protocol_t fp, u32 fib_index,
+				const ip46_address_t *client_ip, u32 pfx_len,
 				u32 sw_if_index, u8 is_add)
 {
-  if (fib_index == ~0 || client_ip4 == NULL || client_ip4->as_u32 == 0
-      || sw_if_index == ~0)
+  if (fib_index == ~0 || client_ip == NULL || sw_if_index == ~0)
+    return;
+  if (fp == FIB_PROTOCOL_IP4 && client_ip->ip4.as_u32 == 0)
+    return;
+  if (fp == FIB_PROTOCOL_IP6 && ip6_address_is_zero (&client_ip->ip6))
     return;
 
   fib_prefix_t pfx;
   clib_memset (&pfx, 0, sizeof (pfx));
-  pfx.fp_proto = FIB_PROTOCOL_IP4;
-  pfx.fp_len = 32;
-  pfx.fp_addr.ip4.as_u32 = client_ip4->as_u32;
+  pfx.fp_proto = fp;
+  pfx.fp_len = pfx_len;
+  pfx.fp_addr = *client_ip;
 
-  /* via = 0.0.0.0 (zero_addr): attached path, equivalent to the
+  /* via = 0.0.0.0/:: (zero_addr): attached path, equivalent to the
    * via=0.0.0.0 + hwif_name produced by connectRouteAddRemove. */
   const ip46_address_t zero_addr = { };
 
@@ -296,7 +302,10 @@ _(session_id)                                   \
 _(encap_if_index)                               \
 _(decap_fib_index)                              \
 _(client_ip)                                    \
-_(server_ip)
+_(server_ip)                                    \
+_(client_ip6)                                   \
+_(decap_fib_index6)                             \
+_(client_route_valid6)
 
 #if 0
 static bool
@@ -502,7 +511,8 @@ VLIB_REGISTER_NODE (pppoe_hw_if_pool_process_node) = {
 
 int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_index,
 			  u32 *p_sw_if_index, u8 *sw_if_name, u8 is_add,
-			  u32 lcp_magic, u32 client_ip4, u32 client_table_id)
+			  u32 lcp_magic, u32 client_ip4, u32 client_table_id,
+			  ip46_address_t *client_ip6, u32 client_table_id6)
 {
   pppoe_main_t *pem = &pppoe_main;
   pppoe_session_t *t = 0;
@@ -603,9 +613,26 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
 	{
 	  t->client_ip.ip4.as_u32 = client_ip4;
 	  t->decap_fib_index = fib_table_find (FIB_PROTOCOL_IP4, client_table_id);
-	  lcp_pppoe_client_route_add_del (t->decap_fib_index, &t->client_ip.ip4,
-					  sw_if_index, 1 /* add */);
+	  lcp_pppoe_client_route_add_del (FIB_PROTOCOL_IP4, t->decap_fib_index,
+					  &t->client_ip, 32, sw_if_index,
+					  1 /* add */);
 	  t->client_route_valid = (t->decap_fib_index != ~0);
+	}
+
+      /* Scheme A, IPv6 half (dual-stack v1.1.0): same host-route logic for
+       * the client's IPv6 address — a /128 via the session interface in the
+       * client_table_id6 IPv6 FIB.  As for IPv4 above, route_add_del is
+       * still called when the table does not exist (fib_table_find ~0) and
+       * no-ops there; client_route_valid6 records whether the table
+       * existed so deletion cleans up only when appropriate. */
+      if (client_ip6 && !ip6_address_is_zero (&client_ip6->ip6))
+	{
+	  t->client_ip6 = *client_ip6;
+	  t->decap_fib_index6 = fib_table_find (FIB_PROTOCOL_IP6, client_table_id6);
+	  lcp_pppoe_client_route_add_del (FIB_PROTOCOL_IP6, t->decap_fib_index6,
+					  &t->client_ip6, 128, sw_if_index,
+					  1 /* add */);
+	  t->client_route_valid6 = (t->decap_fib_index6 != ~0);
 	}
 
   }
@@ -625,8 +652,13 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       }
 
       if (t->client_route_valid)
-	lcp_pppoe_client_route_add_del (t->decap_fib_index, &t->client_ip.ip4,
-					t->sw_if_index, 0 /* del */);
+	lcp_pppoe_client_route_add_del (FIB_PROTOCOL_IP4, t->decap_fib_index,
+					&t->client_ip, 32, t->sw_if_index,
+					0 /* del */);
+      if (t->client_route_valid6)
+	lcp_pppoe_client_route_add_del (FIB_PROTOCOL_IP6, t->decap_fib_index6,
+					&t->client_ip6, 128, t->sw_if_index,
+					0 /* del */);
 
       vnet_sw_interface_set_flags (vnm, t->sw_if_index, 0 /* down */);
       vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, t->sw_if_index);
@@ -660,7 +692,8 @@ int
 lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
 			    u32 encap_sw_if_index, u32 *p_sw_if_index,
 			    u8 *sw_if_name, u8 is_add, u8 *is_new_if,
-			    u32 lcp_magic, u32 client_ip4, u32 client_table_id)
+			    u32 lcp_magic, u32 client_ip4, u32 client_table_id,
+			    ip46_address_t *client_ip6, u32 client_table_id6)
 {
   pppoe_main_t *pem = &pppoe_main;
   pppoe_session_t *t = 0;
@@ -755,9 +788,21 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
 	{
 	  t->client_ip.ip4.as_u32 = client_ip4;
 	  t->decap_fib_index = fib_table_find (FIB_PROTOCOL_IP4, client_table_id);
-	  lcp_pppoe_client_route_add_del (t->decap_fib_index, &t->client_ip.ip4,
-					  sw_if_index, 1 /* add */);
+	  lcp_pppoe_client_route_add_del (FIB_PROTOCOL_IP4, t->decap_fib_index,
+					  &t->client_ip, 32, sw_if_index,
+					  1 /* add */);
 	  t->client_route_valid = (t->decap_fib_index != ~0);
+	}
+
+      /* Scheme A, IPv6 half (dual-stack v1.1.0): see lcp_pppoe_session_add(). */
+      if (client_ip6 && !ip6_address_is_zero (&client_ip6->ip6))
+	{
+	  t->client_ip6 = *client_ip6;
+	  t->decap_fib_index6 = fib_table_find (FIB_PROTOCOL_IP6, client_table_id6);
+	  lcp_pppoe_client_route_add_del (FIB_PROTOCOL_IP6, t->decap_fib_index6,
+					  &t->client_ip6, 128, sw_if_index,
+					  1 /* add */);
+	  t->client_route_valid6 = (t->decap_fib_index6 != ~0);
 	}
     }
   else
@@ -773,8 +818,13 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
 	clib_memcpy (sw_if_name, hi->name, 16);
 
       if (t->client_route_valid)
-	lcp_pppoe_client_route_add_del (t->decap_fib_index, &t->client_ip.ip4,
-					t->sw_if_index, 0 /* del */);
+	lcp_pppoe_client_route_add_del (FIB_PROTOCOL_IP4, t->decap_fib_index,
+					&t->client_ip, 32, t->sw_if_index,
+					0 /* del */);
+      if (t->client_route_valid6)
+	lcp_pppoe_client_route_add_del (FIB_PROTOCOL_IP6, t->decap_fib_index6,
+					&t->client_ip6, 128, t->sw_if_index,
+					0 /* del */);
 
       vnet_sw_interface_set_flags (vnm, t->sw_if_index, 0 /* down */);
       vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, t->sw_if_index);
@@ -804,7 +854,8 @@ int vnet_pppoe_add_del_session
 
   ret = lcp_pppoe_session_add (a->server_mac, a->session_id, a->encap_if_index,
 			       sw_if_indexp, NULL, a->is_add, 0,
-			       0 /* client_ip4 */, 0 /* client_table_id */);
+			       0 /* client_ip4 */, 0 /* client_table_id */,
+			       NULL /* client_ip6 */, 0 /* client_table_id6 */);
   if(ret!=0)
   {
      return ret;
@@ -1026,6 +1077,11 @@ pppoe_add_del_session_command_fn (vlib_main_t * vm,
   u32 encap_if_index = ~0;
   u8 encap_set = 0;
   u32 decap_fib_index = 0;
+  /* referenced by foreach_copy_field macro expansion below; keeps CLI
+   * path zeroed (IPv6 unsupported on CLI) */
+  ip46_address_t client_ip6;
+  u32 decap_fib_index6 = 0;
+  u8 client_route_valid6 = 0;
   u8 server_mac[6] = { 0 };
   u8 server_mac_set = 0;
   int rv;
@@ -1036,6 +1092,7 @@ pppoe_add_del_session_command_fn (vlib_main_t * vm,
 
   /* Cant "universally zero init" (={0}) due to GCC bug 53119 */
   clib_memset (&client_ip, 0, sizeof client_ip);
+  clib_memset (&client_ip6, 0, sizeof client_ip6);
 
   /* Get a line of input. */
   if (!unformat_user (input, unformat_line_input, line_input))
@@ -1388,6 +1445,11 @@ format_pppoe_session (u8 * s, va_list * args)
 
   s = format (s, "encap-if-index %d decap-fib-index %d\n",
 	      t->encap_if_index, t->decap_fib_index);
+
+  s = format (s, "    client-ip6 %U decap-fib-index6 %d route-valid %d route-valid6 %d\n",
+	      format_ip46_address, &t->client_ip6, IP46_TYPE_ANY,
+	      t->decap_fib_index6, t->client_route_valid,
+	      t->client_route_valid6);
 
   s = format (s, "    local-mac %U  server-mac %U",
 	      format_ethernet_address, t->local_mac,

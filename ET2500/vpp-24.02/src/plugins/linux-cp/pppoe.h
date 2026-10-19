@@ -84,6 +84,17 @@ typedef struct
    * removed on session deletion iff this flag is set. */
   u8  client_route_valid;
 
+  /* Scheme A, IPv6 half (dual-stack v1.1.0): client IPv6 address; all-zeros
+   * when not configured.  When non-zero a /128 host route via the session
+   * interface is installed in decap_fib_index6 during session creation and
+   * removed on session deletion iff client_route_valid6 is set.
+   * decap_fib_index6 is the fib_table_find() result for the IPv6
+   * client_table_id6 (~0 when that table does not exist) and is only
+   * meaningful while client_route_valid6 is set. */
+  ip46_address_t client_ip6;
+  u32 decap_fib_index6;
+  u8  client_route_valid6;
+
 } pppoe_session_t;
 
 #define foreach_pppoe_input_next        \
@@ -235,6 +246,11 @@ typedef struct
   ip46_address_t server_ip;
   u32 encap_if_index;
   u32 decap_fib_index;
+  /* v1.1.0 dual-stack: IPv6 client host-route fields.  Only the binary API
+   * path sets these; the CLI passes all-zeros (IPv6 not supported there). */
+  ip46_address_t client_ip6;
+  u32 decap_fib_index6;
+  u8 client_route_valid6;
   u8 local_mac[6];
   u8 client_mac[6];
   u8 server_mac[6];
@@ -389,12 +405,16 @@ pppoe_update_1 (BVT (clib_bihash) * table,
 extern int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id,
 				 u32 encap_sw_if_index, u32 *p_sw_if_index,
 				 u8 *sw_if_name, u8 is_add, u32 lcp_magic,
-				 u32 client_ip4, u32 client_table_id);
+				 u32 client_ip4, u32 client_table_id,
+				 ip46_address_t *client_ip6,
+				 u32 client_table_id6);
 extern int lcp_pppoe_session_add_bulk(u8 *server_mac, u16 ppp_session_id,
 				      u32 encap_sw_if_index, u32 *p_sw_if_index,
 				      u8 *sw_if_name, u8 is_add, u8 *is_new_if,
 				      u32 lcp_magic, u32 client_ip4,
-				      u32 client_table_id);
+				      u32 client_table_id,
+				      ip46_address_t *client_ip6,
+				      u32 client_table_id6);
 extern void lcp_pppoe_setup_new_if_features(u32 sw_if_index);
 extern int lcp_pppoe_hw_if_create_one (u32 *hw_if_index_out);
 extern int lcp_pppoe_hw_if_pool_ensure (u32 target, u32 batch);
