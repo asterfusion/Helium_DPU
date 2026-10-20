@@ -190,6 +190,16 @@ lcp_dhcp_client_interface (const lcp_packet_view_t *view)
     return NULL;
 
   lipi = lcp_itf_pair_find_by_phy (view->rx_sw_if_index);
+  if (lipi == INDEX_INVALID)
+    {
+      vnet_sw_interface_t *si = vnet_get_sw_interface_or_null (
+        vnet_get_main (), view->rx_sw_if_index);
+
+      /* Routed VLAN interfaces share their parent's Linux TAP. Resolve
+       * client identity through that pair before IPv4 is configured. */
+      if (si && si->type == VNET_SW_INTERFACE_TYPE_SUB)
+        lipi = lcp_itf_pair_find_by_phy (si->sup_sw_if_index);
+    }
   if (lipi != INDEX_INVALID)
     {
       lip = lcp_itf_pair_get (lipi);
