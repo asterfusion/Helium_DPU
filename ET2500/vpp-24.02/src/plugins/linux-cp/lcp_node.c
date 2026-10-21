@@ -147,7 +147,7 @@ lcp_prepare_cpu_branch (vlib_main_t *vm, vlib_buffer_t *b,
 
   if (PREDICT_FALSE (lipi == INDEX_INVALID))
     {
-      if ((b->flags & VLIB_BUFFER_NOT_PHY_INTF) &&
+      if ((b->flags & (VLIB_BUFFER_NOT_PHY_INTF | VLIB_BUFFER_PUNT_FROM_VPN)) &&
 	  vnet_buffer2 (b)->l2_rx_sw_if_index != ~0)
 	{
 	  u32 l2_rx_sw_if_index = vnet_buffer2 (b)->l2_rx_sw_if_index;
