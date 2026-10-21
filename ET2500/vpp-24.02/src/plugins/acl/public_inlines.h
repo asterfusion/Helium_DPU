@@ -734,6 +734,92 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
 	}
 
 /*
+ * Helpers for the fixed-size applied ACE table (see hash_lookup.c).
+ * The bihash values are positions within am->applied_hash_ace_table, whose
+ * layout is acl_index*ACL_APPLIED_HASH_ACE_STRIDE + ace_index.
+ */
+always_inline applied_hash_ace_entry_t *
+ahace_get_entry (acl_main_t * am, u32 entry_index)
+{
+  if (entry_index >= vec_len (am->applied_hash_ace_table))
+    return 0;
+  applied_hash_ace_entry_t *pae =
+    vec_elt_at_index (am->applied_hash_ace_table, entry_index);
+  /* the entries are active iff they are linked into a collision chain */
+  if (pae->collision_head_ae_index == ~0)
+    return 0;
+  return pae;
+}
+
+always_inline u16
+ahace_get_acl_priority (acl_main_t * am, u32 lc_index, u32 acl_index)
+{
+  u64 prio_index = (u64) lc_index *ACL_APPLIED_HASH_MAX_ACLS + acl_index;
+  if (prio_index >= vec_len (am->acl_priority_by_lc))
+    return 0;
+  return am->acl_priority_by_lc[prio_index];
+}
+
+/* the bihash entries are shared across the lcs, so we need to check
+   that the ACL of the matched entry is actually bound to this lc */
+always_inline int
+ahace_acl_applied_on_lc (acl_main_t * am, u32 lc_index, u32 acl_index)
+{
+  if (acl_index >= vec_len (am->hash_acl_infos))
+    return 0;
+  hash_acl_info_t *ha = vec_elt_at_index (am->hash_acl_infos, acl_index);
+  return vec_search (ha->lc_index_list, lc_index) != ~0;
+}
+
+/* the live position of the ACL within the lc's applied ACL list */
+always_inline u32
+ahace_acl_position_on_lc (acl_main_t * am, u32 lc_index, u32 acl_index)
+{
+  if (lc_index >= vec_len (am->applied_hash_acl_info_by_lc_index))
+    return ~0;
+  applied_hash_acl_info_t *pal =
+    vec_elt_at_index (am->applied_hash_acl_info_by_lc_index, lc_index);
+  return vec_search (pal->applied_acls, acl_index);
+}
+
+/*
+ * Decide whether the candidate entry is a better match than the current
+ * best. Larger (lc,acl) priority wins; on a tie the ACL earlier in the
+ * lc's applied ACL list wins; on a further tie the earlier rule wins.
+ */
+always_inline u8
+ahace_candidate_better (acl_main_t * am, u32 lc_index, u32 cand_index,
+			u32 best_index)
+{
+  applied_hash_ace_entry_t *cand_pae;
+  applied_hash_ace_entry_t *best_pae;
+  u16 cand_prio, best_prio;
+  u32 cand_pos, best_pos;
+
+  if (best_index == ~0)
+    return 1;
+  cand_pae = ahace_get_entry (am, cand_index);
+  if (!cand_pae)
+    return 0;
+  best_pae = ahace_get_entry (am, best_index);
+  if (!best_pae)
+    return 1;
+
+  cand_prio = ahace_get_acl_priority (am, lc_index, cand_pae->acl_index);
+  best_prio = ahace_get_acl_priority (am, lc_index, best_pae->acl_index);
+  if (cand_prio != best_prio)
+    return cand_prio > best_prio;
+
+  cand_pos = ahace_acl_position_on_lc (am, lc_index, cand_pae->acl_index);
+  best_pos = ahace_acl_position_on_lc (am, lc_index, best_pae->acl_index);
+  if (cand_pos != best_pos)
+    return cand_pos < best_pos;
+
+  return cand_pae->ace_index < best_pae->ace_index;
+}
+
+
+/*
  * This returns true if there is indeed a match on the portranges.
  * With all these levels of indirections, this is not going to be very fast,
  * so, best use the individual ports or wildcard ports for performance.
@@ -742,8 +828,9 @@ always_inline int
 match_portranges(acl_main_t *am, fa_5tuple_t *match, u32 index)
 {
 
-  applied_hash_ace_entry_t **applied_hash_aces = vec_elt_at_index(am->hash_entry_vec_by_lc_index, match->pkt.lc_index);
-  applied_hash_ace_entry_t *pae = vec_elt_at_index((*applied_hash_aces), index);
+  applied_hash_ace_entry_t *pae = ahace_get_entry(am, index);
+  if (!pae)
+    return 0;
 
   acl_rule_t *r = &(am->acls[pae->acl_index].rules[pae->ace_index]);
 
@@ -870,14 +957,14 @@ multi_acl_match_get_applied_ace_index (acl_main_t * am, int is_ip6, fa_5tuple_t 
   u64 *pmask;
   u64 *pkey;
   int mask_type_index, order_index;
-  u32 curr_match_index = (~0 - 1);
+  u32 curr_match_index = ~0;
 
 
 
   u32 lc_index = match->pkt.lc_index;
-  applied_hash_ace_entry_t **applied_hash_aces =
-    vec_elt_at_index (am->hash_entry_vec_by_lc_index, lc_index);
 
+  if (lc_index >= vec_len (am->hash_applied_mask_info_vec_by_lc_index))
+    return ~0;
   hash_applied_mask_info_t **hash_applied_mask_info_vec =
     vec_elt_at_index (am->hash_applied_mask_info_vec_by_lc_index, lc_index);
 
@@ -890,12 +977,6 @@ multi_acl_match_get_applied_ace_index (acl_main_t * am, int is_ip6, fa_5tuple_t 
        order_index++)
     {
       minfo = vec_elt_at_index ((*hash_applied_mask_info_vec), order_index);
-      if (minfo->first_rule_index > curr_match_index)
-	{
-	  /* Index in this and following (by construction) partitions are greater than our candidate, Avoid trying to match! */
-	  break;
-	}
-
       mask_type_index = minfo->mask_type_index;
       ace_mask_type_entry_t *mte =
 	vec_elt_at_index (am->ace_mask_type_pool, mask_type_index);
@@ -927,6 +1008,8 @@ multi_acl_match_get_applied_ace_index (acl_main_t * am, int is_ip6, fa_5tuple_t 
        */
       fa_packet_info_t tmp_pkt = kv_key->pkt;
       tmp_pkt.mask_type_index_lsb = mask_type_index;
+      /* the entries are shared across the lcs: no lc in the key */
+      tmp_pkt.lc_index = 0;
       kv_key->pkt.as_u64 = tmp_pkt.as_u64;
 
       //int res = 0;
@@ -935,20 +1018,26 @@ multi_acl_match_get_applied_ace_index (acl_main_t * am, int is_ip6, fa_5tuple_t 
       if (res == 0)
 	{
 	  /* There is a hit in the hash, so check the collision vector */
-	  u32 curr_index = result_val->applied_entry_index;
-	  applied_hash_ace_entry_t *pae =
-	    vec_elt_at_index ((*applied_hash_aces), curr_index);
-	  collision_match_rule_t *crs = pae->colliding_rules;
-	  int i;
-	  for (i = 0; i < vec_len (crs); i++)
+	  u32 head_index = result_val->applied_entry_index;
+	  applied_hash_ace_entry_t *head_pae = ahace_get_entry (am, head_index);
+	  if (head_pae)
 	    {
-	      if (crs[i].applied_entry_index >= curr_match_index)
+	      collision_match_rule_t *crs = head_pae->colliding_rules;
+	      int i;
+	      for (i = 0; i < vec_len (crs); i++)
 		{
-		  continue;
-		}
-	      if (single_rule_match_5tuple (&crs[i].rule, is_ip6, match))
-		{
-		  curr_match_index = crs[i].applied_entry_index;
+		  u32 cand_index = crs[i].applied_entry_index;
+		  applied_hash_ace_entry_t *cand_pae = ahace_get_entry (am, cand_index);
+		  if (!cand_pae)
+		    continue;
+		  if (!ahace_acl_applied_on_lc (am, lc_index, cand_pae->acl_index))
+		    continue;
+		  if (single_rule_match_5tuple (&crs[i].rule, is_ip6, match))
+		    {
+		      if (ahace_candidate_better (am, lc_index, cand_index,
+						  curr_match_index))
+			curr_match_index = cand_index;
+		    }
 		}
 	    }
 	}
@@ -959,7 +1048,7 @@ multi_acl_match_get_applied_ace_index (acl_main_t * am, int is_ip6, fa_5tuple_t 
 
 always_inline u32
 multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
-                                                                fa_5tuple_t * match, match_acl_t *match_acl_info)
+                                           fa_5tuple_t * match, match_acl_t *match_acl_info)
 {
     clib_bihash_kv_72_8_t kv;
     clib_bihash_kv_72_8_t result;
@@ -969,11 +1058,12 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
     u64 *pmask;
     u64 *pkey;
     int mask_type_index, order_index;
-    u32 curr_match_index = -1;
+    u32 curr_match_index = ~0;
 
     u32 lc_index = match->pkt.lc_index;
-    applied_hash_ace_entry_t **applied_hash_aces = vec_elt_at_index (am->hash_entry_vec_by_lc_index, lc_index);
 
+    if (lc_index >= vec_len (am->hash_applied_mask_info_vec_by_lc_index))
+        return ~0;
     hash_applied_mask_info_t **hash_applied_mask_info_vec = vec_elt_at_index (am->hash_applied_mask_info_vec_by_lc_index, lc_index);
 
     hash_applied_mask_info_t *minfo;
@@ -1002,9 +1092,11 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
          * The use of temporary variable convinces the compiler
          * to make a u64 write, avoiding the stall on crc32 operation
          * just a bit later.
-        */
+         */
         fa_packet_info_t tmp_pkt = kv_key->pkt;
         tmp_pkt.mask_type_index_lsb = mask_type_index;
+        /* the entries are shared across the lcs: no lc in the key */
+        tmp_pkt.lc_index = 0;
         kv_key->pkt.as_u64 = tmp_pkt.as_u64;
 
         int res = clib_bihash_search_inline_2_72_8 (&am->acl_lookup_hash, &kv, &result);
@@ -1012,42 +1104,53 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
         if (res == 0)
         {
             /* There is a hit in the hash, so check the collision vector */
-            u32 curr_index = result_val->applied_entry_index;
-            applied_hash_ace_entry_t *pae = vec_elt_at_index ((*applied_hash_aces), curr_index);
-            collision_match_rule_t *crs = pae->colliding_rules;
-            int i;
-            applied_hash_ace_entry_t *tmp_pae = NULL;
-
-            for (i = 0; i < vec_len (crs); i++)
+            u32 head_index = result_val->applied_entry_index;
+            applied_hash_ace_entry_t *head_pae = ahace_get_entry (am, head_index);
+            if (head_pae)
             {
-                if (crs[i].applied_entry_index >= curr_match_index)
-                {
-                    continue;
-                }
-                if (single_rule_match_5tuple (&crs[i].rule, is_ip6, match))
-                {
-                    curr_match_index = crs[i].applied_entry_index;
-                }
-            }
+                collision_match_rule_t *crs = head_pae->colliding_rules;
+                int i;
+                applied_hash_ace_entry_t *tmp_pae = NULL;
 
-            if (-1 != curr_match_index)
-            {
-                tmp_pae = vec_elt_at_index ((*applied_hash_aces), curr_match_index);
-                match_acl_info->acl_index[0] = tmp_pae->acl_index;
-                match_acl_info->rule_index[0] = tmp_pae->ace_index;
-                match_acl_info->action[0] = tmp_pae->action;
-                match_acl_info->acl_pos[0] = tmp_pae->acl_position;
-                match_acl_info->curr_match_index[0] = curr_match_index;
+                for (i = 0; i < vec_len (crs); i++)
+                {
+                    u32 cand_index = crs[i].applied_entry_index;
+                    applied_hash_ace_entry_t *cand_pae = ahace_get_entry (am, cand_index);
+                    if (!cand_pae)
+                        continue;
+                    /* the entries are shared across the lcs */
+                    if (!ahace_acl_applied_on_lc (am, lc_index, cand_pae->acl_index))
+                        continue;
+                    if (single_rule_match_5tuple (&crs[i].rule, is_ip6, match))
+                    {
+                        if (ahace_candidate_better (am, lc_index, cand_index,
+                                                    curr_match_index))
+                            curr_match_index = cand_index;
+                    }
+                }
 
-                match_acl_info->action_expand_bitmap[0] = tmp_pae->action_expand_bitmap;
-                match_acl_info->policer_index[0] = tmp_pae->policer_index;
-                match_acl_info->set_tc_value[0] = tmp_pae->set_tc_value;
-                match_acl_info->set_hqos_user_id[0] = tmp_pae->set_hqos_user_id;
-                match_acl_info->set_hqos_guser_id[0] = tmp_pae->set_hqos_guser_id;
-                match_acl_info->acl_priority[0] = tmp_pae->priority;
-                pae->hitcount++;
-                match_acl_info->acl_match_count = 1;
-                return 1;
+                if (~0 != curr_match_index)
+                {
+                    tmp_pae = ahace_get_entry (am, curr_match_index);
+                    if (tmp_pae)
+                    {
+                        match_acl_info->acl_index[0] = tmp_pae->acl_index;
+                        match_acl_info->rule_index[0] = tmp_pae->ace_index;
+                        match_acl_info->action[0] = tmp_pae->action;
+                        match_acl_info->acl_pos[0] = ahace_acl_position_on_lc (am, lc_index, tmp_pae->acl_index);
+                        match_acl_info->curr_match_index[0] = curr_match_index;
+
+                        match_acl_info->action_expand_bitmap[0] = tmp_pae->action_expand_bitmap;
+                        match_acl_info->policer_index[0] = tmp_pae->policer_index;
+                        match_acl_info->set_tc_value[0] = tmp_pae->set_tc_value;
+                        match_acl_info->set_hqos_user_id[0] = tmp_pae->set_hqos_user_id;
+                        match_acl_info->set_hqos_guser_id[0] = tmp_pae->set_hqos_guser_id;
+                        match_acl_info->acl_priority[0] = ahace_get_acl_priority (am, lc_index, tmp_pae->acl_index);
+                        tmp_pae->hitcount++;
+                        match_acl_info->acl_match_count = 1;
+                        return 1;
+                    }
+                }
             }
         }
     }
@@ -1057,17 +1160,16 @@ multi_acl_match_get_applied_ace_index_sai (acl_main_t * am, int is_ip6,
 
 always_inline int
 hash_acl_match_index_has_geo_mask (acl_main_t *am,
-                                   applied_hash_ace_entry_t **applied_hash_aces,
                                    u32 match_index, int check_geosite,
                                    int check_geoip)
 {
   applied_hash_ace_entry_t *pae;
   ace_mask_type_entry_t *mte;
 
-  if (match_index >= vec_len ((*applied_hash_aces)))
+  pae = ahace_get_entry (am, match_index);
+  if (!pae)
     return 0;
 
-  pae = vec_elt_at_index ((*applied_hash_aces), match_index);
   mte = vec_elt_at_index (am->ace_mask_type_pool, pae->mask_type_index);
 
   if (check_geosite && mte->mask.geosite_cc_index == 0)
@@ -1079,6 +1181,7 @@ hash_acl_match_index_has_geo_mask (acl_main_t *am,
   return 1;
 }
 
+
 always_inline int
 hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5tuple,
                        int is_ip6, u8 *action, u32 *acl_pos_p, u32 * acl_match_p,
@@ -1086,7 +1189,6 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
 		       u32 *cc_indices)
 {
   acl_main_t *am = p_acl_main;
-  applied_hash_ace_entry_t **applied_hash_aces = vec_elt_at_index(am->hash_entry_vec_by_lc_index, lc_index);
   u32 match_index = ~0;
   u32 best_match_index = ~0;
     if(get_cc_code & (ACL_PKT_GET_DNS_REQ | ACL_PKT_GET_GEOSITE_INDEX)){
@@ -1097,21 +1199,20 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
         pkt_5tuple->geosite_cc_index = *cc;
         pkt_5tuple->geoip_cc_index = GEO_CFG;
          match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
-        accepted = hash_acl_match_index_has_geo_mask(am, applied_hash_aces,
-                                                     match_index, 1, 0);
-        if(accepted && match_index < tmp_match_index){
+        accepted = hash_acl_match_index_has_geo_mask(am, match_index, 1, 0);
+        if(accepted && ahace_candidate_better(am, lc_index, match_index, tmp_match_index)){
             tmp_match_index = match_index;
         }
 
       }
-      if (tmp_match_index < vec_len((*applied_hash_aces))){
+      if (tmp_match_index != ~0){
         best_match_index = tmp_match_index;
       }
 
       pkt_5tuple->geosite_cc_index = GEO_CFG;
       pkt_5tuple->geoip_cc_index = GEO_CFG;
       match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
-      if (match_index < best_match_index)
+      if (ahace_candidate_better(am, lc_index, match_index, best_match_index))
         best_match_index = match_index;
     }
     else if(get_cc_code & ACL_PKT_GET_GEOIP_INDEX){
@@ -1121,7 +1222,7 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
         pkt_5tuple->geosite_cc_index = GEO_CFG;
         pkt_5tuple->geoip_cc_index = *cc;
         match_index = multi_acl_match_get_applied_ace_index(am, is_ip6, pkt_5tuple);
-        if(match_index < tmp_match_index){
+        if(ahace_candidate_better(am, lc_index, match_index, tmp_match_index)){
           tmp_match_index = match_index;
         }
       }
@@ -1140,14 +1241,16 @@ hash_multi_acl_match_5tuple (void *p_acl_main, u32 lc_index, fa_5tuple_t * pkt_5
   match_index = best_match_index;
   vec_free(cc_indices);
   
-  if (match_index < vec_len((*applied_hash_aces))) {
-    applied_hash_ace_entry_t *pae = vec_elt_at_index((*applied_hash_aces), match_index);
-    pae->hitcount++;
-    *acl_pos_p = pae->acl_position;
-    *acl_match_p = pae->acl_index;
-    *rule_match_p = pae->ace_index;
-    *action = pae->action;
-    return 1;
+  if (match_index != ~0) {
+    applied_hash_ace_entry_t *pae = ahace_get_entry(am, match_index);
+    if (pae) {
+      pae->hitcount++;
+      *acl_pos_p = ahace_acl_position_on_lc(am, lc_index, pae->acl_index);
+      *acl_match_p = pae->acl_index;
+      *rule_match_p = pae->ace_index;
+      *action = pae->action;
+      return 1;
+    }
   }
   return 0;
 }

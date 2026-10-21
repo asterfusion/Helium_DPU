@@ -159,7 +159,24 @@ typedef struct {
   applied_hash_acl_info_t *input_applied_hash_acl_info_by_sw_if_index;
   applied_hash_acl_info_t *output_applied_hash_acl_info_by_sw_if_index;
 */
-  applied_hash_ace_entry_t **hash_entry_vec_by_lc_index;
+  /*
+   * Fixed-size table of applied hash ACE entries, shared by all lookup
+   * contexts. An entry for (acl_index, ace_index) lives at
+   * acl_index*ACL_APPLIED_HASH_ACE_STRIDE + ace_index, so the position of
+   * a rule never changes when other rules are added/removed/modified
+   * and the bihash values (which store these positions) never need
+   * to be rewritten because of a rule reorder.
+   * An entry is active (present in the bihash collision chains) iff
+   * collision_head_ae_index != ~0.
+   */
+  applied_hash_ace_entry_t *applied_hash_ace_table;
+  /*
+   * Per-(lc,acl) ACL priority, flat array indexed by
+   * lc_index*ACL_APPLIED_HASH_MAX_ACLS + acl_index. Maintained at
+   * bind/unbind time and by acl_set_acl_priority(), so that priority
+   * changes do not require re-pushing the rules.
+   */
+  u16 *acl_priority_by_lc;
   applied_hash_acl_info_t *applied_hash_acl_info_by_lc_index;
 
   /* Corresponding lookup context indices for in/out lookups per sw_if_index */
@@ -204,6 +221,17 @@ typedef struct {
 
   /* Do we use the TupleMerge for hash ACLs or not */
   int use_tuple_merge;
+
+  /*
+   * Capacity limits of the fixed-size applied_hash_ace_table.
+   * Position of a rule = acl_index*ACL_APPLIED_HASH_ACE_STRIDE + ace_index.
+   * At most ACL_APPLIED_HASH_MAX_ACLS ACLs, each with at most
+   * ACL_APPLIED_HASH_ACE_STRIDE rules.
+   */
+#define ACL_APPLIED_HASH_ACE_STRIDE 8192
+#define ACL_APPLIED_HASH_MAX_ACLS 2048
+#define ACL_APPLIED_HASH_ACE_TABLE_SIZE \
+  (ACL_APPLIED_HASH_ACE_STRIDE * ACL_APPLIED_HASH_MAX_ACLS)
 
   /* Max collision vector length before splitting the tuple */
 #define TM_SPLIT_THRESHOLD 39

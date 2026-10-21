@@ -429,99 +429,8 @@ static void determine_macip_replace_or_del(macip_acl_rule_t *acl_old_rules, maci
     return;
 }
 
-static void determine_replace_or_del(acl_rule_t *acl_old_rules, acl_rule_t *acl_new_rules, 
-                                                 int *add_replace_del_flag, int *replace_del_place)
-{
-    int i = 0;
-    int old_len = 0;
-    int new_len = 0;
-
-    old_len = vec_len(acl_old_rules);
-    new_len = vec_len(acl_new_rules);
-
-    if (old_len > new_len)
-    {
-        *add_replace_del_flag = ACL_DEL_RULE_ONE;
-        if ((old_len - new_len) == 2)
-        {
-            *add_replace_del_flag = ACL_DEL_RULE_TWO;
-        }
-        for (i = 0; i < new_len; i++)
-        {
-            if (acl_old_rules[i].rule_id != acl_new_rules[i].rule_id)
-            {
-                *replace_del_place = i;
-                if (i > 0 && acl_old_rules[i-1].rule_id == acl_old_rules[i].rule_id)
-                {
-                    *add_replace_del_flag = ACL_DEL_RULE_ONE_REP_ONE;
-                    *replace_del_place = i - 1;
-                }
-                break;
-            }
-        }
-
-        if (*replace_del_place == 0 && i == new_len)
-        {
-            *replace_del_place = new_len;
-        }
-    }
-
-    else if (old_len == new_len)
-    {
-        *add_replace_del_flag = ACL_REPLACE_RULE_NONE;
-        for (i = 0; i < new_len; i++)
-        {
-            const clib_bihash_kv_48_8_t *old_key = (clib_bihash_kv_48_8_t *)(&(acl_old_rules[i]));
-            const clib_bihash_kv_48_8_t *new_key = (clib_bihash_kv_48_8_t *)(&(acl_new_rules[i]));
-            u64 hash_old = clib_bihash_hash_48_8(old_key);
-            u64 hash_new = clib_bihash_hash_48_8(new_key);
-            if (hash_old != hash_new)
-            {
-                *add_replace_del_flag = ACL_REPLACE_RULE_ONE;
-                *replace_del_place = i;
-                if (i < new_len - 1 && acl_old_rules[i].rule_id == acl_old_rules[i + 1].rule_id)
-                {
-                    *add_replace_del_flag = ACL_REPLACE_RULE_TWO;
-                }
-
-                break;
-            }
-        }
-    }
-
-    else
-    {
-        *add_replace_del_flag = ACL_ADD_RULE_ONE;
-        if ((new_len - old_len) == 2)
-        {
-            *add_replace_del_flag = ACL_ADD_RULE_TWO;
-        }
-        for (i = 0; i < old_len; i++)
-        {
-            if (acl_old_rules[i].rule_id != acl_new_rules[i].rule_id)
-            {
-                *replace_del_place = i;
-                if (i > 0 && acl_new_rules[i - 1].rule_id == acl_new_rules[i].rule_id)
-                {
-                    *add_replace_del_flag = ACL_ADD_RULE_ONE_REP_ONE;
-                    *replace_del_place = i - 1;
-                }
-                break;
-            }
-        }
-
-        if (*replace_del_place == 0 && i == old_len)
-        {
-            *replace_del_place = old_len;
-        }
-    }
-
-    return;
-}
-
 static void
-validate_and_reset_acl_counters (acl_main_t * am, u32 acl_index, 
-        int old_rule_len, int new_rule_len, int add_replace_del_flag, int replace_del_place)
+validate_and_reset_acl_counters (acl_main_t * am, u32 acl_index)
 {
   int i;
 
@@ -545,21 +454,17 @@ validate_and_reset_acl_counters (acl_main_t * am, u32 acl_index,
       vlib_clear_combined_counters (&am->combined_acl_counters[i]);
     }
 
-  /* (re)validate for the actual ACL that is getting added/updated */
+  /* (re)validate for the actual ACL that is getting added/updated.
+   * Plan A simplification: counter vec is validated and cleared
+   * unconditionally. The legacy +/-1, +/-2 position-shift logic and
+   * determine_replace_or_del flag computation are obsolete now that
+   * all rule changes go through bulk-add. Counter inheritance by
+   * rule_id is handled by the snapshot/restore block in acl_add_list. */
   i32 rule_count = vec_len (am->acls[acl_index].rules);
   /* Validate one extra so we always have at least one counter for an ACL */
   vlib_validate_combined_counter (&am->combined_acl_counters[acl_index],
 				  rule_count);
-  if (add_replace_del_flag == ACL_ADD_LIST)
-  {
-      vlib_clear_combined_counters (&am->combined_acl_counters[acl_index]);
-  }
-
-  else
-  {
-      vlib_set_combined_counters (&am->combined_acl_counters[acl_index], 
-                       add_replace_del_flag, replace_del_place, old_rule_len, new_rule_len);
-  }
+  vlib_clear_combined_counters (&am->combined_acl_counters[acl_index]);
 
   acl_plugin_counter_unlock (am);
 }
@@ -584,8 +489,12 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
   acl_rule_t *acl_old_rules = NULL;
   size_t tag_len;
   int i;
-  int add_replace_del_flag = 0;
-  int replace_del_place = 0;
+  /* Plan A: per-rule_id counter snapshot for bulk-add inheritance.
+   * Built BEFORE validate_and_reset_acl_counters modifies the counter
+   * vector, drained AFTER. NULL if no eligible rules had rule_id. */
+  uword **acl_old_counter_packets_per_thread = NULL;
+  uword **acl_old_counter_bytes_per_thread = NULL;
+  u32 acl_old_counter_n_threads = 0;
 
   tag_len = clib_strnlen ((const char *) tag, sizeof (a->tag));
   if (tag_len == sizeof (a->tag))
@@ -610,6 +519,17 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       if (ntohs (rules[i].dstport_or_icmpcode_first) >
 	  ntohs (rules[i].dstport_or_icmpcode_last))
 	return VNET_API_ERROR_INVALID_VALUE_2;
+    }
+
+  /* the hash lookup stores the rules at acl_index*ACL_APPLIED_HASH_ACE_STRIDE
+   * + ace_index, so a single ACL can hold at most ACL_APPLIED_HASH_ACE_STRIDE
+   * rules */
+  if (count > ACL_APPLIED_HASH_ACE_STRIDE)
+    {
+      clib_warning
+	("acl-plugin-error: too many rules (%d) for ACL %d (tag %s), maximum is %d",
+	 count, *acl_list_index, tag, ACL_APPLIED_HASH_ACE_STRIDE);
+      return VNET_API_ERROR_INVALID_VALUE;
     }
 
   if (*acl_list_index != ~0)
@@ -684,7 +604,16 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       clib_memset (a, 0, sizeof (*a));
       /* Will return the newly allocated ACL index */
       *acl_list_index = a - am->acls;
-      add_replace_del_flag = ACL_ADD_LIST;
+      /* the hash lookup supports at most ACL_APPLIED_HASH_MAX_ACLS ACLs */
+      if (*acl_list_index >= ACL_APPLIED_HASH_MAX_ACLS)
+	{
+	  clib_warning
+	    ("acl-plugin-error: too many ACLs, maximum is %d (index %d, tag %s)",
+	     ACL_APPLIED_HASH_MAX_ACLS, *acl_list_index, tag);
+	  pool_put (am->acls, a);
+	  *acl_list_index = ~0;
+	  return VNET_API_ERROR_INVALID_VALUE;
+	}
       if (0 != *acl_list_index)
       {
           a->reflect_flag = reflect;
@@ -698,20 +627,10 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
   else
     {
       a = am->acls + *acl_list_index;
-      /* Get rid of the old rules */
+      /* Stash the old rules so the Plan A snapshot block below can recover
+       * counters by rule_id before validate_and_reset_acl_counters clears them. */
       if (a->rules)
-      {
-          acl_old_rules = a->rules;
-          if (0 == acl_old_rules[0].rule_id)
-          {
-              add_replace_del_flag = ACL_ADD_LIST;
-          }
-      }
-
-      else
-      {
-          add_replace_del_flag = ACL_ADD_LIST;
-      }
+        acl_old_rules = a->rules;
     }
   a->rules = acl_new_rules;
   memcpy (a->tag, tag, tag_len + 1);
@@ -722,12 +641,99 @@ acl_add_list (u32 count, vl_api_acl_rule_t rules[],
       /* a change in an ACLs if they are applied may mean a new policy epoch */
       policy_notify_acl_change (am, *acl_list_index);
     }
-  if (add_replace_del_flag == 0)
-  {
-      determine_replace_or_del(acl_old_rules, acl_new_rules, &add_replace_del_flag, &replace_del_place);
-  }
-  validate_and_reset_acl_counters(am, *acl_list_index, vec_len(acl_old_rules), vec_len(acl_new_rules), 
-                                     add_replace_del_flag, replace_del_place);
+  /* Plan A: snapshot old counters by rule_id BEFORE the counter vector is
+   * resized/shifted by validate_and_reset_acl_counters. Used for
+   * bulk-add inheritance so counters for unchanged rule_ids survive.
+   *
+   * Skip when: ACL is brand new (no acl_old_rules), counter vec not yet
+   * allocated, or no old rule has a non-zero rule_id. */
+  if (acl_old_rules && *acl_list_index < vec_len (am->combined_acl_counters))
+    {
+      int n_old = vec_len (acl_old_rules);
+      int j, has_id = 0;
+      for (j = 0; j < n_old; j++)
+        {
+          if (acl_old_rules[j].rule_id != 0)
+            {
+              has_id = 1;
+              break;
+            }
+        }
+      if (has_id)
+        {
+          u32 n_threads = vec_len (am->combined_acl_counters
+                                        [*acl_list_index].counters);
+          u32 t;
+          for (t = 0; t < n_threads; t++)
+            {
+              vec_validate (acl_old_counter_packets_per_thread, t);
+              vec_validate (acl_old_counter_bytes_per_thread, t);
+              acl_old_counter_packets_per_thread[t] =
+                hash_create (n_old, sizeof (uword));
+              acl_old_counter_bytes_per_thread[t] =
+                hash_create (n_old, sizeof (uword));
+            }
+          acl_old_counter_n_threads = n_threads;
+          for (t = 0; t < n_threads; t++)
+            for (j = 0; j < n_old; j++)
+              {
+                vlib_counter_t *cp;
+                u32 rid = acl_old_rules[j].rule_id;
+                if (rid == 0)
+                  continue;
+                cp = vec_elt_at_index (am->combined_acl_counters
+                                        [*acl_list_index].counters[t], j);
+                hash_set (acl_old_counter_packets_per_thread[t], rid,
+                          cp->packets);
+                hash_set (acl_old_counter_bytes_per_thread[t], rid,
+                          cp->bytes);
+              }
+        }
+    }
+
+  validate_and_reset_acl_counters(am, *acl_list_index);
+
+
+  /* Plan A: restore counters to new rules whose rule_id matches an entry
+   * in the snapshot taken above. Overwrites whatever
+   * validate_and_reset_acl_counters left in the slot (cleared, shifted,
+   * or untouched). Per-thread writes mirror vlib_zero_combined_counter's
+   * sweep pattern. */
+  if (acl_old_counter_packets_per_thread && acl_new_rules)
+    {
+      int n_new = vec_len (acl_new_rules);
+      int j;
+      u32 t;
+      u32 n_threads_now = vec_len (am->combined_acl_counters
+                                    [*acl_list_index].counters);
+      u32 t_max =
+        (acl_old_counter_n_threads <
+         n_threads_now) ? acl_old_counter_n_threads : n_threads_now;
+      for (t = 0; t < t_max; t++)
+        {
+          for (j = 0; j < n_new; j++)
+            {
+              u32 rid = acl_new_rules[j].rule_id;
+              uword *pp, *bp;
+              vlib_counter_t *cp;
+              if (rid == 0)
+                continue;
+              pp = hash_get (acl_old_counter_packets_per_thread[t], rid);
+              bp = hash_get (acl_old_counter_bytes_per_thread[t], rid);
+              if (!pp || !bp)
+                continue;
+              cp = vec_elt_at_index (am->combined_acl_counters
+                                      [*acl_list_index].counters[t], j);
+              cp->packets = *pp;
+              cp->bytes = *bp;
+            }
+          hash_free (acl_old_counter_packets_per_thread[t]);
+          hash_free (acl_old_counter_bytes_per_thread[t]);
+        }
+      vec_free (acl_old_counter_packets_per_thread);
+      vec_free (acl_old_counter_bytes_per_thread);
+      acl_old_counter_n_threads = 0;
+    }
   acl_geosite_refcnt_update_bound_contexts (*acl_list_index, acl_old_rules,
 					    acl_new_rules);
   if (acl_old_rules)
@@ -2332,6 +2338,14 @@ acl_set_acl_priority (acl_main_t * am, u32 sw_if_index,
                 clib_memset(&key, 0, sizeof(clib_bihash_kv_8_8_t));
                 key.key = ((u64)lc_index << 32) | acln;
                 clib_bihash_add_del_8_8(&am->sw_acl_index_priority_hash, &key, 0);
+                /* clear the per-(lc,acl) priority so the dataplane picks
+                   the change up without re-pushing the rules */
+                if (acln < ACL_APPLIED_HASH_MAX_ACLS)
+                  {
+                    u64 prio_index = (u64)lc_index * ACL_APPLIED_HASH_MAX_ACLS + acln;
+                    if (prio_index < vec_len(am->acl_priority_by_lc))
+                      am->acl_priority_by_lc[prio_index] = 0;
+                  }
             }
         }
         else
@@ -2349,6 +2363,15 @@ acl_set_acl_priority (acl_main_t * am, u32 sw_if_index,
             key.key = ((u64)lc_index << 32) | acln;
             key.value = a->priority;
             clib_bihash_add_del_8_8(&am->sw_acl_index_priority_hash, &key, 1);
+            /* mirror into the per-(lc,acl) priority array so the dataplane
+               picks the change up without re-pushing the rules */
+            if (acln < ACL_APPLIED_HASH_MAX_ACLS)
+              {
+                vec_validate(am->acl_priority_by_lc,
+                           ((u64)(lc_index + 1) * ACL_APPLIED_HASH_MAX_ACLS) - 1);
+                am->acl_priority_by_lc[(u64)lc_index * ACL_APPLIED_HASH_MAX_ACLS + acln] =
+                  (u16)a->priority;
+              }
         }
     }
 
