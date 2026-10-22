@@ -160,8 +160,11 @@ typedef struct {
   applied_hash_acl_info_t *output_applied_hash_acl_info_by_sw_if_index;
 */
   /*
-   * Fixed-size table of applied hash ACE entries, shared by all lookup
-   * contexts. An entry for (acl_index, ace_index) lives at
+   * Fixed-size, two-level table of applied hash ACE entries, shared by all
+   * lookup contexts. The slot for an ACL (am->applied_hash_ace_table[acl])
+   * is allocated on the first use of that ACL and holds
+   * ACL_APPLIED_HASH_ACE_STRIDE entries. An entry for (acl_index, ace_index)
+   * lives at slot[ace_index], i.e. at the fixed position
    * acl_index*ACL_APPLIED_HASH_ACE_STRIDE + ace_index, so the position of
    * a rule never changes when other rules are added/removed/modified
    * and the bihash values (which store these positions) never need
@@ -169,7 +172,7 @@ typedef struct {
    * An entry is active (present in the bihash collision chains) iff
    * collision_head_ae_index != ~0.
    */
-  applied_hash_ace_entry_t *applied_hash_ace_table;
+  applied_hash_ace_entry_t **applied_hash_ace_table;
   /*
    * Per-(lc,acl) ACL priority, flat array indexed by
    * lc_index*ACL_APPLIED_HASH_MAX_ACLS + acl_index. Maintained at
@@ -226,7 +229,9 @@ typedef struct {
    * Capacity limits of the fixed-size applied_hash_ace_table.
    * Position of a rule = acl_index*ACL_APPLIED_HASH_ACE_STRIDE + ace_index.
    * At most ACL_APPLIED_HASH_MAX_ACLS ACLs, each with at most
-   * ACL_APPLIED_HASH_ACE_STRIDE rules.
+   * ACL_APPLIED_HASH_ACE_STRIDE rules. The per-ACL slots are allocated
+   * on demand, so the memory used is proportional to the number of
+   * ACLs actually in use.
    */
 #define ACL_APPLIED_HASH_ACE_STRIDE 8192
 #define ACL_APPLIED_HASH_MAX_ACLS 2048

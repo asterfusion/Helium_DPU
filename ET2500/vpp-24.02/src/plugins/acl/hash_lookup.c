@@ -66,20 +66,54 @@ ahace_index (u32 acl_index, u32 ace_index)
 }
 
 /*
- * Lazily allocate the fixed-size applied ACE table.
- * All the entries are marked inactive (0xff fill, i.e.
- * collision_head_ae_index == ~0) .
+ * The applied ACE table is two-level so that the memory is consumed
+ * proportionally to the number of ACLs actually in use:
+ * am->applied_hash_ace_table[acl_index] points to a slot of
+ * ACL_APPLIED_HASH_ACE_STRIDE entries, allocated (and 0xff-filled, i.e.
+ * all entries inactive) on the first use of that ACL index.
  */
 static void
 ahace_ensure_table (acl_main_t *am)
 {
   if (PREDICT_TRUE (am->applied_hash_ace_table != 0))
     return;
-  vec_validate (am->applied_hash_ace_table,
-		ACL_APPLIED_HASH_ACE_TABLE_SIZE - 1);
-  clib_memset (am->applied_hash_ace_table, 0xff,
-	       ACL_APPLIED_HASH_ACE_TABLE_SIZE *
-	       sizeof (applied_hash_ace_entry_t));
+  vec_validate (am->applied_hash_ace_table, ACL_APPLIED_HASH_MAX_ACLS - 1);
+}
+
+/*
+ * Return the slot for acl_index, optionally allocating (and
+ * marking inactive) it if it does not exist yet.
+ */
+static applied_hash_ace_entry_t *
+ahace_get_slot (acl_main_t *am, u32 acl_index, int do_alloc)
+{
+  applied_hash_ace_entry_t *slot;
+
+  if (acl_index >= ACL_APPLIED_HASH_MAX_ACLS)
+    return 0;
+  ahace_ensure_table (am);
+  slot = am->applied_hash_ace_table[acl_index];
+  if (!slot && do_alloc)
+    {
+      slot = clib_mem_alloc_aligned (ACL_APPLIED_HASH_ACE_STRIDE *
+				     sizeof (applied_hash_ace_entry_t),
+				     CLIB_CACHE_LINE_BYTES);
+      clib_memset (slot, 0xff,
+		   ACL_APPLIED_HASH_ACE_STRIDE * sizeof (applied_hash_ace_entry_t));
+      am->applied_hash_ace_table[acl_index] = slot;
+    }
+  return slot;
+}
+
+
+/* Control-plane accessor: entry by its table position. The slot must exist. */
+always_inline applied_hash_ace_entry_t *
+ahace_entry_at (acl_main_t *am, u32 entry_index)
+{
+  applied_hash_ace_entry_t *slot =
+    am->applied_hash_ace_table[entry_index / ACL_APPLIED_HASH_ACE_STRIDE];
+  ASSERT (slot != 0);
+  return &slot[entry_index % ACL_APPLIED_HASH_ACE_STRIDE];
 }
 
 static void
@@ -150,7 +184,7 @@ fill_applied_hash_ace_kv(acl_main_t *am,
 {
   fa_5tuple_t *kv_key = (fa_5tuple_t *)kv->key;
   hash_acl_lookup_value_t *kv_val = (hash_acl_lookup_value_t *)&kv->value;
-  applied_hash_ace_entry_t *pae = vec_elt_at_index(am->applied_hash_ace_table, entry_index);
+  applied_hash_ace_entry_t *pae = ahace_entry_at(am, entry_index);
   hash_acl_info_t *ha = vec_elt_at_index(am->hash_acl_infos, pae->acl_index);
 
   /* apply the base mask to ace key */
@@ -269,7 +303,7 @@ del_colliding_rule (acl_main_t * am,
   DBG0("DEL COLLIDING RULE: head_index %d applied index %d", head_index, applied_entry_index);
 
   applied_hash_ace_entry_t *head_pae =
-    vec_elt_at_index (am->applied_hash_ace_table, head_index);
+    ahace_entry_at (am, head_index);
   vec_del_collision_rule (&head_pae->colliding_rules, applied_entry_index);
 }
 
@@ -278,9 +312,9 @@ add_colliding_rule (acl_main_t * am,
                     u32 head_index, u32 applied_entry_index)
 {
   applied_hash_ace_entry_t *head_pae =
-    vec_elt_at_index (am->applied_hash_ace_table, head_index);
+    ahace_entry_at (am, head_index);
   applied_hash_ace_entry_t *pae =
-    vec_elt_at_index (am->applied_hash_ace_table, applied_entry_index);
+    ahace_entry_at (am, applied_entry_index);
   DBG0("ADD COLLIDING RULE: head_index %d applied index %d", head_index, applied_entry_index);
 
   collision_match_rule_t cr;
@@ -305,7 +339,7 @@ activate_applied_ace_hash_entry(acl_main_t *am, u32 entry_index)
   clib_bihash_kv_72_8_t kv;
   clib_bihash_kv_72_8_t result;
   hash_acl_lookup_value_t *result_val = (hash_acl_lookup_value_t *)&result.value;
-  applied_hash_ace_entry_t *pae = vec_elt_at_index(am->applied_hash_ace_table, entry_index);
+  applied_hash_ace_entry_t *pae = ahace_entry_at(am, entry_index);
 
   ASSERT(pae->collision_head_ae_index == ~0);
   DBG("activate_applied_ace_hash_entry entry_index %d", entry_index);
@@ -333,7 +367,7 @@ set_collision_head_ae_index(acl_main_t *am, collision_match_rule_t *colliding_ru
 {
 	collision_match_rule_t *cr;
 	vec_foreach(cr, colliding_rules) {
-            applied_hash_ace_entry_t *pae = vec_elt_at_index(am->applied_hash_ace_table, cr->applied_entry_index);
+            applied_hash_ace_entry_t *pae = ahace_entry_at(am, cr->applied_entry_index);
             pae->collision_head_ae_index = new_index;
 	}
 }
@@ -348,7 +382,7 @@ set_collision_head_ae_index(acl_main_t *am, collision_match_rule_t *colliding_ru
 static void
 deactivate_applied_ace_hash_entry(acl_main_t *am, u32 entry_index)
 {
-  applied_hash_ace_entry_t *pae = vec_elt_at_index(am->applied_hash_ace_table, entry_index);
+  applied_hash_ace_entry_t *pae = ahace_entry_at(am, entry_index);
   DBG("UNAPPLY DEACTIVATE: entry index %d", entry_index);
 
   if (pae->collision_head_ae_index == ~0)
@@ -365,7 +399,7 @@ deactivate_applied_ace_hash_entry(acl_main_t *am, u32 entry_index)
     del_colliding_rule(am, entry_index, entry_index);
     if (vec_len(pae->colliding_rules) > 0) {
       u32 next_entry_index = pae->colliding_rules[0].applied_entry_index;
-      applied_hash_ace_entry_t *next_pae = vec_elt_at_index(am->applied_hash_ace_table, next_entry_index);
+      applied_hash_ace_entry_t *next_pae = ahace_entry_at(am, next_entry_index);
       /* Remove ourselves and transfer the ownership of the colliding rules vector */
       next_pae->colliding_rules = pae->colliding_rules;
       set_collision_head_ae_index(am, next_pae->colliding_rules, next_entry_index);
@@ -741,6 +775,11 @@ void hash_acl_add(acl_main_t *am, int acl_index)
 
   ahace_ensure_table(am);
 
+  applied_hash_ace_entry_t *slot = 0;
+  if (acl_index < ACL_APPLIED_HASH_MAX_ACLS)
+    /* allocate (and mark inactive) the slot on its first use */
+    slot = ahace_get_slot(am, acl_index, 1);
+
   for(i=0; i < vec_len(acl_rules); i++) {
     hash_ace_info_t ace_info;
     fa_5tuple_t mask;
@@ -755,10 +794,9 @@ void hash_acl_add(acl_main_t *am, int acl_index)
     ace_info.match.pkt.mask_type_index_lsb = ace_info.base_mask_type_index;
     DBG("ACE: %d mask_type_index: %d", i, ace_info.base_mask_type_index);
 
-    if (acl_index < ACL_APPLIED_HASH_MAX_ACLS) {
+    if (slot) {
       /* write the applied ACE entry at its fixed position */
-      applied_hash_ace_entry_t *pae =
-        vec_elt_at_index(am->applied_hash_ace_table, ahace_index(acl_index, i));
+      applied_hash_ace_entry_t *pae = &slot[i];
       pae->acl_index = acl_index;
       pae->ace_index = i;
       pae->hash_ace_info_index = i;
@@ -833,17 +871,11 @@ void hash_acl_delete(acl_main_t *am, int acl_index)
     release_mask_type_index(am, ha->rules[i].base_mask_type_index);
   }
 
-  /* clear the applied ACE table slots of this ACL */
   if ((acl_index < ACL_APPLIED_HASH_MAX_ACLS) &&
-      (am->applied_hash_ace_table != 0)) {
-    for (i = 0; i < n_rules; i++) {
-      applied_hash_ace_entry_t *pae =
-        vec_elt_at_index(am->applied_hash_ace_table, ahace_index(acl_index, i));
-      pae->acl_index = ~0;
-      pae->collision_head_ae_index = ~0;
-      pae->colliding_rules = NULL;
-      pae->hitcount = 0;
-    }
+      (am->applied_hash_ace_table != 0) &&
+      (am->applied_hash_ace_table[acl_index] != 0)) {
+    clib_mem_free (am->applied_hash_ace_table[acl_index]);
+    am->applied_hash_ace_table[acl_index] = 0;
   }
 
   ha->hash_acl_exists = 0;
@@ -978,15 +1010,13 @@ acl_plugin_show_tables_applied_info (u32 lc_index)
 	      if (*acl_index >= vec_len (am->hash_acl_infos))
 		continue;
 	      hash_acl_info_t *ha = &am->hash_acl_infos[*acl_index];
+	      applied_hash_ace_entry_t *slot =
+		ahace_get_slot (am, *acl_index, 0);
+	      if (!slot)
+		continue;
 	      for (j = 0; j < vec_len (ha->rules); j++)
 		{
-		  u32 entry_index = ahace_index (*acl_index, j);
-		  if (entry_index >= vec_len (am->applied_hash_ace_table))
-		    continue;
-		  acl_plugin_print_pae (vm, entry_index,
-					vec_elt_at_index
-					(am->applied_hash_ace_table,
-					 entry_index));
+		  acl_plugin_print_pae (vm, ahace_index (*acl_index, j), &slot[j]);
 		}
 	    }
 	}

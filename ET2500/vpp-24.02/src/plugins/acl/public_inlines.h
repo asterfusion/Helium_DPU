@@ -741,10 +741,17 @@ linear_multi_acl_match_5tuple_sai (void *p_acl_main, u32 lc_index, fa_5tuple_t *
 always_inline applied_hash_ace_entry_t *
 ahace_get_entry (acl_main_t * am, u32 entry_index)
 {
-  if (entry_index >= vec_len (am->applied_hash_ace_table))
+  applied_hash_ace_entry_t *slot;
+  applied_hash_ace_entry_t *pae;
+
+  if (entry_index >= ACL_APPLIED_HASH_ACE_TABLE_SIZE)
     return 0;
-  applied_hash_ace_entry_t *pae =
-    vec_elt_at_index (am->applied_hash_ace_table, entry_index);
+  if (am->applied_hash_ace_table == 0)
+    return 0;
+  slot = am->applied_hash_ace_table[entry_index / ACL_APPLIED_HASH_ACE_STRIDE];
+  if (!slot)
+    return 0;
+  pae = &slot[entry_index % ACL_APPLIED_HASH_ACE_STRIDE];
   /* the entries are active iff they are linked into a collision chain */
   if (pae->collision_head_ae_index == ~0)
     return 0;
