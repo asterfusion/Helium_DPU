@@ -50,17 +50,25 @@ vl_api_lcp_pppoe_add_del_session_t_handler (
   u32 client_ip4 = 0;
   u32 client_table_id = ntohl (mp->client_table_id);
   clib_memcpy (&client_ip4, mp->client_ip, 4);
+  /* v1.1.0 dual-stack: the 16 octets of client_ip6 are likewise copied
+   * straight into the ip6 member of a zeroed ip46_address_t. */
+  ip46_address_t client_ip6;
+  u32 client_table_id6 = ntohl (mp->client_table_id6);
+  clib_memset (&client_ip6, 0, sizeof (client_ip6));
+  clib_memcpy (&client_ip6.ip6, mp->client_ip6, 16);
 
   if(mp->is_add)
   {
       rv = lcp_pppoe_session_add (server_mac, ppp_session_id, encap_sw_if_index,
 				  &sw_if_index, sw_if_name, 1, lcp_magic,
-				  client_ip4, client_table_id);
+				  client_ip4, client_table_id,
+				  &client_ip6, client_table_id6);
   }
   else
   {
       rv = lcp_pppoe_session_add (server_mac, ppp_session_id, encap_sw_if_index,
-				  &sw_if_index, sw_if_name, 0, 0, 0, 0);
+				  &sw_if_index, sw_if_name, 0, 0, 0, 0,
+				  NULL, 0);
   }
 
   BAD_SW_IF_INDEX_LABEL;
@@ -114,11 +122,17 @@ vl_api_lcp_pppoe_bulk_add_del_sessions_t_handler (
       u32 client_ip4 = 0;
       u32 client_table_id = ntohl (e->client_table_id);
       clib_memcpy (&client_ip4, e->client_ip, 4);
+      /* v1.1.0 dual-stack (see single-add handler). */
+      ip46_address_t client_ip6;
+      u32 client_table_id6 = ntohl (e->client_table_id6);
+      clib_memset (&client_ip6, 0, sizeof (client_ip6));
+      clib_memcpy (&client_ip6.ip6, e->client_ip6, 16);
       err = lcp_pppoe_session_add_bulk (server_mac, ppp_session_id,
 					encap_sw_if_index, &sw_if_index,
 					sw_if_names[i], e->is_add,
 					&is_new_if, ntohl (e->lcp_magic),
-					client_ip4, client_table_id);
+					client_ip4, client_table_id,
+					&client_ip6, client_table_id6);
       sw_if_indices[i] = (err == 0) ? sw_if_index : (u32) ~0;
       if (err != 0 && rv == 0)
 	rv = err;

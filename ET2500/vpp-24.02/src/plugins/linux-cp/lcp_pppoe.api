@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-option version = "1.0.0";
+option version = "1.1.0";
 
 import "vnet/interface_types.api";
 import "vnet/ethernet/ethernet_types.api";
@@ -40,6 +40,9 @@ define lcp_pppoe_add_del_session
    * interface is installed (on add) / removed (on del) in client_table_id. */
   vl_api_ip4_address_t client_ip;
   u32 client_table_id;
+  /* v1.1.0: dual-stack support */
+  vl_api_ip6_address_t client_ip6;
+  u32 client_table_id6;
   option vat_help = "session-id <nn> encap-if-index <nn> server-mac <server-mac> [lcp-magic <nn>] [del]";
 };
 
@@ -95,6 +98,9 @@ typedef lcp_pppoe_session_entry
    * the route is removed using the address stored in the session. */
   vl_api_ip4_address_t client_ip;
   u32 client_table_id;
+  /* v1.1.0: dual-stack support */
+  vl_api_ip6_address_t client_ip6;
+  u32 client_table_id6;
 };
 
 /** \brief Bulk add / delete PPPoE sessions in a single RPC
