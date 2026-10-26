@@ -1582,7 +1582,7 @@ ip4_local_check_src (vlib_buffer_t *b, ip4_header_t *ip0,
        *  - allow packets destined to the broadcast address from unknown sources
        */
 
-      if(ip0->protocol != IP_PROTOCOL_IGMP)
+      if(ip0->protocol != IP_PROTOCOL_IGMP && ip0->protocol != IP_PROTOCOL_IPSEC_ESP)
       {
         *error0 = ((*error0 == IP4_ERROR_UNKNOWN_PROTOCOL
                    && dpo0->dpoi_type == DPO_RECEIVE) ?
