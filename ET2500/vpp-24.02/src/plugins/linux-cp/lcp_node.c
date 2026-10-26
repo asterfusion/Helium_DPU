@@ -193,6 +193,24 @@ lcp_prepare_cpu_branch (vlib_main_t *vm, vlib_buffer_t *b,
 		       clib_host_to_net_u16 (ETHERNET_TYPE_IP4) :
 		       clib_host_to_net_u16 (ETHERNET_TYPE_IP6);
 	}
+      else if (PREDICT_FALSE (b->flags & VLIB_BUFFER_PUNT_FROM_VPN))
+      {
+        ethernet_header_t *eh =
+          (ethernet_header_t *) ((u8 *) vlib_buffer_get_current (b) -
+                                 sizeof (ethernet_header_t));
+
+        clib_memcpy (eh, ethernet_buffer_get_header (b),
+                     sizeof (ethernet_header_t));
+        ip4_header_t *ih = (ip4_header_t *) vlib_buffer_get_current (b);
+        eh->type = ((ih->ip_version_and_header_length >> 4) == 4) ?
+                clib_host_to_net_u16 (ETHERNET_TYPE_IP4) : clib_host_to_net_u16 (ETHERNET_TYPE_IP6);
+        b->flags &= ~(VNET_BUFFER_F_GSO | VNET_BUFFER_F_OFFLOAD);
+        vlib_buffer_advance (b, -sizeof (ethernet_header_t));
+        vnet_buffer (b)->l2_hdr_offset =
+          (u8 *) vlib_buffer_get_current (b) - (u8 *) b->data;
+        vnet_buffer (b)->l3_hdr_offset =
+          vnet_buffer (b)->l2_hdr_offset + sizeof (ethernet_header_t);
+      }
       else
 	vlib_buffer_advance (b, -len);
     }
