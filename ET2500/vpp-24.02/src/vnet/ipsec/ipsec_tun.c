@@ -269,6 +269,30 @@ ipsec_tun_protect_rx_db_add (ipsec_main_t * im,
 				   IPSEC_TUN_DEFAULT_HASH_MEMORY_SIZE);
 
 	  clib_bihash_add_del_8_16 (&im->tun4_protect_by_key, bkey, 1);
+
+	  /*
+	   * Also install a wildcard entry keyed on the SPI only, so that
+	   * inbound ESP packets whose outer source address was rewritten
+	   * on the path (e.g. source NAT on the peer) can still be demuxed
+	   * to this tunnel. Exact (remote,spi) entries always take
+	   * priority at lookup time. If the wildcard is already present
+	   * (another tunnel installed the same SPI first), keep it.
+	   */
+	  {
+	    const ip4_address_t any4 = { .as_u32 = 0 };
+	    ipsec4_tunnel_kv_t wkey = {
+	      .value = res,
+	    };
+	    clib_bihash_kv_8_16_t *wbkey = (clib_bihash_kv_8_16_t *) &wkey;
+	    clib_bihash_kv_8_16_t wres;
+
+	    ipsec4_tunnel_mk_key (&wkey, &any4,
+				  clib_host_to_net_u32 (sa->spi));
+	    if (clib_bihash_search_8_16 (&im->tun4_protect_by_key, wbkey,
+					 &wres))
+	      clib_bihash_add_del_8_16 (&im->tun4_protect_by_key, wbkey, 1);
+	  }
+
 	  ipsec_tun_register_nodes (AF_IP4);
 	}
       else
@@ -385,6 +409,30 @@ ipsec_tun_protect_rx_db_remove (ipsec_main_t * im,
               clib_bihash_add_del_8_16 (&im->tun4_protect_by_key, bkey, 0);
               ipsec_tun_unregister_nodes(AF_IP4);
             }
+
+          /*
+           * Remove the wildcard (any-remote) entry too, but only if
+           * it is still pointing at this SA - it may belong to
+           * another tunnel that installed the same SPI first.
+           */
+          {
+            const ip4_address_t any4 = { .as_u32 = 0 };
+            ipsec4_tunnel_kv_t wkey;
+            clib_bihash_kv_8_16_t wres, *wbkey =
+              (clib_bihash_kv_8_16_t *) &wkey;
+            ipsec_tun_lkup_result_t wval;
+
+            ipsec4_tunnel_mk_key (&wkey, &any4,
+                                  clib_host_to_net_u32 (sa->spi));
+            if (!clib_bihash_search_8_16 (&im->tun4_protect_by_key,
+                                          wbkey, &wres))
+              {
+                clib_memcpy (&wval, wres.value, sizeof (wval));
+                if (wval.sa_index == (u32) (sa - im->sa_pool))
+                  clib_bihash_add_del_8_16 (&im->tun4_protect_by_key,
+                                            wbkey, 0);
+              }
+          }
       }
     else
       {
