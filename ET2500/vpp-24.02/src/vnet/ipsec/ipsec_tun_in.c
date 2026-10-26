@@ -297,6 +297,26 @@ ipsec_tun_protect_input_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
 	      int rv =
 		clib_bihash_search_inline_8_16 (&im->tun4_protect_by_key,
 						&bkey40);
+	      if (PREDICT_FALSE (rv))
+		{
+		  /*
+		   * No exact (remote,spi) entry. The outer source address
+		   * may have been rewritten on the path (e.g. source NAT
+		   * on the peer); retry the demux with a wildcard remote
+		   * (SPI only) before giving up.
+		   */
+		  const ip4_address_t any4 = { .as_u32 = 0 };
+		  ipsec4_tunnel_kv_t wkey40 = { 0 };
+		  clib_bihash_kv_8_16_t *wbkey40 =
+		    (clib_bihash_kv_8_16_t *) &wkey40;
+
+		  ipsec4_tunnel_mk_key (&wkey40, &any4, esp0->spi);
+		  rv = clib_bihash_search_inline_8_16 (&im->tun4_protect_by_key,
+						       wbkey40);
+		  if (!rv)
+		    clib_memcpy_fast (bkey40.value, &wkey40.value,
+				      sizeof (bkey40.value));
+		}
 	      if (!rv)
 		{
 		  clib_memcpy_fast (&itr0, &bkey40.value, sizeof (itr0));
