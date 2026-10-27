@@ -55,6 +55,7 @@
   _ (CH_LEN_90B, 18)                                                          \
   _ (CUSTOM0, 19)                                                             \
   _ (VLAN, 20)                                                                \
+  _ (PPPOE, 25)                                                               \
   _ (L4_DST, 28)                                                              \
   _ (L4_SRC, 29)                                                              \
   _ (L3_DST, 30)                                                              \

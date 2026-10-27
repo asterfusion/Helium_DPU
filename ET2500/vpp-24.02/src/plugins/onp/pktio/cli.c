@@ -281,7 +281,10 @@ onp_pktio_flow_add_command_fn (vlib_main_t *vm, unformat_input_t *input,
 
   /* Get a line of input. */
   if (!unformat_user (input, unformat_line_input, line_input))
-    return 0;
+	{
+	  vec_free (items);
+	  return 0;
+	}
 
   while (unformat_check_input (line_input) != UNFORMAT_END_OF_INPUT)
     {
@@ -310,6 +313,7 @@ onp_pktio_flow_add_command_fn (vlib_main_t *vm, unformat_input_t *input,
               item->spec = NULL;                                              \
 	      item->mask = NULL;                                              \
 	      item->type = CNXK_DRV_FLOW_ITEM_TYPE_##ltype;                   \
+	      unformat_free (&sub_input);                                       \
 	      continue;                                                       \
 	    }                                                                 \
                                                                               \
@@ -359,8 +363,11 @@ onp_pktio_flow_add_command_fn (vlib_main_t *vm, unformat_input_t *input,
 	  foreach_rss_function
 
 	  else
-	    return clib_error_return (0, "unknown input '%U'",
-				      format_unformat_error, line_input);
+	    {
+	      err = clib_error_return (0, "unknown input '%U'",
+				       format_unformat_error, line_input);
+	      goto done;
+	    }
 
 	  vf.actions |= VNET_FLOW_ACTION_RSS;
 	}
@@ -394,9 +401,10 @@ onp_pktio_flow_add_command_fn (vlib_main_t *vm, unformat_input_t *input,
 	      foreach_flow_rss_types                                          \
 	      else                                                            \
 		{                                                             \
-		  return clib_error_return (0, "parse error: '%U'",           \
-				            format_unformat_error,            \
-				            line_input);                      \
+		  err = clib_error_return (0, "parse error: '%U'",           \
+				    format_unformat_error,            \
+				    line_input);                      \
+		  goto done;                                                      \
 	        }                                                             \
 	    }
 
@@ -424,7 +432,7 @@ onp_pktio_flow_add_command_fn (vlib_main_t *vm, unformat_input_t *input,
       else
 	{
 	  err = clib_error_return (0, "Unknown input : '%U'",
-	    			   format_unformat_error, input);
+	    			   format_unformat_error, line_input);
 	  goto done;
 	}
       /* clang-format on */
@@ -470,7 +478,6 @@ onp_pktio_flow_add_command_fn (vlib_main_t *vm, unformat_input_t *input,
 done:
   vec_free (items);
   unformat_free (line_input);
-  unformat_free (&sub_input);
   return err;
 }
 
