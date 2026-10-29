@@ -11,6 +11,7 @@
 #include <vnet/l2/l2_fib.h>
 #include <vnet/osi/osi.h>
 #include <vnet/udp/udp_local.h>
+#include <vnet/session/session_lookup.h>
 
 #include <linux-cp/lcp.api_enum.h>
 #include <linux-cp/lcp_interface.h>
@@ -37,7 +38,7 @@ lcp_l2_dhcp_is_bvi_bound (vlib_buffer_t *b,
 {
   ethernet_header_t *eh;
   l2fib_entry_result_t result = { .raw = 0 };
-  BVT (clib_bihash_kv) lookup;
+  clib_bihash_kv_8_8_t lookup;
 
   if (trap_type != LCP_TRAP_DHCP_L2 &&
       trap_type != LCP_TRAP_DHCPV6_L2)
@@ -47,7 +48,7 @@ lcp_l2_dhcp_is_bvi_bound (vlib_buffer_t *b,
   lookup.key = l2fib_make_key (eh->dst_address,
 			       vnet_buffer (b)->l2.bd_index);
   lookup.value = ~0ULL;
-  if (BV (clib_bihash_search_inline) (&l2fib_main.mac_table, &lookup) != 0)
+  if (clib_bihash_search_inline_8_8 (&l2fib_main.mac_table, &lookup) != 0)
     return false;
 
   result.raw = lookup.value;
@@ -318,6 +319,25 @@ lcp_ip_producer_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	      (view.valid_fields & LCP_MATCH_FIELD_L4_PORTS) &&
 	      udp_is_valid_dst_port (view.l4_dst_port, !is_ip6))
 	    view.state &= ~LCP_MATCH_STATE_HOST_BOUND;
+
+          if (parsed && adapter == LCP_IP_ADAPTER_LOCAL &&
+             view.ip_protocol == IP_PROTOCOL_TCP &&
+             (view.valid_fields & LCP_MATCH_FIELD_L4_PORTS) &&
+             (view.state & LCP_MATCH_STATE_HOST_BOUND))
+           {
+             u32 fib_index = vnet_buffer (b)->ip.fib_index;
+             u16 dst_port = clib_host_to_net_u16 (view.l4_dst_port);
+             session_t *listener =
+               is_ip6 ?
+                 session_lookup_listener6 (fib_index, &view.dst_ip.ip6,
+                                           dst_port, TRANSPORT_PROTO_TCP,
+                                           1 /* use_wildcard */) :
+                 session_lookup_listener4 (fib_index, &view.dst_ip.ip4,
+                                           dst_port, TRANSPORT_PROTO_TCP,
+                                           1 /* use_wildcard */);
+             if (listener)
+               view.state &= ~LCP_MATCH_STATE_HOST_BOUND;
+           }
 
 	  if (!copp_processed && vnet_buffer2 (b)->trap_id == LCP_TRAP_INVALID &&
 	      parsed &&
