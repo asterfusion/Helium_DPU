@@ -913,6 +913,103 @@ typedef enum
  * protocols reach the CPU even when an ACL bound to the port would drop
  * them.
  */
+/*
+ * Per-buffer worker for lcp_l2_nonip_punt_node.  Classifies the frame,
+ * applies the CoPP action, appends any CPU copy to @copies, and returns
+ * the next-node index for the original buffer.
+ */
+always_inline u32
+lcp_l2_nonip_punt_buffer (vlib_main_t *vm, vlib_node_runtime_t *node,
+                          vlib_buffer_t *b, u32 *copies, u32 *n_copies)
+{
+  lcp_action_result_t action_result;
+  lcp_packet_view_t view = { 0 };
+  lcp_match_result_t result = { 0 };
+  vl_api_lcp_trap_type_t trap_id = LCP_TRAP_INVALID;
+  u32 next, original_next;
+  u32 l2_len;
+
+  vnet_feature_next (&original_next, b);
+  next = original_next;
+
+  vnet_buffer2 (b)->trap_id = LCP_TRAP_INVALID;
+
+  l2_len = vnet_buffer (b)->l2.l2_len;
+
+  if (l2_len < b->current_length)
+    {
+      const u8 *current = vlib_buffer_get_current (b);
+      u16 ethertype = clib_net_to_host_u16 (*(u16 *) (current + l2_len - 2));
+
+      if (ethertype == ETHERNET_TYPE_ARP)
+        {
+          /* Classify ARP by opcode; the L2_DIRECT rules do not
+           * cover ARP.  lcp_packet_parse (LCP_MATCH_CTX_ARP) expects
+           * buffer current at the ARP header, while on this feature arc
+           * current points at the L2 header; advance it temporarily. */
+          if (b->current_length - l2_len >= sizeof (ethernet_arp_header_t))
+            {
+              vlib_buffer_advance (b, l2_len);
+              if (lcp_packet_parse (vm, b, LCP_MATCH_CTX_ARP, NULL, &view) &&
+                  lcp_match_select (&view, &result))
+                trap_id = result.trap_type;
+              vlib_buffer_advance (b, -(word) l2_len);
+            }
+        }
+      else if (lcp_packet_parse (vm, b, LCP_MATCH_CTX_L2_DIRECT, NULL,
+                                 &view) &&
+               lcp_match_select (&view, &result))
+        trap_id = result.trap_type;
+    }
+
+  if (trap_id != LCP_TRAP_INVALID && lcp_buffer_set_trap_id (b, trap_id))
+    {
+      action_result =
+        lcp_punt_process_with_default (vm, b, lcp_legacy_action (trap_id));
+      switch (action_result.disposition)
+        {
+        case LCP_DISPOSITION_DROP:
+          next = LCP_L2_NONIP_PUNT_NEXT_DROP;
+          break;
+        case LCP_DISPOSITION_FORWARD:
+          next = original_next;
+          break;
+        case LCP_DISPOSITION_COPY:
+          next = original_next;
+          /* The CPU copy carries the trap id; the original must
+           * continue through the feature arc (ACL, DAI, l2-flood)
+           * without a stale punt marker. */
+          lcp_buffer_mark_copp_processed (b);
+          break;
+        case LCP_DISPOSITION_TRAP:
+          next = LCP_L2_NONIP_PUNT_NEXT_PUNT;
+          break;
+        }
+      if (action_result.cpu_bi != LCP_PUNT_BUFFER_INVALID)
+        copies[(*n_copies)++] = action_result.cpu_bi;
+    }
+
+  if (PREDICT_FALSE (b->flags & VLIB_BUFFER_IS_TRACED))
+    {
+      lcp_producer_trace_t *t = vlib_add_trace (vm, node, b, sizeof (*t));
+
+      t->sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
+      t->trap_id = trap_id;
+      t->rule_id = result.evidence_rule_id;
+      t->context =
+        view.context ? view.context : LCP_MATCH_CTX_L2_DIRECT;
+      t->metadata_source = 0;
+      t->llc_dsap = view.llc_dsap;
+      t->llc_ssap = view.llc_ssap;
+      t->llc_control = view.llc_control;
+      t->osi_protocol = view.osi_protocol;
+      t->isis_pdu_type = view.isis_pdu_type;
+      t->valid_fields = view.valid_fields;
+    }
+
+  return next;
+}
+
 VLIB_NODE_FN (lcp_l2_nonip_punt_node) (vlib_main_t *vm,
               vlib_node_runtime_t *node,
               vlib_frame_t *frame)
@@ -928,105 +1025,86 @@ VLIB_NODE_FN (lcp_l2_nonip_punt_node) (vlib_main_t *vm,
       u32 *to_next, n_left_to_next;
 
       vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
+
+      while (n_left >= 8 && n_left_to_next >= 4)
+        {
+          u32 bi0, bi1, bi2, bi3;
+          vlib_buffer_t *b0, *b1, *b2, *b3;
+          u32 next0, next1, next2, next3;
+
+          /* Prefetch the next quad of buffer headers. */
+          vlib_prefetch_buffer_header (vlib_get_buffer (vm, from[4]), LOAD);
+          vlib_prefetch_buffer_header (vlib_get_buffer (vm, from[5]), LOAD);
+          vlib_prefetch_buffer_header (vlib_get_buffer (vm, from[6]), LOAD);
+          vlib_prefetch_buffer_header (vlib_get_buffer (vm, from[7]), LOAD);
+
+          bi0 = to_next[0] = from[0];
+          bi1 = to_next[1] = from[1];
+          bi2 = to_next[2] = from[2];
+          bi3 = to_next[3] = from[3];
+
+          b0 = vlib_get_buffer (vm, bi0);
+          b1 = vlib_get_buffer (vm, bi1);
+          b2 = vlib_get_buffer (vm, bi2);
+          b3 = vlib_get_buffer (vm, bi3);
+
+          next0 = lcp_l2_nonip_punt_buffer (vm, node, b0, copies, &n_copies);
+          next1 = lcp_l2_nonip_punt_buffer (vm, node, b1, copies, &n_copies);
+          next2 = lcp_l2_nonip_punt_buffer (vm, node, b2, copies, &n_copies);
+          next3 = lcp_l2_nonip_punt_buffer (vm, node, b3, copies, &n_copies);
+
+          from += 4;
+          to_next += 4;
+          n_left -= 4;
+          n_left_to_next -= 4;
+
+          vlib_validate_buffer_enqueue_x4 (vm, node, next_index, to_next,
+                                           n_left_to_next, bi0, bi1, bi2,
+                                           bi3, next0, next1, next2, next3);
+        }
+
+      while (n_left >= 4 && n_left_to_next >= 2)
+        {
+          u32 bi0, bi1;
+          vlib_buffer_t *b0, *b1;
+          u32 next0, next1;
+
+          /* Prefetch the next pair of buffer headers. */
+          vlib_prefetch_buffer_header (vlib_get_buffer (vm, from[2]), LOAD);
+          vlib_prefetch_buffer_header (vlib_get_buffer (vm, from[3]), LOAD);
+
+          bi0 = to_next[0] = from[0];
+          bi1 = to_next[1] = from[1];
+
+          b0 = vlib_get_buffer (vm, bi0);
+          b1 = vlib_get_buffer (vm, bi1);
+
+          next0 = lcp_l2_nonip_punt_buffer (vm, node, b0, copies, &n_copies);
+          next1 = lcp_l2_nonip_punt_buffer (vm, node, b1, copies, &n_copies);
+
+          from += 2;
+          to_next += 2;
+          n_left -= 2;
+          n_left_to_next -= 2;
+
+          vlib_validate_buffer_enqueue_x2 (vm, node, next_index, to_next,
+                                           n_left_to_next, bi0, bi1, next0, next1);
+        }
+
       while (n_left && n_left_to_next)
-       {
-         u32 bi = from[0], next, original_next;
-         vlib_buffer_t *b = vlib_get_buffer (vm, bi);
-         lcp_action_result_t action_result;
-         lcp_packet_view_t view = { 0 };
-         lcp_match_result_t result = { 0 };
-         vl_api_lcp_trap_type_t trap_id = LCP_TRAP_INVALID;
+        {
+          u32 bi0 = to_next[0] = from[0];
+          vlib_buffer_t *b0 = vlib_get_buffer (vm, bi0);
+          u32 next0 =
+            lcp_l2_nonip_punt_buffer (vm, node, b0, copies, &n_copies);
 
-         vnet_feature_next (&original_next, b);
-         next = original_next;
-
-         vnet_buffer2 (b)->trap_id = LCP_TRAP_INVALID;
-
-         u32 l2_len = vnet_buffer (b)->l2.l2_len;
-
-         if (l2_len < b->current_length)
-           {
-             const u8 *current = vlib_buffer_get_current (b);
-             u16 ethertype =
-               clib_net_to_host_u16 (*(u16 *) (current + l2_len - 2));
-
-             if (ethertype == ETHERNET_TYPE_ARP)
-               {
-                 /* Classify ARP by opcode; the L2_DIRECT rules do not
-                  * cover ARP. */
-                 if (b->current_length - l2_len >=
-                     sizeof (ethernet_arp_header_t))
-                   {
-                     const ethernet_arp_header_t *arp =
-                       (const void *) (current + l2_len);
-                     u16 opcode = clib_net_to_host_u16 (arp->opcode);
-
-                     if (opcode == ETHERNET_ARP_OPCODE_request)
-                       trap_id = LCP_TRAP_ARP_REQUEST;
-                     else if (opcode == ETHERNET_ARP_OPCODE_reply)
-                       trap_id = LCP_TRAP_ARP_RESPONSE;
-                   }
-               }
-             else if (lcp_packet_parse (vm, b, LCP_MATCH_CTX_L2_DIRECT, NULL,
-                                        &view) &&
-                      lcp_match_select (&view, &result))
-               trap_id = result.trap_type;
-           }
-
-         if (trap_id != LCP_TRAP_INVALID &&
-             lcp_buffer_set_trap_id (b, trap_id))
-           {
-             action_result =
-               lcp_punt_process_with_default (vm, b,
-                                              lcp_legacy_action (trap_id));
-             switch (action_result.disposition)
-               {
-               case LCP_DISPOSITION_DROP:
-                 next = LCP_L2_NONIP_PUNT_NEXT_DROP;
-                 break;
-               case LCP_DISPOSITION_FORWARD:
-                 next = original_next;
-                 break;
-               case LCP_DISPOSITION_COPY:
-                 next = original_next;
-                 /* The CPU copy carries the trap id; the original must
-                  * continue through the feature arc (ACL, DAI, l2-flood)
-                  * without a stale punt marker. */
-                 lcp_buffer_mark_copp_processed (b);
-                 break;
-               case LCP_DISPOSITION_TRAP:
-                 next = LCP_L2_NONIP_PUNT_NEXT_PUNT;
-                 break;
-               }
-             if (action_result.cpu_bi != LCP_PUNT_BUFFER_INVALID)
-               copies[n_copies++] = action_result.cpu_bi;
-           }
-
-         if (PREDICT_FALSE (b->flags & VLIB_BUFFER_IS_TRACED))
-           {
-             lcp_producer_trace_t *t =
-               vlib_add_trace (vm, node, b, sizeof (*t));
-
-             t->sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
-             t->trap_id = trap_id;
-             t->rule_id = result.evidence_rule_id;
-             t->context = LCP_MATCH_CTX_L2_DIRECT;
-             t->metadata_source = 0;
-             t->llc_dsap = view.llc_dsap;
-             t->llc_ssap = view.llc_ssap;
-             t->llc_control = view.llc_control;
-             t->osi_protocol = view.osi_protocol;
-             t->isis_pdu_type = view.isis_pdu_type;
-             t->valid_fields = view.valid_fields;
-           }
-         to_next[0] = bi;
-         from++;
-         to_next++;
-         n_left--;
-         n_left_to_next--;
-         vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
-                                          n_left_to_next, bi, next);
-       }
+          from++;
+          to_next++;
+          n_left--;
+          n_left_to_next--;
+          vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
+                                           n_left_to_next, bi0, next0);
+        }
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
     }
 
