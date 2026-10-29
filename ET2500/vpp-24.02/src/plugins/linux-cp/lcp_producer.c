@@ -7,6 +7,7 @@
 #include <vnet/ip/ip4_packet.h>
 #include <vnet/ip/reass/ip4_sv_reass.h>
 #include <vnet/ip/reass/ip6_sv_reass.h>
+#include <vnet/arp/arp.h>
 #include <vnet/llc/llc.h>
 #include <vnet/l2/l2_fib.h>
 #include <vnet/osi/osi.h>
@@ -881,6 +882,177 @@ VLIB_REGISTER_NODE (lcp_l2_producer_node) = {
     foreach_lcp_l2_feature_next
 #undef _
   },
+};
+
+#define foreach_lcp_l2_nonip_punt_next                                   \
+  _ (DROP, "error-drop")                                                \
+  _ (PUNT, "linux-cp-l2-delivery")
+
+typedef enum
+{
+#define _(sym, node) LCP_L2_NONIP_PUNT_NEXT_##sym,
+  foreach_lcp_l2_nonip_punt_next
+#undef _
+  LCP_L2_NONIP_PUNT_N_NEXT,
+} lcp_l2_nonip_punt_next_t;
+
+/*
+ * CoPP producer for non-IP traffic on the l2-input-nonip feature arc.
+ *
+ * The arc carries every non-IP frame received on bridge-domain ports
+ * (ARP, tagged LLDP, LACP, PTP, EAPOL, STP, ...).  Untagged LLDP/BPDU are
+ * diverted to the direct adapters at ethernet-input and never land here.
+ *
+ * Link-local control protocols are classified through the L2_DIRECT rules
+ * and are TRAPped to Linux by default.  ARP is classified by opcode into
+ * ARP_REQUEST/ARP_RESPONSE whose default CoPP action is COPY: a copy is
+ * delivered to Linux while the original keeps walking the feature arc
+ * (ACL, DAI, l2-flood) untouched.
+ *
+ * This node is ordered before acl-plugin-in-sai-nonip-l2 so that control
+ * protocols reach the CPU even when an ACL bound to the port would drop
+ * them.
+ */
+VLIB_NODE_FN (lcp_l2_nonip_punt_node) (vlib_main_t *vm,
+              vlib_node_runtime_t *node,
+              vlib_frame_t *frame)
+{
+  u32 *from = vlib_frame_vector_args (frame);
+  u32 n_left = frame->n_vectors;
+  u32 next_index = node->cached_next_index;
+  u32 copies[VLIB_FRAME_SIZE];
+  u32 n_copies = 0;
+
+  while (n_left)
+    {
+      u32 *to_next, n_left_to_next;
+
+      vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
+      while (n_left && n_left_to_next)
+       {
+         u32 bi = from[0], next, original_next;
+         vlib_buffer_t *b = vlib_get_buffer (vm, bi);
+         lcp_action_result_t action_result;
+         lcp_packet_view_t view = { 0 };
+         lcp_match_result_t result = { 0 };
+         vl_api_lcp_trap_type_t trap_id = LCP_TRAP_INVALID;
+
+         vnet_feature_next (&original_next, b);
+         next = original_next;
+
+         vnet_buffer2 (b)->trap_id = LCP_TRAP_INVALID;
+
+         u32 l2_len = vnet_buffer (b)->l2.l2_len;
+
+         if (l2_len < b->current_length)
+           {
+             const u8 *current = vlib_buffer_get_current (b);
+             u16 ethertype =
+               clib_net_to_host_u16 (*(u16 *) (current + l2_len - 2));
+
+             if (ethertype == ETHERNET_TYPE_ARP)
+               {
+                 /* Classify ARP by opcode; the L2_DIRECT rules do not
+                  * cover ARP. */
+                 if (b->current_length - l2_len >=
+                     sizeof (ethernet_arp_header_t))
+                   {
+                     const ethernet_arp_header_t *arp =
+                       (const void *) (current + l2_len);
+                     u16 opcode = clib_net_to_host_u16 (arp->opcode);
+
+                     if (opcode == ETHERNET_ARP_OPCODE_request)
+                       trap_id = LCP_TRAP_ARP_REQUEST;
+                     else if (opcode == ETHERNET_ARP_OPCODE_reply)
+                       trap_id = LCP_TRAP_ARP_RESPONSE;
+                   }
+               }
+             else if (lcp_packet_parse (vm, b, LCP_MATCH_CTX_L2_DIRECT, NULL,
+                                        &view) &&
+                      lcp_match_select (&view, &result))
+               trap_id = result.trap_type;
+           }
+
+         if (trap_id != LCP_TRAP_INVALID &&
+             lcp_buffer_set_trap_id (b, trap_id))
+           {
+             action_result =
+               lcp_punt_process_with_default (vm, b,
+                                              lcp_legacy_action (trap_id));
+             switch (action_result.disposition)
+               {
+               case LCP_DISPOSITION_DROP:
+                 next = LCP_L2_NONIP_PUNT_NEXT_DROP;
+                 break;
+               case LCP_DISPOSITION_FORWARD:
+                 next = original_next;
+                 break;
+               case LCP_DISPOSITION_COPY:
+                 next = original_next;
+                 /* The CPU copy carries the trap id; the original must
+                  * continue through the feature arc (ACL, DAI, l2-flood)
+                  * without a stale punt marker. */
+                 lcp_buffer_mark_copp_processed (b);
+                 break;
+               case LCP_DISPOSITION_TRAP:
+                 next = LCP_L2_NONIP_PUNT_NEXT_PUNT;
+                 break;
+               }
+             if (action_result.cpu_bi != LCP_PUNT_BUFFER_INVALID)
+               copies[n_copies++] = action_result.cpu_bi;
+           }
+
+         if (PREDICT_FALSE (b->flags & VLIB_BUFFER_IS_TRACED))
+           {
+             lcp_producer_trace_t *t =
+               vlib_add_trace (vm, node, b, sizeof (*t));
+
+             t->sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
+             t->trap_id = trap_id;
+             t->rule_id = result.evidence_rule_id;
+             t->context = LCP_MATCH_CTX_L2_DIRECT;
+             t->metadata_source = 0;
+             t->llc_dsap = view.llc_dsap;
+             t->llc_ssap = view.llc_ssap;
+             t->llc_control = view.llc_control;
+             t->osi_protocol = view.osi_protocol;
+             t->isis_pdu_type = view.isis_pdu_type;
+             t->valid_fields = view.valid_fields;
+           }
+         to_next[0] = bi;
+         from++;
+         to_next++;
+         n_left--;
+         n_left_to_next--;
+         vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
+                                          n_left_to_next, bi, next);
+       }
+      vlib_put_next_frame (vm, node, next_index, n_left_to_next);
+    }
+
+  if (n_copies)
+    vlib_buffer_enqueue_to_single_next (vm, node, copies,
+                                       LCP_L2_NONIP_PUNT_NEXT_PUNT, n_copies);
+  return frame->n_vectors;
+}
+
+VLIB_REGISTER_NODE (lcp_l2_nonip_punt_node) = {
+  .name = "linux-cp-l2-nonip-punt",
+  .vector_size = sizeof (u32),
+  .format_trace = format_lcp_producer_trace,
+  .type = VLIB_NODE_TYPE_INTERNAL,
+  .n_next_nodes = LCP_L2_NONIP_PUNT_N_NEXT,
+  .next_nodes = {
+#define _(sym, node) [LCP_L2_NONIP_PUNT_NEXT_##sym] = node,
+    foreach_lcp_l2_nonip_punt_next
+#undef _
+  },
+};
+
+VNET_FEATURE_INIT (lcp_l2_nonip_punt_feat, static) = {
+  .arc_name = "l2-input-nonip",
+  .node_name = "linux-cp-l2-nonip-punt",
+  .runs_before = VNET_FEATURES ("acl-plugin-in-sai-nonip-l2"),
 };
 
 VLIB_REGISTER_NODE (lcp_l2_direct_adapter_node) = {
