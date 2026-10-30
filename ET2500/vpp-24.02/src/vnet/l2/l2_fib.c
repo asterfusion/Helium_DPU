@@ -931,11 +931,21 @@ l2fib_flush_int_mac (vlib_main_t * vm, u32 sw_if_index)
 /**
     Flush all non static MACs in a bridge domain
 */
+static void
+l2fib_invalidate_bd_mac_entries (u32 bd_index)
+{
+  l2_bridge_domain_t *bd_config = l2input_bd_config (bd_index);
+
+  bd_config->seq_num += 1;
+
+  /* New learns must use the same BD sequence number as the age scanner. */
+  bd_input_walk (bd_index, l2input_recache, NULL);
+}
+
 void
 l2fib_flush_bd_mac (vlib_main_t * vm, u32 bd_index)
 {
-  l2_bridge_domain_t *bd_config = l2input_bd_config (bd_index);
-  bd_config->seq_num += 1;
+  l2fib_invalidate_bd_mac_entries (bd_index);
   l2fib_start_ager_scan (vm);
 }
 
@@ -945,10 +955,16 @@ l2fib_flush_bd_mac (vlib_main_t * vm, u32 bd_index)
 void
 l2fib_flush_all_mac (vlib_main_t * vm)
 {
-  l2_bridge_domain_t *bd_config;
-  vec_foreach (bd_config, l2input_main.bd_configs)
-    if (bd_is_valid (bd_config))
-    bd_config->seq_num += 1;
+  u32 bd_index;
+
+  vec_foreach_index (bd_index, l2input_main.bd_configs)
+    {
+      l2_bridge_domain_t *bd_config =
+        vec_elt_at_index (l2input_main.bd_configs, bd_index);
+
+      if (bd_is_valid (bd_config))
+        l2fib_invalidate_bd_mac_entries (bd_index);
+    }
 
   l2fib_start_ager_scan (vm);
 }
