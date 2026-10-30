@@ -1516,6 +1516,7 @@ cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
   u8 flag = is_inside ? CGNAT_INTERFACE_FLAG_IS_INSIDE :
 				CGNAT_INTERFACE_FLAG_IS_OUTSIDE;
   char *feature_name = is_inside ? "cgnat-in2out-policy" : "cgnat-out2in";
+  u8 enabled = clib_atomic_load_relax_n (&cm->enabled);
   int rv;
 
   if (pool_is_free_index (cm->vnet_main->interface_main.sw_interfaces,
@@ -1532,12 +1533,13 @@ cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
       /* CGNAT needs fragments reassembled before the policy node; enable
        * shallow virtual reassembly on the interface (refcounted, shared
        * with other consumers such as nat44). */
-      rv = ip4_sv_reass_enable_disable_with_refcnt (sw_if_index, 1);
+      rv = enabled ?
+	ip4_sv_reass_enable_disable_with_refcnt (sw_if_index, 1) : 0;
       if (rv)
 	return rv;
 
-      rv = vnet_feature_enable_disable ("ip4-unicast", feature_name,
-					sw_if_index, 1, 0, 0);
+      rv = enabled ? vnet_feature_enable_disable ("ip4-unicast", feature_name,
+						sw_if_index, 1, 0, 0) : 0;
       if (rv)
 	{
 	  ip4_sv_reass_enable_disable_with_refcnt (sw_if_index, 0);
@@ -1580,7 +1582,7 @@ cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
 
       /* Make VPP answer ARP for all pool public IPs and static mapping
        * outside IPs on this outside interface. */
-      if (!is_inside)
+      if (enabled && !is_inside)
 	{
 	  cgnat_add_all_pool_fib_entries_for_sw_if (cm, sw_if_index);
 	  cgnat_add_static_fib_entries_for_sw_if (cm, sw_if_index);
@@ -1591,15 +1593,16 @@ cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
       if (!match || !(match->flags & flag))
 	return VNET_API_ERROR_NO_SUCH_ENTRY;
 
-      rv = vnet_feature_enable_disable ("ip4-unicast", feature_name,
-					sw_if_index, 0, 0, 0);
+      rv = enabled ? vnet_feature_enable_disable ("ip4-unicast", feature_name,
+						sw_if_index, 0, 0, 0) : 0;
       if (rv)
 	return rv;
 
-      ip4_sv_reass_enable_disable_with_refcnt (sw_if_index, 0);
+      if (enabled)
+	ip4_sv_reass_enable_disable_with_refcnt (sw_if_index, 0);
 
       /* Remove local receive entries before clearing the outside flag. */
-      if (!is_inside)
+      if (enabled && !is_inside)
 	{
 	  cgnat_del_all_pool_fib_entries_for_sw_if (cm, sw_if_index);
 	  cgnat_del_static_fib_entries_for_sw_if (cm, sw_if_index);
