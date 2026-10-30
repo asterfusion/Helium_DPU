@@ -79,6 +79,107 @@ vl_api_lcp_pppoe_add_del_session_t_handler (
 }
 
 static void
+vl_api_lcp_pppoe_update_client_ip6_t_handler (
+  vl_api_lcp_pppoe_update_client_ip6_t *mp)
+{
+  vl_api_lcp_pppoe_update_client_ip6_reply_t *rmp;
+  ip46_address_t client_ip6 = { };
+  int rv;
+
+  clib_memcpy (&client_ip6.ip6, mp->client_ip6, 16);
+  rv = lcp_pppoe_update_client_ip6 (
+    ntohl (mp->sw_if_index), &client_ip6,
+    ntohl (mp->client_table_id6), mp->is_add);
+
+  REPLY_MACRO (VL_API_LCP_PPPOE_UPDATE_CLIENT_IP6_REPLY);
+}
+
+static void
+vl_api_lcp_pppoe_update_client_ip4_t_handler (
+  vl_api_lcp_pppoe_update_client_ip4_t *mp)
+{
+  vl_api_lcp_pppoe_update_client_ip4_reply_t *rmp;
+  ip46_address_t client_ip = { };
+  int rv;
+
+  clib_memcpy (&client_ip.ip4, mp->client_ip, 4);
+  rv = lcp_pppoe_update_client_ip4 (
+    ntohl (mp->sw_if_index), &client_ip,
+    ntohl (mp->client_table_id), mp->is_add);
+
+  REPLY_MACRO (VL_API_LCP_PPPOE_UPDATE_CLIENT_IP4_REPLY);
+}
+
+static void
+vl_api_lcp_pppoe_stats_query_batch_t_handler (
+  vl_api_lcp_pppoe_stats_query_batch_t *mp)
+{
+  vl_api_lcp_pppoe_stats_query_batch_reply_t *rmp;
+  pppoe_main_t *pem = &pppoe_main;
+  vnet_main_t *vnm = vnet_get_main ();
+  vlib_main_t *vm = vlib_get_main ();
+  u32 count = ntohl (mp->count);
+  u32 i;
+  int rv = 0;
+
+  if (count == 0 || count > 256)
+    {
+      REPLY_MACRO3 (VL_API_LCP_PPPOE_STATS_QUERY_BATCH_REPLY, 0,
+      ({
+        rmp->retval = htonl (VNET_API_ERROR_INVALID_VALUE);
+        rmp->count = htonl (0);
+      }));
+      return;
+    }
+
+  if (mp->synchronize_workers)
+    vlib_worker_thread_barrier_sync (vm);
+
+  /* *INDENT-OFF* */
+  REPLY_MACRO3 (VL_API_LCP_PPPOE_STATS_QUERY_BATCH_REPLY,
+    count * sizeof (vl_api_lcp_pppoe_stats_result_t),
+  ({
+    rmp->retval = htonl (rv);
+    rmp->count = htonl (count);
+    for (i = 0; i < count; i++)
+      {
+        u32 sw_if_index = ntohl (mp->sw_if_indices[i]);
+        u32 session_index = ~0;
+        vlib_counter_t rx = { 0, 0 }, tx = { 0, 0 };
+        i32 item_rv = 0;
+
+        if (sw_if_index < vec_len (pem->session_index_by_sw_if_index))
+          session_index = pem->session_index_by_sw_if_index[sw_if_index];
+
+        if (session_index == ~0 ||
+            pool_is_free_index (pem->sessions, session_index))
+          item_rv = VNET_API_ERROR_NO_SUCH_ENTRY;
+        else
+          {
+            vlib_get_combined_counter (
+              &vnm->interface_main.combined_sw_if_counters
+                [VNET_INTERFACE_COUNTER_RX],
+              sw_if_index, &rx);
+            vlib_get_combined_counter (
+              &vnm->interface_main.combined_sw_if_counters
+                [VNET_INTERFACE_COUNTER_TX],
+              sw_if_index, &tx);
+          }
+
+        rmp->results[i].retval = htonl (item_rv);
+        rmp->results[i].rx_packets = clib_host_to_net_u64 (rx.packets);
+        rmp->results[i].rx_bytes = clib_host_to_net_u64 (rx.bytes);
+        rmp->results[i].tx_packets = clib_host_to_net_u64 (tx.packets);
+        rmp->results[i].tx_bytes = clib_host_to_net_u64 (tx.bytes);
+      }
+  }));
+  /* *INDENT-ON* */
+
+  if (mp->synchronize_workers)
+    vlib_worker_thread_barrier_release (vm);
+}
+
+static void
 vl_api_lcp_pppoe_bulk_add_del_sessions_t_handler (
   vl_api_lcp_pppoe_bulk_add_del_sessions_t *mp)
 {
