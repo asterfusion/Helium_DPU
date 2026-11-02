@@ -449,6 +449,121 @@ nat_ed_alloc_addr_and_port (snat_main_t *sm, u32 rx_fib_index,
   return 1;
 }
 
+static int
+nat_ed_unknown_proto_try_addr (snat_main_t *sm, snat_address_t *a,
+			       ip4_address_t d_addr, u32 tx_fib_index,
+			       u8 proto, ip4_address_t *outside_addr)
+{
+  clib_bihash_kv_16_8_t s_kv, s_value;
+
+  init_ed_k (&s_kv, d_addr.as_u32, 0, a->addr.as_u32, 0, tx_fib_index,
+	     proto);
+  if (clib_bihash_search_16_8 (&sm->flow_hash, &s_kv, &s_value))
+    {
+      *outside_addr = a->addr;
+      return 0;
+    }
+
+  return 1;
+}
+
+static int
+nat_ed_alloc_addr_unknown_proto (snat_main_t *sm, u32 rx_fib_index,
+				 u32 tx_sw_if_index, u32 tx_fib_index,
+				 ip4_address_t s_addr, ip4_address_t d_addr,
+				 ip4_address_t o2i_s_addr, u8 proto,
+				 ip4_address_t *outside_addr,
+				 vlib_buffer_t *b)
+{
+  u32 address_count = vec_len (sm->addresses);
+  u32 s_addr_offset = 0;
+  u32 rank_count, rank, j;
+  bool use_acl = (b->flags & VLIB_BUFFER_ACL_INDEX_VALID) && b->acl_index;
+  bool is_tap = false;
+
+  if (address_count == 0)
+    return 1;
+
+  if (!use_acl)
+    {
+      s_addr_offset = (s_addr.as_u32 + (s_addr.as_u32 >> 8) +
+		       (s_addr.as_u32 >> 16) + (s_addr.as_u32 >> 24)) %
+		      address_count;
+      if (tx_sw_if_index != ~0)
+	{
+	  vnet_main_t *vnm = vnet_get_main ();
+	  int sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
+	  const vnet_hw_interface_t *hw =
+	    vnet_get_sup_hw_interface (vnm, sw_if_index);
+	  is_tap = hw && strncmp ((const char *) hw->name, "tap", 3) == 0;
+	}
+    }
+
+  rank_count = tx_sw_if_index != ~0 ? (use_acl ? 5 : 4) : 3;
+  for (rank = 0; rank < rank_count; rank++)
+    {
+      bool forward = rank == 0 ||
+		     (tx_sw_if_index != ~0 && use_acl && rank == 2);
+      for (j = 0; j < address_count; j++)
+	{
+	  u32 i = forward ? (s_addr_offset + j) % address_count :
+			    (s_addr_offset + address_count - 1 - j) %
+			      address_count;
+	  snat_address_t *a = sm->addresses + i;
+	  bool exact_acl = use_acl && a->acl_index == b->acl_index;
+	  bool fib_match, sw_match, net_match;
+	  u32 address_rank;
+
+	  if (use_acl)
+	    {
+	      if (!exact_acl && a->acl_index != ~0)
+		continue;
+	    }
+	  else if (a->acl_index != ~0 && !is_tap)
+	    continue;
+
+	  fib_match = a->fib_index == rx_fib_index;
+	  if (!fib_match && a->fib_index != ~0)
+	    continue;
+	  if (rank == 0 && tx_sw_if_index != ~0 && fib_match &&
+	      PREDICT_FALSE (a->addr_len == ~0))
+	    nat44_ed_update_outside_if_addresses (a);
+
+	  sw_match = tx_sw_if_index == ~0 || a->sw_if_index == tx_sw_if_index;
+	  net_match = a->addr_len != ~0 &&
+		      a->net.as_u32 ==
+			(d_addr.as_u32 & ip4_main.fib_masks[a->addr_len]);
+
+	  if (tx_sw_if_index == ~0)
+	    address_rank = fib_match ? (net_match ? 0 : 1) : 2;
+	  else if (use_acl)
+	    {
+	      if (fib_match && sw_match && exact_acl)
+		address_rank = net_match ? 0 : 1;
+	      else if (fib_match && sw_match)
+		address_rank = 2;
+	      else
+		address_rank = fib_match ? 3 : 4;
+	    }
+	  else
+	    {
+	      if (fib_match && sw_match)
+		address_rank = net_match ? 0 : 1;
+	      else
+		address_rank = fib_match ? 2 : 3;
+	    }
+
+	  if (rank != address_rank)
+	    continue;
+	  if (!nat_ed_unknown_proto_try_addr (sm, a, o2i_s_addr, tx_fib_index,
+					      proto, outside_addr))
+	    return 0;
+	}
+    }
+
+  return 1;
+}
+
 static_always_inline int
 nat44_ed_external_sm_lookup (snat_main_t *sm, ip4_address_t match_addr,
 			     u16 match_port, ip_protocol_t match_protocol,
@@ -1105,16 +1220,13 @@ out:
 static snat_session_t *
 nat44_ed_in2out_slowpath_unknown_proto (snat_main_t *sm, vlib_buffer_t *b,
 					ip4_header_t *ip, u32 rx_fib_index,
-					u32 thread_index, f64 now,
-					vlib_main_t *vm,
+					u32 tx_sw_if_index, u32 thread_index,
+					f64 now, vlib_main_t *vm,
 					vlib_node_runtime_t *node)
 {
-  clib_bihash_kv_16_8_t s_kv, s_value;
   snat_static_mapping_t *m = NULL;
-  snat_main_per_thread_data_t *tsm = &sm->per_thread_data[thread_index];
   snat_session_t *s = NULL;
   u32 tx_fib_index;
-  int i;
   ip4_address_t new_src_addr = { 0 };
   ip4_address_t new_dst_addr = ip->dst_address;
 
@@ -1130,6 +1242,10 @@ nat44_ed_in2out_slowpath_unknown_proto (snat_main_t *sm, vlib_buffer_t *b,
 
   tx_fib_index = get_tx_fib_index (rx_fib_index, ip->dst_address);
 
+  // hairpinning?
+  int is_hairpinning = nat44_ed_external_sm_lookup (
+    sm, ip->dst_address, 0, ip->protocol, &new_dst_addr, NULL);
+
   // Try to find static mapping first
   m = nat44_ed_sm_i2o_lookup (sm, ip->src_address, 0, rx_fib_index,
 			      ip->protocol);
@@ -1139,34 +1255,9 @@ nat44_ed_in2out_slowpath_unknown_proto (snat_main_t *sm, vlib_buffer_t *b,
     }
   else
     {
-      pool_foreach (s, tsm->sessions)
-	{
-	  if (s->ext_host_addr.as_u32 == ip->dst_address.as_u32)
-	    {
-	      init_ed_k (&s_kv, s->out2in.addr.as_u32, 0,
-			 ip->dst_address.as_u32, 0, tx_fib_index,
-			 ip->protocol);
-	      if (clib_bihash_search_16_8 (&sm->flow_hash, &s_kv, &s_value))
-		{
-		  new_src_addr = s->out2in.addr;
-		}
-	      break;
-	    }
-	}
-
-      if (!new_src_addr.as_u32)
-	{
-	  for (i = 0; i < vec_len (sm->addresses); i++)
-	    {
-	      init_ed_k (&s_kv, sm->addresses[i].addr.as_u32, 0,
-			 ip->dst_address.as_u32, 0, tx_fib_index,
-			 ip->protocol);
-	      if (clib_bihash_search_16_8 (&sm->flow_hash, &s_kv, &s_value))
-		{
-		  new_src_addr = sm->addresses[i].addr;
-		}
-	    }
-	}
+      nat_ed_alloc_addr_unknown_proto (
+	sm, rx_fib_index, tx_sw_if_index, tx_fib_index, ip->src_address,
+	ip->dst_address, new_dst_addr, ip->protocol, &new_src_addr, b);
     }
 
   if (!new_src_addr.as_u32)
@@ -1188,9 +1279,6 @@ nat44_ed_in2out_slowpath_unknown_proto (snat_main_t *sm, vlib_buffer_t *b,
   nat_6t_flow_saddr_rewrite_set (&s->i2o, new_src_addr.as_u32);
   nat_6t_flow_txfib_rewrite_set (&s->i2o, tx_fib_index);
 
-  // hairpinning?
-  int is_hairpinning = nat44_ed_external_sm_lookup (
-    sm, ip->dst_address, 0, ip->protocol, &new_dst_addr, NULL);
   s->flags |= is_hairpinning * SNAT_SESSION_FLAG_HAIRPINNING;
 
   nat_6t_flow_daddr_rewrite_set (&s->i2o, new_dst_addr.as_u32);
@@ -1642,7 +1730,8 @@ nat44_ed_in2out_slow_path_node_fn_inline (vlib_main_t *vm,
       if (PREDICT_FALSE (nat44_ed_is_unk_proto (proto0)))
 	{
 	  s0 = nat44_ed_in2out_slowpath_unknown_proto (
-	    sm, b0, ip0, rx_fib_index0, thread_index, now, vm, node);
+	    sm, b0, ip0, rx_fib_index0, tx_sw_if_index0, thread_index, now, vm,
+	    node);
 	  if (!s0)
 	    next[0] = NAT_NEXT_DROP;
 

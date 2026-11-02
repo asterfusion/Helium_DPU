@@ -3211,6 +3211,227 @@ class TestNAT44EDMW(TestNAT44ED):
             self.logger.error(ppp("Unexpected or invalid packet:", packet))
             raise
 
+    def _unknown_proto_acl_enable(self):
+        mask = b"\x00" * 9 + b"\xff" + b"\x00" * 6
+        match = b"\x00" * 9 + b"\x2f" + b"\x00" * 6
+        r = self.vapi.classify_add_del_table(
+            is_add=1,
+            mask=mask,
+            mask_len=len(mask),
+            match_n_vectors=1,
+            miss_next_index=0,
+            current_data_flag=1,
+            current_data_offset=0,
+            next_table_index=0xFFFFFFFF,
+        )
+        table_index = r.new_table_index
+        self.vapi.classify_add_del_session(
+            is_add=1,
+            table_index=table_index,
+            match=match,
+            match_len=len(match),
+            hit_next_index=1,
+            opaque_index=0,
+            advance=0,
+            action=0,
+            metadata=0,
+        )
+        self.vapi.input_acl_set_interface(
+            1, self.pg0.sw_if_index, ip4_table_index=table_index
+        )
+        return table_index
+
+    def _unknown_proto_acl_disable(self, table_index):
+        mask = b"\x00" * 9 + b"\xff" + b"\x00" * 6
+        match = b"\x00" * 9 + b"\x2f" + b"\x00" * 6
+        self.vapi.input_acl_set_interface(
+            0, self.pg0.sw_if_index, ip4_table_index=table_index
+        )
+        self.vapi.classify_add_del_session(
+            is_add=0,
+            table_index=table_index,
+            match=match,
+            match_len=len(match),
+        )
+        self.vapi.classify_add_del_table(
+            is_add=0,
+            table_index=table_index,
+            mask=mask,
+            mask_len=len(mask),
+            match_n_vectors=1,
+        )
+
+    def test_output_feature_unknown_proto(self):
+        """NAT44ED output feature selects TX interface address for unknown proto"""
+        self.vapi.nat44_forwarding_enable_disable(enable=1)
+        self.nat_add_interface_address(self.pg1)
+        self.nat_add_interface_address(self.pg0)
+        self.nat_add_outside_interface(self.pg0)
+        self.vapi.nat44_ed_add_del_output_interface(
+            sw_if_index=self.pg1.sw_if_index, is_add=1
+        )
+
+        p = (
+            Ether(dst=self.pg0.local_mac, src=self.pg0.remote_mac)
+            / IP(src=self.pg0.remote_ip4, dst=self.pg1.remote_ip4)
+            / GRE()
+        )
+        packet = self.send_and_expect(self.pg0, [p], self.pg1)[0]
+        self.assertEqual(packet[IP].src, self.pg1.local_ip4)
+        self.assertEqual(packet[IP].dst, self.pg1.remote_ip4)
+        self.assertEqual(packet.haslayer(GRE), 1)
+        self.assert_packet_checksums_valid(packet)
+
+    def test_output_feature_unknown_proto_address_collision(self):
+        """NAT44ED unknown proto tries the next fallback address on collision"""
+        self.vapi.nat44_forwarding_enable_disable(enable=1)
+        self.nat_add_outside_interface(self.pg0)
+        self.vapi.nat44_ed_add_del_output_interface(
+            sw_if_index=self.pg1.sw_if_index, is_add=1
+        )
+        nat_addrs = ["10.0.30.1", "10.0.30.2"]
+        for addr in nat_addrs:
+            self.vapi.sw_interface_add_del_address(
+                sw_if_index=self.pg1.sw_if_index, prefix=f"{addr}/32"
+            )
+            self.nat_add_address(addr, vrf_id=0)
+
+        hosts = [self.pg0.remote_hosts[0], self.pg0.remote_hosts[2]]
+        translated = []
+        for host in hosts:
+            p = (
+                Ether(dst=self.pg0.local_mac, src=host.mac)
+                / IP(src=host.ip4, dst=self.pg1.remote_ip4)
+                / GRE()
+            )
+            packet = self.send_and_expect(self.pg0, [p], self.pg1)[0]
+            self.assertIn(packet[IP].src, nat_addrs)
+            translated.append(packet[IP].src)
+        self.assertNotEqual(translated[0], translated[1])
+
+        for host, outside_addr in zip(hosts, translated):
+            p = (
+                Ether(dst=self.pg1.local_mac, src=self.pg1.remote_mac)
+                / IP(src=self.pg1.remote_ip4, dst=outside_addr)
+                / GRE()
+            )
+            packet = self.send_and_expect(self.pg1, [p], self.pg0)[0]
+            self.assertEqual(packet[IP].src, self.pg1.remote_ip4)
+            self.assertEqual(packet[IP].dst, host.ip4)
+            self.assert_packet_checksums_valid(packet)
+
+    def test_output_feature_unknown_proto_acl_priority(self):
+        """NAT44ED unknown proto prefers an exact ACL address in fallback"""
+        self.vapi.nat44_forwarding_enable_disable(enable=1)
+        self.nat_add_outside_interface(self.pg0)
+        self.vapi.nat44_ed_add_del_output_interface(
+            sw_if_index=self.pg1.sw_if_index, is_add=1
+        )
+        exact_addr = "10.0.31.1"
+        unbound_addr = "10.0.31.2"
+        for addr in [exact_addr, unbound_addr]:
+            self.vapi.sw_interface_add_del_address(
+                sw_if_index=self.pg1.sw_if_index, prefix=f"{addr}/32"
+            )
+
+        table_index = self._unknown_proto_acl_enable()
+        for addr, acl_index in [
+            (exact_addr, 0x7FFF),
+            (unbound_addr, 0xFFFFFFFF),
+        ]:
+            self.vapi.nat44_add_del_address_v2_range(
+                first_ip_address=addr,
+                last_ip_address=addr,
+                vrf_id=0,
+                acl_index=acl_index,
+                is_add=1,
+                flags=0,
+            )
+
+        try:
+            p = (
+                Ether(dst=self.pg0.local_mac, src=self.pg0.remote_mac)
+                / IP(src=self.pg0.remote_ip4, dst=self.pg1.remote_ip4)
+                / GRE()
+            )
+            packet = self.send_and_expect(self.pg0, [p], self.pg1)[0]
+            self.assertEqual(packet[IP].src, exact_addr)
+        finally:
+            self._unknown_proto_acl_disable(table_index)
+
+    def test_output_feature_unknown_proto_unbound_acl_order(self):
+        """NAT44ED unknown proto uses the first unbound ACL fallback address"""
+        self.vapi.nat44_forwarding_enable_disable(enable=1)
+        self.nat_add_outside_interface(self.pg0)
+        self.vapi.nat44_ed_add_del_output_interface(
+            sw_if_index=self.pg1.sw_if_index, is_add=1
+        )
+        nat_addrs = ["10.0.32.1", "10.0.32.2"]
+        for addr in nat_addrs:
+            self.vapi.sw_interface_add_del_address(
+                sw_if_index=self.pg1.sw_if_index, prefix=f"{addr}/32"
+            )
+            self.vapi.nat44_add_del_address_v2_range(
+                first_ip_address=addr,
+                last_ip_address=addr,
+                vrf_id=0,
+                acl_index=0xFFFFFFFF,
+                is_add=1,
+                flags=0,
+            )
+
+        table_index = self._unknown_proto_acl_enable()
+        try:
+            p = (
+                Ether(dst=self.pg0.local_mac, src=self.pg0.remote_mac)
+                / IP(src=self.pg0.remote_ip4, dst=self.pg1.remote_ip4)
+                / GRE()
+            )
+            packet = self.send_and_expect(self.pg0, [p], self.pg1)[0]
+            self.assertEqual(packet[IP].src, nat_addrs[0])
+        finally:
+            self._unknown_proto_acl_disable(table_index)
+
+    def test_hairpinning_unknown_proto_address_collision(self):
+        """NAT44ED unknown proto avoids duplicate o2i keys when hairpinning"""
+        self.vapi.nat44_forwarding_enable_disable(enable=1)
+        nat_addrs = ["10.0.40.1", "10.0.40.2"]
+        for addr in nat_addrs:
+            self.nat_add_address(addr)
+        self.nat_add_inside_interface(self.pg0)
+        self.nat_add_outside_interface(self.pg1)
+
+        hosts = [self.pg0.remote_hosts[0], self.pg0.remote_hosts[2]]
+        server = self.pg0.remote_hosts[1]
+        server_nat_ip = "10.0.0.11"
+        self.nat_add_static_mapping(server.ip4, server_nat_ip)
+
+        translated = []
+        for host in hosts:
+            p = (
+                Ether(dst=self.pg0.local_mac, src=host.mac)
+                / IP(src=host.ip4, dst=server_nat_ip)
+                / GRE()
+                / IP(src=self.pg2.remote_ip4, dst=self.pg2.remote_ip4)
+                / TCP(sport=1234, dport=1234)
+            )
+            packet = self.send_and_expect(self.pg0, [p], self.pg0)[0]
+            self.assertIn(packet[IP].src, nat_addrs)
+            self.assertEqual(packet[IP].dst, server.ip4)
+            self.assertEqual(packet.haslayer(GRE), 1)
+            self.assert_packet_checksums_valid(packet)
+            translated.append(packet[IP].src)
+        self.assertNotEqual(translated[0], translated[1])
+
+        sessions = self.vapi.cli("show nat44 sessions")
+        for host, outside_addr in zip(hosts, translated):
+            expected_o2i = (
+                f"o2i flow: match: saddr {server.ip4} sport 0 "
+                f"daddr {outside_addr} dport 0 proto GRE fib_idx 0 "
+                f"rewrite: saddr {server_nat_ip} daddr {host.ip4}"
+            )
+            self.assertIn(expected_o2i, sessions)
+
     def test_hairpinning_unknown_proto(self):
         """NAT44ED translate packet with unknown protocol - hairpinning"""
         host = self.pg0.remote_hosts[0]
