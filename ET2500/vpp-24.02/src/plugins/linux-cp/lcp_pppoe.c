@@ -215,6 +215,60 @@ pppoe_fixup (vlib_main_t * vm,
 }
 
 static void
+pppoe_update_unicast_adj (vnet_main_t * vnm, u32 sw_if_index, adj_index_t ai)
+{
+  pppoe_main_t *pem = &pppoe_main;
+  dpo_id_t dpo = DPO_INVALID;
+  ip_adjacency_t *adj;
+  pppoe_session_t *t;
+  vnet_sw_interface_t *si;
+  u32 session_id;
+
+  ASSERT (ADJ_INDEX_INVALID != ai);
+
+  adj = adj_get (ai);
+  session_id = pem->session_index_by_sw_if_index[sw_if_index];
+  t = pool_elt_at_index (pem->sessions, session_id);
+
+  uword len = sizeof (ethernet_header_t);
+
+  si = vnet_get_sw_interface (vnm, t->encap_if_index);
+  if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
+    {
+      if (si->sub.eth.flags.one_tag == 1)
+	{
+	  len += sizeof (ethernet_vlan_header_t);
+	}
+    }
+
+  adj_nbr_midchain_update_rewrite (ai, pppoe_fixup, (void *) len,
+				   ADJ_FLAG_NONE,
+				   pppoe_build_rewrite (vnm, sw_if_index,
+							adj->ia_link, NULL));
+
+  interface_tx_dpo_add_or_lock (vnet_link_to_dpo_proto (adj->ia_link),
+				t->encap_if_index, &dpo);
+  adj_nbr_midchain_stack (ai, &dpo);
+  dpo_reset (&dpo);
+}
+
+static adj_walk_rc_t
+pppoe_refresh_adj_walk (adj_index_t ai, void *arg)
+{
+  vnet_main_t *vnm = arg;
+
+  pppoe_update_unicast_adj (vnm, adj_get_sw_if_index (ai), ai);
+  return ADJ_WALK_RC_CONTINUE;
+}
+
+static void
+lcp_pppoe_refresh_adjs (vnet_main_t *vnm, u32 sw_if_index)
+{
+  adj_nbr_walk (sw_if_index, FIB_PROTOCOL_IP4, pppoe_refresh_adj_walk, vnm);
+  adj_nbr_walk (sw_if_index, FIB_PROTOCOL_IP6, pppoe_refresh_adj_walk, vnm);
+}
+
+static void
 pppoe_update_adj (vnet_main_t * vnm, u32 sw_if_index, adj_index_t ai)
 {
   pppoe_main_t *pem = &pppoe_main;
@@ -519,6 +573,7 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
   vnet_main_t *vnm = pem->vnet_main;
   u32 hw_if_index = ~0;
   u32 sw_if_index = ~0;
+  u8 is_recycled = 0;
   vnet_hw_interface_t *hi;
   pppoe_entry_key_t cached_key;
   pppoe_entry_result_t cached_result;
@@ -576,7 +631,6 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       pppoe_session_set_lcp_magic (t, lcp_magic);
 
       {
-	u8 is_recycled = 0;
 	lcp_pppoe_session_acquire_hw_if (t, &hw_if_index, &sw_if_index,
 					 &is_recycled);
 	hi = vnet_get_hw_interface (vnm, hw_if_index);
@@ -600,6 +654,9 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
 		      server_mac, clib_host_to_net_u16 (ppp_session_id),
               encap_sup_sw_if_index, encap_vlan_id,
               &key, &bucket, &result, 1);
+
+      if (is_recycled)
+	lcp_pppoe_refresh_adjs (vnm, sw_if_index);
 
       vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, sw_if_index);
       si->flags &= ~VNET_SW_INTERFACE_FLAG_HIDDEN;
@@ -706,6 +763,7 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
   u32 bucket;
   pppoe_entry_key_t key;
   pppoe_entry_result_t result;
+  u8 is_recycled = 0;
 
   if (is_new_if)
     *is_new_if = 0;
@@ -755,7 +813,6 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
       pppoe_session_set_lcp_magic (t, lcp_magic);
 
       {
-	u8 is_recycled = 0;
 	lcp_pppoe_session_acquire_hw_if (t, &hw_if_index, &sw_if_index,
 					 &is_recycled);
 	hi = vnet_get_hw_interface (vnm, hw_if_index);
@@ -777,6 +834,9 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
 		      server_mac, clib_host_to_net_u16 (ppp_session_id),
 		      encap_sup_sw_if_index, encap_vlan_id,
 		      &key, &bucket, &result, 1);
+
+      if (is_recycled)
+	lcp_pppoe_refresh_adjs (vnm, sw_if_index);
 
       vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, sw_if_index);
       si->flags &= ~VNET_SW_INTERFACE_FLAG_HIDDEN;
