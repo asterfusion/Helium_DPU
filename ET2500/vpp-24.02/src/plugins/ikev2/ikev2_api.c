@@ -321,6 +321,12 @@ send_sa_v2 (ikev2_sa_t *sa, vl_api_ikev2_sa_v2_dump_t *mp, u32 api_sa_index)
   int rv = 0;
   ikev2_sa_transform_t *tr;
   ikev2_profile_t *p;
+
+  /* responder SAs between IKE_SA_INIT and IKE_AUTH have no profile
+   * matched yet (profile_index == ~0), skip them instead of crashing */
+  if (sa->profile_index == ~0)
+    return;
+
   p = pool_elt_at_index (km->profiles, sa->profile_index);
 
   REPLY_MACRO2_ZERO (VL_API_IKEV2_SA_V2_DETAILS, {
@@ -412,8 +418,15 @@ send_sa_v3 (ikev2_sa_t *sa, vl_api_ikev2_sa_v3_dump_t *mp, u32 api_sa_index)
   int rv = 0;
   ikev2_sa_transform_t *tr;
   ikev2_profile_t *p;
+  vlib_main_t *vm;
+
+  /* responder SAs between IKE_SA_INIT and IKE_AUTH have no profile
+   * matched yet (profile_index == ~0), skip them instead of crashing */
+  if (sa->profile_index == ~0)
+    return;
+
   p = pool_elt_at_index (km->profiles, sa->profile_index);
-  vlib_main_t *vm = vlib_get_main ();
+  vm = vlib_get_main ();
 
   REPLY_MACRO2_ZERO (VL_API_IKEV2_SA_V3_DETAILS, {
     vl_api_ikev2_sa_v3_t *rsa = &rmp->sa;

@@ -91,6 +91,20 @@ define ipip_add_tunnel_reply
 };
 
 /**
+ * Update an IPIP tunnel's destination address in place.
+ * The sw_if_index, interface addresses, RIFs, routes and any IPsec
+ * protection bound to the tunnel are preserved; only the outer destination
+ * address (and the tunnel lookup key / rewrites) changes.
+ */
+autoreply define ipip_update_tunnel
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_address_t dst;
+};
+
+/**
  * Delete an IP{v4,v6} over IP{v4,v6} tunnel.
  */
 autoreply define ipip_del_tunnel
