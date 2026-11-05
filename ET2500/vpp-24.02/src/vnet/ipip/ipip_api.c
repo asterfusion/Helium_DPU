@@ -20,6 +20,7 @@
 #include <vnet/fib/fib_table.h>
 #include <vnet/interface.h>
 #include <vnet/ipip/ipip.h>
+#include <vnet/ipsec/ipsec_tun.h>
 #include <vnet/vnet.h>
 #include <vnet/ip/ip_types_api.h>
 #include <vnet/tunnel/tunnel_types_api.h>
@@ -107,6 +108,26 @@ vl_api_ipip_del_tunnel_t_handler (vl_api_ipip_del_tunnel_t * mp)
   int rv = ipip_del_tunnel (ntohl (mp->sw_if_index));
 
   REPLY_MACRO (VL_API_IPIP_DEL_TUNNEL_REPLY);
+}
+
+static void
+vl_api_ipip_update_tunnel_t_handler (vl_api_ipip_update_tunnel_t * mp)
+{
+  ipip_main_t *im = &ipip_main;
+  vl_api_ipip_update_tunnel_reply_t *rmp;
+  ip46_address_t dst;
+  u32 sw_if_index = ntohl (mp->sw_if_index);
+
+  ip_address_decode (&mp->dst, &dst);
+
+  int rv = ipip_update_tunnel_dst (sw_if_index, &dst);
+
+  if (!rv)
+    /* move any IPsec protection bound to this tunnel to the new peer
+     * address (rebuilds the RX demux keys, keeps the SAs) */
+    ipsec_tun_protect_refresh_tunnel_addrs (sw_if_index);
+
+  REPLY_MACRO (VL_API_IPIP_UPDATE_TUNNEL_REPLY);
 }
 
 static vl_api_tunnel_mode_t
