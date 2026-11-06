@@ -966,6 +966,7 @@ acl_interface_set_inout_acl_list (acl_main_t * am, u32 sw_if_index,
   uword *change_acl_bitmap = 0;
   int acln;
   int rv = 0;
+  int set_rv = 0;
 
 
   if (am->trace_acl > 255)
@@ -1077,7 +1078,11 @@ acl_interface_set_inout_acl_list (acl_main_t * am, u32 sw_if_index,
 						 sw_if_index, is_input);
 	  (*pinout_lc_index_by_sw_if_index)[sw_if_index] = lc_index;
 	}
-      acl_plugin.set_acl_vec_for_context (lc_index, vec_acl_list_index);
+      set_rv = acl_plugin.set_acl_vec_for_context (lc_index,
+						  vec_acl_list_index);
+      if (set_rv)
+	clib_warning ("ERROR: failed to set acl vec for context, lc_index %d rv %d",
+		      lc_index, set_rv);
     }
   else
     {
