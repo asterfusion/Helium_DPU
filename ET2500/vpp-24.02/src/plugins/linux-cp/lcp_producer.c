@@ -5,6 +5,8 @@
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/feature/feature.h>
 #include <vnet/ip/ip4_packet.h>
+#include <vnet/ip/ip4.h>
+#include <vnet/ip/ip6.h>
 #include <vnet/ip/reass/ip4_sv_reass.h>
 #include <vnet/ip/reass/ip6_sv_reass.h>
 #include <vnet/arp/arp.h>
@@ -196,6 +198,18 @@ lcp_ip_metadata_from_buffer (vlib_buffer_t *b, bool is_ip6,
   metadata->icmp_type_valid = metadata->l4_ports_valid;
 }
 
+/* Is this IP protocol registered with a native VPP consumer (ESP, AH, GRE,
+ * IPIP, ...) at ip4/ip6-local protocol dispatch?  Unregistered protocols
+ * resolve to IP_LOCAL_NEXT_PUNT. */
+static_always_inline bool
+lcp_ip_local_proto_registered (u8 ip_protocol, bool is_ip6)
+{
+  ip_lookup_main_t *lm =
+    is_ip6 ? &ip6_main.lookup_main : &ip4_main.lookup_main;
+
+  return lm->local_next_by_ip_protocol[ip_protocol] != IP_LOCAL_NEXT_PUNT;
+}
+
 static_always_inline bool
 lcp_ip_local_metadata_find (vlib_main_t *vm, vlib_buffer_t *b, bool is_ip6,
 			    lcp_ip_metadata_t *metadata)
@@ -339,6 +353,16 @@ lcp_ip_producer_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
              if (listener)
                view.state &= ~LCP_MATCH_STATE_HOST_BOUND;
            }
+
+          /* Only ESP is exempted from the generic IP2ME punt: when VPP has
+           * an IPsec tunnel configured, the ESP protocol is registered to
+           * ipsec4-tun-input and the packet must stay in VPP for decap.
+           * All other protocols keep the Linux fallback behavior. */
+          if (parsed && adapter == LCP_IP_ADAPTER_LOCAL &&
+              (view.state & LCP_MATCH_STATE_HOST_BOUND) &&
+              view.ip_protocol == IP_PROTOCOL_IPSEC_ESP &&
+              lcp_ip_local_proto_registered (view.ip_protocol, is_ip6))
+            view.state &= ~LCP_MATCH_STATE_HOST_BOUND;
 
 	  if (!copp_processed && vnet_buffer2 (b)->trap_id == LCP_TRAP_INVALID &&
 	      parsed &&

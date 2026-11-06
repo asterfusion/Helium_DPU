@@ -161,6 +161,7 @@ void ipip_tunnel_db_add (ipip_tunnel_t * t, const ipip_tunnel_key_t * key);
 void ipip_tunnel_db_remove (ipip_tunnel_t * t, const ipip_tunnel_key_t * key);
 ipip_tunnel_t *ipip_tunnel_db_find (const ipip_tunnel_key_t * key);
 ipip_tunnel_t *ipip_tunnel_db_find_by_sw_if_index (u32 sw_if_index);
+int ipip_update_tunnel_dst (u32 sw_if_index, const ip46_address_t * dst);
 void ipip_mk_key (const ipip_tunnel_t * t, ipip_tunnel_key_t * key);
 void ipip_mk_key_i (ipip_transport_t transport,
 		    ipip_mode_t mode,

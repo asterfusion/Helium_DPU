@@ -353,6 +353,7 @@ static int acl_plugin_set_acl_vec_for_context (u32 lc_index, u32 *acl_list)
   int rv = 0;
   uword *seen_acl_bitmap = 0;
   u32 *pacln = 0;
+  u32 *deduped_acl = 0;
   acl_main_t *am = &acl_main;
   acl_lookup_context_t *acontext;
   if (am->trace_acl) {
@@ -377,17 +378,18 @@ static int acl_plugin_set_acl_vec_for_context (u32 lc_index, u32 *acl_list)
       }
     if (clib_bitmap_get (seen_acl_bitmap, *pacln))
       {
-        /* ACL being applied twice within the list. error. */
-        clib_warning ("ERROR: ACL %d being applied twice", *pacln);
-        rv = VNET_API_ERROR_ENTRY_ALREADY_EXISTS;
-        goto done;
+        /* ACL being applied twice within the list. Ignore the duplicate
+           so that the lookup context and the caller stay in sync. */
+        clib_warning ("WARNING: ACL %d applied twice within the list, ignoring duplicate", *pacln);
+        continue;
       }
     seen_acl_bitmap = clib_bitmap_set (seen_acl_bitmap, *pacln, 1);
+    vec_add1 (deduped_acl, *pacln);
   }
 
   acontext = pool_elt_at_index(am->acl_lookup_contexts, lc_index);
   u32 *old_acl_vector = acontext->acl_indices;
-  acontext->acl_indices = vec_dup(acl_list);
+  acontext->acl_indices = vec_dup(deduped_acl);
 
   unapply_acl_vec(lc_index, old_acl_vector);
   unlock_acl_vec(lc_index, old_acl_vector);
@@ -400,6 +402,7 @@ static int acl_plugin_set_acl_vec_for_context (u32 lc_index, u32 *acl_list)
   vec_free(old_acl_vector);
 
 done:
+  vec_free (deduped_acl);
   clib_bitmap_free (seen_acl_bitmap);
   return rv;
 }

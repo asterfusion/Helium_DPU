@@ -1061,6 +1061,11 @@ VLIB_NODE_FN (ha_sync_timer_node)
     clib_spinlock_lock (&ptd->lock);
     ha_sync_drain_ack_fifo (thread_index, ptd);
 
+    if (PREDICT_FALSE (ptd->timer_expired_vec == 0))
+      {
+        vec_validate (ptd->timer_expired_vec, 0);
+        vec_set_len (ptd->timer_expired_vec, 0);
+      }
     ptd->timer_expired_vec =
       tw_timer_expire_timers_vec_16t_2w_512sl (&ptd->timer_wheel, now,
                                                ptd->timer_expired_vec);
