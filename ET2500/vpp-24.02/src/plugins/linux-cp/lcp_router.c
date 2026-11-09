@@ -759,7 +759,6 @@ lcp_router_neigh_del (struct rtnl_neigh *rn)
 	  return;
 	}
 
-
       rv = ip_neighbor_del (&nh, sw_if_index);
 
       if (rv)
