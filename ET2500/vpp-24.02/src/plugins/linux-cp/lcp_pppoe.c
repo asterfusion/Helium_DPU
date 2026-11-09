@@ -55,11 +55,41 @@ pppoe_session_set_lcp_magic (pppoe_session_t *t, u32 lcp_magic)
  * sends via=0.0.0.0 through the binary API.  Both produce identical
  * forwarding: packets to the client host route are sent out the PPPoE
  * session interface without any ARP/neighbor resolution. */
-static void
-lcp_pppoe_client_route_add_del (fib_protocol_t fp, u32 fib_index,
-				const ip46_address_t *client_ip, u32 pfx_len,
-				u32 sw_if_index, u8 is_add)
+static fib_node_index_t
+lcp_pppoe_client_route_add (fib_protocol_t fp, u32 fib_index,
+			    const ip46_address_t *client_ip, u32 pfx_len,
+			    u32 sw_if_index)
 {
+  fib_prefix_t pfx;
+  const ip46_address_t zero_addr = { };
+
+  if (fib_index == ~0 || client_ip == NULL || sw_if_index == ~0)
+    return FIB_NODE_INDEX_INVALID;
+  if (fp == FIB_PROTOCOL_IP4 && client_ip->ip4.as_u32 == 0)
+    return FIB_NODE_INDEX_INVALID;
+  if (fp == FIB_PROTOCOL_IP6 && ip6_address_is_zero (&client_ip->ip6))
+    return FIB_NODE_INDEX_INVALID;
+
+  clib_memset (&pfx, 0, sizeof (pfx));
+  pfx.fp_proto = fp;
+  pfx.fp_len = pfx_len;
+  pfx.fp_addr = *client_ip;
+
+  return fib_table_entry_path_add (fib_index, &pfx, pppoe_fib_src,
+				   FIB_ENTRY_FLAG_NONE,
+				   fib_proto_to_dpo (pfx.fp_proto), &zero_addr,
+				   sw_if_index, ~0, 1, NULL,
+				   FIB_ROUTE_PATH_FLAG_NONE);
+}
+
+static void
+lcp_pppoe_client_route_del (fib_protocol_t fp, u32 fib_index,
+			    const ip46_address_t *client_ip, u32 pfx_len,
+			    u32 sw_if_index)
+{
+  fib_prefix_t pfx;
+  const ip46_address_t zero_addr = { };
+
   if (fib_index == ~0 || client_ip == NULL || sw_if_index == ~0)
     return;
   if (fp == FIB_PROTOCOL_IP4 && client_ip->ip4.as_u32 == 0)
@@ -67,27 +97,152 @@ lcp_pppoe_client_route_add_del (fib_protocol_t fp, u32 fib_index,
   if (fp == FIB_PROTOCOL_IP6 && ip6_address_is_zero (&client_ip->ip6))
     return;
 
-  fib_prefix_t pfx;
   clib_memset (&pfx, 0, sizeof (pfx));
   pfx.fp_proto = fp;
   pfx.fp_len = pfx_len;
   pfx.fp_addr = *client_ip;
 
-  /* via = 0.0.0.0/:: (zero_addr): attached path, equivalent to the
-   * via=0.0.0.0 + hwif_name produced by connectRouteAddRemove. */
-  const ip46_address_t zero_addr = { };
+  fib_table_entry_path_remove (fib_index, &pfx, pppoe_fib_src,
+			       fib_proto_to_dpo (pfx.fp_proto), &zero_addr,
+			       sw_if_index, ~0, 1,
+			       FIB_ROUTE_PATH_FLAG_NONE);
+}
 
+static void
+lcp_pppoe_client_route_add_del (fib_protocol_t fp, u32 fib_index,
+				const ip46_address_t *client_ip, u32 pfx_len,
+				u32 sw_if_index, u8 is_add)
+{
   if (is_add)
-    fib_table_entry_path_add (fib_index, &pfx, pppoe_fib_src,
-			      FIB_ENTRY_FLAG_NONE,
-			      fib_proto_to_dpo (pfx.fp_proto), &zero_addr,
-			      sw_if_index, ~0, 1, NULL,
-			      FIB_ROUTE_PATH_FLAG_NONE);
+    (void) lcp_pppoe_client_route_add (fp, fib_index, client_ip, pfx_len,
+				       sw_if_index);
   else
-    fib_table_entry_path_remove (fib_index, &pfx, pppoe_fib_src,
-				 fib_proto_to_dpo (pfx.fp_proto), &zero_addr,
-				 sw_if_index, ~0, 1,
-				 FIB_ROUTE_PATH_FLAG_NONE);
+    lcp_pppoe_client_route_del (fp, fib_index, client_ip, pfx_len,
+				sw_if_index);
+}
+
+int
+lcp_pppoe_update_client_ip6 (u32 sw_if_index,
+			     const ip46_address_t *client_ip6,
+			     u32 client_table_id6, u8 is_add)
+{
+  pppoe_main_t *pem = &pppoe_main;
+  pppoe_session_t *session;
+  u32 session_index;
+  u32 new_fib_index;
+  ip46_address_t old_ip6;
+  u32 old_fib_index;
+  u8 old_route_valid;
+
+  if (sw_if_index >= vec_len (pem->session_index_by_sw_if_index))
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  session_index = pem->session_index_by_sw_if_index[sw_if_index];
+  if (session_index == ~0 || pool_is_free_index (pem->sessions, session_index))
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  session = pool_elt_at_index (pem->sessions, session_index);
+  old_ip6 = session->client_ip6;
+  old_fib_index = session->decap_fib_index6;
+  old_route_valid = session->client_route_valid6;
+
+  if (!is_add)
+    {
+      if (old_route_valid)
+	lcp_pppoe_client_route_del (FIB_PROTOCOL_IP6, old_fib_index,
+				    &old_ip6, 128, sw_if_index);
+      clib_memset (&session->client_ip6, 0, sizeof (session->client_ip6));
+      session->decap_fib_index6 = ~0;
+      session->client_route_valid6 = 0;
+      return 0;
+    }
+
+  if (!client_ip6 || ip6_address_is_zero (&client_ip6->ip6))
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  new_fib_index = fib_table_find (FIB_PROTOCOL_IP6, client_table_id6);
+  if (new_fib_index == ~0)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  if (old_route_valid && old_fib_index == new_fib_index &&
+      ip46_address_cmp (&old_ip6, client_ip6) == 0)
+    return 0;
+
+  if (lcp_pppoe_client_route_add (FIB_PROTOCOL_IP6, new_fib_index,
+				  client_ip6, 128, sw_if_index) ==
+      FIB_NODE_INDEX_INVALID)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  if (old_route_valid)
+    lcp_pppoe_client_route_del (FIB_PROTOCOL_IP6, old_fib_index,
+				&old_ip6, 128, sw_if_index);
+
+  session->client_ip6 = *client_ip6;
+  session->decap_fib_index6 = new_fib_index;
+  session->client_route_valid6 = 1;
+  return 0;
+}
+
+int
+lcp_pppoe_update_client_ip4 (u32 sw_if_index,
+			     const ip46_address_t *client_ip,
+			     u32 client_table_id, u8 is_add)
+{
+  pppoe_main_t *pem = &pppoe_main;
+  pppoe_session_t *session;
+  u32 session_index;
+  u32 new_fib_index;
+  ip46_address_t old_ip;
+  u32 old_fib_index;
+  u8 old_route_valid;
+
+  if (sw_if_index >= vec_len (pem->session_index_by_sw_if_index))
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  session_index = pem->session_index_by_sw_if_index[sw_if_index];
+  if (session_index == ~0 || pool_is_free_index (pem->sessions, session_index))
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  session = pool_elt_at_index (pem->sessions, session_index);
+  old_ip = session->client_ip;
+  old_fib_index = session->decap_fib_index;
+  old_route_valid = session->client_route_valid;
+
+  if (!is_add)
+    {
+      if (old_route_valid)
+	lcp_pppoe_client_route_del (FIB_PROTOCOL_IP4, old_fib_index,
+				    &old_ip, 32, sw_if_index);
+      clib_memset (&session->client_ip, 0, sizeof (session->client_ip));
+      session->decap_fib_index = ~0;
+      session->client_route_valid = 0;
+      return 0;
+    }
+
+  if (!client_ip || client_ip->ip4.as_u32 == 0)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  new_fib_index = fib_table_find (FIB_PROTOCOL_IP4, client_table_id);
+  if (new_fib_index == ~0)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  if (old_route_valid && old_fib_index == new_fib_index &&
+      ip46_address_cmp (&old_ip, client_ip) == 0)
+    return 0;
+
+  if (lcp_pppoe_client_route_add (FIB_PROTOCOL_IP4, new_fib_index,
+				  client_ip, 32, sw_if_index) ==
+      FIB_NODE_INDEX_INVALID)
+    return VNET_API_ERROR_INVALID_VALUE;
+
+  if (old_route_valid)
+    lcp_pppoe_client_route_del (FIB_PROTOCOL_IP4, old_fib_index,
+				&old_ip, 32, sw_if_index);
+
+  session->client_ip = *client_ip;
+  session->decap_fib_index = new_fib_index;
+  session->client_route_valid = 1;
+  return 0;
 }
 
 static u8 *

@@ -415,6 +415,12 @@ extern int lcp_pppoe_session_add_bulk(u8 *server_mac, u16 ppp_session_id,
 				      u32 client_table_id,
 				      ip46_address_t *client_ip6,
 				      u32 client_table_id6);
+extern int lcp_pppoe_update_client_ip4(u32 sw_if_index,
+				       const ip46_address_t *client_ip,
+				       u32 client_table_id, u8 is_add);
+extern int lcp_pppoe_update_client_ip6(u32 sw_if_index,
+				       const ip46_address_t *client_ip6,
+				       u32 client_table_id6, u8 is_add);
 extern void lcp_pppoe_setup_new_if_features(u32 sw_if_index);
 extern int lcp_pppoe_hw_if_create_one (u32 *hw_if_index_out);
 extern int lcp_pppoe_hw_if_pool_ensure (u32 target, u32 batch);
