@@ -8,6 +8,14 @@
 #include <onp/drv/modules/pktio/pktio_rx.h>
 #include <onp/drv/modules/pktio/pktio_fp_ops.h>
 
+static void
+cn10k_pktio_cpt_lf_misc_cb (struct roc_cpt_lf *lf, void *args)
+{
+  (void) args;
+  cnxk_pktio_err ("CPT LF %u misc error interrupt, error_event_pending=%u",
+		  lf->lf_id, lf->error_event_pending);
+}
+
 static_always_inline i32
 cn10k_pktio_inl_dev_outb_cfg (cnxk_pktio_t *pktio,
 			      cnxk_pktio_inl_dev_cfg_t *inl_dev_cfg)
@@ -29,6 +37,9 @@ cn10k_pktio_inl_dev_outb_cfg (cnxk_pktio_t *pktio,
 		      roc_error_msg_get (rv));
       return -1;
     }
+
+  /* Register CPT LF error interrupt callback for observability */
+  roc_cpt_int_misc_cb_register (cn10k_pktio_cpt_lf_misc_cb, NULL);
   pktio->fp_ctx.outb_nb_desc = nix->outb_nb_desc;
   pktio->fp_ctx.outb_nb_crypto_qs = nix->outb_nb_crypto_qs;
   pktio->fp_ctx.cached_cpt_pkts = 0;
