@@ -454,10 +454,22 @@ cn10k_ipsec_inb_session_update (vlib_main_t *vm,
 
   cnxk_ipsec_sa_len_precalc (sa, &sess->encap);
 
-#if 0
-  if (sa->flags & IPSEC_SA_FLAG_USE_ANTI_REPLAY)
-    roc_sa->w0.s.ar_win = max_log2 (IPSEC_SA_ANTI_REPLAY_WINDOW_SIZE (sa)) - 5;
-#endif
+  if (ipsec_sa_is_set_USE_ANTI_REPLAY (sa))
+    {
+      /*
+       * Program the anti-replay window into the hardware SA.  The window
+       * size lives in the per-SA inbound runtime (allocated before the
+       * add callback runs).  Encoding (see cn10k_ipsec_inb_ctx_size):
+       * ar_win N => window of 2^(N+5) bits, so VPP's default 64-bit
+       * window maps to 1.  This is required for ESN: the hardware derives
+       * the high-order sequence number bits from the replay window state
+       * machine; leaving ar_win at 0 breaks ICV verification once large
+       * packet-loss gaps occur.
+       */
+      ipsec_sa_inb_rt_t *irt =
+	ipsec_main.inb_sa_runtimes[sa - ipsec_main.sa_pool];
+      roc_sa->w0.s.ar_win = max_log2 (irt->anti_replay_window_size) - 5;
+    }
 
   /* Set direction and enable ESN (if needed) */
   w2.s.dir = ROC_IE_SA_DIR_INBOUND;
@@ -620,6 +632,7 @@ cn10k_ipsec_session_destroy (vlib_main_t *vm, uintptr_t ipsec_queue,
 	    {
 	      cnxk_ipsec_err (
 		"Could not write inline outbound session to hardware");
+	      cnxk_plt_free (sa_dptr);
 	      return rv;
 	    }
 	  cnxk_plt_free (sa_dptr);
@@ -652,6 +665,7 @@ cn10k_ipsec_session_destroy (vlib_main_t *vm, uintptr_t ipsec_queue,
 	    {
 	      cnxk_ipsec_err (
 		"Could not write inline inbound session to hardware");
+	      cnxk_plt_free (sa_dptr);
 	      return rv;
 	    }
 	  cnxk_plt_free (sa_dptr);
