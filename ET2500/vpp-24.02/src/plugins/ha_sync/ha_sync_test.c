@@ -128,6 +128,51 @@ static ha_sync_session_registration_t ha_sync_test_nat_reg = {
   .snapshot_mode = HA_SYNC_SNAPSHOT_MODE_SINGLE,
 };
 
+uword ha_sync_timer_node_fn (vlib_main_t *, vlib_node_runtime_t *,
+                             vlib_frame_t *);
+
+static clib_error_t *
+test_ha_sync_timer_vector_fn (vlib_main_t *vm)
+{
+  ha_sync_main_t *hsm = &ha_sync_main;
+  ha_sync_main_t saved;
+  ha_sync_per_thread_data_t *ptd;
+  clib_error_t *error = 0;
+  u32 thread_index = vlib_get_thread_index ();
+
+  if (hsm->enabled || hsm->per_thread_data)
+    return clib_error_return (0, "ha-sync must be disabled with no resources");
+
+  saved = *hsm;
+  hsm->enabled = 1;
+  hsm->connection_established = 1;
+  vec_validate (hsm->per_thread_data, thread_index);
+  ptd = &hsm->per_thread_data[thread_index];
+  clib_spinlock_init (&ptd->lock);
+  tw_timer_wheel_init_16t_2w_512sl (&ptd->timer_wheel, NULL,
+                                    HA_SYNC_TIMER_WHEEL_INTERVAL_SEC, 8192);
+  ptd->timer_wheel.last_run_time = vlib_time_now (vm) - 0.02;
+
+  ha_sync_timer_node_fn (vm, NULL, NULL);
+
+  if (!ptd->timer_expired_vec)
+    error = clib_error_return (0, "timer expiration vector was not allocated");
+  else if (ptd->timer_expired_vec == ptd->timer_wheel.expired_timer_handles)
+    error = clib_error_return (0, "timer expiration vectors alias");
+  else
+    vlib_cli_output (vm, "ha-sync timer expiration vectors are independent");
+
+  if (ptd->timer_expired_vec == ptd->timer_wheel.expired_timer_handles)
+    ptd->timer_expired_vec = 0;
+  vec_free (ptd->timer_expired_vec);
+  tw_timer_wheel_free_16t_2w_512sl (&ptd->timer_wheel);
+  clib_spinlock_free (&ptd->lock);
+  vec_free (hsm->per_thread_data);
+  *hsm = saved;
+
+  return error;
+}
+
 static clib_error_t *
 test_ha_sync_command_fn (vlib_main_t *vm, unformat_input_t *input,
                          vlib_cli_command_t *cmd)
@@ -139,6 +184,7 @@ test_ha_sync_command_fn (vlib_main_t *vm, unformat_input_t *input,
   u8 do_incr = 0;
   u8 do_rate = 0;
   u8 do_stop = 0;
+  u8 do_timer_vector = 0;
   u32 incr_count = 1;
   u32 sessions_per_sec = 0;
   u32 interval_ms = HA_SYNC_TEST_RATE_INTERVAL_MS;
@@ -165,9 +211,14 @@ test_ha_sync_command_fn (vlib_main_t *vm, unformat_input_t *input,
       do_rate = 1;
     else if (unformat (input, "stop"))
       do_stop = 1;
+    else if (unformat (input, "timer-vector"))
+      do_timer_vector = 1;
     else
       return clib_error_return (0, "unknown input `%U`", format_unformat_error, input);
   }
+
+  if (do_timer_vector)
+    return test_ha_sync_timer_vector_fn (vm);
 
   if (do_register)
   {
@@ -277,7 +328,8 @@ test_ha_sync_command_fn (vlib_main_t *vm, unformat_input_t *input,
                    "test ha-sync nat incr <n>\n"
                    "test ha-sync nat rate <sessions-per-sec> [interval <ms>]\n"
                    "test ha-sync nat stop\n"
-                   "test ha-sync nat show");
+                   "test ha-sync nat show\n"
+                   "test ha-sync timer-vector");
   return 0;
 }
 
@@ -323,6 +375,6 @@ VLIB_REGISTER_NODE (ha_sync_test_rate_process_node) = {
 
 VLIB_CLI_COMMAND (test_ha_sync_command, static) = {
   .path = "test ha-sync",
-  .short_help = "test ha-sync nat register|unregister|incr|rate|stop|show",
+  .short_help = "test ha-sync nat register|unregister|incr|rate|stop|show|timer-vector",
   .function = test_ha_sync_command_fn,
 };

@@ -62,6 +62,9 @@
   _ (18, FLOW_KEY_TYPE_GENEVE, "geneve")                                      \
   _ (19, FLOW_KEY_TYPE_NVGRE, "nvgre")                                        \
   _ (20, FLOW_KEY_TYPE_GTPU, "gtpu")                                          \
+  _ (23, FLOW_KEY_TYPE_PPPOE, "ppoe")                                         \
+  _ (24, FLOW_KEY_TYPE_PPPOE | FLOW_KEY_TYPE_IPV4 | FLOW_KEY_TYPE_IPV6 |      \
+	FLOW_KEY_TYPE_TCP | FLOW_KEY_TYPE_UDP, "ppoe-4tuple")                   \
   _ (60, FLOW_KEY_TYPE_L4_DST, "l4-dst-only")                                 \
   _ (61, FLOW_KEY_TYPE_L4_SRC, "l4-src-only")                                 \
   _ (62, FLOW_KEY_TYPE_L3_DST, "l3-dst-only")                                 \
@@ -381,10 +384,8 @@ parse_actions:
   else if (flow->actions & VNET_FLOW_ACTION_RSS)
     {
       if (!flow->queue_num)
-	{
-	  cnxk_pktio_err ("RSS action has no queues");
-	  return CNXK_UNSUPPORTED_OPERATION;
-	}
+	/* Default to all Rx queues of the interface. */
+	flow->queue_num = dev->n_rx_queues;
       queues = clib_mem_alloc (sizeof (u16) * dev->n_rx_queues);
 
       for (index = 0; index < flow->queue_num; index++)

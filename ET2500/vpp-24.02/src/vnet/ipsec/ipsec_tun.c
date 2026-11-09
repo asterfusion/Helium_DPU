@@ -762,6 +762,50 @@ out:
   return (rv);
 }
 
+int
+ipsec_tun_protect_refresh_tunnel_addrs (u32 sw_if_index)
+{
+  /* Re-read the tunnel endpoint addresses of the protected interface and
+   * rebuild the RX/TX demux entries, keeping the currently bound SAs.
+   * Used when the underlying tunnel's addresses change in place (e.g. the
+   * peer address was updated after NAT detection) without deleting the
+   * tunnel interface. */
+  ipsec_main_t *im = &ipsec_main;
+  ipsec_tun_protect_t *itp;
+  vnet_main_t *vnm = vnet_get_main ();
+  vnet_hw_interface_t *hi;
+  vnet_device_class_t *dev_class;
+  u32 *sas_in = NULL;
+  u8 is_l2;
+  u32 ii;
+
+  pool_foreach (itp, ipsec_tun_protect_pool)
+    {
+      if (itp->itp_sw_if_index != sw_if_index)
+	continue;
+
+      hi = vnet_get_sup_hw_interface (vnm, sw_if_index);
+      dev_class = vnet_get_device_class (vnm, hi->dev_class_index);
+      if (NULL == dev_class->ip_tun_desc)
+	return VNET_API_ERROR_INVALID_SW_IF_INDEX;
+
+      if (dev_class->ip_tun_desc (sw_if_index, &itp->itp_tun.src,
+				  &itp->itp_tun.dst, &is_l2))
+	return VNET_API_ERROR_INVALID_SW_IF_INDEX;
+
+      for (ii = 0; ii < itp->itp_n_sa_in; ii++)
+	vec_add1 (sas_in, itp->itp_in_sas[ii]);
+
+      ipsec_tun_protect_unconfig (im, itp);
+      ipsec_tun_protect_config (im, itp, itp->itp_out_sa, sas_in);
+
+      vec_free (sas_in);
+      return 0;
+    }
+
+  return VNET_API_ERROR_NO_SUCH_ENTRY;
+}
+
 static int
 ipsec_tun_protect_del_by_idx (index_t itpi)
 {

@@ -440,6 +440,8 @@ lcp_copp_features_set (u32 phy_sw_if_index, u8 enable)
 				  phy_sw_if_index, enable, NULL, 0);
   vnet_l2_feature_enable_disable ("l2-input-ip6", "linux-cp-l2-punt",
 				  phy_sw_if_index, enable, NULL, 0);
+  vnet_l2_feature_enable_disable ("l2-input-nonip", "linux-cp-l2-nonip-punt",
+                                 phy_sw_if_index, enable, NULL, 0);
 }
 
 int

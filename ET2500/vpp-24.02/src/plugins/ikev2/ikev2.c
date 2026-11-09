@@ -4608,6 +4608,25 @@ ikev2_set_profile_tunnel_interface (vlib_main_t * vm,
 
   p->tun_itf = sw_if_index;
 
+  /* SAs negotiated before this call captured the tunnel sw_if_index at
+   * creation time (sa->tun_itf).  If the tunnel interface is being swapped
+   * (e.g. deleted and re-created with a new peer address), those SAs would
+   * keep pointing to the freed interface and the next rekey would attach
+   * the protection to a dead interface.  Update them in place. */
+  ikev2_main_t *km = &ikev2_main;
+  ikev2_main_per_thread_data_t *tkm;
+  u32 pi = p - km->profiles;
+
+  vec_foreach (tkm, km->per_thread_data)
+    {
+      ikev2_sa_t *sa;
+      pool_foreach (sa, tkm->sas)
+	{
+	  if (sa->profile_index == pi && sa->is_tun_itf_set)
+	    sa->tun_itf = sw_if_index;
+	}
+    }
+
   return 0;
 }
 

@@ -1312,7 +1312,11 @@ VLIB_NODE_FN (lcp_arp_phy_node)
 
 	  vnet_feature_next (&original_next, b0);
 	  next0 = original_next;
-	  if (lcp_packet_parse (vm, b0, LCP_MATCH_CTX_ARP, NULL, &view) &&
+          if (PREDICT_FALSE (lcp_buffer_copp_processed (b0)))
+          {
+              vnet_buffer2 (b0)->lcp_host_copy_done = 1;
+          }
+	  else if (lcp_packet_parse (vm, b0, LCP_MATCH_CTX_ARP, NULL, &view) &&
 	      lcp_match_select (&view, &result))
 	    {
 	      if (!lcp_buffer_set_trap_id (b0, result.trap_type))

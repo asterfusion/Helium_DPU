@@ -167,24 +167,38 @@ abf_cmp_attach_for_sort (void *v1, void *v2)
   return (aia1->aia_prio - aia2->aia_prio);
 }
 
-void
+int
 abf_setup_acl_lc (fib_protocol_t fproto, u32 sw_if_index)
 {
   u32 *acl_vec = 0;
   u32 *aiai;
   abf_itf_attach_t *aia;
+  int rv;
 
   if (~0 == abf_alctx_per_itf[fproto][sw_if_index])
-    return;
+    return 0;
 
   vec_foreach (aiai, abf_per_itf[fproto][sw_if_index])
   {
     aia = abf_itf_attach_get (*aiai);
+
+    /* More than one attachment can reference the same ACL (e.g. several ABF
+     * policies built from the same ACL table). Applying it twice in the same
+     * lookup context is rejected by the ACL plugin and would leave the
+     * context out of sync with the attachments, so de-duplicate here. */
+    if (vec_len (acl_vec) > 0 &&
+	~0 != vec_search (acl_vec, aia->aia_acl))
+      continue;
+
     vec_add1 (acl_vec, aia->aia_acl);
   }
-  acl_plugin.set_acl_vec_for_context (abf_alctx_per_itf[fproto][sw_if_index],
-				      acl_vec);
+  rv = acl_plugin.set_acl_vec_for_context (abf_alctx_per_itf[fproto][sw_if_index],
+					    acl_vec);
+  if (rv)
+    clib_warning ("ERROR: failed to set acl vec for context, fproto %d sw_if_index %d rv %d",
+		  fproto, sw_if_index, rv);
   vec_free (acl_vec);
+  return rv;
 }
 
 int
@@ -194,6 +208,7 @@ abf_itf_attach (fib_protocol_t fproto,
   abf_itf_attach_t *aia;
   abf_policy_t *ap;
   u32 api, aiai;
+  int rv = 0;
 
   api = abf_policy_find (policy_id);
 
@@ -258,7 +273,7 @@ abf_itf_attach (fib_protocol_t fproto,
     }
 
   /* Prepare and set the list of ACLs for lookup within the context */
-  abf_setup_acl_lc (fproto, sw_if_index);
+  rv = abf_setup_acl_lc (fproto, sw_if_index);
 
   /*
    * become a child of the ABF policy so we are notified when
@@ -268,6 +283,12 @@ abf_itf_attach (fib_protocol_t fproto,
 					 api,
 					 abf_itf_attach_fib_node_type, aiai);
 
+  if (rv)
+    {
+      clib_warning ("ERROR: abf_itf_attach failed to setup acl lc, rv %d", rv);
+      return rv;
+    }
+
   return (0);
 }
 
@@ -276,6 +297,7 @@ abf_itf_detach (fib_protocol_t fproto, u32 policy_id, u32 sw_if_index)
 {
   abf_itf_attach_t *aia;
   u32 index;
+  int rv = 0;
 
   /*
    * check this is a valid attachment
@@ -323,7 +345,7 @@ abf_itf_detach (fib_protocol_t fproto, u32 policy_id, u32 sw_if_index)
     }
 
   /* Prepare and set the list of ACLs for lookup within the context */
-  abf_setup_acl_lc (fproto, sw_if_index);
+  rv = abf_setup_acl_lc (fproto, sw_if_index);
 
   /*
    * remove the dependency on the policy
@@ -345,6 +367,12 @@ abf_itf_detach (fib_protocol_t fproto, u32 policy_id, u32 sw_if_index)
    * return the object
    */
   pool_put (abf_itf_attach_pool, aia);
+
+  if (rv)
+    {
+      clib_warning ("ERROR: abf_itf_detach failed to setup acl lc, rv %d", rv);
+      return rv;
+    }
 
   return (0);
 }

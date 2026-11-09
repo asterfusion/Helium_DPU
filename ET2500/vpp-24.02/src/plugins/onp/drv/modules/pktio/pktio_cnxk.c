@@ -242,6 +242,7 @@ cnxk_pktio_start (vlib_main_t *vm, cnxk_pktio_t *dev)
 {
   struct roc_nix *nix = &dev->nix;
   cnxk_pktio_main_t *pm;
+  u8 rss_alg_idx;
   int rv;
   u32 i;
 
@@ -286,6 +287,21 @@ cnxk_pktio_start (vlib_main_t *vm, cnxk_pktio_t *dev)
 		      roc_error_msg_get (rv));
       return -1;
     }
+
+  /* The default unicast MCAM entry has no action programmed until it gets
+   * enabled above, so the flowkey configured during pktio config is dropped
+   * silently by the AF ("no action was set earlier").  Re-apply it now that
+   * the entry is enabled, otherwise steering falls back to the AF default
+   * hash (IPv4/IPv6 only) and L4 ports are ignored by RSS. */
+  rv = roc_nix_rss_flowkey_set (nix, &rss_alg_idx, CNXK_DEFAULT_RSS_FLOW_KEY,
+				ROC_NIX_RSS_GROUP_DEFAULT, CNXK_ANY_MCAM_INDEX);
+  if (rv)
+    {
+      cnxk_pktio_err ("roc_nix_rss_flowkey_set failed with '%s' error",
+		      roc_error_msg_get (rv));
+      return -1;
+    }
+  cnxk_pktio_notice ("default rss flowkey applied (alg_idx %u)", rss_alg_idx);
 
   dev->is_started = 1;
 

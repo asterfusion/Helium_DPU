@@ -512,6 +512,65 @@ ipip_tunnel_desc (u32 sw_if_index,
   return (0);
 }
 
+static adj_walk_rc_t
+ipip_update_tunnel_adj_walk (adj_index_t ai, void *ctx)
+{
+  vnet_main_t *vnm = vnet_get_main ();
+  u32 sw_if_index = (u32) (uword) ctx;
+
+  /* The midchain delegate tracks the fib entry of the tunnel dst only at
+   * first stack (adj_midchain_delegate_stack() does not re-track when the
+   * prefix changes).  Remove it entirely so ipip_update_adj() rebuilds the
+   * rewrite and stacks against the new dst's entry. */
+  adj_midchain_delegate_remove (ai);
+  ipip_update_adj (vnm, sw_if_index, ai);
+
+  return (ADJ_WALK_RC_CONTINUE);
+}
+
+int
+ipip_update_tunnel_dst (u32 sw_if_index, const ip46_address_t * dst)
+{
+  ipip_tunnel_t *t;
+  ipip_tunnel_key_t key;
+
+  t = ipip_tunnel_db_find_by_sw_if_index (sw_if_index);
+  if (!t)
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  if (0 == ip46_address_cmp (&t->tunnel_dst, dst))
+    return 0;
+
+  if (ip46_address_is_ip4 (dst) != ip46_address_is_ip4 (&t->tunnel_src))
+    return VNET_API_ERROR_INVALID_PROTOCOL;
+
+  /* refuse to collide with another tunnel */
+  ipip_mk_key_i (t->transport, t->mode, &t->tunnel_src, dst, t->fib_index,
+		 &key);
+  if (ipip_tunnel_db_find (&key))
+    return VNET_API_ERROR_IF_ALREADY_EXISTS;
+
+  /* re-key the tunnel in the lookup DB, then move the dst address */
+  ipip_mk_key_i (t->transport, t->mode, &t->tunnel_src, &t->tunnel_dst,
+		 t->fib_index, &key);
+  ipip_tunnel_db_remove (t, &key);
+
+  ip46_address_copy (&t->tunnel_dst, dst);
+
+  ipip_mk_key_i (t->transport, t->mode, &t->tunnel_src, &t->tunnel_dst,
+		 t->fib_index, &key);
+  ipip_tunnel_db_add (t, &key);
+
+  /* rebuild the rewrites (outer header src/dst) and restack all
+   * adjacencies on this tunnel interface */
+  fib_protocol_t proto;
+  FOR_EACH_FIB_IP_PROTOCOL (proto)
+    adj_nbr_walk (t->sw_if_index, proto, ipip_update_tunnel_adj_walk,
+		  (void *) (uword) t->sw_if_index);
+
+  return 0;
+}
+
 /* *INDENT-OFF* */
 VNET_DEVICE_CLASS(ipip_device_class) = {
     .name = "IPIP tunnel device",

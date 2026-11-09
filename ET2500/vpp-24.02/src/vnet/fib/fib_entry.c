@@ -1552,10 +1552,17 @@ u32
 fib_entry_get_resolving_interface (fib_node_index_t entry_index)
 {
     fib_entry_t *fib_entry;
+    fib_node_index_t path_list_index;
 
     fib_entry = fib_entry_get(entry_index);
+    path_list_index = fib_entry->fe_parent;
 
-    return (fib_path_list_get_resolving_interface(fib_entry->fe_parent));
+    if (FIB_NODE_INDEX_INVALID == path_list_index)
+    {
+        return (~0);
+    }
+
+    return (fib_path_list_get_resolving_interface(path_list_index));
 }
 
 u32
