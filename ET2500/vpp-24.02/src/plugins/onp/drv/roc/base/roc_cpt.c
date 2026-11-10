@@ -1155,23 +1155,45 @@ roc_cpt_lmtline_init(struct roc_cpt *roc_cpt, struct roc_cpt_lmtline *lmtline,
 	return 0;
 }
 
+#define CPT_CTX_WRITE_FC_WAIT_US (500 * 1000)
+#define CPT_CTX_WRITE_POLL_MS    1000
+#define CPT_CTX_WRITE_MAX_ATTEMPTS 3
+
+/* Wait for the CPT LF instruction queue to have room. The CTX write path
+ * does not participate in flow control accounting, but submitting the LMT
+ * doorbell into a full queue makes hardware silently drop the instruction
+ * which would then never complete.
+ */
+static int
+cpt_ctx_write_fc_wait(struct roc_cpt_lf *lf)
+{
+	int retries = CPT_CTX_WRITE_FC_WAIT_US / 10;
+	int depth;
+
+	while (retries-- > 0) {
+		depth = lf->nb_desc -
+			(int)__atomic_load_n(lf->fc_addr, __ATOMIC_RELAXED);
+		if (depth > 0)
+			return 0;
+		plt_delay_us(10);
+	}
+
+	return -EAGAIN;
+}
+
 int
 roc_cpt_ctx_write(struct roc_cpt_lf *lf, void *sa_dptr, void *sa_cptr,
 		  uint16_t sa_len)
 {
-	uintptr_t lmt_base = lf->lmt_base;
+	uintptr_t lmt_base;
 	union cpt_res_s res, *hw_res;
 	uint64_t lmt_arg, io_addr;
 	struct cpt_inst_s *inst;
+	uint64_t timeout;
 	uint16_t lmt_id;
 	uint64_t *dptr;
-	int i;
-
-	/* Use this lcore's LMT line as no one else is using it */
-	ROC_LMT_BASE_ID_GET(lmt_base, lmt_id);
-	inst = (struct cpt_inst_s *)lmt_base;
-
-	memset(inst, 0, sizeof(struct cpt_inst_s));
+	int attempt, i;
+	int rc = 0;
 
 	hw_res = plt_zmalloc(sizeof(*hw_res), ROC_CPT_RES_ALIGN);
 	if (hw_res == NULL) {
@@ -1189,43 +1211,85 @@ roc_cpt_ctx_write(struct roc_cpt_lf *lf, void *sa_dptr, void *sa_cptr,
 	for (i = 0; i < (sa_len / 8); i++)
 		dptr[i] = plt_cpu_to_be_64(((uint64_t *)sa_dptr)[i]);
 
-	/* Fill CPT_INST_S for WRITE_SA microcode op */
-	hw_res->cn10k.compcode = CPT_COMP_NOT_DONE;
-	inst->res_addr = (uint64_t)hw_res;
-	inst->dptr = (uint64_t)dptr;
-	inst->w4.s.param2 = sa_len >> 3;
-	inst->w4.s.dlen = sa_len;
-	inst->w4.s.opcode_major = ROC_IE_OT_MAJOR_OP_WRITE_SA;
-	inst->w4.s.opcode_minor = ROC_IE_OT_MINOR_OP_WRITE_SA;
-	inst->w7.s.cptr = (uint64_t)sa_cptr;
-	inst->w7.s.ctx_val = 1;
-	inst->w7.s.egrp = ROC_CPT_DFLT_ENG_GRP_SE_IE;
+	res.u64[0] = 0;
+	for (attempt = 0; attempt < CPT_CTX_WRITE_MAX_ATTEMPTS; attempt++) {
+		if (attempt == CPT_CTX_WRITE_MAX_ATTEMPTS - 1) {
+			/* Last resort: reset and re-init the instruction queue
+			 * to recover a potentially wedged LF. Instructions
+			 * pending in the queue are lost.
+			 */
+			plt_warn("Write SA: resetting CPT LF %u instruction queue",
+				 lf->lf_id);
+			roc_cpt_iq_reset(lf);
+			cpt_iq_init(lf);
+			roc_cpt_iq_enable(lf);
+		}
 
-	lmt_arg = ROC_CN10K_CPT_LMT_ARG | (uint64_t)lmt_id;
-	io_addr = lf->io_addr | ROC_CN10K_CPT_INST_DW_M1 << 4;
+		/* Never drop the doorbell into a full queue */
+		rc = cpt_ctx_write_fc_wait(lf);
+		if (rc) {
+			plt_err("Write SA attempt %d: queue full, fc wait timed "
+				"out", attempt);
+			continue;
+		}
 
-	roc_lmt_submit_steorl(lmt_arg, io_addr);
-	plt_io_wmb();
+		lmt_base = lf->lmt_base;
+		/* Use this lcore's LMT line as no one else is using it */
+		ROC_LMT_BASE_ID_GET(lmt_base, lmt_id);
+		inst = (struct cpt_inst_s *)lmt_base;
 
-	/* Use 1 min timeout for the poll */
-	const uint64_t timeout = plt_tsc_cycles() + 60 * plt_tsc_hz();
+		memset(inst, 0, sizeof(struct cpt_inst_s));
 
-	/* Wait until CPT instruction completes */
-	do {
-		res.u64[0] = __atomic_load_n(&hw_res->u64[0], __ATOMIC_RELAXED);
-		if (unlikely(plt_tsc_cycles() > timeout))
-			break;
-	} while (res.cn10k.compcode == CPT_COMP_NOT_DONE);
+		/* Fill CPT_INST_S for WRITE_SA microcode op */
+		hw_res->cn10k.compcode = CPT_COMP_NOT_DONE;
+		inst->res_addr = (uint64_t)hw_res;
+		inst->dptr = (uint64_t)dptr;
+		inst->w4.s.param2 = sa_len >> 3;
+		inst->w4.s.dlen = sa_len;
+		inst->w4.s.opcode_major = ROC_IE_OT_MAJOR_OP_WRITE_SA;
+		inst->w4.s.opcode_minor = ROC_IE_OT_MINOR_OP_WRITE_SA;
+		inst->w7.s.cptr = (uint64_t)sa_cptr;
+		inst->w7.s.ctx_val = 1;
+		inst->w7.s.egrp = ROC_CPT_DFLT_ENG_GRP_SE_IE;
 
+		lmt_arg = ROC_CN10K_CPT_LMT_ARG | (uint64_t)lmt_id;
+		io_addr = lf->io_addr | ROC_CN10K_CPT_INST_DW_M1 << 4;
+
+		roc_lmt_submit_steorl(lmt_arg, io_addr);
+		plt_io_wmb();
+
+		/* Bounded poll timeout for each attempt */
+		timeout = plt_tsc_cycles() +
+			((uint64_t)CPT_CTX_WRITE_POLL_MS * plt_tsc_hz()) / 1000;
+
+		/* Wait until CPT instruction completes */
+		do {
+			res.u64[0] = __atomic_load_n(&hw_res->u64[0],
+						     __ATOMIC_RELAXED);
+			if (unlikely(plt_tsc_cycles() > timeout))
+				break;
+		} while (res.cn10k.compcode == CPT_COMP_NOT_DONE);
+
+		if (res.cn10k.compcode == CPT_COMP_GOOD &&
+		    res.cn10k.uc_compcode == 0) {
+			rc = 0;
+			goto exit;
+		}
+
+		plt_err("Write SA attempt %d failed: compcode=0x%x "
+			"uc_compcode=0x%x res=0x%016" PRIx64,
+			attempt, res.cn10k.compcode, res.cn10k.uc_compcode,
+			res.u64[0]);
+		rc = -ETIMEDOUT;
+	}
+
+	plt_err("Write SA operation failed after %d attempts",
+		CPT_CTX_WRITE_MAX_ATTEMPTS);
+exit:
 	plt_free(dptr);
 	plt_free(hw_res);
 
-	if (res.cn10k.compcode != CPT_COMP_GOOD || res.cn10k.uc_compcode) {
-		plt_err("Write SA operation timed out");
-		return -ETIMEDOUT;
-	}
-
-	return 0;
+	return rc;
 }
 
 void

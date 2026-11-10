@@ -2161,14 +2161,28 @@ ikev2_add_tunnel_from_main (ikev2_add_ipsec_tunnel_args_t * a)
       if (rv == VNET_API_ERROR_IF_ALREADY_EXISTS)
 	{
 	  if (hash_get (km->sw_if_indices, sw_if_index))
-	    /* interface is managed by IKE; proceed with updating SAs */
-	    rv = 0;
+	    {
+	      /* interface is managed by IKE; proceed with updating SAs */
+	      rv = 0;
+	      /* the interface may have been left admin-down by a previous
+	       * ikev2_del_tunnel_from_main (the tunnel itself is kept),
+	       * bring it back up to keep down/up paths symmetric */
+	      ikev2_log_warning ("ipip tunnel sw_if_index %u admin UP "
+				 "(already exists, is_rekey %u, local spi %x "
+				 "remote spi %x)",
+				 sw_if_index, a->is_rekey, a->local_spi,
+				 a->remote_spi);
+	      vnet_sw_interface_admin_up (vnet_get_main (), sw_if_index);
+	    }
 	}
       hash_set1 (km->sw_if_indices, sw_if_index);
     }
   else
     {
       sw_if_index = a->sw_if_index;
+      ikev2_log_warning ("ipip tunnel sw_if_index %u admin UP (is_rekey %u, "
+			 "local spi %x remote spi %x)",
+			 sw_if_index, a->is_rekey, a->local_spi, a->remote_spi);
       vnet_sw_interface_admin_up (vnet_get_main (), sw_if_index);
     }
 
@@ -2561,6 +2575,9 @@ ikev2_del_tunnel_from_main (ikev2_del_ipsec_tunnel_args_t * a)
   else
     {
       sw_if_index = a->sw_if_index;
+      ikev2_log_warning ("ipip tunnel sw_if_index %u admin DOWN (delete "
+			 "child SA, local_sa_id %u remote_sa_id %u)",
+			 sw_if_index, a->local_sa_id, a->remote_sa_id);
       vnet_sw_interface_admin_down (vnet_get_main (), sw_if_index);
     }
 
@@ -3571,6 +3588,8 @@ ikev2_node_internal (vlib_main_t *vm, vlib_node_runtime_t *node,
 						    !sa0->is_initiator);
 			if (ch_sa)
 			  {
+			    ikev2_log_warning ("peer requested delete of child SA spi %x "
+					       "via INFORMATIONAL exchange", d->spi);
 			    ikev2_delete_tunnel_interface (km->vnet_main,
 							   sa0, ch_sa);
 			    if (!sa0->is_initiator)
@@ -5355,6 +5374,11 @@ ikev2_mngr_process_child_sa (ikev2_sa_t * sa, ikev2_child_sa_t * csa,
     {
       if (!csa->is_expired || csa->rekey_retries > 0)
 	{
+	  ikev2_log_warning ("child SA spi %x expired%s, initiating rekey "
+			     "(retries left %d)",
+			     csa->i_proposals->spi,
+			     csa->is_expired ? " again" : "",
+			     csa->rekey_retries);
 	  ikev2_rekey_child_sa_internal (vm, sa, csa);
 	  csa->time_to_expiration = now + p->handover;
 	  csa->is_expired = 1;
@@ -5376,6 +5400,8 @@ ikev2_mngr_process_child_sa (ikev2_sa_t * sa, ikev2_child_sa_t * csa,
 	}
       else
 	{
+	  ikev2_log_warning ("child SA spi %x rekey retries exhausted, "
+			     "deleting child SA", csa->i_proposals->spi);
 	  csa->time_to_expiration = 0;
 	  ikev2_delete_child_sa_internal (vm, sa, csa);
 	  res |= 1;
@@ -5539,18 +5565,24 @@ ikev2_mngr_process_ipsec_sa (ipsec_sa_t * ipsec_sa)
   {
       if (!fchild->is_expired && counts.packets > IKEV2_MAX_PKTS_ONE_SA)
       {
-        vlib_zero_combined_counter (&ipsec_sa_counters, ipsec_sa->stat_index);
-        if (0 == p->handover)
-        {
-            p->handover = 10;
-        }
-        fchild->time_to_expiration = now;
+	ikev2_log_warning ("IPsec SA spi %x packets %llu over %u, mark child "
+			   "SA expired for rekey", ipsec_sa->spi,
+			   (unsigned long long) counts.packets,
+			   IKEV2_MAX_PKTS_ONE_SA);
+	vlib_zero_combined_counter (&ipsec_sa_counters, ipsec_sa->stat_index);
+	if (0 == p->handover)
+	  p->handover = 10;
+	fchild->time_to_expiration = now;
       }
   }
   if (fchild && p && p->lifetime_maxdata)
     {
       if (!fchild->is_expired && counts.bytes > p->lifetime_maxdata)
 	{
+	  ikev2_log_warning ("IPsec SA spi %x bytes %llu over lifetime_maxdata "
+			     "%llu, mark child SA expired for rekey",
+			     ipsec_sa->spi, (unsigned long long) counts.bytes,
+			     (unsigned long long) p->lifetime_maxdata);
 	  fchild->time_to_expiration = now;
 	}
     }
@@ -5785,6 +5817,9 @@ ikev2_mngr_process_fn (vlib_main_t * vm, vlib_node_runtime_t * rt,
 	  const int reinitiate = (sa->is_initiator && profile_index != ~0);
 	  vec_foreach (c, sa->childs)
 	  {
+	    ikev2_log_warning ("IKE SA deleted (e.g. DPD/liveness timeout), "
+			       "deleting child SA spi %x and tunnel",
+			       c->i_proposals ? c->i_proposals->spi : 0);
 	    ikev2_delete_tunnel_interface (km->vnet_main, sa, c);
 	    ikev2_sa_del_child_sa (sa, c);
 	  }

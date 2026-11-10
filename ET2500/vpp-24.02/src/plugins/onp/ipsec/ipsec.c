@@ -88,6 +88,119 @@ onp_ipsec_check_support (ipsec_sa_t *sa)
   return 0;
 }
 
+#define ONP_IPSEC_SESS_RETRY_INTERVAL 5.0 /* seconds */
+
+static void
+onp_ipsec_pending_sess_add (u32 sa_index)
+{
+  onp_ipsec_main_t *im = &onp_ipsec_main;
+  onp_ipsec_pending_sess_t *p;
+
+  vec_foreach (p, im->pending_sessions)
+    if (p->sa_index == sa_index)
+      return;
+
+  vec_add2 (im->pending_sessions, p, 1);
+  p->sa_index = sa_index;
+  p->n_attempts = 0;
+}
+
+static void
+onp_ipsec_pending_sess_remove (u32 sa_index)
+{
+  onp_ipsec_main_t *im = &onp_ipsec_main;
+  onp_ipsec_pending_sess_t *p;
+
+  vec_foreach (p, im->pending_sessions)
+    if (p->sa_index == sa_index)
+      {
+	vec_del1 (im->pending_sessions, p - im->pending_sessions);
+	return;
+      }
+}
+
+static void
+onp_ipsec_session_retry_walk (vlib_main_t *vm)
+{
+  onp_ipsec_main_t *im = &onp_ipsec_main;
+  ipsec_main_t *ipm = &ipsec_main;
+  onp_ipsec_pending_sess_t *p;
+  uintptr_t ipsec_queue;
+  ipsec_sa_t *sa;
+  u32 i = 0;
+
+  while (i < vec_len (im->pending_sessions))
+    {
+      p = vec_elt_at_index (im->pending_sessions, i);
+
+      if (PREDICT_FALSE (pool_is_free_index (ipm->sa_pool, p->sa_index)))
+	{
+	  onp_ipsec_warn ("IPsec HW session retry: SA index %u no longer "
+			  "exists, dropping from retry list", p->sa_index);
+	  vec_del1 (im->pending_sessions, i);
+	  continue;
+	}
+
+      sa = pool_elt_at_index (ipm->sa_pool, p->sa_index);
+      ipsec_queue = (sa->flags & IPSEC_SA_FLAG_IS_INBOUND) ?
+	im->in_ipsec_queue : im->out_ipsec_queue;
+
+      p->n_attempts++;
+      onp_ipsec_warn ("IPsec HW session retry #%u for SA index %u "
+		      "(spi %x, %s)", p->n_attempts, p->sa_index, sa->spi,
+		      (sa->flags & IPSEC_SA_FLAG_IS_INBOUND) ? "inbound" :
+		      "outbound");
+
+      if (cnxk_drv_ipsec_session_create (vm, ipsec_queue, p->sa_index,
+					 0) == 0)
+	{
+	  onp_ipsec_warn ("IPsec HW session retry succeeded for SA index "
+			  "%u (spi %x, %s) after %u attempt(s)",
+			  p->sa_index, sa->spi,
+			  (sa->flags & IPSEC_SA_FLAG_IS_INBOUND) ? "inbound" :
+			  "outbound", p->n_attempts);
+	  if (sa->flags & IPSEC_SA_FLAG_IS_INBOUND &&
+	      cnxk_drv_pktio_is_inl_dev_enabled (vm))
+	    {
+	      clib_error_t *err = onp_pktio_inl_inb_ipsec_flow_enable (vm);
+	      if (err)
+		{
+		  onp_ipsec_err ("inl inbound flow enable after retry "
+				 "failed: %v", err->what);
+		  clib_error_free (err);
+		}
+	    }
+	  vec_del1 (im->pending_sessions, i);
+	  continue;
+	}
+
+      onp_ipsec_warn ("IPsec HW session retry #%u for SA index %u failed, "
+		      "will retry in %u seconds", p->n_attempts, p->sa_index,
+		      (u32) ONP_IPSEC_SESS_RETRY_INTERVAL);
+      i++;
+    }
+}
+
+static uword
+onp_ipsec_session_retry_process (vlib_main_t *vm, vlib_node_runtime_t *rt,
+				 vlib_frame_t *f)
+{
+  while (1)
+    {
+      vlib_process_wait_for_event_or_clock (vm,
+				    ONP_IPSEC_SESS_RETRY_INTERVAL);
+      vlib_process_get_events (vm, NULL);
+      onp_ipsec_session_retry_walk (vm);
+    }
+  return 0;
+}
+
+VLIB_REGISTER_NODE (onp_ipsec_session_retry_process_node, static) = {
+  .function = onp_ipsec_session_retry_process,
+  .type = VLIB_NODE_TYPE_PROCESS,
+  .name = "onp-ipsec-session-retry",
+};
+
 static clib_error_t *
 onp_esp_add_del_sa_sess (u32 sa_index, u8 is_add)
 {
@@ -116,6 +229,8 @@ onp_esp_add_del_sa_sess (u32 sa_index, u8 is_add)
 
   if (!is_add)
     {
+      /* SA is going away: drop any pending create retry for it */
+      onp_ipsec_pending_sess_remove (sa_index);
       if (cnxk_drv_ipsec_session_destroy (vm, ipsec_queue, sa_index) < 0)
 	{
 	  onp_ipsec_err ("IPsec session destroy operation failed for IPsec "
@@ -131,8 +246,18 @@ onp_esp_add_del_sa_sess (u32 sa_index, u8 is_add)
 
   if (cnxk_drv_ipsec_session_create (vm, ipsec_queue, sa_index, 0) < 0)
     {
-      onp_ipsec_err ("cnxk_drv_ipsec_session_create failed");
-      return clib_error_create ("cnxk_drv_ipsec_session_create failed");
+      /* Do not fail the SA install. The CPT WRITE_SA instruction may have
+       * been silently dropped under queue-full condition while the IKE
+       * negotiation itself already succeeded - failing here would leave
+       * the peers permanently out of sync (no retry anywhere above).
+       * Keep the software SA and let the background retry process
+       * re-program the hardware session. */
+      onp_ipsec_warn ("IPsec HW session create failed for SA index %u "
+		      "(spi %x, %s), queued for background retry",
+		      sa_index, sa->spi,
+		      (sa->flags & IPSEC_SA_FLAG_IS_INBOUND) ? "inbound" :
+		      "outbound");
+      onp_ipsec_pending_sess_add (sa_index);
     }
 
   if ((im->ipsec_offloads_configured & CNXK_IPSEC_OFFLOAD_FLAG_INL_OUTBOUND) &&

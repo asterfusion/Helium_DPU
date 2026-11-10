@@ -42,6 +42,12 @@ typedef struct
 
 typedef struct
 {
+  u32 sa_index;
+  u32 n_attempts;
+} onp_ipsec_pending_sess_t;
+
+typedef struct
+{
   CLIB_CACHE_LINE_ALIGN_MARK (c0);
   uintptr_t in_ipsec_queue;
   u32 in_dev_id;
@@ -65,6 +71,10 @@ typedef struct
   u16 onp_esp4_enc_tun_post_next;
   /* Next node index for IPv6 ESP tunnel encryption */
   u16 onp_esp6_enc_tun_post_next;
+
+  /* HW session writes that failed (e.g. CPT WRITE_SA silently dropped
+   * under queue-full condition) and are awaiting background retry */
+  onp_ipsec_pending_sess_t *pending_sessions;
 
 } onp_ipsec_main_t;
 

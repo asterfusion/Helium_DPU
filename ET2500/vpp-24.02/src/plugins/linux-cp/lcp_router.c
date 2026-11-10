@@ -759,6 +759,10 @@ lcp_router_neigh_del (struct rtnl_neigh *rn)
 	  return;
 	}
 
+      LCP_ROUTER_INFO ("neighbor del from kernel: %U dev %U nud_state 0x%x",
+		       format_ip_address, &nh, format_vnet_sw_if_index_name,
+		       vnet_get_main (), sw_if_index, rtnl_neigh_get_state (rn));
+
       rv = ip_neighbor_del (&nh, sw_if_index);
 
       if (rv)
