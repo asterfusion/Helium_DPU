@@ -66,8 +66,8 @@ ipoe_session_counter_add (u32 counter_index,
 
 ipoe_session_t *
 ipoe_session_lookup_downstream (
-  u32 sw_if_index, const ip4_address_t *dst_ip, u64 expected_generation,
-  u8 check_generation, ipoe_downstream_lookup_result_t *result)
+  u32 sw_if_index, const ip4_address_t *dst_ip, u64 expected_external_index,
+  u8 check_session, ipoe_downstream_lookup_result_t *result)
 {
   ipoe_main_t *im = &ipoe_main;
   ipoe_session_t *session;
@@ -86,14 +86,9 @@ ipoe_session_lookup_downstream (
     *result = IPOE_DOWNSTREAM_LOOKUP_SESSION_INACTIVE;
   else if (session->sw_if_index != sw_if_index)
     *result = IPOE_DOWNSTREAM_LOOKUP_ACCESS_MISMATCH;
-  else if (check_generation && session->generation != expected_generation)
-    {
-      *result = IPOE_DOWNSTREAM_LOOKUP_GENERATION_MISMATCH;
-      clib_warning ("ipoe downstream generation mismatch interface=%u "
-		    "ip=%U expected=%llu actual=%llu",
-		    sw_if_index, format_ip4_address, dst_ip,
-		    expected_generation, session->generation);
-    }
+  else if (check_session &&
+           session->external_index != expected_external_index)
+    *result = IPOE_DOWNSTREAM_LOOKUP_SESSION_MISMATCH;
   else
     *result = IPOE_DOWNSTREAM_LOOKUP_OK;
 

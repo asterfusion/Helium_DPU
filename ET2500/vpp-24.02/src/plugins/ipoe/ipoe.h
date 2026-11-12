@@ -96,14 +96,14 @@ typedef enum
   IPOE_DOWNSTREAM_LOOKUP_NO_SESSION,
   IPOE_DOWNSTREAM_LOOKUP_SESSION_INACTIVE,
   IPOE_DOWNSTREAM_LOOKUP_ACCESS_MISMATCH,
-  IPOE_DOWNSTREAM_LOOKUP_GENERATION_MISMATCH,
+  IPOE_DOWNSTREAM_LOOKUP_SESSION_MISMATCH,
 } ipoe_downstream_lookup_result_t;
 
 typedef struct
 {
   u32 qinq_sw_if_index;
   u32 fib_index;
-  u64 generation;
+  u64 external_index;
   u32 locks;
 } ipoe_qinq_dpo_t;
 
@@ -189,8 +189,8 @@ void ipoe_session_counter_add (u32 counter_index,
 			       ipoe_session_counter_type_t counter_type,
 			       u32 ip4_bytes);
 ipoe_session_t *ipoe_session_lookup_downstream (
-  u32 sw_if_index, const ip4_address_t *dst_ip, u64 expected_generation,
-  u8 check_generation, ipoe_downstream_lookup_result_t *result);
+  u32 sw_if_index, const ip4_address_t *dst_ip, u64 expected_external_index,
+  u8 check_session, ipoe_downstream_lookup_result_t *result);
 int ipoe_session_get_counters (u64 external_index,
 			       ipoe_session_counters_t *counters);
 int ipoe_session_quiesce_snapshot_batch (

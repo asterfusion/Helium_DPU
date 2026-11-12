@@ -15,7 +15,7 @@ typedef enum
   IPOE_QINQ_OUTPUT_ERROR_SESSION_INACTIVE,
   IPOE_QINQ_OUTPUT_ERROR_NO_QINQ,
   IPOE_QINQ_OUTPUT_ERROR_INVALID_DPO,
-  IPOE_QINQ_OUTPUT_ERROR_GENERATION_MISMATCH,
+  IPOE_QINQ_OUTPUT_ERROR_SESSION_MISMATCH,
   IPOE_QINQ_OUTPUT_ERROR_ACCESS_MISMATCH,
   IPOE_QINQ_OUTPUT_ERROR_NO_HEADROOM,
   IPOE_QINQ_OUTPUT_N_ERROR,
@@ -26,7 +26,7 @@ static char *ipoe_qinq_output_error_strings[] = {
   "IPoE QinQ session is inactive",
   "IPoE session has no QinQ encapsulation",
   "IPoE QinQ DPO context is invalid",
-  "IPoE QinQ session generation mismatch",
+  "IPoE QinQ DPO session mismatch",
   "IPoE QinQ session access mismatch",
   "IPoE QinQ packet has insufficient headroom",
 };
@@ -38,8 +38,8 @@ typedef struct
   u32 qinq_sw_if_index;
   u32 parent_sw_if_index;
   ip4_address_t dst_ip;
-  u64 external_index;
-  u64 generation;
+  u64 dpo_external_index;
+  u64 session_external_index;
   u16 outer_vlan;
   u16 inner_vlan;
   u8 error;
@@ -55,12 +55,14 @@ format_ipoe_qinq_output_trace (u8 *s, va_list *args)
   const char *result = trace->error == (u8) ~0 ?
 		       "forward" : ipoe_qinq_output_error_strings[trace->error];
 
-  return format (s, "ipoe-qinq-output: dpo %u fib %u generation %llu "
+  return format (s, "ipoe-qinq-output: dpo %u fib %u dpo-session %llu "
 		 "interface %u parent %u dst %U session %llu vlan %u/%u "
 		 "result %s",
-		 trace->dpo_index, trace->fib_index, trace->generation,
+		 trace->dpo_index, trace->fib_index,
+		 trace->dpo_external_index,
 		 trace->qinq_sw_if_index, trace->parent_sw_if_index,
-		 format_ip4_address, &trace->dst_ip, trace->external_index,
+		 format_ip4_address, &trace->dst_ip,
+		 trace->session_external_index,
 		 trace->outer_vlan, trace->inner_vlan, result);
 }
 
@@ -97,15 +99,15 @@ VLIB_NODE_FN (ipoe_qinq_output_node) (vlib_main_t *vm,
 	  if (context)
 	    {
 	      session = ipoe_session_lookup_downstream (
-		qinq_sw_if_index, &ip4->dst_address, context->generation, 1,
+		qinq_sw_if_index, &ip4->dst_address, context->external_index, 1,
 		&lookup_result);
 	      if (lookup_result == IPOE_DOWNSTREAM_LOOKUP_NO_SESSION)
 		error = IPOE_QINQ_OUTPUT_ERROR_NO_SESSION;
 	      else if (lookup_result == IPOE_DOWNSTREAM_LOOKUP_SESSION_INACTIVE)
 		error = IPOE_QINQ_OUTPUT_ERROR_SESSION_INACTIVE;
 	      else if (lookup_result ==
-		       IPOE_DOWNSTREAM_LOOKUP_GENERATION_MISMATCH)
-		error = IPOE_QINQ_OUTPUT_ERROR_GENERATION_MISMATCH;
+		       IPOE_DOWNSTREAM_LOOKUP_SESSION_MISMATCH)
+		error = IPOE_QINQ_OUTPUT_ERROR_SESSION_MISMATCH;
 	      else if (lookup_result == IPOE_DOWNSTREAM_LOOKUP_ACCESS_MISMATCH)
 		error = IPOE_QINQ_OUTPUT_ERROR_ACCESS_MISMATCH;
 	      else if (!session->qinq.enabled)
@@ -146,12 +148,13 @@ VLIB_NODE_FN (ipoe_qinq_output_node) (vlib_main_t *vm,
 		vlib_add_trace (vm, node, b, sizeof (*trace));
 	      trace->dpo_index = dpo_index;
 	      trace->fib_index = context ? context->fib_index : ~0;
-	      trace->generation = context ? context->generation : 0;
+	      trace->dpo_external_index = context ? context->external_index : 0;
 	      trace->qinq_sw_if_index = qinq_sw_if_index;
 	      trace->parent_sw_if_index =
 		session ? session->qinq.parent_sw_if_index : ~0;
 	      trace->dst_ip = ip4->dst_address;
-	      trace->external_index = session ? session->external_index : 0;
+	      trace->session_external_index =
+		session ? session->external_index : 0;
 	      trace->outer_vlan = session ? session->qinq.outer_vlan : 0;
 	      trace->inner_vlan = session ? session->qinq.inner_vlan : 0;
 	      trace->error = next == IPOE_QINQ_OUTPUT_NEXT_DROP ? error : ~0;

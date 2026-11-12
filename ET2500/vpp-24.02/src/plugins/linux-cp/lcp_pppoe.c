@@ -2808,17 +2808,6 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 
           if (PREDICT_FALSE (result0.fields.session_index == ~0))
           {
-              clib_warning (
-		"PPPoE lookup miss mac %U session %u carrier %u vlan %u "
-		"key 0x%016llx:0x%016llx result session %d interface %d",
-		format_ethernet_address, h0->src_address,
-		clib_net_to_host_u16 (pppoe0->session_id), sw_if_index,
-		lookup_vlan_id, key0.raw[0], key0.raw[1],
-		result0.fields.session_index == ~0 ?
-		  -1 : (i32) result0.fields.session_index,
-		result0.fields.sw_if_index == ~0 ?
-		  -1 : (i32) result0.fields.sw_if_index);
-
               /* session miss */
               u32 copy_bi;
               next0 = PPPOE_INPUT_NEXT_DROP;

@@ -42,9 +42,9 @@ ipoe_qinq_dpo_unlock (dpo_id_t *dpo)
   if (!context->locks)
     {
       clib_warning ("ipoe qinq dpo free index=%u interface=%u fib=%u "
-		    "generation=%llu",
+		    "session=%llu",
 		    (u32) dpo->dpoi_index, context->qinq_sw_if_index,
-		    context->fib_index, context->generation);
+		    context->fib_index, context->external_index);
       pool_put (ipoe_qinq_dpo_pool, context);
     }
 }
@@ -59,10 +59,10 @@ format_ipoe_qinq_dpo (u8 *s, va_list *args)
   if (!context)
     return format (s, "ipoe-qinq deleted");
 
-  return format (s, "ipoe-qinq interface:%U fib:%u generation:%llu",
+  return format (s, "ipoe-qinq interface:%U fib:%u session:%llu",
 		 format_vnet_sw_if_index_name, vnet_get_main (),
 		 context->qinq_sw_if_index, context->fib_index,
-		 context->generation);
+		 context->external_index);
 }
 
 static u32
@@ -137,20 +137,20 @@ ipoe_qinq_route_add_del (u32 table_id, const ip4_address_t *user_ip4,
       context_index = context - ipoe_qinq_dpo_pool;
       context->qinq_sw_if_index = sw_if_index;
       context->fib_index = fib_index;
-      context->generation = session->generation;
+      context->external_index = session->external_index;
       clib_warning ("ipoe qinq dpo allocate index=%u interface=%u fib=%u "
-		    "generation=%llu",
+		    "session=%llu",
 		    context_index, sw_if_index, fib_index,
-		    context->generation);
+		    context->external_index);
       dpo_set (&dpo, ipoe_qinq_dpo_type, DPO_PROTO_IP4, context_index);
       fib_table_entry_special_dpo_add (
 	fib_index, &prefix, ipoe_qinq_fib_source,
 	FIB_ENTRY_FLAG_EXCLUSIVE, &dpo);
       dpo_reset (&dpo);
       clib_warning ("ipoe qinq route add fib=%u interface=%u ip=%U "
-		    "generation=%llu",
+		    "session=%llu",
 		    fib_index, sw_if_index, format_ip4_address, user_ip4,
-		    session->generation);
+		    session->external_index);
     }
   else
     {
