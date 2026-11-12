@@ -1180,14 +1180,14 @@ cn10k_pkts_send_inline_ipsec (vlib_main_t *vm, vlib_node_runtime_t *node,
 
   if (ipsec_cnt)
     {
-      clib_memcpy (ptd->buffers, ipsec_buff, ipsec_cnt);
+      clib_memcpy (ptd->buffers, ipsec_buff, ipsec_cnt * sizeof(ptd->buffers[0]));
       rv = cn10k_pkts_send_ipsec (vm, node, txq, ipsec_cnt, ptd, desc_sz,
 				  fp_flags, off_flags);
     }
 
   if (pkt_cnt)
     {
-      clib_memcpy (ptd->buffers, buff, pkt_cnt);
+      clib_memcpy (ptd->buffers, buff, pkt_cnt * sizeof(ptd->buffers[0]));
       rv = cn10k_pkts_send (vm, node, txq, pkt_cnt, ptd, desc_sz, fp_flags,
 			    off_flags);
     }
