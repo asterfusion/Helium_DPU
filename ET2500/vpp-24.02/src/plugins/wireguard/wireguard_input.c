@@ -404,7 +404,7 @@ wg_input_post_process (vlib_main_t *vm, vlib_buffer_t *b, u16 *next,
     }
   if (allowed)
     {
-      if (0 == vnet_buffer2 (b)->l2_rx_sw_if_index || ~0 == vnet_buffer2 (b)->l2_rx_sw_if_index)
+      if (!(b->flags & VLIB_BUFFER_NOT_PHY_INTF))
       {
           vnet_buffer2 (b)->l2_rx_sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
       }

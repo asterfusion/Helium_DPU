@@ -342,8 +342,7 @@ ipsec_tun_protect_input_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
        * interface address itself) can be redirected to the host interface
        * paired with the physical interface.  esp decrypt will otherwise
        * record the tunnel interface here. */
-      if (0 == vnet_buffer2 (b[0])->l2_rx_sw_if_index ||
-         ~0 == vnet_buffer2 (b[0])->l2_rx_sw_if_index)
+      if (!(b[0]->flags & VLIB_BUFFER_NOT_PHY_INTF))
        vnet_buffer2 (b[0])->l2_rx_sw_if_index =
          vnet_buffer (b[0])->sw_if_index[VLIB_RX];
 
