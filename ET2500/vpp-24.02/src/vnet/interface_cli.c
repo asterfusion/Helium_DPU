@@ -749,6 +749,11 @@ create_sub_interfaces (vlib_main_t * vm,
       template.sub.eth.flags.no_tags = 1;
       template.sub.eth.flags.exact_match = 1;
     }
+  else if (unformat (input, "%d qinq-carrier", &id_min))
+    {
+      id_max = id_min;
+      template.sub.eth.flags.qinq_carrier = 1;
+    }
   else if (unformat (input, "%d dot1q", &id_min))
     {
       /* parse dot1q config */
@@ -927,7 +932,7 @@ done:
 VLIB_CLI_COMMAND (create_sub_interfaces_command, static) = {
   .path = "create sub-interfaces",
   .short_help = "create sub-interfaces <interface> "
-    "{<subId> [default|untagged]} | "
+    "{<subId> [default|untagged|qinq-carrier]} | "
     "{<subId>-<subId>} | "
     "{<subId> dot1q|dot1ad <vlanId>|any [inner-dot1q <vlanId>|any] [exact-match]}",
   .function = create_sub_interfaces,

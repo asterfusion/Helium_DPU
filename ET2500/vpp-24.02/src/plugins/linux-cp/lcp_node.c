@@ -20,6 +20,7 @@
 
 #include <plugins/linux-cp/lcp_interface.h>
 #include <plugins/linux-cp/lcp_adj.h>
+#include <plugins/linux-cp/pppoe.h>
 #include <linux-cp/lcp.api_enum.h>
 #include <linux-cp/lcp_match.h>
 #include <linux-cp/lcp_punt.h>
@@ -29,6 +30,7 @@
 #include <vnet/ip/ip4_packet.h>
 #include <vnet/ethernet/arp_packet.h>
 #include <vnet/ethernet/ethernet.h>
+#include <vnet/ethernet/qinq.h>
 #include <vnet/ip/ip_types.h>
 #include <vnet/ip/lookup.h>
 #include <vnet/ip/ip4.h>
@@ -50,8 +52,11 @@ typedef enum
 
 typedef struct lip_punt_trace_t_
 {
+  u32 qinq_sw_if_index;
   u32 phy_sw_if_index;
   u32 host_sw_if_index;
+  u8 trap_id;
+  u8 vlan_depth;
 } lip_punt_trace_t;
 
 /* packet trace format function */
@@ -62,8 +67,9 @@ format_lip_punt_trace (u8 *s, va_list *args)
   CLIB_UNUSED (vlib_node_t * node) = va_arg (*args, vlib_node_t *);
   lip_punt_trace_t *t = va_arg (*args, lip_punt_trace_t *);
 
-  s =
-    format (s, "lip-punt: %u -> %u", t->phy_sw_if_index, t->host_sw_if_index);
+  s = format (s, "lip-punt: qinq %u parent %u host %u trap %u vlans %u",
+	      t->qinq_sw_if_index, t->phy_sw_if_index,
+	      t->host_sw_if_index, t->trap_id, t->vlan_depth);
 
   return s;
 }
@@ -131,8 +137,25 @@ lcp_prepare_cpu_branch (vlib_main_t *vm, vlib_buffer_t *b,
 			const lcp_itf_pair_t **lip)
 {
   u32 lipi;
+  u32 carrier_sw_if_index;
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+  u8 is_qinq = qinq_buffer_matches_rx (b);
+#endif
 
-  *sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
+  if (lcp_pppoe_session_get_carrier (
+	vnet_buffer (b)->sw_if_index[VLIB_RX], &carrier_sw_if_index))
+    {
+      const qinq_subport_t *subport =
+	qinq_subport_get_by_sw_if_index (carrier_sw_if_index);
+
+      *sw_if_index =
+	subport ? subport->parent_sw_if_index : carrier_sw_if_index;
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+      is_qinq = subport != NULL;
+#endif
+    }
+  else
+    *sw_if_index = qinq_buffer_rx_parent (b);
   if ((b->flags & VNET_BUFFER_F_TCP_ORIG_RX_SAVED) &&
       vnet_buffer2 (b)->l2_rx_sw_if_index != ~0)
     {
@@ -216,7 +239,8 @@ lcp_prepare_cpu_branch (vlib_main_t *vm, vlib_buffer_t *b,
     }
 
 #ifdef SUPPORT_LCP_VLAN_TAG_ACT
-  lcp_itf_host_vlan_tag_process (*lip, b);
+  if (!is_qinq)
+    lcp_itf_host_vlan_tag_process (*lip, b);
 #endif
   return lipi;
 
@@ -252,6 +276,8 @@ lip_punt_node_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  u32 next0 = ~0;
 	  u32 bi0, lipi0;
 	  u32 sw_if_index0;
+	  u32 qinq_sw_if_index0;
+	  u8 vlan_depth0;
 
 	  bi0 = to_next[0] = from[0];
 
@@ -263,6 +289,18 @@ lip_punt_node_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 
 	  b0 = vlib_get_buffer (vm, bi0);
 	  sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
+	  qinq_sw_if_index0 =
+	    qinq_buffer_matches_rx (b0) ? sw_if_index0 : ~0;
+	  if (qinq_sw_if_index0 == ~0)
+	    {
+	      u32 carrier_sw_if_index;
+
+	      if (lcp_pppoe_session_get_carrier (sw_if_index0,
+						 &carrier_sw_if_index) &&
+		  qinq_subport_get_by_sw_if_index (carrier_sw_if_index))
+		qinq_sw_if_index0 = carrier_sw_if_index;
+	    }
+	  vlan_depth0 = ethernet_buffer_get_vlan_count (b0);
 
 	  lipi0 = INDEX_INVALID;
 	  /* Account policy/policer success before attempting Linux delivery. */
@@ -279,9 +317,12 @@ lip_punt_node_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  if (PREDICT_FALSE ((b0->flags & VLIB_BUFFER_IS_TRACED)))
 	    {
 	      lip_punt_trace_t *t = vlib_add_trace (vm, node, b0, sizeof (*t));
+	      t->qinq_sw_if_index = qinq_sw_if_index0;
 	      t->phy_sw_if_index = sw_if_index0;
 	      t->host_sw_if_index =
 		(lipi0 == INDEX_INVALID) ? ~0 : lip0->lip_host_sw_if_index;
+	      t->trap_id = vnet_buffer2 (b0)->trap_id;
+	      t->vlan_depth = vlan_depth0;
 	    }
 
 	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
@@ -1201,8 +1242,7 @@ format_lcp_arp_trace (u8 *s, va_list *args)
 static_always_inline const lcp_itf_pair_t *
 lcp_arp_phy_pair (vlib_buffer_t *b)
 {
-  u32 lipi = lcp_itf_pair_find_by_phy (
-    vnet_buffer (b)->sw_if_index[VLIB_RX]);
+  u32 lipi = lcp_itf_pair_find_by_phy (qinq_buffer_rx_parent (b));
 
   if (lipi == INDEX_INVALID && (b->flags & VLIB_BUFFER_NOT_PHY_INTF) &&
       vnet_buffer2 (b)->l2_rx_sw_if_index != ~0)
@@ -1237,6 +1277,9 @@ VLIB_NODE_FN (lcp_arp_copp_delivery_node)
 	{
 	  u32 bi0 = from[0];
 	  vlib_buffer_t *b0 = vlib_get_buffer (vm, bi0);
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+	  u8 is_qinq0 = qinq_buffer_matches_rx (b0);
+#endif
 	  const lcp_itf_pair_t *lip0 = lcp_arp_phy_pair (b0);
 	  u32 next0 = LCP_ARP_DELIVERY_NEXT_DROP;
 
@@ -1249,7 +1292,8 @@ VLIB_NODE_FN (lcp_arp_copp_delivery_node)
 		lip0->lip_host_sw_if_index;
 	      vlib_buffer_advance (b0, -len0);
 #ifdef SUPPORT_LCP_VLAN_TAG_ACT
-	      lcp_itf_host_vlan_tag_process (lip0, b0);
+	      if (!is_qinq0)
+		lcp_itf_host_vlan_tag_process (lip0, b0);
 #endif
 	      if (lcp_cpu_branch_pass (vm, b0))
 		next0 = LCP_ARP_DELIVERY_NEXT_IO;

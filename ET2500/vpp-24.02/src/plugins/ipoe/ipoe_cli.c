@@ -65,17 +65,27 @@ ipoe_set_session_command (vlib_main_t *vm, unformat_input_t *input,
   ipoe_main_t *im = &ipoe_main;
   ip4_address_t user_ip4 = {};
   mac_address_t user_mac = {};
+  ipoe_qinq_session_t qinq = {};
   u64 external_index = 0;
+  u64 generation = 0;
+  u64 lease_expiry = 0;
   u32 sw_if_index = ~0, lease_timeout = 0;
-  u8 is_add = 0, is_del = 0, has_ip = 0, has_mac = 0;
-  u64 lease_expiry;
+  u32 value;
+  u8 is_add = 0, is_update = 0, is_del = 0;
+  u8 has_ip = 0, has_mac = 0, has_generation = 0;
+  u8 admin_state = 1;
   int rv;
+
+  qinq.parent_sw_if_index = ~0;
 
   while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
     {
       if (unformat (input, "add")) is_add = 1;
+      else if (unformat (input, "update")) is_update = 1;
       else if (unformat (input, "del")) is_del = 1;
       else if (unformat (input, "index %llu", &external_index)) ;
+      else if (unformat (input, "generation %llu", &generation))
+	has_generation = 1;
       else if (unformat (input, "interface %U", unformat_vnet_sw_interface,
 			 im->vnet_main, &sw_if_index)) ;
       else if (unformat (input, "ip %U", unformat_ip4_address, &user_ip4))
@@ -83,39 +93,138 @@ ipoe_set_session_command (vlib_main_t *vm, unformat_input_t *input,
       else if (unformat (input, "mac %U", unformat_ethernet_address,
 			 user_mac.bytes))
 	has_mac = 1;
+      else if (unformat (input, "local-mac %U", unformat_ethernet_address,
+			 qinq.local_mac.bytes))
+	qinq.enabled = 1;
+      else if (unformat (input, "parent %U", unformat_vnet_sw_interface,
+			 im->vnet_main, &qinq.parent_sw_if_index))
+	qinq.enabled = 1;
+      else if (unformat (input, "outer-tpid %x", &value))
+	{
+	  qinq.outer_tpid = value;
+	  qinq.enabled = 1;
+	}
+      else if (unformat (input, "outer-vlan %u", &value))
+	{
+	  qinq.outer_vlan = value;
+	  qinq.enabled = 1;
+	}
+      else if (unformat (input, "inner-tpid %x", &value))
+	{
+	  qinq.inner_tpid = value;
+	  qinq.enabled = 1;
+	}
+      else if (unformat (input, "inner-vlan %u", &value))
+	{
+	  qinq.inner_vlan = value;
+	  qinq.enabled = 1;
+	}
       else if (unformat (input, "lease %u", &lease_timeout)) ;
+      else if (unformat (input, "lease-expiry %llu", &lease_expiry)) ;
+      else if (unformat (input, "state up")) admin_state = 1;
+      else if (unformat (input, "state down")) admin_state = 0;
       else
 	return clib_error_return (0, "unknown input `%U'",
 				  format_unformat_error, input);
     }
 
-  if (!external_index || is_add == is_del)
-    return clib_error_return (0, "one add|del and non-zero index are required");
+  if (!external_index || (is_add + is_update + is_del) != 1)
+    return clib_error_return (
+      0, "one add|update|del and non-zero index are required");
   if (is_del)
     rv = ipoe_session_del (external_index);
   else
     {
       if (sw_if_index == ~0 || !has_ip || !lease_timeout)
-	return clib_error_return (0, "add requires interface, ip and lease");
-      lease_expiry = (u64) time (0) + lease_timeout;
-      rv = ipoe_session_add (external_index, 0, sw_if_index, &user_ip4,
-			     &user_mac, has_mac, 1, lease_timeout,
-			     lease_expiry);
+	return clib_error_return (
+	  0, "add|update requires interface, ip and lease");
+      if (is_update && !has_generation)
+	return clib_error_return (0, "update requires generation");
+      if (!lease_expiry)
+	lease_expiry = (u64) time (0) + lease_timeout;
+      if (is_add)
+	rv = ipoe_session_add (
+	  external_index, generation, sw_if_index, &user_ip4, &user_mac,
+	  has_mac, admin_state, lease_timeout, lease_expiry, &qinq);
+      else
+	rv = ipoe_session_update (
+	  external_index, generation, sw_if_index, &user_ip4, &user_mac,
+	  has_mac, admin_state, lease_timeout, lease_expiry, &qinq);
     }
   if (rv)
     return clib_error_return (0, "IPoE session failed: %s",
 			      ipoe_error_string (rv));
   vlib_cli_output (vm, "ipoe session index %llu %s", external_index,
-		   is_add ? "installed" : "removed");
+		   is_add ? "installed" :
+		   is_update ? "updated" : "removed");
   return 0;
 }
 
 VLIB_CLI_COMMAND (ipoe_set_session_cli, static) = {
   .path = "set ipoe session",
-  .short_help = "set ipoe session add index <index> interface <interface> "
-		"ip <ipv4> [mac <mac>] lease <seconds> | "
+  .short_help = "set ipoe session add|update index <index> "
+		"interface <interface> "
+		"ip <ipv4> [mac <mac>] lease <seconds> "
+		"[lease-expiry <time>] [generation <generation>] "
+		"[state up|down] "
+		"[parent <parent> local-mac <mac> outer-tpid <hex> "
+		"outer-vlan <vid> inner-tpid <hex> inner-vlan <vid>] | "
 		"del index <index>",
   .function = ipoe_set_session_command,
+};
+
+static clib_error_t *
+ipoe_set_qinq_route_command (vlib_main_t *vm, unformat_input_t *input,
+			     vlib_cli_command_t *cmd)
+{
+  ipoe_main_t *im = &ipoe_main;
+  ip4_address_t user_ip4 = {};
+  u32 table_id = 0;
+  u32 sw_if_index = ~0;
+  u8 is_add = 0, is_del = 0;
+  u8 has_table = 0, has_ip = 0;
+  int rv;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "add"))
+	is_add = 1;
+      else if (unformat (input, "del"))
+	is_del = 1;
+      else if (unformat (input, "table %u", &table_id))
+	has_table = 1;
+      else if (unformat (input, "ip %U", unformat_ip4_address, &user_ip4))
+	has_ip = 1;
+      else if (unformat (input, "interface %U", unformat_vnet_sw_interface,
+			 im->vnet_main, &sw_if_index))
+	;
+      else
+	return clib_error_return (0, "unknown input `%U'",
+				  format_unformat_error, input);
+    }
+
+  if ((is_add + is_del) != 1 || !has_table || !has_ip)
+    return clib_error_return (
+      0, "one add|del, table and ip are required");
+  if (is_add && sw_if_index == ~0)
+    return clib_error_return (0, "add requires interface");
+
+  rv = ipoe_qinq_route_add_del (table_id, &user_ip4, sw_if_index, is_add);
+  if (rv)
+    return clib_error_return (0, "IPoE QinQ route failed: %s",
+			      ipoe_error_string (rv));
+
+  vlib_cli_output (vm, "IPoE QinQ route %U/32 table %u %s",
+		   format_ip4_address, &user_ip4, table_id,
+		   is_add ? "installed" : "removed");
+  return 0;
+}
+
+VLIB_CLI_COMMAND (ipoe_set_qinq_route_cli, static) = {
+  .path = "set ipoe qinq route",
+  .short_help = "set ipoe qinq route add table <id> ip <ipv4> "
+		"interface <interface> | del table <id> ip <ipv4>",
+  .function = ipoe_set_qinq_route_command,
 };
 
 static void
@@ -186,6 +295,17 @@ ipoe_show_one_session (vlib_main_t *vm, ipoe_session_t *session)
 		     session->user_mac.bytes);
   else
     vlib_cli_output (vm, "  user MAC:      not configured");
+  if (session->qinq.enabled)
+    {
+      vlib_cli_output (vm, "  QinQ parent:   %U",
+		       format_vnet_sw_if_index_name, ipoe_main.vnet_main,
+		       session->qinq.parent_sw_if_index);
+      vlib_cli_output (vm, "  QinQ tags:     0x%04x/%u 0x%04x/%u",
+		       session->qinq.outer_tpid, session->qinq.outer_vlan,
+		       session->qinq.inner_tpid, session->qinq.inner_vlan);
+      vlib_cli_output (vm, "  local MAC:     %U", format_ethernet_address,
+		       session->qinq.local_mac.bytes);
+    }
   vlib_cli_output (vm, "  admin state:   %s",
 		   session->admin_state ? "up" : "down");
   vlib_cli_output (vm, "  lease expiry:  %llu", session->lease_expiry);

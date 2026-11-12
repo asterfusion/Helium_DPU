@@ -25,6 +25,7 @@
 #include <vnet/vnet.h>
 #include <vnet/ip/ip.h>
 #include <vnet/ethernet/ethernet.h>
+#include <vnet/ethernet/qinq.h>
 #include <vnet/ip/ip4_packet.h>
 #include <vnet/ip/ip6_packet.h>
 #include <vnet/dpo/dpo.h>
@@ -65,6 +66,13 @@ typedef struct
 
   u8 local_mac[6];
   u8 client_mac[6];
+
+  u32 parent_sw_if_index;
+  u16 outer_tpid;
+  u16 outer_vlan;
+  u16 inner_tpid;
+  u16 inner_vlan;
+  u8 has_qinq;
 
   /* vnet intfc index */
   u32 sw_if_index;
@@ -193,6 +201,12 @@ typedef struct
   u32 decap_fib_index;
   u8 local_mac[6];
   u8 client_mac[6];
+  u32 parent_sw_if_index;
+  u16 outer_tpid;
+  u16 outer_vlan;
+  u16 inner_tpid;
+  u16 inner_vlan;
+  u8 has_qinq;
 } vnet_pppoe_add_del_session_args_t;
 
 int vnet_pppoe_add_del_session

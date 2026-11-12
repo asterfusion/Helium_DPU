@@ -13,6 +13,7 @@
 #include <vnet/ip/ip6_link.h>
 #include <vnet/ethernet/arp_packet.h>
 #include <vnet/ethernet/ethernet.h>
+#include <vnet/ethernet/qinq.h>
 #include <vnet/fib/fib_entry.h>
 #include <vnet/fib/fib_table.h>
 #include <vnet/dpo/interface_tx_dpo.h>
@@ -32,6 +33,25 @@
 pppoe_main_t pppoe_main;
 
 fib_source_t pppoe_fib_src;
+
+bool
+lcp_pppoe_session_get_carrier (u32 session_sw_if_index,
+			       u32 *carrier_sw_if_index)
+{
+  pppoe_main_t *pem = &pppoe_main;
+  u32 session_index;
+
+  if (session_sw_if_index >= vec_len (pem->session_index_by_sw_if_index))
+    return false;
+
+  session_index = pem->session_index_by_sw_if_index[session_sw_if_index];
+  if (session_index == ~0 || pool_is_free_index (pem->sessions, session_index))
+    return false;
+
+  *carrier_sw_if_index =
+    pool_elt_at_index (pem->sessions, session_index)->encap_if_index;
+  return true;
+}
 
 static_always_inline void
 pppoe_session_set_lcp_magic (pppoe_session_t *t, u32 lcp_magic)
@@ -296,7 +316,9 @@ pppoe_build_rewrite (vnet_main_t * vnm,
 
   int len = sizeof (pppoe_header_t) + sizeof (ethernet_header_t);
   si = vnet_get_sw_interface (vnm, t->encap_if_index);
-  if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
+  if (t->has_qinq)
+    len += 2 * sizeof (ethernet_vlan_header_t);
+  else if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
     {
       if (si->sub.eth.flags.one_tag == 1)
 	{
@@ -310,7 +332,21 @@ pppoe_build_rewrite (vnet_main_t * vnm,
   eth_hdr->type = clib_host_to_net_u16 (ETHERNET_TYPE_PPPOE_SESSION);
   pppoe = (pppoe_header_t *) (eth_hdr + 1);
 
-  if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
+  if (t->has_qinq)
+    {
+      ethernet_vlan_header_t *outer =
+	(ethernet_vlan_header_t *) (eth_hdr + 1);
+      ethernet_vlan_header_t *inner = outer + 1;
+
+      eth_hdr->type = clib_host_to_net_u16 (t->outer_tpid);
+      outer->priority_cfi_and_id = clib_host_to_net_u16 (t->outer_vlan);
+      outer->type = clib_host_to_net_u16 (t->inner_tpid);
+      inner->priority_cfi_and_id = clib_host_to_net_u16 (t->inner_vlan);
+      inner->type = clib_host_to_net_u16 (ETHERNET_TYPE_PPPOE_SESSION);
+      pppoe = (pppoe_header_t *) (inner + 1);
+      si = vnet_get_sw_interface (vnm, t->parent_sw_if_index);
+    }
+  else if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
     {
       if (si->sub.eth.flags.one_tag == 1)
 	{
@@ -442,7 +478,9 @@ pppoe_update_adj (vnet_main_t * vnm, u32 sw_if_index, adj_index_t ai)
   uword len = sizeof (ethernet_header_t);
 
   si = vnet_get_sw_interface (vnm, t->encap_if_index);
-  if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
+  if (t->has_qinq)
+    len += 2 * sizeof (ethernet_vlan_header_t);
+  else if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
     {
       if (si->sub.eth.flags.one_tag == 1)
 	{
@@ -718,10 +756,64 @@ VLIB_REGISTER_NODE (pppoe_hw_if_pool_process_node) = {
   .n_next_nodes = 0,
 };
 
+static_always_inline void
+lcp_pppoe_session_key_carrier (vnet_main_t *vnm, u32 encap_sw_if_index,
+			       u32 *key_sw_if_index, u16 *key_vlan_id)
+{
+  vnet_sw_interface_t *encap_si;
+
+  *key_sw_if_index = encap_sw_if_index;
+  *key_vlan_id = 0;
+
+  if (qinq_subport_get_by_sw_if_index (encap_sw_if_index))
+    return;
+
+  encap_si = vnet_get_sw_interface (vnm, encap_sw_if_index);
+  if (encap_si && encap_si->type == VNET_SW_INTERFACE_TYPE_SUB)
+    {
+      *key_sw_if_index = encap_si->sup_sw_if_index;
+      *key_vlan_id = encap_si->sub.eth.outer_vlan_id;
+    }
+}
+
+static int
+lcp_pppoe_session_apply_qinq (pppoe_session_t *session,
+			      const lcp_pppoe_qinq_t *qinq)
+{
+  const qinq_subport_t *rule;
+
+  if (!qinq || !qinq->has_qinq)
+    return 0;
+
+  rule = qinq_subport_get_by_sw_if_index (session->encap_if_index);
+  if (!rule || rule->parent_sw_if_index != qinq->parent_sw_if_index ||
+      rule->outer_tpid != qinq->outer_tpid ||
+      rule->outer_vlan != qinq->outer_vlan ||
+      rule->inner_tpid != qinq->inner_tpid ||
+      qinq->inner_vlan < QINQ_VLAN_MIN ||
+      qinq->inner_vlan > QINQ_VLAN_MAX ||
+      (rule->match_type == QINQ_MATCH_EXACT &&
+       qinq->inner_vlan != rule->inner_vlan_first) ||
+      (rule->match_type == QINQ_MATCH_RANGE &&
+       (qinq->inner_vlan < rule->inner_vlan_first ||
+	qinq->inner_vlan > rule->inner_vlan_last)))
+    return VNET_API_ERROR_INVALID_SW_IF_INDEX;
+
+  session->parent_sw_if_index = qinq->parent_sw_if_index;
+  session->outer_tpid = qinq->outer_tpid;
+  session->outer_vlan = qinq->outer_vlan;
+  session->inner_tpid = qinq->inner_tpid;
+  session->inner_vlan = qinq->inner_vlan;
+  session->has_qinq = 1;
+
+  return 0;
+}
+
 int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_index,
 			  u32 *p_sw_if_index, u8 *sw_if_name, u8 is_add,
 			  u32 lcp_magic, u32 client_ip4, u32 client_table_id,
-			  ip46_address_t *client_ip6, u32 client_table_id6)
+			  ip46_address_t *client_ip6, u32 client_table_id6,
+			  const lcp_pppoe_qinq_t *qinq)
 {
   pppoe_main_t *pem = &pppoe_main;
   pppoe_session_t *t = 0;
@@ -740,18 +832,14 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
   cached_key.raw[1] = ~0;
   cached_result.raw = ~0;	/* warning be gone */
   
-  u32 encap_sup_sw_if_index = encap_sw_if_index;
+  u32 encap_key_sw_if_index;
   u16 encap_vlan_id = 0;
-  vnet_sw_interface_t *encap_si = vnet_get_sw_interface (vnm, encap_sw_if_index);
-  if (encap_si && encap_si->type == VNET_SW_INTERFACE_TYPE_SUB)
-  {
-      encap_sup_sw_if_index = encap_si->sup_sw_if_index;
-      encap_vlan_id = encap_si->sub.eth.outer_vlan_id;
-  }
+  lcp_pppoe_session_key_carrier (vnm, encap_sw_if_index,
+				 &encap_key_sw_if_index, &encap_vlan_id);
   /* lookup session_table */
   pppoe_lookup_1 (&pem->session_table, &cached_key, &cached_result,
 		  server_mac, clib_host_to_net_u16 (ppp_session_id),
-          encap_sup_sw_if_index, encap_vlan_id,
+          encap_key_sw_if_index, encap_vlan_id,
 		  &key, &bucket, &result);
 
   if(is_add)
@@ -784,6 +872,12 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       //t->decap_fib_index; //vrf others to do
       clib_memcpy (t->server_mac, server_mac, 6);
       pppoe_session_set_lcp_magic (t, lcp_magic);
+      int qinq_rv = lcp_pppoe_session_apply_qinq (t, qinq);
+      if (qinq_rv != 0)
+	{
+	  pool_put (pem->sessions, t);
+	  return qinq_rv;
+	}
 
       {
 	lcp_pppoe_session_acquire_hw_if (t, &hw_if_index, &sw_if_index,
@@ -807,11 +901,18 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       result.fields.sw_if_index = sw_if_index;
       pppoe_update_1 (&pem->session_table,
 		      server_mac, clib_host_to_net_u16 (ppp_session_id),
-              encap_sup_sw_if_index, encap_vlan_id,
+              encap_key_sw_if_index, encap_vlan_id,
               &key, &bucket, &result, 1);
 
       if (is_recycled)
 	lcp_pppoe_refresh_adjs (vnm, sw_if_index);
+
+      clib_warning (
+	"PPPoE insert mac %U session %u carrier %u vlan %u "
+	"key 0x%016llx:0x%016llx result session %u interface %u",
+	format_ethernet_address, server_mac, ppp_session_id,
+	encap_key_sw_if_index, encap_vlan_id, key.raw[0], key.raw[1],
+	result.fields.session_index, result.fields.sw_if_index);
 
       vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, sw_if_index);
       si->flags &= ~VNET_SW_INTERFACE_FLAG_HIDDEN;
@@ -884,7 +985,7 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
       result.fields.session_index = ~0;
       pppoe_update_1 (&pem->session_table,
 		      server_mac, clib_host_to_net_u16 (ppp_session_id),
-              encap_sup_sw_if_index, encap_vlan_id,
+              encap_key_sw_if_index, encap_vlan_id,
               &key, &bucket, &result, 0);
       pool_put (pem->sessions, t);
 
@@ -905,7 +1006,8 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
 			    u32 encap_sw_if_index, u32 *p_sw_if_index,
 			    u8 *sw_if_name, u8 is_add, u8 *is_new_if,
 			    u32 lcp_magic, u32 client_ip4, u32 client_table_id,
-			    ip46_address_t *client_ip6, u32 client_table_id6)
+			    ip46_address_t *client_ip6, u32 client_table_id6,
+			    const lcp_pppoe_qinq_t *qinq)
 {
   pppoe_main_t *pem = &pppoe_main;
   pppoe_session_t *t = 0;
@@ -927,18 +1029,14 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
   cached_key.raw[1] = ~0;
   cached_result.raw = ~0;
 
-  u32 encap_sup_sw_if_index = encap_sw_if_index;
+  u32 encap_key_sw_if_index;
   u16 encap_vlan_id = 0;
-  vnet_sw_interface_t *encap_si = vnet_get_sw_interface (vnm, encap_sw_if_index);
-  if (encap_si && encap_si->type == VNET_SW_INTERFACE_TYPE_SUB)
-    {
-      encap_sup_sw_if_index = encap_si->sup_sw_if_index;
-      encap_vlan_id = encap_si->sub.eth.outer_vlan_id;
-    }
+  lcp_pppoe_session_key_carrier (vnm, encap_sw_if_index,
+				 &encap_key_sw_if_index, &encap_vlan_id);
 
   pppoe_lookup_1 (&pem->session_table, &cached_key, &cached_result,
 		  server_mac, clib_host_to_net_u16 (ppp_session_id),
-		  encap_sup_sw_if_index, encap_vlan_id,
+		  encap_key_sw_if_index, encap_vlan_id,
 		  &key, &bucket, &result);
 
   if (is_add)
@@ -966,6 +1064,12 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
       t->encap_if_index = encap_sw_if_index;
       clib_memcpy (t->server_mac, server_mac, 6);
       pppoe_session_set_lcp_magic (t, lcp_magic);
+      int qinq_rv = lcp_pppoe_session_apply_qinq (t, qinq);
+      if (qinq_rv != 0)
+	{
+	  pool_put (pem->sessions, t);
+	  return qinq_rv;
+	}
 
       {
 	lcp_pppoe_session_acquire_hw_if (t, &hw_if_index, &sw_if_index,
@@ -987,7 +1091,7 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
       result.fields.sw_if_index = sw_if_index;
       pppoe_update_1 (&pem->session_table,
 		      server_mac, clib_host_to_net_u16 (ppp_session_id),
-		      encap_sup_sw_if_index, encap_vlan_id,
+		      encap_key_sw_if_index, encap_vlan_id,
 		      &key, &bucket, &result, 1);
 
       if (is_recycled)
@@ -1051,7 +1155,7 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
       result.fields.session_index = ~0;
       pppoe_update_1 (&pem->session_table,
 		      server_mac, clib_host_to_net_u16 (ppp_session_id),
-		      encap_sup_sw_if_index, encap_vlan_id,
+		      encap_key_sw_if_index, encap_vlan_id,
 		      &key, &bucket, &result, 0);
       pool_put (pem->sessions, t);
     }
@@ -1070,7 +1174,8 @@ int vnet_pppoe_add_del_session
   ret = lcp_pppoe_session_add (a->server_mac, a->session_id, a->encap_if_index,
 			       sw_if_indexp, NULL, a->is_add, 0,
 			       0 /* client_ip4 */, 0 /* client_table_id */,
-			       NULL /* client_ip6 */, 0 /* client_table_id6 */);
+			       NULL /* client_ip6 */, 0 /* client_table_id6 */,
+			       a->qinq.has_qinq ? &a->qinq : NULL);
   if(ret!=0)
   {
      return ret;
@@ -1291,6 +1396,12 @@ pppoe_add_del_session_command_fn (vlib_main_t * vm,
   u8 ipv6_set = 0;
   u32 encap_if_index = ~0;
   u8 encap_set = 0;
+  u32 parent_sw_if_index = ~0;
+  u32 outer_tpid = 0;
+  u32 outer_vlan = 0;
+  u32 inner_tpid = 0;
+  u32 inner_vlan = 0;
+  u8 qinq_fields = 0;
   u32 decap_fib_index = 0;
   /* referenced by foreach_copy_field macro expansion below; keeps CLI
    * path zeroed (IPv6 unsupported on CLI) */
@@ -1325,6 +1436,25 @@ pppoe_add_del_session_command_fn (vlib_main_t * vm,
       {
           encap_set = 1;
       }
+      else if (unformat (line_input, "qinq-interface %U",
+			 unformat_vnet_sw_interface, vnet_get_main (),
+			 &encap_if_index))
+	{
+	  encap_set = 1;
+	  qinq_fields |= 1 << 0;
+	}
+      else if (unformat (line_input, "parent %U",
+			 unformat_vnet_sw_interface, vnet_get_main (),
+			 &parent_sw_if_index))
+	qinq_fields |= 1 << 1;
+      else if (unformat (line_input, "outer-tpid %x", &outer_tpid))
+	qinq_fields |= 1 << 2;
+      else if (unformat (line_input, "outer-vlan %u", &outer_vlan))
+	qinq_fields |= 1 << 3;
+      else if (unformat (line_input, "inner-tpid %x", &inner_tpid))
+	qinq_fields |= 1 << 4;
+      else if (unformat (line_input, "inner-vlan %u", &inner_vlan))
+	qinq_fields |= 1 << 5;
       else if (unformat (line_input, "client-ip %U",
 			 unformat_ip4_address, &client_ip.ip4))
 	{
@@ -1398,6 +1528,21 @@ pppoe_add_del_session_command_fn (vlib_main_t * vm,
       goto done;
     }
 
+  if (qinq_fields != 0 && qinq_fields != 0x3f)
+    {
+      error = clib_error_return (0, "incomplete QinQ session parameters");
+      goto done;
+    }
+
+  if (qinq_fields &&
+      (outer_tpid > 0xffff || inner_tpid > 0xffff ||
+       outer_vlan < QINQ_VLAN_MIN || outer_vlan > QINQ_VLAN_MAX ||
+       inner_vlan < QINQ_VLAN_MIN || inner_vlan > QINQ_VLAN_MAX))
+    {
+      error = clib_error_return (0, "invalid QinQ TPID or VLAN");
+      goto done;
+    }
+
   clib_memset (a, 0, sizeof (*a));
 
   a->is_add = is_add;
@@ -1408,6 +1553,16 @@ pppoe_add_del_session_command_fn (vlib_main_t * vm,
 #undef _
 
   clib_memcpy (a->server_mac, server_mac, 6);
+
+  if (qinq_fields)
+    {
+      a->qinq.has_qinq = 1;
+      a->qinq.parent_sw_if_index = parent_sw_if_index;
+      a->qinq.outer_tpid = (u16) outer_tpid;
+      a->qinq.outer_vlan = (u16) outer_vlan;
+      a->qinq.inner_tpid = (u16) inner_tpid;
+      a->qinq.inner_vlan = (u16) inner_vlan;
+    }
 
   rv = vnet_pppoe_add_del_session (a, &session_sw_if_index);
 
@@ -1455,7 +1610,9 @@ VLIB_CLI_COMMAND (create_pppoe_session_command, static) = {
   .path = "create lcp pppoe session",
   .short_help =
   "create pppoe session client-ip <client-ip> server-ip <server-ip> session-id <nn>"
-  " server-mac <server-mac> encap-if-index <nn> [decap-vrf-id <nn>] [del]",
+  " server-mac <server-mac> [encap-if-index <nn> | qinq-interface <subport>"
+  " parent <parent> outer-tpid <hex> outer-vlan <vid> inner-tpid <hex>"
+  " inner-vlan <vid>] [decap-vrf-id <nn>] [del]",
   .function = pppoe_add_del_session_command_fn,
 };
 /* *INDENT-ON* */
@@ -1669,6 +1826,12 @@ format_pppoe_session (u8 * s, va_list * args)
   s = format (s, "    local-mac %U  server-mac %U",
 	      format_ethernet_address, t->local_mac,
 	      format_ethernet_address, t->server_mac);
+
+  if (t->has_qinq)
+    s = format (s, "\n    qinq parent %U tags 0x%04x/%u 0x%04x/%u",
+		format_vnet_sw_if_index_name, pem->vnet_main,
+		t->parent_sw_if_index, t->outer_tpid, t->outer_vlan,
+		t->inner_tpid, t->inner_vlan);
 
   return s;
 }
@@ -1951,7 +2114,12 @@ lcp_pppoe_apply_copp (vlib_main_t *vm, vlib_buffer_t *b,
 typedef struct lcp_pppoe_trace_t_
 {
   u32 sw_if_index;
+  u32 qinq_sw_if_index;
+  u32 rule_id;
+  u16 outer_vlan;
+  u16 inner_vlan;
   u8 is_host;
+  u8 qinq_valid;
 } lcp_pppoe_trace_t;
 
 /* packet trace format function */
@@ -1965,7 +2133,38 @@ format_lcp_pppoe_trace (u8 *s, va_list *args)
   s = format (s, "pppoe: sw_if_index %d direction %s\n", t->sw_if_index,
               t->is_host ? "host-to-phy" : "phy-to-host");
 
+  if (t->qinq_valid)
+    s = format (s, " qinq subport %u rule %u vlan %u/%u",
+		t->qinq_sw_if_index, t->rule_id, t->outer_vlan,
+		t->inner_vlan);
+
   return s;
+}
+
+static_always_inline void
+lcp_pppoe_trace_set (lcp_pppoe_trace_t *t, vlib_buffer_t *b,
+		     u32 sw_if_index, u8 is_host)
+{
+  const qinq_subport_t *subport = qinq_subport_get_by_sw_if_index (
+    vnet_buffer (b)->sw_if_index[VLIB_RX]);
+
+  t->sw_if_index = sw_if_index;
+  t->is_host = is_host;
+  t->qinq_valid = subport != 0;
+  if (subport)
+    {
+      ethernet_header_t *ethernet = ethernet_buffer_get_header (b);
+      ethernet_vlan_header_t *outer =
+	(ethernet_vlan_header_t *) (ethernet + 1);
+      ethernet_vlan_header_t *inner = outer + 1;
+
+      t->qinq_sw_if_index = subport->sw_if_index;
+      t->rule_id = subport->rule_id;
+      t->outer_vlan =
+	clib_net_to_host_u16 (outer->priority_cfi_and_id) & 0x0fff;
+      t->inner_vlan =
+	clib_net_to_host_u16 (inner->priority_cfi_and_id) & 0x0fff;
+    }
 }
 VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
              vlib_node_runtime_t * node,
@@ -2012,8 +2211,8 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
 
           next0 = next1 = LCP_PPPOE_NEXT_DROP;
 
-          sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
-          sw_if_index1 = vnet_buffer(b1)->sw_if_index[VLIB_RX];
+          sw_if_index0 = qinq_buffer_rx_parent (b0);
+          sw_if_index1 = qinq_buffer_rx_parent (b1);
 
           vnet_feature_next (&next0, b0);
           vnet_feature_next (&next1, b1);
@@ -2128,8 +2327,7 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               lcp_pppoe_trace_t *t =
                   vlib_add_trace (vm, node, b0, sizeof (*t));
 
-              t->sw_if_index = sw_if_index0;
-              t->is_host = is_host0;
+              lcp_pppoe_trace_set (t, b0, sw_if_index0, is_host0);
           }
 
           if (b1->flags & VLIB_BUFFER_IS_TRACED)
@@ -2137,8 +2335,7 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               lcp_pppoe_trace_t *t =
                   vlib_add_trace (vm, node, b1, sizeof (*t));
 
-              t->sw_if_index = sw_if_index1;
-              t->is_host = is_host1;
+              lcp_pppoe_trace_set (t, b1, sw_if_index1, is_host1);
           }
 
           from += 2;
@@ -2173,7 +2370,7 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
           /* most packets will follow feature arc */
           vnet_feature_next (&next0, b0);
 
-          sw_if_index0 = vnet_buffer(b0)->sw_if_index[VLIB_RX];
+          sw_if_index0 = qinq_buffer_rx_parent (b0);
 
 	      lipi0 = lcp_itf_pair_find_by_phy (sw_if_index0); 
           if (lipi0 == INDEX_INVALID)
@@ -2231,8 +2428,7 @@ VLIB_NODE_FN (lcp_pppoe_punt_node) (vlib_main_t * vm,
               lcp_pppoe_trace_t *t =
                   vlib_add_trace (vm, node, b0, sizeof (*t));
 
-              t->sw_if_index = sw_if_index0;
-              t->is_host = is_host0;
+              lcp_pppoe_trace_set (t, b0, sw_if_index0, is_host0);
           }
 
           from += 1;
@@ -2303,6 +2499,14 @@ typedef struct {
   u32 rx_sw_if_index;
   u32 next_sw_if_index;
   u32 result_sw_if_index;
+  u32 qinq_parent_sw_if_index;
+  u32 qinq_sw_if_index;
+  u32 qinq_rule_id;
+  u16 outer_tpid;
+  u16 outer_vlan;
+  u16 inner_tpid;
+  u16 inner_vlan;
+  u8 qinq_valid;
 } pppoe_rx_trace_t;
 
 static u8 * format_pppoe_rx_trace (u8 * s, va_list * args)
@@ -2323,13 +2527,78 @@ static u8 * format_pppoe_rx_trace (u8 * s, va_list * args)
                   t->session_index, t->session_id,
                   t->rx_sw_if_index, t->next_sw_if_index, t->result_sw_if_index);
     }
+
+  if (t->qinq_valid)
+    s = format (s, " qinq subport %u parent %u rule %u tags "
+		"0x%04x/%u 0x%04x/%u",
+		t->qinq_sw_if_index, t->qinq_parent_sw_if_index,
+		t->qinq_rule_id, t->outer_tpid, t->outer_vlan,
+		t->inner_tpid, t->inner_vlan);
+
   return s;
+}
+
+static_always_inline int
+lcp_pppoe_packet_header (vlib_buffer_t *b, ethernet_header_t **ethernet,
+			 pppoe_header_t **pppoe, u32 *l2_len,
+			 u16 *single_vlan_id)
+{
+  u8 *start;
+  u16 type;
+
+  vlib_buffer_reset (b);
+  start = vlib_buffer_get_current (b);
+  *ethernet = (ethernet_header_t *) start;
+  *l2_len = ethernet_buffer_header_size (b);
+  *single_vlan_id = 0;
+
+  if (*l2_len < sizeof (**ethernet) ||
+      b->current_length < *l2_len + sizeof (**pppoe))
+    return 0;
+
+  type = clib_net_to_host_u16 (
+    clib_mem_unaligned (start + *l2_len - sizeof (u16), u16));
+  if (type != ETHERNET_TYPE_PPPOE_DISCOVERY &&
+      type != ETHERNET_TYPE_PPPOE_SESSION)
+    return 0;
+
+  if (*l2_len == sizeof (**ethernet) + sizeof (ethernet_vlan_header_t))
+    {
+      ethernet_vlan_header_t *vlan =
+	(ethernet_vlan_header_t *) (start + sizeof (**ethernet));
+      *single_vlan_id =
+	clib_net_to_host_u16 (vlan->priority_cfi_and_id) & 0x0fff;
+    }
+
+  *pppoe = (pppoe_header_t *) (start + *l2_len);
+  return 1;
+}
+
+static_always_inline void
+lcp_pppoe_rx_key_carrier (vlib_buffer_t *b, u16 single_vlan_id,
+			  u32 *key_sw_if_index, u16 *key_vlan_id)
+{
+  if (qinq_buffer_matches_rx (b))
+    {
+      *key_sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
+      *key_vlan_id = 0;
+      return;
+    }
+
+  if ((b->flags & VLIB_BUFFER_NOT_PHY_INTF) &&
+      vnet_buffer2 (b)->l2_rx_sw_if_index != ~0)
+    *key_sw_if_index = vnet_buffer2 (b)->l2_rx_sw_if_index;
+  else
+    *key_sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
+
+  *key_vlan_id = single_vlan_id;
 }
 
 VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
              vlib_node_runtime_t * node,
              vlib_frame_t * frame)
 {
+  static u8 node_entry_logged;
   u32 n_left_from, *from, *to_next;
   u32 next_index = node->cached_next_index;
   pppoe_main_t *pem = &pppoe_main;
@@ -2341,6 +2610,9 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
   u32 stats_sw_if_index, stats_n_packets, stats_n_bytes;
   u32 copies[VLIB_FRAME_SIZE];
   u32 n_copies = 0;
+
+  if (clib_atomic_bool_cmp_and_swap (&node_entry_logged, 0, 1))
+    clib_warning ("PPPoE input node entered");
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
@@ -2364,18 +2636,24 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
           vlib_buffer_t *b0;
           u32 next0;
           ethernet_header_t *h0;
-          ethernet_vlan_header_t *vlan0 = 0;
-          pppoe_header_t * pppoe0;
+          pppoe_header_t *pppoe0 = 0;
           u32 error0;
           u16 ppp_proto0 = 0;
-          u16 type0;
+          u16 single_vlan_id = 0;
+          u16 lookup_vlan_id = 0;
           pppoe_session_t * t0;
           u32 sw_if_index = 0;
+          u32 l2_len = 0;
           pppoe_entry_key_t key0;
           pppoe_entry_result_t result0;
           u32 bucket0;
           u32 len0;
           u32 new_sw_if_index0;
+          const qinq_subport_t *qinq_trace = 0;
+          u16 qinq_outer_tpid = 0;
+          u16 qinq_outer_vlan = 0;
+          u16 qinq_inner_tpid = 0;
+          u16 qinq_inner_vlan = 0;
 
           bi0 = from[0];
           to_next[0] = bi0;
@@ -2383,26 +2661,34 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
           b0 = vlib_get_buffer (vm, bi0);
           error0 = 0;
 
-          /* get mac */
-          vlib_buffer_reset(b0);
-          h0 = vlib_buffer_get_current (b0);
           result0.raw = ~0ULL;
           result0.fields.session_index = ~0;
 
-          /* get pppoe header */
-          type0 = clib_net_to_host_u16(h0->type);
-          if(type0 == ETHERNET_TYPE_VLAN){
-              vlan0 = (ethernet_vlan_header_t *)(h0+1);
-              type0 = clib_net_to_host_u16(vlan0->type);
-              pppoe0 = (pppoe_header_t*)(vlan0+1);
-              if( type0 != ETHERNET_TYPE_PPPOE_DISCOVERY && type0 != ETHERNET_TYPE_PPPOE_SESSION ) {
-                  error0 = PPPOE_ERROR_BAD_VER_TYPE;
-                  next0 = PPPOE_INPUT_NEXT_DROP;
-                  goto trace00;
-              }
-          } else {
-              pppoe0 = (pppoe_header_t*)(h0+1);
-          }
+          if (!lcp_pppoe_packet_header (b0, &h0, &pppoe0, &l2_len,
+					&single_vlan_id))
+            {
+              error0 = PPPOE_ERROR_BAD_VER_TYPE;
+              next0 = PPPOE_INPUT_NEXT_DROP;
+              goto trace00;
+            }
+
+          lcp_pppoe_rx_key_carrier (b0, single_vlan_id, &sw_if_index,
+				    &lookup_vlan_id);
+          qinq_trace = qinq_subport_get_by_sw_if_index (
+            vnet_buffer (b0)->sw_if_index[VLIB_RX]);
+          if (qinq_trace)
+            {
+              ethernet_vlan_header_t *outer =
+		(ethernet_vlan_header_t *) (h0 + 1);
+              ethernet_vlan_header_t *inner = outer + 1;
+
+              qinq_outer_tpid = clib_net_to_host_u16 (h0->type);
+              qinq_outer_vlan = clib_net_to_host_u16 (
+		outer->priority_cfi_and_id) & 0x0fff;
+              qinq_inner_tpid = clib_net_to_host_u16 (outer->type);
+              qinq_inner_vlan = clib_net_to_host_u16 (
+		inner->priority_cfi_and_id) & 0x0fff;
+            }
 
           /* Frames received on an LCP host interface were originated by
            * Linux.  Send them to the paired physical interface unchanged;
@@ -2433,26 +2719,13 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
                   u8 *lcp0 = (u8 *) (pppoe0 + 1);
                   if (lcp0[0] == 9 /* echo_request */)
                     {
-                      u32 lookup_sw_if_index;
                       u16 lcp_len;
                       pppoe_session_t *echo_sess = 0;
 
-                      if ((b0->flags & VLIB_BUFFER_NOT_PHY_INTF)
-                          && (vnet_buffer2 (b0)->l2_rx_sw_if_index != ~0))
-                        lookup_sw_if_index =
-                          vnet_buffer2 (b0)->l2_rx_sw_if_index;
-                      else
-                        lookup_sw_if_index =
-                          vnet_buffer (b0)->sw_if_index[VLIB_RX];
-
                       pppoe_lookup_1 (&pem->session_table, &cached_key,
                                       &cached_result, h0->src_address,
-                                      pppoe0->session_id, lookup_sw_if_index,
-                                      vlan0 == 0 ?
-                                        0 :
-                                        (clib_net_to_host_u16 (
-                                           vlan0->priority_cfi_and_id)
-                                         & 0x0fff),
+                                      pppoe0->session_id, sw_if_index,
+                                      lookup_vlan_id,
                                       &key0, &bucket0, &result0);
 
                       if (PREDICT_FALSE (result0.fields.session_index == ~0))
@@ -2528,23 +2801,24 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               goto trace00;
           }
 
-          if ((b0->flags & VLIB_BUFFER_NOT_PHY_INTF) && (vnet_buffer2(b0)->l2_rx_sw_if_index != ~0))
-          {
-              sw_if_index = vnet_buffer2(b0)->l2_rx_sw_if_index;
-          }
-          else
-          {
-              sw_if_index = vnet_buffer(b0)->sw_if_index[VLIB_RX];
-          }
-
 	  pppoe_lookup_1 (&pem->session_table, &cached_key, &cached_result,
 			  h0->src_address, pppoe0->session_id,
-              sw_if_index,
-              vlan0 == 0 ? 0: (clib_net_to_host_u16(vlan0->priority_cfi_and_id) & 0x0fff),
+			  sw_if_index, lookup_vlan_id,
 			  &key0, &bucket0, &result0);
 
           if (PREDICT_FALSE (result0.fields.session_index == ~0))
           {
+              clib_warning (
+		"PPPoE lookup miss mac %U session %u carrier %u vlan %u "
+		"key 0x%016llx:0x%016llx result session %d interface %d",
+		format_ethernet_address, h0->src_address,
+		clib_net_to_host_u16 (pppoe0->session_id), sw_if_index,
+		lookup_vlan_id, key0.raw[0], key0.raw[1],
+		result0.fields.session_index == ~0 ?
+		  -1 : (i32) result0.fields.session_index,
+		result0.fields.sw_if_index == ~0 ?
+		  -1 : (i32) result0.fields.sw_if_index);
+
               /* session miss */
               u32 copy_bi;
               next0 = PPPOE_INPUT_NEXT_DROP;
@@ -2557,11 +2831,8 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               goto trace00;
           }
 
-          /* Pop Eth and PPPoE header */
-          vlan0 == 0 ?
-              vlib_buffer_advance(b0, sizeof(*h0)+sizeof(*pppoe0))
-              :
-              vlib_buffer_advance(b0, sizeof(*h0)+sizeof(*vlan0)+sizeof(*pppoe0));
+          /* Pop the complete Ethernet/VLAN header and PPPoE header. */
+          vlib_buffer_advance (b0, l2_len + sizeof (*pppoe0));
 
           next0 = (ppp_proto0==PPP_PROTOCOL_ip4)?
               PPPOE_INPUT_NEXT_IP4_INPUT
@@ -2570,7 +2841,9 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
           {
               t0 = pool_elt_at_index (pem->sessions,
                       result0.fields.session_index);
-              vnet_buffer2(b0)->l2_rx_sw_if_index = vnet_buffer(b0)->sw_if_index[VLIB_RX];
+              if (!(b0->flags & VLIB_BUFFER_NOT_PHY_INTF))
+                vnet_buffer2 (b0)->l2_rx_sw_if_index =
+                  vnet_buffer (b0)->sw_if_index[VLIB_RX];
               vnet_buffer(b0)->sw_if_index[VLIB_RX] = t0->sw_if_index;
               b0->flags |= VLIB_BUFFER_NOT_PHY_INTF;
 
@@ -2621,10 +2894,21 @@ trace00:
               tr->next_index = next0;
               tr->error = error0;
               tr->session_index = result0.fields.session_index;
-              tr->session_id = clib_net_to_host_u16(pppoe0->session_id);
+              tr->session_id = pppoe0 ?
+		clib_net_to_host_u16 (pppoe0->session_id) : 0;
               tr->rx_sw_if_index = vnet_buffer(b0)->sw_if_index[VLIB_RX];
               tr->next_sw_if_index = vnet_buffer2(b0)->l2_rx_sw_if_index;
               tr->result_sw_if_index = result0.fields.sw_if_index;
+              tr->qinq_valid = qinq_trace != 0;
+              tr->qinq_parent_sw_if_index =
+		qinq_trace ? qinq_trace->parent_sw_if_index : ~0;
+              tr->qinq_sw_if_index =
+		qinq_trace ? qinq_trace->sw_if_index : ~0;
+              tr->qinq_rule_id = qinq_trace ? qinq_trace->rule_id : ~0;
+              tr->outer_tpid = qinq_outer_tpid;
+              tr->outer_vlan = qinq_outer_vlan;
+              tr->inner_tpid = qinq_inner_tpid;
+              tr->inner_vlan = qinq_inner_vlan;
           }
           vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
              to_next, n_left_to_next,

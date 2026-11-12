@@ -7,7 +7,7 @@
 
 ipoe_main_t ipoe_main;
 
-const char *
+__clib_export const char *
 ipoe_error_string (int rv)
 {
   switch (rv)
@@ -223,6 +223,7 @@ ipoe_init (vlib_main_t *vm)
   im->downstream_gate_drop.stat_segment_name =
     "/ipoe/session/downstream-gate-drop";
   ipoe_timer_init (vm);
+  ipoe_qinq_dpo_module_init ();
   return 0;
 }
 
