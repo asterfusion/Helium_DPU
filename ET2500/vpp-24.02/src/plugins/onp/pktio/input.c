@@ -59,11 +59,6 @@ onp_pktio_input_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
   if (PREDICT_FALSE (!n_rx_packets))
     return 0;
 
-  for (u32 i = 0; i < n_rx_packets; i++)
-  {
-      vnet_buffer2 (ptd->buffers[i])->l2_rx_sw_if_index = ~0;
-  }
-
   cnxk_drv_pkt_process_and_enq_to_next_march (vm, node, ptd, n_rx_packets,
 					      next_index, &is_single_next);
 
