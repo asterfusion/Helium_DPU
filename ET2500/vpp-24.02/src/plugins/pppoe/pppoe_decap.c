@@ -108,7 +108,7 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 	  u32 next0, next1;
 	  ethernet_header_t *h0, *h1;
 	  u32 l2_len0, l2_len1;
-          pppoe_header_t * pppoe0, * pppoe1;
+          pppoe_header_t *pppoe0 = 0, *pppoe1 = 0;
           u16 ppp_proto0 = 0, ppp_proto1 = 0;
           pppoe_session_t * t0, * t1;
           u32 error0 = 0, error1 = 0;
@@ -223,7 +223,8 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               tr->next_index = next0;
               tr->error = error0;
               tr->session_index = result0.fields.session_index;
-              tr->session_id = clib_net_to_host_u32(pppoe0->session_id);
+              tr->session_id = pppoe0 ?
+		clib_net_to_host_u16 (pppoe0->session_id) : 0;
             }
 
           if (!pppoe_packet_header (b1, &h1, &pppoe1, &l2_len1))
@@ -303,7 +304,8 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               tr->next_index = next1;
               tr->error = error1;
               tr->session_index = result1.fields.session_index;
-              tr->session_id = clib_net_to_host_u32(pppoe1->session_id);
+              tr->session_id = pppoe1 ?
+		clib_net_to_host_u16 (pppoe1->session_id) : 0;
             }
 
 	  vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
@@ -318,7 +320,7 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 	  u32 next0;
 	  ethernet_header_t *h0;
 	  u32 l2_len0;
-          pppoe_header_t * pppoe0;
+          pppoe_header_t *pppoe0 = 0;
           u16 ppp_proto0 = 0;
           pppoe_session_t * t0;
           u32 error0;
@@ -413,7 +415,8 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               tr->next_index = next0;
               tr->error = error0;
               tr->session_index = result0.fields.session_index;
-              tr->session_id = clib_net_to_host_u16(pppoe0->session_id);
+              tr->session_id = pppoe0 ?
+		clib_net_to_host_u16 (pppoe0->session_id) : 0;
             }
 	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
 					   to_next, n_left_to_next,
