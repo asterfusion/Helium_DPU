@@ -64,6 +64,37 @@ ipoe_session_counter_add (u32 counter_index,
 				  counter_index, 1, ip4_bytes);
 }
 
+ipoe_session_t *
+ipoe_session_lookup_downstream (
+  u32 sw_if_index, const ip4_address_t *dst_ip, u64 expected_external_index,
+  u8 check_session, ipoe_downstream_lookup_result_t *result)
+{
+  ipoe_main_t *im = &ipoe_main;
+  ipoe_session_t *session;
+  uword *p;
+
+  p = hash_get (im->session_by_user,
+		(uword) ipoe_user_key (sw_if_index, dst_ip));
+  if (!p || pool_is_free_index (im->sessions, p[0]))
+    {
+      *result = IPOE_DOWNSTREAM_LOOKUP_NO_SESSION;
+      return 0;
+    }
+
+  session = pool_elt_at_index (im->sessions, p[0]);
+  if (!session->admin_state)
+    *result = IPOE_DOWNSTREAM_LOOKUP_SESSION_INACTIVE;
+  else if (session->sw_if_index != sw_if_index)
+    *result = IPOE_DOWNSTREAM_LOOKUP_ACCESS_MISMATCH;
+  else if (check_session &&
+           session->external_index != expected_external_index)
+    *result = IPOE_DOWNSTREAM_LOOKUP_SESSION_MISMATCH;
+  else
+    *result = IPOE_DOWNSTREAM_LOOKUP_OK;
+
+  return session;
+}
+
 static void
 ipoe_session_get_counter (vlib_combined_counter_main_t *counter_main,
 			  u32 counter_index, vlib_counter_t *counter)
@@ -159,6 +190,10 @@ ipoe_session_remove_index (u32 session_index, u8 stop_timer)
     return;
 
   session = pool_elt_at_index (im->sessions, session_index);
+  clib_warning ("ipoe session remove index=%llu generation=%llu "
+		"interface=%u ip=%U",
+		session->external_index, session->generation,
+		session->sw_if_index, format_ip4_address, &session->user_ip4);
   if (stop_timer)
     ipoe_timer_stop (session);
   hash_unset (im->session_by_index, (uword) session->external_index);
@@ -176,18 +211,15 @@ ipoe_session_remove_index (u32 session_index, u8 stop_timer)
 }
 
 static int
-ipoe_session_add_locked (u64 external_index, u64 generation, u32 sw_if_index,
-		  const ip4_address_t *user_ip4,
-		  const mac_address_t *user_mac, u8 has_user_mac,
-		  u8 admin_state,
-		  u32 lease_timeout, u64 lease_expiry)
+ipoe_session_validate (u64 external_index, u32 sw_if_index,
+		       const ip4_address_t *user_ip4,
+		       const mac_address_t *user_mac, u8 *has_user_mac,
+		       u32 lease_timeout, u64 lease_expiry,
+		       const ipoe_qinq_session_t *qinq)
 {
   ipoe_main_t *im = &ipoe_main;
   ipoe_interface_t *intf;
-  ipoe_session_t *session;
-  uword *p;
-  u32 session_index;
-  u64 user_key;
+  const qinq_subport_t *qinq_rule;
 
   if (!external_index || !lease_timeout || !lease_expiry ||
       sw_if_index >= vec_len (im->interfaces))
@@ -195,20 +227,66 @@ ipoe_session_add_locked (u64 external_index, u64 generation, u32 sw_if_index,
   if (user_ip4->as_u32 == 0 || ip4_address_is_multicast (user_ip4) ||
       ip4_address_is_global_broadcast (user_ip4))
     return IPOE_ERROR_INVALID_VALUE;
-  admin_state = !!admin_state;
   intf = vec_elt_at_index (im->interfaces, sw_if_index);
   if (!intf->enabled)
     return IPOE_ERROR_INVALID_INTERFACE;
-  if (intf->access_mode == IPOE_INTERNAL_ACCESS_MODE_L2 && !has_user_mac)
+  if (intf->access_mode == IPOE_INTERNAL_ACCESS_MODE_L2 && !*has_user_mac)
     return IPOE_ERROR_INVALID_VALUE;
-  if (has_user_mac &&
+  if (*has_user_mac &&
       ((user_mac->bytes[0] & 1) ||
        (user_mac->bytes[0] == 0 && user_mac->bytes[1] == 0 &&
 	user_mac->bytes[2] == 0 && user_mac->bytes[3] == 0 &&
 	user_mac->bytes[4] == 0 && user_mac->bytes[5] == 0)))
     return IPOE_ERROR_INVALID_VALUE;
-  if (intf->access_mode == IPOE_INTERNAL_ACCESS_MODE_L3)
-    has_user_mac = 0;
+  if (qinq && qinq->enabled)
+    {
+      qinq_rule = qinq_subport_get_by_sw_if_index (sw_if_index);
+      if (!qinq_rule || !*has_user_mac ||
+	  qinq->parent_sw_if_index != qinq_rule->parent_sw_if_index ||
+	  qinq->outer_tpid != qinq_rule->outer_tpid ||
+	  qinq->outer_vlan != qinq_rule->outer_vlan ||
+	  qinq->inner_tpid != qinq_rule->inner_tpid ||
+	  qinq->inner_vlan < QINQ_VLAN_MIN ||
+	  qinq->inner_vlan > QINQ_VLAN_MAX ||
+	  (qinq_rule->match_type == QINQ_MATCH_EXACT &&
+	   qinq->inner_vlan != qinq_rule->inner_vlan_first) ||
+	  (qinq_rule->match_type == QINQ_MATCH_RANGE &&
+	   (qinq->inner_vlan < qinq_rule->inner_vlan_first ||
+	    qinq->inner_vlan > qinq_rule->inner_vlan_last)) ||
+	  mac_address_is_zero (&qinq->local_mac) ||
+	  (qinq->local_mac.bytes[0] & 1))
+	return IPOE_ERROR_INVALID_VALUE;
+    }
+  if (intf->access_mode == IPOE_INTERNAL_ACCESS_MODE_L3 &&
+      (!qinq || !qinq->enabled))
+    *has_user_mac = 0;
+
+  return IPOE_OK;
+}
+
+static int
+ipoe_session_add_locked (u64 external_index, u64 generation, u32 sw_if_index,
+		  const ip4_address_t *user_ip4,
+		  const mac_address_t *user_mac, u8 has_user_mac,
+		  u8 admin_state, u32 lease_timeout, u64 lease_expiry,
+		  const ipoe_qinq_session_t *qinq)
+{
+  ipoe_main_t *im = &ipoe_main;
+  ipoe_interface_t *intf;
+  ipoe_session_t *session;
+  uword *p;
+  u32 session_index;
+  u64 user_key;
+  int rv;
+
+  rv = ipoe_session_validate (external_index, sw_if_index, user_ip4,
+			      user_mac, &has_user_mac, lease_timeout,
+			      lease_expiry, qinq);
+  if (rv != IPOE_OK)
+    return rv;
+
+  admin_state = !!admin_state;
+  intf = vec_elt_at_index (im->interfaces, sw_if_index);
 
   user_key = ipoe_user_key (sw_if_index, user_ip4);
   p = hash_get (im->session_by_index, (uword) external_index);
@@ -219,6 +297,9 @@ ipoe_session_add_locked (u64 external_index, u64 generation, u32 sw_if_index,
       if (session->sw_if_index == sw_if_index &&
 	  session->user_ip4.as_u32 == user_ip4->as_u32 &&
 	  session->has_user_mac == has_user_mac &&
+	  session->qinq.enabled == (qinq && qinq->enabled) &&
+	  (!session->qinq.enabled ||
+	   !memcmp (&session->qinq, qinq, sizeof (*qinq))) &&
 	  (!has_user_mac ||
 	   !memcmp (&session->user_mac, user_mac, sizeof (*user_mac))))
 	{
@@ -234,13 +315,12 @@ ipoe_session_add_locked (u64 external_index, u64 generation, u32 sw_if_index,
 	  session->admin_state = admin_state;
 	  session->timer_generation++;
 	  ipoe_timer_update (session_index, lease_timeout);
-#if 0
-	  clib_warning ("ipoe session lease update index=%llu "
-		"sw_if_index=%u ip=%U lease_timeout=%u lease_expiry=%llu",
-		external_index, sw_if_index,
+	  clib_warning ("ipoe session lease update index=%llu generation=%llu "
+			"sw_if_index=%u ip=%U lease_timeout=%u "
+			"lease_expiry=%llu",
+			external_index, generation, sw_if_index,
 			format_ip4_address, user_ip4, lease_timeout,
 			lease_expiry);
-#endif
 	  return IPOE_OK;
 	}
       return IPOE_ERROR_ALREADY_EXISTS;
@@ -259,6 +339,8 @@ ipoe_session_add_locked (u64 external_index, u64 generation, u32 sw_if_index,
   session->sw_if_index = sw_if_index;
   session->has_user_mac = has_user_mac;
   session->admin_state = admin_state;
+  if (qinq && qinq->enabled)
+    session->qinq = *qinq;
   session->timer_handle = ~0;
   session->timer_generation = 1;
   ipoe_session_counter_allocate (session);
@@ -269,13 +351,87 @@ ipoe_session_add_locked (u64 external_index, u64 generation, u32 sw_if_index,
   hash_set (im->session_by_user, (uword) user_key, session_index);
   intf->session_count++;
   ipoe_timer_start (session_index, lease_timeout);
-#if 0
-	  clib_warning ("ipoe session add index=%llu sw_if_index=%u ip=%U "
-		"lease_timeout=%u lease_expiry=%llu "
-		"timer_handle=%u", external_index, sw_if_index,
+  clib_warning ("ipoe session add index=%llu generation=%llu "
+		"sw_if_index=%u ip=%U lease_timeout=%u "
+		"lease_expiry=%llu timer_handle=%u",
+		external_index, generation, sw_if_index,
 		format_ip4_address, user_ip4, lease_timeout, lease_expiry,
 		session->timer_handle);
-#endif
+  return IPOE_OK;
+}
+
+static int
+ipoe_session_update_locked (u64 external_index, u64 generation,
+			    u32 sw_if_index,
+			    const ip4_address_t *user_ip4,
+			    const mac_address_t *user_mac, u8 has_user_mac,
+			    u8 admin_state, u32 lease_timeout,
+			    u64 lease_expiry,
+			    const ipoe_qinq_session_t *qinq)
+{
+  ipoe_main_t *im = &ipoe_main;
+  ipoe_session_t *session;
+  ipoe_interface_t *old_intf;
+  ipoe_interface_t *new_intf;
+  u64 old_user_key;
+  u64 new_user_key;
+  uword *p;
+  u32 session_index;
+  int rv;
+
+  p = hash_get (im->session_by_index, (uword) external_index);
+  if (!p || pool_is_free_index (im->sessions, p[0]))
+    return IPOE_ERROR_NO_SUCH_ENTRY;
+
+  session_index = p[0];
+  session = pool_elt_at_index (im->sessions, session_index);
+  if (generation < session->generation)
+    return IPOE_ERROR_GENERATION_STALE;
+
+  rv = ipoe_session_validate (external_index, sw_if_index, user_ip4,
+			      user_mac, &has_user_mac, lease_timeout,
+			      lease_expiry, qinq);
+  if (rv != IPOE_OK)
+    return rv;
+
+  new_user_key = ipoe_user_key (sw_if_index, user_ip4);
+  p = hash_get (im->session_by_user, (uword) new_user_key);
+  if (p && p[0] != session_index)
+    return IPOE_ERROR_IP_CONFLICT;
+
+  old_user_key = ipoe_user_key (session->sw_if_index, &session->user_ip4);
+  old_intf = vec_elt_at_index (im->interfaces, session->sw_if_index);
+  new_intf = vec_elt_at_index (im->interfaces, sw_if_index);
+  hash_unset (im->session_by_user, (uword) old_user_key);
+
+  if (session->sw_if_index != sw_if_index)
+    {
+      if (old_intf->session_count)
+	old_intf->session_count--;
+      new_intf->session_count++;
+    }
+
+  session->generation = generation;
+  session->lease_expiry = lease_expiry;
+  session->expires_at = vlib_time_now (im->vlib_main) + lease_timeout;
+  session->user_ip4 = *user_ip4;
+  session->sw_if_index = sw_if_index;
+  session->has_user_mac = has_user_mac;
+  session->admin_state = !!admin_state;
+  clib_memset (&session->user_mac, 0, sizeof (session->user_mac));
+  clib_memset (&session->qinq, 0, sizeof (session->qinq));
+  if (has_user_mac)
+    session->user_mac = *user_mac;
+  if (qinq && qinq->enabled)
+    session->qinq = *qinq;
+
+  hash_set (im->session_by_user, (uword) new_user_key, session_index);
+  session->timer_generation++;
+  ipoe_timer_update (session_index, lease_timeout);
+  clib_warning ("ipoe session update index=%llu generation=%llu "
+		"interface=%u ip=%U",
+		external_index, generation, sw_if_index,
+		format_ip4_address, user_ip4);
   return IPOE_OK;
 }
 
@@ -283,7 +439,8 @@ int
 ipoe_session_add (u64 external_index, u64 generation, u32 sw_if_index,
 		  const ip4_address_t *user_ip4,
 		  const mac_address_t *user_mac, u8 has_user_mac,
-		  u8 admin_state, u32 lease_timeout, u64 lease_expiry)
+		  u8 admin_state, u32 lease_timeout, u64 lease_expiry,
+		  const ipoe_qinq_session_t *qinq)
 {
   ipoe_main_t *im = &ipoe_main;
   int rv;
@@ -291,9 +448,27 @@ ipoe_session_add (u64 external_index, u64 generation, u32 sw_if_index,
   vlib_worker_thread_barrier_sync (im->vlib_main);
   rv = ipoe_session_add_locked (
     external_index, generation, sw_if_index, user_ip4, user_mac,
-    has_user_mac, admin_state, lease_timeout, lease_expiry);
+    has_user_mac, admin_state, lease_timeout, lease_expiry, qinq);
   vlib_worker_thread_barrier_release (im->vlib_main);
 
+  return rv;
+}
+
+int
+ipoe_session_update (u64 external_index, u64 generation, u32 sw_if_index,
+		     const ip4_address_t *user_ip4,
+		     const mac_address_t *user_mac, u8 has_user_mac,
+		     u8 admin_state, u32 lease_timeout, u64 lease_expiry,
+		     const ipoe_qinq_session_t *qinq)
+{
+  ipoe_main_t *im = &ipoe_main;
+  int rv;
+
+  vlib_worker_thread_barrier_sync (im->vlib_main);
+  rv = ipoe_session_update_locked (
+    external_index, generation, sw_if_index, user_ip4, user_mac,
+    has_user_mac, admin_state, lease_timeout, lease_expiry, qinq);
+  vlib_worker_thread_barrier_release (im->vlib_main);
   return rv;
 }
 
@@ -322,7 +497,7 @@ ipoe_session_add_batch (
         entries[i].sw_if_index, &entries[i].user_ip4,
         &entries[i].user_mac, entries[i].has_user_mac,
         entries[i].admin_state, entries[i].lease_timeout,
-        entries[i].lease_expiry);
+        entries[i].lease_expiry, &entries[i].qinq);
       if (result->retval != IPOE_OK)
 	continue;
 
@@ -347,10 +522,8 @@ ipoe_session_del (u64 external_index)
   uword *p = hash_get (im->session_by_index, (uword) external_index);
   if (!p)
     return IPOE_ERROR_NO_SUCH_ENTRY;
-#if 0
-  clib_warning ("ipoe session del index=%llu pool_index=%u",
+  clib_warning ("ipoe session delete request index=%llu pool_index=%u",
 		external_index, (u32) p[0]);
-#endif
   vlib_worker_thread_barrier_sync (im->vlib_main);
   ipoe_session_remove_index (p[0], 1);
   vlib_worker_thread_barrier_release (im->vlib_main);
@@ -377,10 +550,8 @@ ipoe_session_set_state (u64 external_index, u64 generation, u8 admin_state)
   vlib_worker_thread_barrier_sync (im->vlib_main);
   session->admin_state = admin_state;
   vlib_worker_thread_barrier_release (im->vlib_main);
-#if 0
   clib_warning ("ipoe session state index=%llu state=%u", external_index,
 		admin_state);
-#endif
   return IPOE_OK;
 }
 

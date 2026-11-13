@@ -30,6 +30,7 @@ vl_api_ipoe_session_add_del_t_handler (vl_api_ipoe_session_add_del_t *mp)
   vl_api_ipoe_session_add_del_reply_t *rmp;
   ip4_address_t user_ip4;
   mac_address_t user_mac;
+  ipoe_qinq_session_t qinq = {};
   ipoe_interface_t *intf;
   ipoe_session_t *session;
   uword *p;
@@ -63,11 +64,22 @@ vl_api_ipoe_session_add_del_t_handler (vl_api_ipoe_session_add_del_t *mp)
 
   ip4_address_decode (mp->user_ip4, &user_ip4);
   mac_address_decode (mp->user_mac, &user_mac);
+  qinq.enabled = mp->has_qinq;
+  if (qinq.enabled)
+    {
+      mac_address_decode (mp->local_mac, &qinq.local_mac);
+      qinq.parent_sw_if_index = ntohl (mp->parent_sw_if_index);
+      qinq.outer_tpid = ntohs (mp->outer_tpid);
+      qinq.outer_vlan = ntohs (mp->outer_vlan);
+      qinq.inner_tpid = ntohs (mp->inner_tpid);
+      qinq.inner_vlan = ntohs (mp->inner_vlan);
+    }
   rv = ipoe_session_add (
     clib_net_to_host_u64 (mp->index),
     clib_net_to_host_u64 (mp->generation), sw_if_index, &user_ip4,
     &user_mac, mp->has_user_mac, mp->admin_state,
-    ntohl (mp->lease_timeout_sec), clib_net_to_host_u64 (mp->lease_expiry));
+    ntohl (mp->lease_timeout_sec), clib_net_to_host_u64 (mp->lease_expiry),
+    &qinq);
   if (rv == IPOE_OK)
     {
       p = hash_get (im->session_by_index,
@@ -109,6 +121,8 @@ vl_api_ipoe_session_add_batch_t_handler (
   u32 i;
   int rv = IPOE_OK;
 
+  clib_memset (entries, 0, sizeof (entries));
+
   if (!count || count > IPOE_SESSION_ADD_BATCH_MAX)
     {
       count = 0;
@@ -127,6 +141,18 @@ vl_api_ipoe_session_add_batch_t_handler (
       entries[i].sw_if_index = ntohl (mp->entries[i].sw_if_index);
       entries[i].has_user_mac = mp->entries[i].has_user_mac;
       entries[i].admin_state = mp->entries[i].admin_state;
+      entries[i].qinq.enabled = mp->entries[i].has_qinq;
+      if (entries[i].qinq.enabled)
+        {
+          mac_address_decode (mp->entries[i].local_mac,
+                              &entries[i].qinq.local_mac);
+          entries[i].qinq.parent_sw_if_index =
+            ntohl (mp->entries[i].parent_sw_if_index);
+          entries[i].qinq.outer_tpid = ntohs (mp->entries[i].outer_tpid);
+          entries[i].qinq.outer_vlan = ntohs (mp->entries[i].outer_vlan);
+          entries[i].qinq.inner_tpid = ntohs (mp->entries[i].inner_tpid);
+          entries[i].qinq.inner_vlan = ntohs (mp->entries[i].inner_vlan);
+        }
       if (entries[i].access_mode != IPOE_ACCESS_MODE_L2 &&
 	  entries[i].access_mode != IPOE_ACCESS_MODE_L3)
 	entries[i].lease_timeout = 0;

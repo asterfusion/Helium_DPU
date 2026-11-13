@@ -3,6 +3,7 @@
 #include <vlib/vlib.h>
 #include <vnet/buffer.h>
 #include <vnet/ethernet/ethernet.h>
+#include <vnet/ethernet/qinq.h>
 #include <vnet/feature/feature.h>
 #include <vnet/ip/ip4_packet.h>
 #include <vnet/ip/ip4.h>
@@ -661,7 +662,13 @@ VNET_FEATURE_INIT (lcp_local_ip6_classify_feature, static) = {
 static_always_inline u32
 lcp_l2_direct_rx_sw_if_index (vlib_buffer_t *b)
 {
-  u32 sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
+  u32 sw_if_index = qinq_buffer_rx_parent (b);
+
+  if (sw_if_index != vnet_buffer (b)->sw_if_index[VLIB_RX])
+    {
+      vnet_buffer (b)->sw_if_index[VLIB_RX] = sw_if_index;
+      return sw_if_index;
+    }
 
   if ((b->flags & VLIB_BUFFER_NOT_PHY_INTF) &&
       vnet_buffer2 (b)->l2_rx_sw_if_index != 0 &&
@@ -690,8 +697,12 @@ VLIB_NODE_FN (lcp_l2_delivery_node)
 	{
 	  u32 bi = from[0], next = LCP_L2_DELIVERY_NEXT_DROP;
 	  vlib_buffer_t *b = vlib_get_buffer (vm, bi);
-	  index_t lipi = lcp_itf_pair_find_by_phy (
-	    lcp_l2_direct_rx_sw_if_index (b));
+	  u32 delivery_sw_if_index;
+#ifdef SUPPORT_LCP_VLAN_TAG_ACT
+	  u8 is_qinq = qinq_buffer_matches_rx (b);
+#endif
+	  delivery_sw_if_index = lcp_l2_direct_rx_sw_if_index (b);
+	  index_t lipi = lcp_itf_pair_find_by_phy (delivery_sw_if_index);
 	  lcp_itf_pair_t *lip = lcp_itf_pair_get (lipi);
 
 	  if (lip)
@@ -701,7 +712,8 @@ VLIB_NODE_FN (lcp_l2_delivery_node)
 	      vnet_buffer (b)->sw_if_index[VLIB_TX] = lip->lip_host_sw_if_index;
 	      vlib_buffer_advance (b, -len);
 #ifdef SUPPORT_LCP_VLAN_TAG_ACT
-	      lcp_itf_host_vlan_tag_process (lip, b);
+	      if (!is_qinq)
+		lcp_itf_host_vlan_tag_process (lip, b);
 #endif
 	      if (lcp_cpu_branch_pass (vm, b) ||
 		  vnet_buffer2 (b)->trap_id == LCP_TRAP_INVALID)

@@ -19,6 +19,31 @@
 #include <vnet/ppp/packet.h>
 #include <pppoe/pppoe.h>
 
+static_always_inline int
+pppoe_packet_header (vlib_buffer_t *b, ethernet_header_t **ethernet,
+		     pppoe_header_t **pppoe, u32 *l2_len)
+{
+  u8 *start;
+  u16 type;
+
+  vlib_buffer_reset (b);
+  start = vlib_buffer_get_current (b);
+  *ethernet = (ethernet_header_t *) start;
+  *l2_len = ethernet_buffer_header_size (b);
+  if (*l2_len < sizeof (**ethernet) ||
+      b->current_length < *l2_len + sizeof (**pppoe))
+    return 0;
+
+  type = clib_net_to_host_u16 (
+    clib_mem_unaligned (start + *l2_len - sizeof (u16), u16));
+  if (type != ETHERNET_TYPE_PPPOE_DISCOVERY &&
+      type != ETHERNET_TYPE_PPPOE_SESSION)
+    return 0;
+
+  *pppoe = (pppoe_header_t *) (start + *l2_len);
+  return 1;
+}
+
 typedef struct {
   u32 next_index;
   u32 session_index;
@@ -82,8 +107,8 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 	  vlib_buffer_t * b0, * b1;
 	  u32 next0, next1;
 	  ethernet_header_t *h0, *h1;
-	  ethernet_vlan_header_t *vlan0 = 0, *vlan1 = 0;
-          pppoe_header_t * pppoe0, * pppoe1;
+	  u32 l2_len0, l2_len1;
+          pppoe_header_t *pppoe0 = 0, *pppoe1 = 0;
           u16 ppp_proto0 = 0, ppp_proto1 = 0;
           pppoe_session_t * t0, * t1;
           u32 error0 = 0, error1 = 0;
@@ -91,7 +116,6 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 	  pppoe_entry_key_t key0, key1;
 	  pppoe_entry_result_t result0, result1;
 	  u32 bucket0, bucket1;
-	  u16 type0, type1;
 
 	  /* Prefetch next iteration. */
 	  {
@@ -121,26 +145,13 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
           error0 = 0;
           error1 = 0;
 
-		  /* get client mac */
-          vlib_buffer_reset(b0);
-          h0 = vlib_buffer_get_current (b0);
-
-		  /* get pppoe header */
-		  type0 = clib_net_to_host_u16(h0->type);
-		  if(type0 == ETHERNET_TYPE_VLAN){
-			  vlan0 = (ethernet_vlan_header_t *)(h0+1);
-			  type0 = clib_net_to_host_u16(vlan0->type);
-			  pppoe0 = (pppoe_header_t*)(vlan0+1);
-			  if( type0 != ETHERNET_TYPE_PPPOE_DISCOVERY && type0 != ETHERNET_TYPE_PPPOE_SESSION ) {
-				error0 = PPPOE_ERROR_BAD_VER_TYPE;
-				result0.fields.session_index =
-				  ~0; // avoid tracing random data
-				next0 = PPPOE_INPUT_NEXT_DROP;
-				goto trace0;
-			  }
-		  } else {
-			  pppoe0 = (pppoe_header_t*)(h0+1);
-		  }
+          if (!pppoe_packet_header (b0, &h0, &pppoe0, &l2_len0))
+	    {
+	      error0 = PPPOE_ERROR_BAD_VER_TYPE;
+	      result0.fields.session_index = ~0;
+	      next0 = PPPOE_INPUT_NEXT_DROP;
+	      goto trace0;
+	    }
 
           ppp_proto0 = clib_net_to_host_u16(pppoe0->ppp_proto);          
 
@@ -148,10 +159,7 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
           if ((ppp_proto0 != PPP_PROTOCOL_ip4)
              && (ppp_proto0 != PPP_PROTOCOL_ip6))
             {
-		  vlan0 == 0 ?
-	  	    vlib_buffer_advance(b0, sizeof(*h0))
-	      :
-	  	    vlib_buffer_advance(b0, sizeof(*h0)+sizeof(*vlan0));
+	      vlib_buffer_advance (b0, l2_len0);
 	      error0 = PPPOE_ERROR_CONTROL_PLANE;
 	      next0 = PPPOE_INPUT_NEXT_CP_INPUT;
 	      result0.fields.session_index = ~0;
@@ -162,7 +170,9 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 	  pppoe_lookup_1 (&pem->session_table, &cached_key, &cached_result,
 			  h0->src_address, pppoe0->session_id,
 			  &key0, &bucket0, &result0);
-          if (PREDICT_FALSE (result0.fields.session_index == ~0))
+          if (PREDICT_FALSE (result0.fields.session_index == ~0 ||
+			     result0.fields.sw_if_index !=
+			       vnet_buffer (b0)->sw_if_index[VLIB_RX]))
 	    {
 	      error0 = PPPOE_ERROR_NO_SUCH_SESSION;
 	      next0 = PPPOE_INPUT_NEXT_DROP;
@@ -173,10 +183,7 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 				  result0.fields.session_index);
 
 	  /* Pop Eth and PPPoE header */
-	  vlan0 == 0 ?
-	  	vlib_buffer_advance(b0, sizeof(*h0)+sizeof(*pppoe0))
-	  :
-	  	vlib_buffer_advance(b0, sizeof(*h0)+sizeof(*vlan0)+sizeof(*pppoe0));
+	  vlib_buffer_advance (b0, l2_len0 + sizeof (*pppoe0));
 
 	  next0 = (ppp_proto0==PPP_PROTOCOL_ip4)?
 		  PPPOE_INPUT_NEXT_IP4_INPUT
@@ -216,29 +223,17 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               tr->next_index = next0;
               tr->error = error0;
               tr->session_index = result0.fields.session_index;
-              tr->session_id = clib_net_to_host_u32(pppoe0->session_id);
+              tr->session_id = pppoe0 ?
+		clib_net_to_host_u16 (pppoe0->session_id) : 0;
             }
 
-          /* get client mac */
-          vlib_buffer_reset(b1);
-          h1 = vlib_buffer_get_current (b1);
-
-		  /* get pppoe header */
-		  type1 = clib_net_to_host_u16(h1->type);
-		  if(type1 == ETHERNET_TYPE_VLAN){
-			  vlan1 = (ethernet_vlan_header_t *)(h1+1);
-			  type1 = clib_net_to_host_u16(vlan1->type);
-			  pppoe1 = (pppoe_header_t*)(vlan1+1);
-			  if( type1 != ETHERNET_TYPE_PPPOE_DISCOVERY && type1 != ETHERNET_TYPE_PPPOE_SESSION ) {
-				error1 = PPPOE_ERROR_BAD_VER_TYPE;
-				result1.fields.session_index =
-				  ~0; // avoid tracing random data
-				next1 = PPPOE_INPUT_NEXT_DROP;
-				goto trace1;
-			  }
-		  } else {
-			  pppoe1 = (pppoe_header_t*)(h1+1);
-		  }
+          if (!pppoe_packet_header (b1, &h1, &pppoe1, &l2_len1))
+	    {
+	      error1 = PPPOE_ERROR_BAD_VER_TYPE;
+	      result1.fields.session_index = ~0;
+	      next1 = PPPOE_INPUT_NEXT_DROP;
+	      goto trace1;
+	    }
 
 		  ppp_proto1 = clib_net_to_host_u16(pppoe1->ppp_proto);
 
@@ -246,10 +241,7 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
           if ((ppp_proto1 != PPP_PROTOCOL_ip4)
              && (ppp_proto1 != PPP_PROTOCOL_ip6))
             {
-		  vlan1 == 0 ?
-	  	    vlib_buffer_advance(b1, sizeof(*h1))
-	      :
-	  	    vlib_buffer_advance(b1, sizeof(*h1)+sizeof(*vlan1));
+	      vlib_buffer_advance (b1, l2_len1);
 	      error1 = PPPOE_ERROR_CONTROL_PLANE;
 	      next1 = PPPOE_INPUT_NEXT_CP_INPUT;
 	      result1.fields.session_index = ~0;
@@ -259,7 +251,9 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 	  pppoe_lookup_1 (&pem->session_table, &cached_key, &cached_result,
 			  h1->src_address, pppoe1->session_id,
 			  &key1, &bucket1, &result1);
-          if (PREDICT_FALSE (result1.fields.session_index == ~0))
+          if (PREDICT_FALSE (result1.fields.session_index == ~0 ||
+			     result1.fields.sw_if_index !=
+			       vnet_buffer (b1)->sw_if_index[VLIB_RX]))
 	    {
 	      error1 = PPPOE_ERROR_NO_SUCH_SESSION;
 	      next1 = PPPOE_INPUT_NEXT_DROP;
@@ -270,10 +264,7 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 				  result1.fields.session_index);
 
 	  /* Pop Eth and PPPoE header */
-	  vlan1 == 0 ?
-	  	vlib_buffer_advance(b1, sizeof(*h1)+sizeof(*pppoe1))
-	  :
-	  	vlib_buffer_advance(b1, sizeof(*h1)+sizeof(*vlan1)+sizeof(*pppoe1));
+	  vlib_buffer_advance (b1, l2_len1 + sizeof (*pppoe1));
 
 	  next1 = (ppp_proto1==PPP_PROTOCOL_ip4)?
 		  PPPOE_INPUT_NEXT_IP4_INPUT
@@ -313,7 +304,8 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               tr->next_index = next1;
               tr->error = error1;
               tr->session_index = result1.fields.session_index;
-              tr->session_id = clib_net_to_host_u32(pppoe1->session_id);
+              tr->session_id = pppoe1 ?
+		clib_net_to_host_u16 (pppoe1->session_id) : 0;
             }
 
 	  vlib_validate_buffer_enqueue_x2 (vm, node, next_index,
@@ -327,8 +319,8 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 	  vlib_buffer_t * b0;
 	  u32 next0;
 	  ethernet_header_t *h0;
-	  ethernet_vlan_header_t *vlan0 = 0;
-          pppoe_header_t * pppoe0;
+	  u32 l2_len0;
+          pppoe_header_t *pppoe0 = 0;
           u16 ppp_proto0 = 0;
           pppoe_session_t * t0;
           u32 error0;
@@ -336,7 +328,6 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 	  pppoe_entry_key_t key0;
 	  pppoe_entry_result_t result0;
 	  u32 bucket0;
-	  u32 type0;
 
 	  bi0 = from[0];
 	  to_next[0] = bi0;
@@ -348,36 +339,20 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 	  b0 = vlib_get_buffer (vm, bi0);
 	  error0 = 0;
 
-          /* get client mac */
-          vlib_buffer_reset(b0);
-          h0 = vlib_buffer_get_current (b0);
-
-		  /* get pppoe header */
-		  type0 = clib_net_to_host_u16(h0->type);
-		  if(type0 == ETHERNET_TYPE_VLAN){
-			  vlan0 = (ethernet_vlan_header_t *)(h0+1);
-			  type0 = clib_net_to_host_u16(vlan0->type);
-			  pppoe0 = (pppoe_header_t*)(vlan0+1);
-			  if( type0 != ETHERNET_TYPE_PPPOE_DISCOVERY && type0 != ETHERNET_TYPE_PPPOE_SESSION ) {
-				error0 = PPPOE_ERROR_BAD_VER_TYPE;
-				result0.fields.session_index =
-				  ~0; // avoid tracing random data
-				next0 = PPPOE_INPUT_NEXT_DROP;
-				goto trace00;
-			  }
-		  } else {
-			  pppoe0 = (pppoe_header_t*)(h0+1);
-		  }
+          if (!pppoe_packet_header (b0, &h0, &pppoe0, &l2_len0))
+	    {
+	      error0 = PPPOE_ERROR_BAD_VER_TYPE;
+	      result0.fields.session_index = ~0;
+	      next0 = PPPOE_INPUT_NEXT_DROP;
+	      goto trace00;
+	    }
 
           ppp_proto0 = clib_net_to_host_u16(pppoe0->ppp_proto);   
 
           if ((ppp_proto0 != PPP_PROTOCOL_ip4)
              && (ppp_proto0 != PPP_PROTOCOL_ip6))
             {
-		  vlan0 == 0 ?
-	  	    vlib_buffer_advance(b0, sizeof(*h0))
-	      :
-	  	    vlib_buffer_advance(b0, sizeof(*h0)+sizeof(*vlan0));
+	      vlib_buffer_advance (b0, l2_len0);
 	      error0 = PPPOE_ERROR_CONTROL_PLANE;
 	      next0 = PPPOE_INPUT_NEXT_CP_INPUT;
 	      result0.fields.session_index = ~0;
@@ -387,7 +362,9 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 	  pppoe_lookup_1 (&pem->session_table, &cached_key, &cached_result,
 			  h0->src_address, pppoe0->session_id,
 			  &key0, &bucket0, &result0);
-          if (PREDICT_FALSE (result0.fields.session_index == ~0))
+          if (PREDICT_FALSE (result0.fields.session_index == ~0 ||
+			     result0.fields.sw_if_index !=
+			       vnet_buffer (b0)->sw_if_index[VLIB_RX]))
 	    {
 	      error0 = PPPOE_ERROR_NO_SUCH_SESSION;
 	      next0 = PPPOE_INPUT_NEXT_DROP;
@@ -398,10 +375,7 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
 				  result0.fields.session_index);
 
 	  /* Pop Eth and PPPoE header */
-	  vlan0 == 0 ?
-	  	vlib_buffer_advance(b0, sizeof(*h0)+sizeof(*pppoe0))
-	  :
-	  	vlib_buffer_advance(b0, sizeof(*h0)+sizeof(*vlan0)+sizeof(*pppoe0));
+	  vlib_buffer_advance (b0, l2_len0 + sizeof (*pppoe0));
 
 	  next0 = (ppp_proto0==PPP_PROTOCOL_ip4)?
 		  PPPOE_INPUT_NEXT_IP4_INPUT
@@ -441,7 +415,8 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               tr->next_index = next0;
               tr->error = error0;
               tr->session_index = result0.fields.session_index;
-              tr->session_id = clib_net_to_host_u16(pppoe0->session_id);
+              tr->session_id = pppoe0 ?
+		clib_net_to_host_u16 (pppoe0->session_id) : 0;
             }
 	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index,
 					   to_next, n_left_to_next,

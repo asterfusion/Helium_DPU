@@ -1,0 +1,77 @@
+/*
+ * Copyright (c) 2026 Asterfusion Networks
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+option version = "1.0.0";
+
+import "vnet/interface_types.api";
+import "vnet/ip/ip_types.api";
+
+autoreply define qinq_subport_add
+{
+  u32 client_index;
+  u32 context;
+  u32 rule_id;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_interface_index_t parent_sw_if_index;
+  u16 outer_tpid;
+  u16 outer_vlan;
+  u16 inner_tpid;
+  u16 inner_vlan_first;
+  u16 inner_vlan_last;
+  u8 match_type;
+  u8 service_flags;
+  bool admin_up;
+};
+
+autoreply define qinq_subport_update
+{
+  u32 client_index;
+  u32 context;
+  u32 rule_id;
+  vl_api_interface_index_t sw_if_index;
+  vl_api_interface_index_t parent_sw_if_index;
+  u16 outer_tpid;
+  u16 outer_vlan;
+  u16 inner_tpid;
+  u16 inner_vlan_first;
+  u16 inner_vlan_last;
+  u8 match_type;
+  u8 service_flags;
+  bool admin_up;
+};
+
+autoreply define qinq_subport_delete
+{
+  u32 client_index;
+  u32 context;
+  u32 rule_id;
+};
+
+autoreply define qinq_ipoe_route_add
+{
+  u32 client_index;
+  u32 context;
+  u32 route_id;
+  u32 table_id;
+  vl_api_ip4_address_t user_ip4;
+  vl_api_interface_index_t sw_if_index;
+};
+
+autoreply define qinq_ipoe_route_update
+{
+  u32 client_index;
+  u32 context;
+  u32 route_id;
+  u32 table_id;
+  vl_api_ip4_address_t user_ip4;
+  vl_api_interface_index_t sw_if_index;
+};
+
+autoreply define qinq_ipoe_route_delete
+{
+  u32 client_index;
+  u32 context;
+  u32 route_id;
+};

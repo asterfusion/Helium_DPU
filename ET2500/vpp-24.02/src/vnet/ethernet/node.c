@@ -40,6 +40,7 @@
 #include <vlib/vlib.h>
 #include <vnet/pg/pg.h>
 #include <vnet/ethernet/ethernet.h>
+#include <vnet/ethernet/qinq.h>
 #include <vnet/ethernet/p2p_ethernet.h>
 #include <vnet/devices/pipe/pipe.h>
 #include <vppinfra/sparse_vec.h>
@@ -66,6 +67,12 @@ typedef struct
   u8 packet_data[32];
   u16 frame_flags;
   ethernet_input_frame_t frame_data;
+  qinq_match_result_t qinq;
+  u16 outer_tpid;
+  u16 outer_vlan;
+  u16 inner_tpid;
+  u16 inner_vlan;
+  u8 qinq_valid;
 } ethernet_input_trace_t;
 
 static u8 *
@@ -74,6 +81,7 @@ format_ethernet_input_trace (u8 * s, va_list * va)
   CLIB_UNUSED (vlib_main_t * vm) = va_arg (*va, vlib_main_t *);
   CLIB_UNUSED (vlib_node_t * node) = va_arg (*va, vlib_node_t *);
   ethernet_input_trace_t *t = va_arg (*va, ethernet_input_trace_t *);
+  vnet_main_t *vnm = vnet_get_main ();
   u32 indent = format_get_indent (s);
 
   if (t->frame_flags)
@@ -85,6 +93,16 @@ format_ethernet_input_trace (u8 * s, va_list * va)
       s = format (s, "\n%U", format_white_space, indent);
     }
   s = format (s, "%U", format_ethernet_header, t->packet_data);
+  if (t->qinq_valid)
+    s = format (s,
+		"\n%Uqinq: parent %u subport %U(%u) rule %u match %u "
+		"outer 0x%04x/%u inner 0x%04x/%u services 0x%02x",
+		format_white_space, indent, t->qinq.parent_sw_if_index,
+		format_vnet_sw_if_index_name, vnm, t->qinq.sw_if_index,
+		t->qinq.sw_if_index, t->qinq.rule_id,
+		t->qinq.match_type, t->outer_tpid, t->outer_vlan,
+		t->inner_tpid, t->inner_vlan,
+		t->qinq.service_flags);
 
   return s;
 }
@@ -105,6 +123,7 @@ parse_header (ethernet_input_variant_t variant,
 	      vlib_buffer_t * b0,
 	      u16 * type,
 	      u16 * orig_type,
+	      u16 * inner_type,
 	      u16 * outer_id, u16 * inner_id, u32 * match_flags)
 {
   u8 vlan_count;
@@ -137,6 +156,7 @@ parse_header (ethernet_input_variant_t variant,
 
   // save for distinguishing between dot1q and dot1ad later
   *orig_type = *type;
+  *inner_type = 0;
 
   // default the tags to 0 (used if there is no corresponding tag)
   *outer_id = 0;
@@ -166,10 +186,11 @@ parse_header (ethernet_input_variant_t variant,
       vlib_buffer_advance (b0, sizeof (h0[0]));
       vlan_count = 1;
 
-      if (*type == ETHERNET_TYPE_VLAN)
+	  if (ethernet_frame_is_tagged (*type))
 	{
 	  // Double tagged packet
 	  *match_flags = SUBINT_CONFIG_VALID | SUBINT_CONFIG_MATCH_2_TAG;
+	  *inner_type = *type;
 
 	  h0 = vlib_buffer_get_current (b0);
 
@@ -181,7 +202,7 @@ parse_header (ethernet_input_variant_t variant,
 
 	  vlib_buffer_advance (b0, sizeof (h0[0]));
 	  vlan_count = 2;
-	  if (*type == ETHERNET_TYPE_VLAN)
+	  if (ethernet_frame_is_tagged (*type))
 	    {
 	      // More than double tagged packet
 	      *match_flags = SUBINT_CONFIG_VALID | SUBINT_CONFIG_MATCH_3_TAG;
@@ -211,13 +232,29 @@ identify_subint (ethernet_main_t * em,
 		 main_intf_t * main_intf,
 		 vlan_intf_t * vlan_intf,
 		 qinq_intf_t * qinq_intf,
+		 u16 outer_tpid,
+		 u16 outer_vlan,
+		 u16 inner_tpid,
+		 u16 inner_vlan,
 		 u32 * new_sw_if_index, u8 * error0, u32 * is_l2)
 {
   u32 matched;
   ethernet_interface_t *ei = ethernet_get_interface (em, hi->hw_if_index);
+  qinq_match_result_t qinq_result;
 
-  matched = eth_identify_subint (hi, match_flags, main_intf, vlan_intf,
-				 qinq_intf, new_sw_if_index, error0, is_l2);
+  matched = 0;
+  if (match_flags == (SUBINT_CONFIG_VALID | SUBINT_CONFIG_MATCH_2_TAG) &&
+      qinq_subport_lookup (hi->sw_if_index, outer_tpid, outer_vlan,
+			   inner_tpid, inner_vlan, &qinq_result))
+    {
+      matched = 1;
+      *new_sw_if_index = qinq_result.sw_if_index;
+      *error0 = ETHERNET_ERROR_NONE;
+      *is_l2 = 0;
+    }
+  else
+    matched = eth_identify_subint (hi, match_flags, main_intf, vlan_intf,
+				   qinq_intf, new_sw_if_index, error0, is_l2);
 
   if (matched)
     {
@@ -1139,36 +1176,11 @@ eth_input_single_int (vlib_main_t * vm, vlib_node_runtime_t * node,
 }
 
 static_always_inline void
-ethernet_input_trace (vlib_main_t * vm, vlib_node_runtime_t * node,
-		      vlib_frame_t * from_frame)
+ethernet_input_trace_prepare (vlib_main_t *vm, vlib_node_runtime_t *node,
+			      vlib_frame_t *from_frame)
 {
   vnet_main_t *vnm = vnet_get_main ();
   u32 *from, n_left;
-  if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE)))
-    {
-      from = vlib_frame_vector_args (from_frame);
-      n_left = from_frame->n_vectors;
-
-      while (n_left)
-	{
-	  ethernet_input_trace_t *t0;
-	  vlib_buffer_t *b0 = vlib_get_buffer (vm, from[0]);
-
-	  if (b0->flags & VLIB_BUFFER_IS_TRACED)
-	    {
-	      t0 = vlib_add_trace (vm, node, b0,
-				   sizeof (ethernet_input_trace_t));
-	      clib_memcpy_fast (t0->packet_data, b0->data + b0->current_data,
-				sizeof (t0->packet_data));
-	      t0->frame_flags = from_frame->flags;
-	      clib_memcpy_fast (&t0->frame_data,
-				vlib_frame_scalar_args (from_frame),
-				sizeof (ethernet_input_frame_t));
-	    }
-	  from += 1;
-	  n_left -= 1;
-	}
-    }
 
   /* rx pcap capture if enabled */
   if (PREDICT_FALSE (vnm->pcap.pcap_rx_enable))
@@ -1188,6 +1200,67 @@ ethernet_input_trace (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  if (vnet_is_packet_pcaped (pp, b0, ~0))
 	    pcap_add_buffer (&pp->pcap_main, vm, bi0, pp->max_bytes_per_pkt);
 	}
+    }
+}
+
+static_always_inline void
+ethernet_input_trace (vlib_main_t *vm, vlib_node_runtime_t *node,
+		      vlib_frame_t *from_frame)
+{
+  u32 *from, n_left;
+
+  if (PREDICT_TRUE (!(node->flags & VLIB_NODE_FLAG_TRACE)))
+    return;
+
+  from = vlib_frame_vector_args (from_frame);
+  n_left = from_frame->n_vectors;
+
+  while (n_left)
+    {
+      ethernet_input_trace_t *t0;
+      vlib_buffer_t *b0 = vlib_get_buffer (vm, from[0]);
+
+      if (b0->flags & VLIB_BUFFER_IS_TRACED)
+	{
+	  t0 = vlib_add_trace (vm, node, b0, sizeof (*t0));
+	  clib_memcpy_fast (t0->packet_data,
+			b0->data + vnet_buffer (b0)->l2_hdr_offset,
+			sizeof (t0->packet_data));
+	  t0->frame_flags = from_frame->flags;
+	  clib_memcpy_fast (&t0->frame_data,
+			vlib_frame_scalar_args (from_frame),
+			sizeof (t0->frame_data));
+	  t0->qinq_valid = 0;
+	  {
+	    const qinq_subport_t *subport = qinq_subport_get_by_sw_if_index (
+	      vnet_buffer (b0)->sw_if_index[VLIB_RX]);
+
+	    if (subport)
+	      {
+		ethernet_header_t *ethernet =
+		  (ethernet_header_t *) t0->packet_data;
+		ethernet_vlan_header_t *outer =
+		  (ethernet_vlan_header_t *) (ethernet + 1);
+		ethernet_vlan_header_t *inner = outer + 1;
+
+		t0->qinq.sw_if_index = subport->sw_if_index;
+		t0->qinq.parent_sw_if_index = subport->parent_sw_if_index;
+		t0->qinq.rule_id = subport->rule_id;
+		t0->qinq.match_type = subport->match_type;
+		t0->qinq.service_flags = subport->service_flags;
+		t0->qinq.admin_up = subport->admin_up;
+		t0->outer_tpid = clib_net_to_host_u16 (ethernet->type);
+		t0->outer_vlan = clib_net_to_host_u16 (
+		  outer->priority_cfi_and_id) & 0x0fff;
+		t0->inner_tpid = clib_net_to_host_u16 (outer->type);
+		t0->inner_vlan = clib_net_to_host_u16 (
+		  inner->priority_cfi_and_id) & 0x0fff;
+		t0->qinq_valid = 1;
+	      }
+	  }
+	}
+      from += 1;
+      n_left -= 1;
     }
 }
 
@@ -1233,7 +1306,7 @@ ethernet_input_inline (vlib_main_t * vm,
 	  u32 bi0, bi1;
 	  vlib_buffer_t *b0, *b1;
 	  u8 next0, next1, error0, error1;
-	  u16 type0, orig_type0, type1, orig_type1;
+	  u16 type0, orig_type0, inner_type0, type1, orig_type1, inner_type1;
 	  u16 outer_id0, inner_id0, outer_id1, inner_id1;
 	  u32 match_flags0, match_flags1;
 	  u32 old_sw_if_index0, new_sw_if_index0, len0, old_sw_if_index1,
@@ -1374,12 +1447,14 @@ ethernet_input_inline (vlib_main_t * vm,
 	  parse_header (variant,
 			b0,
 			&type0,
-			&orig_type0, &outer_id0, &inner_id0, &match_flags0);
+			&orig_type0, &inner_type0, &outer_id0, &inner_id0,
+			&match_flags0);
 
 	  parse_header (variant,
 			b1,
 			&type1,
-			&orig_type1, &outer_id1, &inner_id1, &match_flags1);
+			&orig_type1, &inner_type1, &outer_id1, &inner_id1,
+			&match_flags1);
 
 	  old_sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
 	  old_sw_if_index1 = vnet_buffer (b1)->sw_if_index[VLIB_RX];
@@ -1408,7 +1483,8 @@ ethernet_input_inline (vlib_main_t * vm,
 			   match_flags0,
 			   main_intf0,
 			   vlan_intf0,
-			   qinq_intf0, &new_sw_if_index0, &error0, &is_l20);
+			   qinq_intf0, orig_type0, outer_id0, inner_type0,
+			   inner_id0, &new_sw_if_index0, &error0, &is_l20);
 
 	  identify_subint (em,
 			   hi1,
@@ -1416,7 +1492,8 @@ ethernet_input_inline (vlib_main_t * vm,
 			   match_flags1,
 			   main_intf1,
 			   vlan_intf1,
-			   qinq_intf1, &new_sw_if_index1, &error1, &is_l21);
+			   qinq_intf1, orig_type1, outer_id1, inner_type1,
+			   inner_id1, &new_sw_if_index1, &error1, &is_l21);
 
 	  // Save RX sw_if_index for later nodes
 	  vnet_buffer (b0)->sw_if_index[VLIB_RX] =
@@ -1518,7 +1595,7 @@ ethernet_input_inline (vlib_main_t * vm,
 	  u32 bi0;
 	  vlib_buffer_t *b0;
 	  u8 error0, next0;
-	  u16 type0, orig_type0;
+	  u16 type0, orig_type0, inner_type0;
 	  u16 outer_id0, inner_id0;
 	  u32 match_flags0;
 	  u32 old_sw_if_index0, new_sw_if_index0, len0;
@@ -1627,7 +1704,8 @@ ethernet_input_inline (vlib_main_t * vm,
 	  parse_header (variant,
 			b0,
 			&type0,
-			&orig_type0, &outer_id0, &inner_id0, &match_flags0);
+			&orig_type0, &inner_type0, &outer_id0, &inner_id0,
+			&match_flags0);
 
 	  old_sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_RX];
 
@@ -1646,7 +1724,8 @@ ethernet_input_inline (vlib_main_t * vm,
 			   match_flags0,
 			   main_intf0,
 			   vlan_intf0,
-			   qinq_intf0, &new_sw_if_index0, &error0, &is_l20);
+			   qinq_intf0, orig_type0, outer_id0, inner_type0,
+			   inner_id0, &new_sw_if_index0, &error0, &is_l20);
 
 	  // Save RX sw_if_index for later nodes
 	  vnet_buffer (b0)->sw_if_index[VLIB_RX] =
@@ -1740,7 +1819,7 @@ VLIB_NODE_FN (ethernet_input_node) (vlib_main_t * vm,
   u32 *from = vlib_frame_vector_args (frame);
   u32 n_packets = frame->n_vectors;
 
-  ethernet_input_trace (vm, node, frame);
+  ethernet_input_trace_prepare (vm, node, frame);
 
   if (frame->flags & ETH_INPUT_FRAME_F_SINGLE_SW_IF_IDX)
     {
@@ -1752,6 +1831,7 @@ VLIB_NODE_FN (ethernet_input_node) (vlib_main_t * vm,
   else{
     ethernet_input_inline (vm, node, from, n_packets,
 			   ETHERNET_INPUT_VARIANT_ETHERNET);}
+  ethernet_input_trace (vm, node, frame);
   return n_packets;
 }
 
@@ -1761,9 +1841,10 @@ VLIB_NODE_FN (ethernet_input_type_node) (vlib_main_t * vm,
 {
   u32 *from = vlib_frame_vector_args (from_frame);
   u32 n_packets = from_frame->n_vectors;
-  ethernet_input_trace (vm, node, from_frame);
+  ethernet_input_trace_prepare (vm, node, from_frame);
   ethernet_input_inline (vm, node, from, n_packets,
 			 ETHERNET_INPUT_VARIANT_ETHERNET_TYPE);
+  ethernet_input_trace (vm, node, from_frame);
   return n_packets;
 }
 
@@ -1773,9 +1854,10 @@ VLIB_NODE_FN (ethernet_input_not_l2_node) (vlib_main_t * vm,
 {
   u32 *from = vlib_frame_vector_args (from_frame);
   u32 n_packets = from_frame->n_vectors;
-  ethernet_input_trace (vm, node, from_frame);
+  ethernet_input_trace_prepare (vm, node, from_frame);
   ethernet_input_inline (vm, node, from, n_packets,
 			 ETHERNET_INPUT_VARIANT_NOT_L2);
+  ethernet_input_trace (vm, node, from_frame);
   return n_packets;
 }
 
@@ -1833,6 +1915,11 @@ ethernet_sw_interface_get_config (vnet_main_t * vnm,
       pipe = pipe_get (sw_if_index);
       subint = &pipe->subint;
       *flags = SUBINT_CONFIG_P2P;
+    }
+  else if (si->sub.eth.flags.qinq_carrier)
+    {
+      *unsupported = 0;
+      goto done;
     }
   else if (si->sub.eth.flags.default_sub)
     {

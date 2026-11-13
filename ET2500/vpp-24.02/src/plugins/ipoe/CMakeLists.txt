@@ -10,6 +10,8 @@ add_vpp_plugin(ipoe
   ipoe_l2_input_node.c
   ipoe_ip4_input_node.c
   ipoe_output_node.c
+  ipoe_qinq_dpo.c
+  ipoe_qinq_output_node.c
 
   API_FILES
   ipoe.api

@@ -827,9 +827,27 @@ lcp_itf_pair_delete (u32 phy_sw_if_index)
  *
  * Registered to receive interface Add and delete notifications
  */
+static void
+lcp_qinq_carrier_features_set (u32 sw_if_index, u8 enable)
+{
+  clib_warning ("qinq carrier features: sw_if_index %u enable %u",
+		sw_if_index, !!enable);
+
+  lcp_copp_features_set (sw_if_index, enable);
+  vnet_feature_enable_disable ("arp", "linux-cp-arp-phy", sw_if_index,
+			       enable, NULL, 0);
+}
+
 static clib_error_t *
 lcp_itf_interface_add_del (vnet_main_t *vnm, u32 sw_if_index, u32 is_add)
 {
+  vnet_sw_interface_t *sw =
+    vnet_get_sw_interface_or_null (vnm, sw_if_index);
+
+  if (sw && sw->type == VNET_SW_INTERFACE_TYPE_SUB &&
+      sw->sub.eth.flags.qinq_carrier)
+    lcp_qinq_carrier_features_set (sw_if_index, is_add);
+
   if (!is_add)
     /* remove any interface pair we have for this interface */
     lcp_itf_pair_delete (sw_if_index);
@@ -1556,6 +1574,8 @@ VNET_HW_INTERFACE_LINK_UP_DOWN_FUNCTION (lcp_itf_pair_link_up_down);
 static clib_error_t *
 lcp_interface_init (vlib_main_t *vm)
 {
+  vnet_main_t *vnm = vnet_get_main ();
+  vnet_sw_interface_t *sw;
   vlib_punt_hdl_t punt_hdl = vlib_punt_client_register ("linux-cp");
 
   /* punt IKE */
@@ -1571,6 +1591,13 @@ lcp_interface_init (vlib_main_t *vm)
   tcp_punt_unknown (vm, 1, 1);
 
   lcp_itf_pair_logger = vlib_log_register_class ("linux-cp", "itf");
+
+  pool_foreach (sw, vnm->interface_main.sw_interfaces)
+    {
+      if (sw->type == VNET_SW_INTERFACE_TYPE_SUB &&
+	  sw->sub.eth.flags.qinq_carrier)
+	lcp_qinq_carrier_features_set (sw->sw_if_index, 1);
+    }
 
   return NULL;
 }

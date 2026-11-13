@@ -7,6 +7,7 @@
 #include <vnet/ip/format.h>
 #include <vnet/ip/ip4_packet.h>
 #include <vnet/ethernet/ethernet.h>
+#include <vnet/ethernet/qinq.h>
 #include <vppinfra/hash.h>
 #include <vppinfra/tw_timer_1t_3w_1024sl_ov.h>
 
@@ -30,6 +31,17 @@ typedef enum
   IPOE_SESSION_COUNTER_DOWNSTREAM_GATE_DROP,
   IPOE_SESSION_COUNTER_N_TYPES,
 } ipoe_session_counter_type_t;
+
+typedef struct
+{
+  mac_address_t local_mac;
+  u32 parent_sw_if_index;
+  u16 outer_tpid;
+  u16 outer_vlan;
+  u16 inner_tpid;
+  u16 inner_vlan;
+  u8 enabled;
+} ipoe_qinq_session_t;
 
 typedef struct
 {
@@ -75,7 +87,25 @@ typedef struct
   u32 counter_index;
   u8 has_user_mac;
   u8 admin_state;
+  ipoe_qinq_session_t qinq;
 } ipoe_session_t;
+
+typedef enum
+{
+  IPOE_DOWNSTREAM_LOOKUP_OK,
+  IPOE_DOWNSTREAM_LOOKUP_NO_SESSION,
+  IPOE_DOWNSTREAM_LOOKUP_SESSION_INACTIVE,
+  IPOE_DOWNSTREAM_LOOKUP_ACCESS_MISMATCH,
+  IPOE_DOWNSTREAM_LOOKUP_SESSION_MISMATCH,
+} ipoe_downstream_lookup_result_t;
+
+typedef struct
+{
+  u32 qinq_sw_if_index;
+  u32 fib_index;
+  u64 external_index;
+  u32 locks;
+} ipoe_qinq_dpo_t;
 
 #define IPOE_SESSION_ADD_BATCH_MAX 64
 #define IPOE_SESSION_SNAPSHOT_BATCH_MAX 128
@@ -92,6 +122,7 @@ typedef struct
   u8 access_mode;
   u8 has_user_mac;
   u8 admin_state;
+  ipoe_qinq_session_t qinq;
 } ipoe_session_add_batch_entry_t;
 
 typedef struct
@@ -139,7 +170,13 @@ int ipoe_session_add (u64 external_index, u64 generation,
 		      u32 sw_if_index, const ip4_address_t *user_ip4,
 		      const mac_address_t *user_mac, u8 has_user_mac,
 		      u8 admin_state,
-		      u32 lease_timeout, u64 lease_expiry);
+		      u32 lease_timeout, u64 lease_expiry,
+		      const ipoe_qinq_session_t *qinq);
+int ipoe_session_update (u64 external_index, u64 generation,
+			 u32 sw_if_index, const ip4_address_t *user_ip4,
+			 const mac_address_t *user_mac, u8 has_user_mac,
+			 u8 admin_state, u32 lease_timeout, u64 lease_expiry,
+			 const ipoe_qinq_session_t *qinq);
 int ipoe_session_add_batch (
   const ipoe_session_add_batch_entry_t *entries, u32 count,
   ipoe_session_add_batch_result_t *results);
@@ -151,6 +188,9 @@ void ipoe_session_expire (u32 session_index);
 void ipoe_session_counter_add (u32 counter_index,
 			       ipoe_session_counter_type_t counter_type,
 			       u32 ip4_bytes);
+ipoe_session_t *ipoe_session_lookup_downstream (
+  u32 sw_if_index, const ip4_address_t *dst_ip, u64 expected_external_index,
+  u8 check_session, ipoe_downstream_lookup_result_t *result);
 int ipoe_session_get_counters (u64 external_index,
 			       ipoe_session_counters_t *counters);
 int ipoe_session_quiesce_snapshot_batch (
@@ -161,6 +201,11 @@ void ipoe_timer_init (vlib_main_t *vm);
 void ipoe_timer_start (u32 session_index, u32 lease_timeout);
 void ipoe_timer_stop (ipoe_session_t *session);
 void ipoe_timer_update (u32 session_index, u32 lease_timeout);
+
+void ipoe_qinq_dpo_module_init (void);
+const ipoe_qinq_dpo_t *ipoe_qinq_dpo_get (u32 dpo_index);
+int ipoe_qinq_route_add_del (u32 table_id, const ip4_address_t *user_ip4,
+			     u32 sw_if_index, u8 is_add);
 
 static_always_inline u64
 ipoe_user_key (u32 sw_if_index, const ip4_address_t *user_ip4)
