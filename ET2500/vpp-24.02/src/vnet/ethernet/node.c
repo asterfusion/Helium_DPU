@@ -96,13 +96,12 @@ format_ethernet_input_trace (u8 * s, va_list * va)
   if (t->qinq_valid)
     s = format (s,
 		"\n%Uqinq: parent %u subport %U(%u) rule %u match %u "
-		"outer 0x%04x/%u inner 0x%04x/%u services 0x%02x",
+		"outer 0x%04x/%u inner 0x%04x/%u",
 		format_white_space, indent, t->qinq.parent_sw_if_index,
 		format_vnet_sw_if_index_name, vnm, t->qinq.sw_if_index,
 		t->qinq.sw_if_index, t->qinq.rule_id,
 		t->qinq.match_type, t->outer_tpid, t->outer_vlan,
-		t->inner_tpid, t->inner_vlan,
-		t->qinq.service_flags);
+		t->inner_tpid, t->inner_vlan);
 
   return s;
 }
@@ -1247,7 +1246,6 @@ ethernet_input_trace (vlib_main_t *vm, vlib_node_runtime_t *node,
 		t0->qinq.parent_sw_if_index = subport->parent_sw_if_index;
 		t0->qinq.rule_id = subport->rule_id;
 		t0->qinq.match_type = subport->match_type;
-		t0->qinq.service_flags = subport->service_flags;
 		t0->qinq.admin_up = subport->admin_up;
 		t0->outer_tpid = clib_net_to_host_u16 (ethernet->type);
 		t0->outer_vlan = clib_net_to_host_u16 (

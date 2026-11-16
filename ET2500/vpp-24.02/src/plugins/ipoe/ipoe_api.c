@@ -110,6 +110,54 @@ vl_api_ipoe_session_set_state_t_handler (
 }
 
 static void
+ipoe_api_decode_qinq_route (u32 route_id, u32 table_id,
+			    const vl_api_ip4_address_t user_ip4,
+			    u32 sw_if_index, ipoe_qinq_route_t *route)
+{
+  route->route_id = ntohl (route_id);
+  route->table_id = ntohl (table_id);
+  route->sw_if_index = ntohl (sw_if_index);
+  ip4_address_decode (user_ip4, &route->user_ip4);
+}
+
+static void
+vl_api_ipoe_qinq_route_add_t_handler (vl_api_ipoe_qinq_route_add_t *mp)
+{
+  vl_api_ipoe_qinq_route_add_reply_t *rmp;
+  ipoe_qinq_route_t route;
+  int rv;
+
+  ipoe_api_decode_qinq_route (mp->route_id, mp->table_id, mp->user_ip4,
+			      mp->sw_if_index, &route);
+  rv = ipoe_qinq_route_add (&route);
+  REPLY_MACRO (VL_API_IPOE_QINQ_ROUTE_ADD_REPLY);
+}
+
+static void
+vl_api_ipoe_qinq_route_update_t_handler (
+  vl_api_ipoe_qinq_route_update_t *mp)
+{
+  vl_api_ipoe_qinq_route_update_reply_t *rmp;
+  ipoe_qinq_route_t route;
+  int rv;
+
+  ipoe_api_decode_qinq_route (mp->route_id, mp->table_id, mp->user_ip4,
+			      mp->sw_if_index, &route);
+  rv = ipoe_qinq_route_update (&route);
+  REPLY_MACRO (VL_API_IPOE_QINQ_ROUTE_UPDATE_REPLY);
+}
+
+static void
+vl_api_ipoe_qinq_route_delete_t_handler (
+  vl_api_ipoe_qinq_route_delete_t *mp)
+{
+  vl_api_ipoe_qinq_route_delete_reply_t *rmp;
+  int rv = ipoe_qinq_route_delete (ntohl (mp->route_id));
+
+  REPLY_MACRO (VL_API_IPOE_QINQ_ROUTE_DELETE_REPLY);
+}
+
+static void
 vl_api_ipoe_session_add_batch_t_handler (
   vl_api_ipoe_session_add_batch_t *mp)
 {

@@ -57,6 +57,8 @@ list(APPEND VNET_SOURCES
   interface/runtime.c
   interface/monitor.c
   interface/stats.c
+  interface/qinq_interface_api.c
+  interface/qinq_interface_cli.c
   interface_stats.c
   misc.c
 )
@@ -101,6 +103,7 @@ list(APPEND VNET_HEADERS
 list(APPEND VNET_API_FILES
   dev/dev.api
   interface.api
+  interface/qinq_interface.api
   interface_types.api
   ip/ip_types.api
   flow/flow_types.api

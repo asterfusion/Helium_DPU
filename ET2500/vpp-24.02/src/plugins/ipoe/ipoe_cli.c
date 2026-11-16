@@ -412,3 +412,87 @@ VLIB_CLI_COMMAND (ipoe_show_session_cli, static) = {
   .short_help = "show ipoe session [index <index>]",
   .function = ipoe_show_session_command,
 };
+
+static clib_error_t *
+ipoe_qinq_route_command_fn (vlib_main_t *vm, unformat_input_t *input,
+			    vlib_cli_command_t *cmd)
+{
+  ipoe_qinq_route_t route = {
+    .route_id = ~0,
+    .sw_if_index = ~0,
+  };
+  vnet_main_t *vnm = vnet_get_main ();
+  u8 is_add = 0;
+  u8 is_update = 0;
+  u8 is_delete = 0;
+  u8 has_ip = 0;
+  int rv;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "add"))
+	is_add = 1;
+      else if (unformat (input, "update"))
+	is_update = 1;
+      else if (unformat (input, "delete"))
+	is_delete = 1;
+      else if (unformat (input, "route-id %u", &route.route_id))
+	;
+      else if (unformat (input, "table %u", &route.table_id))
+	;
+      else if (unformat (input, "%U/32", unformat_ip4_address,
+			 &route.user_ip4))
+	has_ip = 1;
+      else if (unformat (input, "interface %U", unformat_vnet_sw_interface,
+			 vnm, &route.sw_if_index))
+	;
+      else
+	return clib_error_return (0, "unknown input `%U'",
+				  format_unformat_error, input);
+    }
+
+  if ((is_add + is_update + is_delete) != 1 || route.route_id == ~0)
+    return clib_error_return (0, "one operation and route-id are required");
+  if (!is_delete && (!has_ip || route.sw_if_index == ~0))
+    return clib_error_return (0, "route and interface are required");
+
+  if (is_add)
+    rv = ipoe_qinq_route_add (&route);
+  else if (is_update)
+    rv = ipoe_qinq_route_update (&route);
+  else
+    rv = ipoe_qinq_route_delete (route.route_id);
+  if (rv != IPOE_OK)
+    return clib_error_return (0, "IPoE QinQ route failed: %s",
+			      ipoe_error_string (rv));
+  return 0;
+}
+
+static clib_error_t *
+show_ipoe_qinq_route_command_fn (vlib_main_t *vm, unformat_input_t *input,
+				 vlib_cli_command_t *cmd)
+{
+  ipoe_main_t *im = &ipoe_main;
+  ipoe_qinq_route_t *route;
+
+  pool_foreach (route, im->qinq_routes)
+    vlib_cli_output (vm, "route-id %u table %u %U/32 interface %U",
+		     route->route_id, route->table_id, format_ip4_address,
+		     &route->user_ip4, format_vnet_sw_if_index_name,
+		     im->vnet_main, route->sw_if_index);
+  return 0;
+}
+
+VLIB_CLI_COMMAND (ipoe_qinq_route_command, static) = {
+  .path = "qinq ipoe route",
+  .short_help = "qinq ipoe route add|update route-id <id> table <table-id> "
+		"<user-ip>/32 interface <qinq-subport> | "
+		"delete route-id <id>",
+  .function = ipoe_qinq_route_command_fn,
+};
+
+VLIB_CLI_COMMAND (show_ipoe_qinq_route_command, static) = {
+  .path = "show qinq ipoe route",
+  .short_help = "show qinq ipoe route",
+  .function = show_ipoe_qinq_route_command_fn,
+};

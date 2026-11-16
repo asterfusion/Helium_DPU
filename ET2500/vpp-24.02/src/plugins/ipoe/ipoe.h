@@ -142,12 +142,22 @@ typedef struct
 
 typedef struct
 {
+  u32 route_id;
+  u32 table_id;
+  u32 sw_if_index;
+  ip4_address_t user_ip4;
+} ipoe_qinq_route_t;
+
+typedef struct
+{
   vlib_main_t *vlib_main;
   vnet_main_t *vnet_main;
   ipoe_interface_t *interfaces;
   ipoe_session_t *sessions;
   uword *session_by_index;
   uword *session_by_user;
+  ipoe_qinq_route_t *qinq_routes;
+  uword *qinq_route_by_id;
   u32 *free_counter_indices;
   u32 next_counter_index;
   vlib_combined_counter_main_t upstream_forward;
@@ -206,6 +216,9 @@ void ipoe_qinq_dpo_module_init (void);
 const ipoe_qinq_dpo_t *ipoe_qinq_dpo_get (u32 dpo_index);
 int ipoe_qinq_route_add_del (u32 table_id, const ip4_address_t *user_ip4,
 			     u32 sw_if_index, u8 is_add);
+int ipoe_qinq_route_add (const ipoe_qinq_route_t *route);
+int ipoe_qinq_route_update (const ipoe_qinq_route_t *route);
+int ipoe_qinq_route_delete (u32 route_id);
 
 static_always_inline u64
 ipoe_user_key (u32 sw_if_index, const ip4_address_t *user_ip4)

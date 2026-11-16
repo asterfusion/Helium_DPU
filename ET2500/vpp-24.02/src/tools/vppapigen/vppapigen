@@ -1,1 +1,3 @@
-vppapigen.py
+#!/bin/sh
+
+exec "$(dirname "$0")/vppapigen.py" "$@"

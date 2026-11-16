@@ -741,9 +741,6 @@ pppoe_hw_if_pool_process (vlib_main_t *vm, vlib_node_runtime_t *rt,
 	}
 
       pem->hw_if_pool_growing = 0;
-      clib_warning ("pppoe hw-if pool ready: created=%u free=%u",
-		    pem->next_pppoe_dev_instance,
-		    vec_len (pem->free_pppoe_session_hw_if_indices));
     }
 
   return 0;
@@ -906,13 +903,6 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
 
       if (is_recycled)
 	lcp_pppoe_refresh_adjs (vnm, sw_if_index);
-
-      clib_warning (
-	"PPPoE insert mac %U session %u carrier %u vlan %u "
-	"key 0x%016llx:0x%016llx result session %u interface %u",
-	format_ethernet_address, server_mac, ppp_session_id,
-	encap_key_sw_if_index, encap_vlan_id, key.raw[0], key.raw[1],
-	result.fields.session_index, result.fields.sw_if_index);
 
       vnet_sw_interface_t *si = vnet_get_sw_interface (vnm, sw_if_index);
       si->flags &= ~VNET_SW_INTERFACE_FLAG_HIDDEN;
@@ -2598,7 +2588,6 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
              vlib_node_runtime_t * node,
              vlib_frame_t * frame)
 {
-  static u8 node_entry_logged;
   u32 n_left_from, *from, *to_next;
   u32 next_index = node->cached_next_index;
   pppoe_main_t *pem = &pppoe_main;
@@ -2610,9 +2599,6 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
   u32 stats_sw_if_index, stats_n_packets, stats_n_bytes;
   u32 copies[VLIB_FRAME_SIZE];
   u32 n_copies = 0;
-
-  if (clib_atomic_bool_cmp_and_swap (&node_entry_logged, 0, 1))
-    clib_warning ("PPPoE input node entered");
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;

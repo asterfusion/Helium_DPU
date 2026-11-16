@@ -830,9 +830,6 @@ lcp_itf_pair_delete (u32 phy_sw_if_index)
 static void
 lcp_qinq_carrier_features_set (u32 sw_if_index, u8 enable)
 {
-  clib_warning ("qinq carrier features: sw_if_index %u enable %u",
-		sw_if_index, !!enable);
-
   lcp_copp_features_set (sw_if_index, enable);
   vnet_feature_enable_disable ("arp", "linux-cp-arp-phy", sw_if_index,
 			       enable, NULL, 0);

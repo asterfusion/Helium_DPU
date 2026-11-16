@@ -108,17 +108,7 @@ qinq_config_validate (const qinq_subport_t *config, u32 replaced_rule_index)
 
   if (!config || config->rule_id == ~0 || config->sw_if_index == ~0 ||
       config->parent_sw_if_index == ~0)
-    {
-      if (!config)
-        clib_warning ("qinq config validation failed: null config");
-      else
-        clib_warning (
-          "qinq config validation failed: invalid identifier "
-          "rule_id %u sw_if_index %u parent_sw_if_index %u",
-          config->rule_id, config->sw_if_index,
-          config->parent_sw_if_index);
-      return QINQ_ERROR_INVALID_ARGUMENT;
-    }
+    return QINQ_ERROR_INVALID_ARGUMENT;
 
   if (pool_is_free_index (im->sw_interfaces, config->sw_if_index))
     return QINQ_ERROR_INVALID_INTERFACE;
@@ -157,22 +147,7 @@ qinq_config_validate (const qinq_subport_t *config, u32 replaced_rule_index)
         return QINQ_ERROR_INVALID_VLAN;
     }
   else if (config->match_type != QINQ_MATCH_ANY)
-    {
-      clib_warning (
-        "qinq config validation failed: invalid match_type %u rule_id %u",
-        config->match_type, config->rule_id);
-      return QINQ_ERROR_INVALID_ARGUMENT;
-    }
-
-  if ((config->service_flags &
-       ~(QINQ_SERVICE_IPOE | QINQ_SERVICE_PPPOE)) != 0)
-    {
-      clib_warning (
-        "qinq config validation failed: invalid service_flags 0x%x "
-        "rule_id %u",
-        config->service_flags, config->rule_id);
-      return QINQ_ERROR_INVALID_ARGUMENT;
-    }
+    return QINQ_ERROR_INVALID_ARGUMENT;
 
   p = hash_get (qm->rule_by_id, config->rule_id);
   if (p && p[0] != replaced_rule_index)
@@ -432,7 +407,6 @@ qinq_subport_lookup (u32 parent_sw_if_index, u16 outer_tpid,
   result->parent_sw_if_index = rule->parent_sw_if_index;
   result->rule_id = rule->rule_id;
   result->match_type = rule->match_type;
-  result->service_flags = rule->service_flags;
   result->admin_up = rule->admin_up;
   return 1;
 }

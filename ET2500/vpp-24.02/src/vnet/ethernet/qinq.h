@@ -22,12 +22,6 @@ typedef enum
 
 typedef enum
 {
-  QINQ_SERVICE_IPOE = (1 << 0),
-  QINQ_SERVICE_PPPOE = (1 << 1),
-} qinq_service_flag_t;
-
-typedef enum
-{
   QINQ_ERROR_NONE,
   QINQ_ERROR_INVALID_ARGUMENT,
   QINQ_ERROR_INVALID_INTERFACE,
@@ -51,7 +45,6 @@ typedef struct
   u16 inner_vlan_first;
   u16 inner_vlan_last;
   qinq_match_type_t match_type;
-  u8 service_flags;
   u8 admin_up;
 } qinq_subport_t;
 
@@ -81,7 +74,6 @@ typedef struct
   u32 parent_sw_if_index;
   u32 rule_id;
   qinq_match_type_t match_type;
-  u8 service_flags;
   u8 admin_up;
 } qinq_match_result_t;
 
@@ -93,15 +85,6 @@ qinq_buffer_matches_rx (vlib_buffer_t *buffer)
   u32 sw_if_index = vnet_buffer (buffer)->sw_if_index[VLIB_RX];
 
   return qinq_subport_get_by_sw_if_index (sw_if_index) != 0;
-}
-
-static_always_inline int
-qinq_buffer_service_enabled (vlib_buffer_t *buffer, u8 service_flag)
-{
-  const qinq_subport_t *subport = qinq_subport_get_by_sw_if_index (
-    vnet_buffer (buffer)->sw_if_index[VLIB_RX]);
-
-  return subport ? (subport->service_flags & service_flag) != 0 : 1;
 }
 
 static_always_inline u32
