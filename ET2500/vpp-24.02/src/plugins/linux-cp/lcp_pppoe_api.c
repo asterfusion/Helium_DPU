@@ -56,19 +56,28 @@ vl_api_lcp_pppoe_add_del_session_t_handler (
   u32 client_table_id6 = ntohl (mp->client_table_id6);
   clib_memset (&client_ip6, 0, sizeof (client_ip6));
   clib_memcpy (&client_ip6.ip6, mp->client_ip6, 16);
+  lcp_pppoe_qinq_t qinq = {
+    .has_qinq = mp->has_qinq,
+    .parent_sw_if_index = ntohl (mp->parent_sw_if_index),
+    .outer_tpid = ntohs (mp->outer_tpid),
+    .outer_vlan = ntohs (mp->outer_vlan),
+    .inner_tpid = ntohs (mp->inner_tpid),
+    .inner_vlan = ntohs (mp->inner_vlan),
+  };
 
   if(mp->is_add)
   {
       rv = lcp_pppoe_session_add (server_mac, ppp_session_id, encap_sw_if_index,
 				  &sw_if_index, sw_if_name, 1, lcp_magic,
 				  client_ip4, client_table_id,
-				  &client_ip6, client_table_id6);
+				  &client_ip6, client_table_id6,
+				  qinq.has_qinq ? &qinq : NULL);
   }
   else
   {
       rv = lcp_pppoe_session_add (server_mac, ppp_session_id, encap_sw_if_index,
 				  &sw_if_index, sw_if_name, 0, 0, 0, 0,
-				  NULL, 0);
+				  NULL, 0, NULL);
   }
 
   BAD_SW_IF_INDEX_LABEL;
@@ -228,12 +237,21 @@ vl_api_lcp_pppoe_bulk_add_del_sessions_t_handler (
       u32 client_table_id6 = ntohl (e->client_table_id6);
       clib_memset (&client_ip6, 0, sizeof (client_ip6));
       clib_memcpy (&client_ip6.ip6, e->client_ip6, 16);
+      lcp_pppoe_qinq_t qinq = {
+	.has_qinq = e->has_qinq,
+	.parent_sw_if_index = ntohl (e->parent_sw_if_index),
+	.outer_tpid = ntohs (e->outer_tpid),
+	.outer_vlan = ntohs (e->outer_vlan),
+	.inner_tpid = ntohs (e->inner_tpid),
+	.inner_vlan = ntohs (e->inner_vlan),
+      };
       err = lcp_pppoe_session_add_bulk (server_mac, ppp_session_id,
 					encap_sw_if_index, &sw_if_index,
 					sw_if_names[i], e->is_add,
 					&is_new_if, ntohl (e->lcp_magic),
 					client_ip4, client_table_id,
-					&client_ip6, client_table_id6);
+					&client_ip6, client_table_id6,
+					qinq.has_qinq ? &qinq : NULL);
       sw_if_indices[i] = (err == 0) ? sw_if_index : (u32) ~0;
       if (err != 0 && rv == 0)
 	rv = err;

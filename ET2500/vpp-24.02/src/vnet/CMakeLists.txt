@@ -57,6 +57,8 @@ list(APPEND VNET_SOURCES
   interface/runtime.c
   interface/monitor.c
   interface/stats.c
+  interface/qinq_interface_api.c
+  interface/qinq_interface_cli.c
   interface_stats.c
   misc.c
 )
@@ -101,6 +103,7 @@ list(APPEND VNET_HEADERS
 list(APPEND VNET_API_FILES
   dev/dev.api
   interface.api
+  interface/qinq_interface.api
   interface_types.api
   ip/ip_types.api
   flow/flow_types.api
@@ -152,6 +155,7 @@ list(APPEND VNET_SOURCES
   ethernet/p2p_ethernet.c
   ethernet/p2p_ethernet_input.c
   ethernet/p2p_ethernet_api.c
+  ethernet/qinq.c
 )
 
 list(APPEND VNET_MULTIARCH_SOURCES
@@ -168,6 +172,7 @@ list(APPEND VNET_HEADERS
   ethernet/sfp.h
   ethernet/p2p_ethernet.h
   ethernet/arp_packet.h
+  ethernet/qinq.h
 )
 
 list(APPEND VNET_API_FILES
@@ -1503,4 +1508,3 @@ if (${ASROUTER_NAME} MATCHES "octeon10")
   add_compile_definitions(ARP_FAIL_PUNT)
   add_compile_definitions(MTU_WITHOUT_HEADER)
 endif()
-

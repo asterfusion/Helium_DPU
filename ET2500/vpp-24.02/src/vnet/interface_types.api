@@ -51,6 +51,7 @@ enum sub_if_flags
   SUB_IF_API_FLAG_INNER_VLAN_ID_ANY = 128,
   SUB_IF_API_FLAG_MASK_VNET = 254,	/* use with vnet_sub_interface_t raw_flags */
   SUB_IF_API_FLAG_DOT1AH = 256,
+  SUB_IF_API_FLAG_QINQ_CARRIER = 512,
 };
 
 enum rx_mode

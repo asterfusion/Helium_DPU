@@ -56,6 +56,7 @@ static void vl_api_pppoe_add_del_session_t_handler
     .is_add = mp->is_add,
     .decap_fib_index = decap_fib_index,
     .session_id = ntohs (mp->session_id),
+    .encap_if_index = ntohl (mp->encap_if_index),
   };
   ip_address_decode (&mp->client_ip, &a.client_ip);
   clib_memcpy (a.client_mac, mp->client_mac, 6);

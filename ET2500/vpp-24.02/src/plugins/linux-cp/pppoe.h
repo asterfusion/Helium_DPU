@@ -70,6 +70,13 @@ typedef struct
   u8 server_mac[6];
   u8 client_mac[6];
 
+  u32 parent_sw_if_index;
+  u16 outer_tpid;
+  u16 outer_vlan;
+  u16 inner_tpid;
+  u16 inner_vlan;
+  u8 has_qinq;
+
   /* BNG-local LCP magic (host byte order) for Echo-Reply proxy (scheme C). */
   u32 lcp_magic;
   u8 lcp_magic_valid;
@@ -239,6 +246,16 @@ extern vlib_node_registration_t pppoe_input_node;
 
 typedef struct
 {
+  u8 has_qinq;
+  u32 parent_sw_if_index;
+  u16 outer_tpid;
+  u16 outer_vlan;
+  u16 inner_tpid;
+  u16 inner_vlan;
+} lcp_pppoe_qinq_t;
+
+typedef struct
+{
   u8 is_add;
   u8 is_ip6;
   u16 session_id;
@@ -254,6 +271,7 @@ typedef struct
   u8 local_mac[6];
   u8 client_mac[6];
   u8 server_mac[6];
+  lcp_pppoe_qinq_t qinq;
 } vnet_pppoe_add_del_session_args_t;
 
 int vnet_pppoe_add_del_session
@@ -407,14 +425,16 @@ extern int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id,
 				 u8 *sw_if_name, u8 is_add, u32 lcp_magic,
 				 u32 client_ip4, u32 client_table_id,
 				 ip46_address_t *client_ip6,
-				 u32 client_table_id6);
+				 u32 client_table_id6,
+				 const lcp_pppoe_qinq_t *qinq);
 extern int lcp_pppoe_session_add_bulk(u8 *server_mac, u16 ppp_session_id,
 				      u32 encap_sw_if_index, u32 *p_sw_if_index,
 				      u8 *sw_if_name, u8 is_add, u8 *is_new_if,
 				      u32 lcp_magic, u32 client_ip4,
 				      u32 client_table_id,
 				      ip46_address_t *client_ip6,
-				      u32 client_table_id6);
+				      u32 client_table_id6,
+				      const lcp_pppoe_qinq_t *qinq);
 extern int lcp_pppoe_update_client_ip4(u32 sw_if_index,
 				       const ip46_address_t *client_ip,
 				       u32 client_table_id, u8 is_add);
@@ -424,6 +444,8 @@ extern int lcp_pppoe_update_client_ip6(u32 sw_if_index,
 extern void lcp_pppoe_setup_new_if_features(u32 sw_if_index);
 extern int lcp_pppoe_hw_if_create_one (u32 *hw_if_index_out);
 extern int lcp_pppoe_hw_if_pool_ensure (u32 target, u32 batch);
+extern bool lcp_pppoe_session_get_carrier (u32 session_sw_if_index,
+					   u32 *carrier_sw_if_index);
 
 extern fib_source_t pppoe_fib_src;
 #endif /* _PPPOE_H */

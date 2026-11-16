@@ -89,6 +89,12 @@ define lcp_pppoe_add_del_session
   /* v1.1.0: dual-stack support */
   vl_api_ip6_address_t client_ip6;
   u32 client_table_id6;
+  bool has_qinq;
+  vl_api_interface_index_t parent_sw_if_index;
+  u16 outer_tpid;
+  u16 outer_vlan;
+  u16 inner_tpid;
+  u16 inner_vlan;
   option vat_help = "session-id <nn> encap-if-index <nn> server-mac <server-mac> [lcp-magic <nn>] [del]";
 };
 
@@ -147,6 +153,12 @@ typedef lcp_pppoe_session_entry
   /* v1.1.0: dual-stack support */
   vl_api_ip6_address_t client_ip6;
   u32 client_table_id6;
+  bool has_qinq;
+  vl_api_interface_index_t parent_sw_if_index;
+  u16 outer_tpid;
+  u16 outer_vlan;
+  u16 inner_tpid;
+  u16 inner_vlan;
 };
 
 /** \brief Bulk add / delete PPPoE sessions in a single RPC

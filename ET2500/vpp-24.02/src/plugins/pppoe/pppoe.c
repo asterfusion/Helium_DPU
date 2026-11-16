@@ -57,6 +57,12 @@ format_pppoe_session (u8 * s, va_list * args)
 	      format_ethernet_address, t->local_mac,
 	      format_ethernet_address, t->client_mac);
 
+  if (t->has_qinq)
+    s = format (s, "\n    qinq parent %U tags 0x%04x/%u 0x%04x/%u",
+		format_vnet_sw_if_index_name, pem->vnet_main,
+		t->parent_sw_if_index, t->outer_tpid, t->outer_vlan,
+		t->inner_tpid, t->inner_vlan);
+
   return s;
 }
 
@@ -111,7 +117,9 @@ pppoe_build_rewrite (vnet_main_t * vnm,
 
   int len = sizeof (pppoe_header_t) + sizeof (ethernet_header_t);
   si = vnet_get_sw_interface (vnm, t->encap_if_index);
-  if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
+  if (t->has_qinq)
+    len += 2 * sizeof (ethernet_vlan_header_t);
+  else if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
     {
       if (si->sub.eth.flags.one_tag == 1)
 	{
@@ -125,7 +133,20 @@ pppoe_build_rewrite (vnet_main_t * vnm,
   eth_hdr->type = clib_host_to_net_u16 (ETHERNET_TYPE_PPPOE_SESSION);
   pppoe = (pppoe_header_t *) (eth_hdr + 1);
 
-  if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
+  if (t->has_qinq)
+    {
+      ethernet_vlan_header_t *outer =
+	(ethernet_vlan_header_t *) (eth_hdr + 1);
+      ethernet_vlan_header_t *inner = outer + 1;
+
+      eth_hdr->type = clib_host_to_net_u16 (t->outer_tpid);
+      outer->priority_cfi_and_id = clib_host_to_net_u16 (t->outer_vlan);
+      outer->type = clib_host_to_net_u16 (t->inner_tpid);
+      inner->priority_cfi_and_id = clib_host_to_net_u16 (t->inner_vlan);
+      inner->type = clib_host_to_net_u16 (ETHERNET_TYPE_PPPOE_SESSION);
+      pppoe = (pppoe_header_t *) (inner + 1);
+    }
+  else if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
     {
       if (si->sub.eth.flags.one_tag == 1)
 	{
@@ -139,6 +160,9 @@ pppoe_build_rewrite (vnet_main_t * vnm,
 	}
       si = vnet_get_sw_interface (vnm, si->sup_sw_if_index);
     }
+
+  if (t->has_qinq)
+    si = vnet_get_sw_interface (vnm, t->parent_sw_if_index);
 
   // set the right mac addresses
   hi = vnet_get_hw_interface (vnm, si->hw_if_index);
@@ -203,7 +227,9 @@ pppoe_update_adj (vnet_main_t * vnm, u32 sw_if_index, adj_index_t ai)
   uword len = sizeof (ethernet_header_t);
 
   si = vnet_get_sw_interface (vnm, t->encap_if_index);
-  if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
+  if (t->has_qinq)
+    len += 2 * sizeof (ethernet_vlan_header_t);
+  else if (si->type == VNET_SW_INTERFACE_TYPE_SUB)
     {
       if (si->sub.eth.flags.one_tag == 1)
 	{
@@ -271,7 +297,13 @@ VNET_HW_INTERFACE_CLASS (pppoe_hw_class) =
 _(session_id)                                   \
 _(encap_if_index)                               \
 _(decap_fib_index)                              \
-_(client_ip)
+_(client_ip)                                    \
+_(parent_sw_if_index)                           \
+_(outer_tpid)                                   \
+_(outer_vlan)                                   \
+_(inner_tpid)                                   \
+_(inner_vlan)                                   \
+_(has_qinq)
 
 static bool
 pppoe_decap_next_is_valid (pppoe_main_t * pem, u32 is_ip6,
@@ -320,15 +352,38 @@ int vnet_pppoe_add_del_session
       pfx.fp_proto = FIB_PROTOCOL_IP6;
     }
 
-  /* Get encap_if_index and local mac address from link_table */
-  pppoe_lookup_1 (&pem->link_table, &cached_key, &cached_result,
-		  a->client_mac, 0, &key, &bucket, &result);
-  a->encap_if_index = result.fields.sw_if_index;
+  /* Discovery supplies the carrier for legacy sessions. QinQ sessions bind
+   * their carrier explicitly because one parent can host many domains. */
+  if (!a->has_qinq)
+    {
+      pppoe_lookup_1 (&pem->link_table, &cached_key, &cached_result,
+		      a->client_mac, 0, &key, &bucket, &result);
+      a->encap_if_index = result.fields.sw_if_index;
+    }
 
   if (a->encap_if_index == ~0)
     return VNET_API_ERROR_INVALID_SW_IF_INDEX;
 
-  si = vnet_get_sw_interface (vnm, a->encap_if_index);
+  if (a->has_qinq)
+    {
+      const qinq_subport_t *rule =
+	qinq_subport_get_by_sw_if_index (a->encap_if_index);
+
+      if (!rule || rule->parent_sw_if_index != a->parent_sw_if_index ||
+	  rule->outer_tpid != a->outer_tpid ||
+	  rule->outer_vlan != a->outer_vlan ||
+	  rule->inner_tpid != a->inner_tpid ||
+	  a->inner_vlan < QINQ_VLAN_MIN || a->inner_vlan > QINQ_VLAN_MAX ||
+	  (rule->match_type == QINQ_MATCH_EXACT &&
+	   a->inner_vlan != rule->inner_vlan_first) ||
+	  (rule->match_type == QINQ_MATCH_RANGE &&
+	   (a->inner_vlan < rule->inner_vlan_first ||
+	    a->inner_vlan > rule->inner_vlan_last)))
+	return VNET_API_ERROR_INVALID_SW_IF_INDEX;
+    }
+
+  si = vnet_get_sw_interface (
+    vnm, a->has_qinq ? a->parent_sw_if_index : a->encap_if_index);
   hi = vnet_get_hw_interface (vnm, si->hw_if_index);
 
   /* lookup session_table */
@@ -353,7 +408,7 @@ int vnet_pppoe_add_del_session
       pool_get_aligned (pem->sessions, t, CLIB_CACHE_LINE_BYTES);
       clib_memset (t, 0, sizeof (*t));
 
-      clib_memcpy (t->local_mac, hi->hw_address, vec_len (hi->hw_address));
+      clib_memcpy (t->local_mac, hi->hw_address, 6);
 
       /* copy from arg structure */
 #define _(x) t->x = a->x;
@@ -479,6 +534,10 @@ pppoe_add_del_session_command_fn (vlib_main_t * vm,
   u8 ipv4_set = 0;
   u8 ipv6_set = 0;
   u32 encap_if_index = 0;
+  u32 parent_sw_if_index = ~0;
+  u32 outer_tpid = 0, outer_vlan = 0;
+  u32 inner_tpid = 0, inner_vlan = 0;
+  u8 has_qinq = 0;
   u32 decap_fib_index = 0;
   u8 client_mac[6] = { 0 };
   u8 client_mac_set = 0;
@@ -534,6 +593,22 @@ pppoe_add_del_session_command_fn (vlib_main_t * vm,
 	    (line_input, "client-mac %U", unformat_ethernet_address,
 	     client_mac))
 	client_mac_set = 1;
+      else if (unformat (line_input, "qinq-interface %U",
+			 unformat_vnet_sw_interface, vnet_get_main (),
+			 &encap_if_index))
+	has_qinq = 1;
+      else if (unformat (line_input, "parent %U",
+			 unformat_vnet_sw_interface, vnet_get_main (),
+			 &parent_sw_if_index))
+	has_qinq = 1;
+      else if (unformat (line_input, "outer-tpid %x", &outer_tpid))
+	has_qinq = 1;
+      else if (unformat (line_input, "outer-vlan %u", &outer_vlan))
+	has_qinq = 1;
+      else if (unformat (line_input, "inner-tpid %x", &inner_tpid))
+	has_qinq = 1;
+      else if (unformat (line_input, "inner-vlan %u", &inner_vlan))
+	has_qinq = 1;
       else
 	{
 	  error = clib_error_return (0, "parse error: '%U'",
@@ -565,6 +640,13 @@ pppoe_add_del_session_command_fn (vlib_main_t * vm,
 
   a->is_add = is_add;
   a->is_ip6 = ipv6_set;
+  a->has_qinq = has_qinq;
+  a->encap_if_index = has_qinq ? encap_if_index : ~0;
+  a->parent_sw_if_index = parent_sw_if_index;
+  a->outer_tpid = outer_tpid;
+  a->outer_vlan = outer_vlan;
+  a->inner_tpid = inner_tpid;
+  a->inner_vlan = inner_vlan;
 
 #define _(x) a->x = x;
   foreach_copy_field;
@@ -618,6 +700,8 @@ VLIB_CLI_COMMAND (create_pppoe_session_command, static) = {
   .path = "create pppoe session",
   .short_help =
   "create pppoe session client-ip <client-ip> session-id <nn>"
+  " client-mac <mac> [qinq-interface <subport> parent <parent>"
+  " outer-tpid <hex> outer-vlan <vid> inner-tpid <hex> inner-vlan <vid>]"
   " client-mac <client-mac> [decap-vrf-id <nn>] [del]",
   .function = pppoe_add_del_session_command_fn,
 };

@@ -36,6 +36,7 @@ define pppoe_add_del_session
   vl_api_address_t client_ip;
   u32 decap_vrf_id;
   vl_api_mac_address_t client_mac;
+  vl_api_interface_index_t encap_if_index;
   option vat_help = "client-addr <client-addr> session-id <nn> [encap-if-index <nn>] [decap-next [ip4|ip6|node <name>]] local-mac <local-mac> client-mac <client-mac> [del]";
 };
 

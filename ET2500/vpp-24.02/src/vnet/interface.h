@@ -824,6 +824,7 @@ typedef struct
 	u16 outer_vlan_id_any:1;
 	u16 inner_vlan_id_any:1;
 	u16 change_mac:1;
+	u16 qinq_carrier:1;
       } flags;
     };
 

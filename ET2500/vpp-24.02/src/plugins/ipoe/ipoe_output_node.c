@@ -96,9 +96,9 @@ ipoe_output_check_packet (vlib_main_t *vm, vlib_buffer_t *b,
   ipoe_main_t *im = &ipoe_main;
   ipoe_ip4_view_t view;
   ipoe_session_t *session;
+  ipoe_downstream_lookup_result_t lookup_result;
   ipoe_packet_result_t parse_result;
   ip4_header_t *ip4;
-  uword *p;
   u32 sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_TX];
 
   *external_index = 0;
@@ -134,22 +134,21 @@ ipoe_output_check_packet (vlib_main_t *vm, vlib_buffer_t *b,
   if (ipoe_ip4_is_dhcp_downstream (&view))
     return IPOE_OUTPUT_RESULT_DHCP_WHITELIST;
 
-  p = hash_get (im->session_by_user,
-		(uword) ipoe_user_key (sw_if_index, &ip4->dst_address));
-  if (!p || pool_is_free_index (im->sessions, p[0]))
+  session = ipoe_session_lookup_downstream (
+    sw_if_index, &ip4->dst_address, 0, 0, &lookup_result);
+  if (lookup_result == IPOE_DOWNSTREAM_LOOKUP_NO_SESSION)
     {
       *error = IPOE_OUTPUT_ERROR_NO_SESSION;
       return IPOE_OUTPUT_RESULT_NO_SESSION;
     }
-  session = pool_elt_at_index (im->sessions, p[0]);
   *external_index = session->external_index;
   *counter_index = session->counter_index;
-  if (!session->admin_state)
+  if (lookup_result == IPOE_DOWNSTREAM_LOOKUP_SESSION_INACTIVE)
     {
       *error = IPOE_OUTPUT_ERROR_SESSION_INACTIVE;
       return IPOE_OUTPUT_RESULT_SESSION_INACTIVE;
     }
-  if (session->sw_if_index != sw_if_index)
+  if (lookup_result == IPOE_DOWNSTREAM_LOOKUP_ACCESS_MISMATCH)
     {
       *error = IPOE_OUTPUT_ERROR_ACCESS_MISMATCH;
       return IPOE_OUTPUT_RESULT_ACCESS_MISMATCH;

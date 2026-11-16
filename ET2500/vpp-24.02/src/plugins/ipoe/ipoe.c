@@ -7,7 +7,81 @@
 
 ipoe_main_t ipoe_main;
 
-const char *
+int
+ipoe_qinq_route_add (const ipoe_qinq_route_t *route)
+{
+  ipoe_main_t *im = &ipoe_main;
+  ipoe_qinq_route_t *stored;
+  u32 route_index;
+  int rv;
+
+  if (!route || route->route_id == ~0 ||
+      hash_get (im->qinq_route_by_id, route->route_id))
+    return IPOE_ERROR_ALREADY_EXISTS;
+  rv = ipoe_qinq_route_add_del (route->table_id, &route->user_ip4,
+				route->sw_if_index, 1);
+  if (rv != IPOE_OK)
+    return rv;
+
+  pool_get (im->qinq_routes, stored);
+  *stored = *route;
+  route_index = stored - im->qinq_routes;
+  hash_set (im->qinq_route_by_id, route->route_id, route_index);
+  return IPOE_OK;
+}
+
+int
+ipoe_qinq_route_update (const ipoe_qinq_route_t *route)
+{
+  ipoe_main_t *im = &ipoe_main;
+  ipoe_qinq_route_t old;
+  ipoe_qinq_route_t *stored;
+  uword *p;
+  int same_prefix;
+  int rv;
+
+  if (!route)
+    return IPOE_ERROR_INVALID_VALUE;
+  p = hash_get (im->qinq_route_by_id, route->route_id);
+  if (!p)
+    return IPOE_ERROR_NO_SUCH_ENTRY;
+  stored = pool_elt_at_index (im->qinq_routes, p[0]);
+  old = *stored;
+  same_prefix = old.table_id == route->table_id &&
+		old.user_ip4.as_u32 == route->user_ip4.as_u32;
+
+  rv = ipoe_qinq_route_add_del (route->table_id, &route->user_ip4,
+				route->sw_if_index, 1);
+  if (rv != IPOE_OK)
+    return rv;
+  if (!same_prefix)
+    ipoe_qinq_route_add_del (old.table_id, &old.user_ip4,
+			     old.sw_if_index, 0);
+  *stored = *route;
+  return IPOE_OK;
+}
+
+int
+ipoe_qinq_route_delete (u32 route_id)
+{
+  ipoe_main_t *im = &ipoe_main;
+  ipoe_qinq_route_t *route;
+  uword *p = hash_get (im->qinq_route_by_id, route_id);
+  int rv;
+
+  if (!p)
+    return IPOE_ERROR_NO_SUCH_ENTRY;
+  route = pool_elt_at_index (im->qinq_routes, p[0]);
+  rv = ipoe_qinq_route_add_del (route->table_id, &route->user_ip4,
+				route->sw_if_index, 0);
+  if (rv != IPOE_OK)
+    return rv;
+  hash_unset (im->qinq_route_by_id, route_id);
+  pool_put (im->qinq_routes, route);
+  return IPOE_OK;
+}
+
+__clib_export const char *
 ipoe_error_string (int rv)
 {
   switch (rv)
@@ -214,6 +288,7 @@ ipoe_init (vlib_main_t *vm)
   im->vnet_main = vnet_get_main ();
   im->session_by_index = hash_create (0, sizeof (uword));
   im->session_by_user = hash_create (0, sizeof (uword));
+  im->qinq_route_by_id = hash_create (0, sizeof (uword));
   im->upstream_forward.stat_segment_name =
     "/ipoe/session/upstream-forward";
   im->downstream_forward.stat_segment_name =
@@ -223,6 +298,7 @@ ipoe_init (vlib_main_t *vm)
   im->downstream_gate_drop.stat_segment_name =
     "/ipoe/session/downstream-gate-drop";
   ipoe_timer_init (vm);
+  ipoe_qinq_dpo_module_init ();
   return 0;
 }
 

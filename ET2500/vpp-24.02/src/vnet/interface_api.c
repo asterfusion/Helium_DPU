@@ -296,7 +296,8 @@ send_sw_interface_details (vpe_api_main_t * am,
       mp->sub_outer_vlan_id = ntohs (sub->eth.outer_vlan_id);
       mp->sub_inner_vlan_id = ntohs (sub->eth.inner_vlan_id);
       mp->sub_if_flags =
-	ntohl (sub->eth.raw_flags & SUB_IF_API_FLAG_MASK_VNET);
+	ntohl (sub->eth.raw_flags &
+	       (SUB_IF_API_FLAG_MASK_VNET | SUB_IF_API_FLAG_QINQ_CARRIER));
     }
 
   /* vlan tag rewrite data */
