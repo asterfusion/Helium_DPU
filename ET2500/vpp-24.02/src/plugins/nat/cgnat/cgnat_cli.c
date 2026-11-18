@@ -750,13 +750,79 @@ static clib_error_t *
 cgnat_show_session_user_command_fn (vlib_main_t *vm, unformat_input_t *input,
 				    vlib_cli_command_t *cmd)
 {
-  cgnat_session_filter_t filter = {
-    .flags = CGNAT_SESSION_FILTER_INSIDE_IP,
-  };
+  cgnat_main_t *cm = &cgnat_main;
+  cgnat_instance_t *instance;
+  ip4_address_t inside_ip;
+  cgnat_session_t *sessions, *session;
+  u8 *instance_name = 0;
+  u32 instance_index = CGNAT_INVALID_INDEX;
+  u32 inside_vrf_id = CGNAT_INVALID_INDEX;
+  u32 inside_fib_index = CGNAT_INVALID_INDEX;
+  u8 inside_vrf_set = 0;
 
-  if (!unformat (input, "%U", unformat_ip4_address, &filter.inside_ip))
+  if (!unformat (input, "%U", unformat_ip4_address, &inside_ip))
     return clib_error_return (0, "expected inside IPv4 address");
-  cgnat_show_session_flows (vm, &filter);
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (!instance_name && unformat (input, "instance %s", &instance_name))
+	;
+      else if (!inside_vrf_set &&
+	       unformat (input, "inside-vrf %u", &inside_vrf_id))
+	inside_vrf_set = 1;
+      else
+	{
+	  clib_error_t *error = clib_error_return (
+	    0, "unknown input '%U'", format_unformat_error, input);
+	  vec_free (instance_name);
+	  return error;
+	}
+    }
+  if (inside_vrf_set)
+    {
+      inside_fib_index = fib_table_find (FIB_PROTOCOL_IP4, inside_vrf_id);
+      if (inside_fib_index == CGNAT_INVALID_INDEX)
+	{
+	  vec_free (instance_name);
+	  return clib_error_return (0, "inside VRF %u not found",
+				    inside_vrf_id);
+	}
+    }
+  if (instance_name)
+    {
+      vec_terminate_c_string (instance_name);
+      instance = cgnat_instance_find_by_name_or_id (cm, instance_name);
+      if (!instance)
+	{
+	  clib_error_t *error = clib_error_return (0, "instance %s not found",
+						   instance_name);
+	  vec_free (instance_name);
+	  return error;
+	}
+      instance_index = instance - cm->instances;
+      vec_free (instance_name);
+    }
+
+  sessions = cgnat_session_user_snapshot (inside_ip, instance_index,
+					 inside_fib_index);
+  vec_foreach (session, sessions)
+    {
+      cgnat_instance_t *owner =
+	cgnat_instance_get_by_index (cm, session->instance_index);
+      vlib_cli_output (
+	vm, "instance %u inside-vrf %u protocol %u inside %U:%u public %U:%u "
+	    "remote %U:%u state %u type %s idle %.3fs",
+	owner ? owner->instance_id : CGNAT_INVALID_INDEX,
+	fib_table_get_table_id (session->inside_fib_index, FIB_PROTOCOL_IP4),
+	session->protocol, format_ip4_address, &session->inside_ip,
+	session->inside_port, format_ip4_address, &session->nat_ip,
+	session->nat_port, format_ip4_address, &session->remote_ip,
+	session->remote_port, session->tcp_state,
+	session->mapping_type == CGNAT_MAPPING_STATIC ? "static" : "dynamic",
+	clib_max (vlib_time_now (vm) - session->last_active, 0.0));
+    }
+
+  vlib_cli_output (vm, "total sessions: %u", vec_len (sessions));
+  vec_free (sessions);
   return 0;
 }
 
@@ -821,6 +887,84 @@ cgnat_show_session_summary_command_fn (vlib_main_t *vm,
 				       vlib_cli_command_t *cmd)
 {
   return cgnat_show_user_stats (vm, input, 0);
+}
+
+static clib_error_t *
+cgnat_show_block_user_command_fn (vlib_main_t *vm, unformat_input_t *input,
+				  vlib_cli_command_t *cmd)
+{
+  cgnat_block_user_detail_t *blocks = 0, *block;
+  cgnat_instance_t *instance;
+  ip4_address_t inside_ip;
+  u8 *instance_name = 0;
+  u32 inside_vrf_id = CGNAT_INVALID_INDEX;
+  u32 inside_fib_index = CGNAT_INVALID_INDEX;
+  u32 instance_index = CGNAT_INVALID_INDEX;
+  u8 inside_vrf_set = 0;
+
+  if (!unformat (input, "%U", unformat_ip4_address, &inside_ip))
+    return clib_error_return (0, "expected inside IPv4 address");
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (!instance_name && unformat (input, "instance %s", &instance_name))
+	;
+      else if (!inside_vrf_set &&
+	       unformat (input, "inside-vrf %u", &inside_vrf_id))
+	inside_vrf_set = 1;
+      else
+	{
+	  clib_error_t *error = clib_error_return (
+	    0, "unknown input '%U'", format_unformat_error, input);
+	  vec_free (instance_name);
+	  return error;
+	}
+    }
+  if (inside_vrf_set)
+    {
+      inside_fib_index = fib_table_find (FIB_PROTOCOL_IP4, inside_vrf_id);
+      if (inside_fib_index == CGNAT_INVALID_INDEX)
+	{
+	  vec_free (instance_name);
+	  return clib_error_return (0, "inside VRF %u not found",
+				    inside_vrf_id);
+	}
+    }
+  if (instance_name)
+    {
+      vec_terminate_c_string (instance_name);
+      instance = cgnat_instance_find_by_name_or_id (&cgnat_main,
+						     instance_name);
+      if (!instance)
+	{
+	  clib_error_t *error = clib_error_return (
+	    0, "instance %s not found", instance_name);
+	  vec_free (instance_name);
+	  return error;
+	}
+      instance_index = instance - cgnat_main.instances;
+      vec_free (instance_name);
+    }
+
+  blocks = cgnat_block_user_detail_snapshot (
+    inside_ip, inside_fib_index, instance_index);
+  vec_foreach (block, blocks)
+    {
+      vlib_cli_output (vm, "instance %u user %U inside-vrf %u public %U "
+		       "%u - %u pool %u state %s ports tcp %u udp %u icmp %u",
+		       block->instance_id, format_ip4_address, &block->inside_ip,
+		       block->inside_vrf_id, format_ip4_address, &block->public_ip,
+		       block->start_port, block->end_port, block->pool_id,
+		       block->state == CGNAT_BLOCK_COOLING ? "cooling" : "occupied",
+		       block->active_ports[CGNAT_PBA_PROTO_TCP],
+		       block->active_ports[CGNAT_PBA_PROTO_UDP],
+		       block->active_ports[CGNAT_PBA_PROTO_ICMP]);
+    }
+
+  if (!vec_len (blocks))
+    vlib_cli_output (vm, "user %U has no blocks", format_ip4_address,
+		     &inside_ip);
+  vec_free (blocks);
+  return 0;
 }
 
 static clib_error_t *
@@ -1684,7 +1828,8 @@ VLIB_CLI_COMMAND (cgnat_show_session_all_command, static) = {
 };
 VLIB_CLI_COMMAND (cgnat_show_session_user_command, static) = {
   .path = "cgnat show session user",
-  .short_help = "cgnat show session user <inside-ip>",
+  .short_help = "cgnat show session user <inside-ip> [instance <name>] "
+		"[inside-vrf <id>]",
   .function = cgnat_show_session_user_command_fn,
 };
 VLIB_CLI_COMMAND (cgnat_show_session_summary_command, static) = {
@@ -1754,6 +1899,11 @@ VLIB_CLI_COMMAND (cgnat_show_det_mappings_command, static) = {
   .path = "cgnat show det mappings",
   .short_help = "cgnat show det mappings instance <id>",
   .function = cgnat_show_det_mappings_command_fn,
+};
+VLIB_CLI_COMMAND (cgnat_show_block_user_command, static) = {
+  .path = "cgnat show block user",
+  .short_help = "cgnat show block user <inside-ip> [instance <name>] [inside-vrf <id>]",
+  .function = cgnat_show_block_user_command_fn,
 };
 /* *INDENT-ON* */
 
