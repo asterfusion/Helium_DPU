@@ -350,6 +350,9 @@ cgnat_instance_runtime_init (cgnat_main_t *cm, cgnat_instance_t *instance,
 
   (void) cm;
 
+  instance->block_query_fib_hint = CGNAT_INVALID_INDEX;
+  instance->block_query_multi_fib = 0;
+
   for (i = 0; i < CGNAT_USER_LOCK_BUCKETS; i++)
     {
       clib_spinlock_init (&instance->user_locks[i]);

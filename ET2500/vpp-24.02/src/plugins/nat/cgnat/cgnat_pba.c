@@ -1155,9 +1155,19 @@ cgnat_commit_user (cgnat_instance_t *instance, cgnat_user_t *user)
 {
   u32 shard = cgnat_user_lock_index (user->key.fib_index,
 				     user->key.private_ip);
+  u32 expected = CGNAT_INVALID_INDEX;
 
   hash_set_mem_alloc (&instance->user_index_by_key_shard[shard], &user->key,
 		      cgnat_user_to_index (instance, user));
+
+  /* User stripes differ across VRFs.  The first observed FIB is a safe
+   * lookup hint until another FIB is committed; mixed is deliberately
+   * sticky, avoiding per-user deletion bookkeeping. */
+  if (instance->mode == CGNAT_INSTANCE_MODE_DYNAMIC &&
+      !clib_atomic_cmp_and_swap_acq_relax_n (
+	&instance->block_query_fib_hint, &expected, user->key.fib_index, 0) &&
+      expected != user->key.fib_index)
+    clib_atomic_store_rel_n (&instance->block_query_multi_fib, 1);
 }
 
 void
@@ -2219,6 +2229,140 @@ cgnat_block_user_snapshot (ip4_address_t inside_ip)
 	}
     }
   vlib_worker_thread_barrier_release (cm->vlib_main);
+  return result;
+}
+
+/* Called with the worker barrier held: the user, owned-block list, and
+ * public-IP block pool remain stable for the entire snapshot. */
+static void
+cgnat_block_user_detail_append (cgnat_main_t *cm,
+                                cgnat_instance_t *instance,
+                                cgnat_user_t *user,
+                                cgnat_block_user_detail_t **result)
+{
+  cgnat_pool_t *pool;
+  cgnat_public_ip_t *public_ip;
+  u16 *block_id;
+  u32 owner;
+
+  if (!cgnat_block_snapshot_pool_get (cm, user->pool_index, &pool) ||
+      user->public_ip_index >= vec_len (pool->public_ips))
+    return;
+
+  public_ip = vec_elt_at_index (pool->public_ips, user->public_ip_index);
+  owner = cgnat_user_to_index (instance, user);
+  vec_foreach (block_id, user->owned_block_ids)
+    {
+      u32 block_index;
+      cgnat_block_t *block;
+      cgnat_block_user_detail_t *detail;
+
+      if (*block_id >= vec_len (public_ip->block_index_by_id))
+        continue;
+      block_index = public_ip->block_index_by_id[*block_id];
+      if (block_index == CGNAT_INVALID_INDEX ||
+          pool_is_free_index (public_ip->blocks, block_index))
+        continue;
+      block = pool_elt_at_index (public_ip->blocks, block_index);
+      if (block->owner_user_index != owner)
+        continue;
+
+      vec_add2 (*result, detail, 1);
+      detail->instance_id = instance->instance_id;
+      detail->inside_vrf_id = fib_table_get_table_id (
+        user->key.fib_index, FIB_PROTOCOL_IP4);
+      detail->pool_id = pool->pool_id;
+      detail->inside_ip = user->key.private_ip;
+      detail->public_ip = public_ip->addr;
+      detail->start_port = cgnat_block_start_port (pool, *block_id);
+      detail->end_port = detail->start_port + pool->block_size - 1;
+      clib_memcpy (detail->active_ports, block->active_ports,
+                   sizeof (detail->active_ports));
+      detail->state = block->state;
+    }
+}
+
+static int
+cgnat_block_user_detail_cmp (void *a, void *b)
+{
+  cgnat_block_user_detail_t *x = a, *y = b;
+  u32 x_ip, y_ip;
+
+  if (x->instance_id != y->instance_id)
+    return x->instance_id < y->instance_id ? -1 : 1;
+  if (x->inside_vrf_id != y->inside_vrf_id)
+    return x->inside_vrf_id < y->inside_vrf_id ? -1 : 1;
+  x_ip = clib_net_to_host_u32 (x->public_ip.as_u32);
+  y_ip = clib_net_to_host_u32 (y->public_ip.as_u32);
+  if (x_ip != y_ip)
+    return x_ip < y_ip ? -1 : 1;
+  if (x->start_port != y->start_port)
+    return x->start_port < y->start_port ? -1 : 1;
+  return 0;
+}
+
+cgnat_block_user_detail_t *
+cgnat_block_user_detail_snapshot (ip4_address_t inside_ip,
+                                  u32 inside_fib_index,
+                                  u32 requested_instance)
+{
+  cgnat_main_t *cm = &cgnat_main;
+  cgnat_block_user_detail_t *result = 0;
+  u32 first, end;
+
+  /* Typical users own far fewer blocks; reserve outside the barrier so
+   * normal queries do not allocate while workers are stopped. */
+  vec_prealloc (result, 128);
+  vlib_worker_thread_barrier_sync (cm->vlib_main);
+  first = requested_instance == CGNAT_INVALID_INDEX ? 0 : requested_instance;
+  end = requested_instance == CGNAT_INVALID_INDEX ?
+    vec_len (cm->instances) : requested_instance + 1;
+
+  for (u32 i = first; i < end; i++)
+    {
+      cgnat_instance_t *instance = vec_elt_at_index (cm->instances, i);
+      u32 fib = inside_fib_index;
+
+      if (!instance->configured ||
+          instance->mode != CGNAT_INSTANCE_MODE_DYNAMIC)
+        continue;
+
+      if (fib == CGNAT_INVALID_INDEX &&
+          !clib_atomic_load_acq_n (&instance->block_query_multi_fib))
+        {
+          fib = clib_atomic_load_acq_n (&instance->block_query_fib_hint);
+          if (fib == CGNAT_INVALID_INDEX)
+            continue;
+        }
+
+      if (fib != CGNAT_INVALID_INDEX)
+        {
+          cgnat_user_key_t key = {
+            .fib_index = fib,
+            .private_ip = inside_ip,
+          };
+          cgnat_user_t *user = cgnat_find_user (instance, &key);
+          if (user)
+            cgnat_block_user_detail_append (cm, instance, user, &result);
+          continue;
+        }
+
+      /* A wildcard VRF in a mixed-VRF instance has no unique hash key.
+       * Scan the instance's user pools, still filtering before touching
+       * any block lists. */
+      for (u32 shard = 0; shard < CGNAT_USER_LOCK_BUCKETS; shard++)
+        {
+          cgnat_user_t *user;
+          pool_foreach (user, instance->users_per_shard[shard])
+            {
+              if (user->key.private_ip.as_u32 == inside_ip.as_u32)
+                cgnat_block_user_detail_append (cm, instance, user, &result);
+            }
+        }
+    }
+
+  vlib_worker_thread_barrier_release (cm->vlib_main);
+  vec_sort_with_function (result, cgnat_block_user_detail_cmp);
   return result;
 }
 

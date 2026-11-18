@@ -292,6 +292,7 @@ typedef enum
   /* Allocated from the VPP pool and parked in a worker-local create cache,
    * but not yet published in the session bihash. */
   CGNAT_SESSION_FLAG_RESERVED = 16,
+  CGNAT_SESSION_FLAG_USER_INDEXED = 32,
 } cgnat_session_flags_t;
 
 #define CGNAT_SESSION_CACHE_BATCH_DEFAULT 128
@@ -445,6 +446,19 @@ typedef struct
 typedef struct
 {
   u32 instance_id;
+  u32 inside_vrf_id;
+  u32 pool_id;
+  ip4_address_t inside_ip;
+  ip4_address_t public_ip;
+  u16 start_port;
+  u16 end_port;
+  u16 active_ports[CGNAT_PBA_PROTO_COUNT];
+  u8 state;
+} cgnat_block_user_detail_t;
+
+typedef struct
+{
+  u32 instance_id;
   u32 inside_fib_index;
   u32 pool_id;
   ip4_address_t public_ip;
@@ -531,6 +545,9 @@ typedef struct
    * deletion stores INVALID here (atomically, without the timer lock) and
    * leaves the armed entry to be discarded at its fire time. */
   u32 timer_handle;
+
+  /* Intrusive user-query index; fits the padding before last_active. */
+  u32 user_index_next;
 
   /* Aligned f64; written without a lock (single-copy atomic store), readers
    * tolerate a stale value - it only skews aging by the 1s touch throttle. */
@@ -716,6 +733,11 @@ typedef struct
   cgnat_user_t *users_per_shard[CGNAT_USER_LOCK_BUCKETS];
   uword *user_index_by_key_shard[CGNAT_USER_LOCK_BUCKETS];
 
+  /* For wildcard inside VRF: a sticky hint, safe until a second FIB is seen.
+   * The mixed state falls back to bounded user-pool scanning. */
+  u32 block_query_fib_hint;
+  u8 block_query_multi_fib;
+
   cgnat_static_rule_t *static_rules;
 
   /* Valid when mode == CGNAT_INSTANCE_MODE_DETERMINISTIC. */
@@ -798,6 +820,10 @@ typedef struct
   u32 *mapping_generation_by_index;
   u32 *session_generation_by_index;
   u32 *adf_remote_generation_by_index;
+  u32 *session_user_bucket_heads;
+  u32 *session_user_prev_by_index;
+  u32 session_user_bucket_mask;
+  clib_spinlock_t session_user_index_locks[256];
 
   /* Active session counters, one cache line per vlib thread.  Data-plane
    * writes are plain (non-atomic) increments of the calling thread's slot;
@@ -1205,6 +1231,9 @@ void cgnat_session_counts (cgnat_main_t *cm, u64 *total, u64 *tcp, u64 *udp,
 			   u64 *icmp);
 int cgnat_session_cache_set_batch_size (u32 batch_size);
 cgnat_session_t *cgnat_session_snapshot (cgnat_session_filter_t *filter);
+cgnat_session_t *cgnat_session_user_snapshot (ip4_address_t inside_ip,
+					     u32 instance_index,
+					     u32 inside_fib_index);
 u32 cgnat_session_delete_matching (cgnat_session_filter_t *filter);
 
 int cgnat_pba_alloc_port_locked (u32 instance_index, u32 fib_index,
@@ -1230,6 +1259,8 @@ cgnat_block_ip_summary_t *
 cgnat_block_summary_snapshot (ip4_address_t *public_ip);
 cgnat_block_user_summary_t *
 cgnat_block_user_snapshot (ip4_address_t inside_ip);
+cgnat_block_user_detail_t *cgnat_block_user_detail_snapshot (
+  ip4_address_t inside_ip, u32 inside_fib_index, u32 instance_index);
 cgnat_block_public_detail_t *
 cgnat_block_public_snapshot (ip4_address_t public_ip);
 

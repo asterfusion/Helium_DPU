@@ -40,6 +40,70 @@ cgnat_calc_bihash_buckets (u32 n_elts)
   return lower_pow2;
 }
 
+static_always_inline u32
+cgnat_session_user_bucket (cgnat_main_t *cm, u32 instance_index,
+			   ip4_address_t inside_ip)
+{
+  u32 h = inside_ip.as_u32 ^ (instance_index * 0x9e3779b9u);
+
+  h ^= h >> 16;
+  h *= 0x7feb352du;
+  h ^= h >> 15;
+  h *= 0x846ca68bu;
+  h ^= h >> 16;
+  return h & cm->session_user_bucket_mask;
+}
+
+static void
+cgnat_session_user_index_add (cgnat_main_t *cm, cgnat_session_t *session)
+{
+  u32 bucket = cgnat_session_user_bucket (cm, session->instance_index,
+					   session->inside_ip);
+  u32 index = session - cm->sessions;
+  u32 head;
+
+  clib_spinlock_lock (&cm->session_user_index_locks[bucket & 255]);
+  if (clib_atomic_load_acq_n (&session->flags) & CGNAT_SESSION_FLAG_DELETING)
+    goto done;
+  ASSERT (!(session->flags & CGNAT_SESSION_FLAG_USER_INDEXED));
+  head = cm->session_user_bucket_heads[bucket];
+  session->user_index_next = head;
+  cm->session_user_prev_by_index[index] = CGNAT_INVALID_INDEX;
+  if (head != CGNAT_INVALID_INDEX)
+    cm->session_user_prev_by_index[head] = index;
+  cm->session_user_bucket_heads[bucket] = index;
+  clib_atomic_fetch_or (&session->flags, CGNAT_SESSION_FLAG_USER_INDEXED);
+done:
+  clib_spinlock_unlock (&cm->session_user_index_locks[bucket & 255]);
+}
+
+static void
+cgnat_session_user_index_remove (cgnat_main_t *cm, cgnat_session_t *session)
+{
+  u32 bucket = cgnat_session_user_bucket (cm, session->instance_index,
+					   session->inside_ip);
+  u32 index = session - cm->sessions;
+  u32 prev, next;
+
+  clib_spinlock_lock (&cm->session_user_index_locks[bucket & 255]);
+  if (!(session->flags & CGNAT_SESSION_FLAG_USER_INDEXED))
+    goto done;
+  prev = cm->session_user_prev_by_index[index];
+  next = session->user_index_next;
+  if (prev == CGNAT_INVALID_INDEX)
+    cm->session_user_bucket_heads[bucket] = next;
+  else
+    pool_elt_at_index (cm->sessions, prev)->user_index_next = next;
+  if (next != CGNAT_INVALID_INDEX)
+    cm->session_user_prev_by_index[next] = prev;
+  session->user_index_next = CGNAT_INVALID_INDEX;
+  cm->session_user_prev_by_index[index] = CGNAT_INVALID_INDEX;
+  clib_atomic_fetch_and (&session->flags,
+			 (u8) ~CGNAT_SESSION_FLAG_USER_INDEXED);
+done:
+  clib_spinlock_unlock (&cm->session_user_index_locks[bucket & 255]);
+}
+
 static_always_inline void
 cgnat_make_static_rule_key (clib_bihash_kv_24_8_t *kv,
 			    cgnat_static_rule_t *rule)
@@ -1177,6 +1241,8 @@ cgnat_session_delete_with_locks (cgnat_main_t *cm, cgnat_session_t *session,
       CGNAT_SESSION_FLAG_DELETING)
     return;
 
+  cgnat_session_user_index_remove (cm, session);
+
   /* The value check runs under the stripe lock together with the delete:
    * checking first and locking afterwards could remove the table entry of a
    * re-created same-flow session. */
@@ -1401,6 +1467,49 @@ cgnat_session_snapshot (cgnat_session_filter_t *filter)
   pool_foreach (session, cm->sessions)
     if (cgnat_session_filter_match (session, filter))
       vec_add1 (snapshot, *session);
+  vlib_worker_thread_barrier_release (cm->vlib_main);
+  return snapshot;
+}
+
+/* The caller prints after releasing the barrier.  Reserve the expected
+ * per-user maximum first so normal queries never grow the vector while
+ * workers are stopped.  The vector may still grow if that limit is raised
+ * or static mappings create more sessions. */
+cgnat_session_t *
+cgnat_session_user_snapshot (ip4_address_t inside_ip, u32 requested_instance,
+			     u32 inside_fib_index)
+{
+  cgnat_main_t *cm = &cgnat_main;
+  cgnat_session_t *snapshot = 0;
+  u32 first, end;
+
+  vec_prealloc (snapshot, 10000);
+
+  vlib_worker_thread_barrier_sync (cm->vlib_main);
+  if (!cm->session_user_bucket_heads)
+    goto done;
+  first = requested_instance == CGNAT_INVALID_INDEX ? 0 : requested_instance;
+  end = requested_instance == CGNAT_INVALID_INDEX ?
+    vec_len (cm->instances) : requested_instance + 1;
+  for (u32 i = first; i < end; i++)
+    {
+      u32 bucket = cgnat_session_user_bucket (cm, i, inside_ip);
+      u32 index = cm->session_user_bucket_heads[bucket];
+
+      while (index != CGNAT_INVALID_INDEX)
+	{
+	  cgnat_session_t *session = pool_elt_at_index (cm->sessions, index);
+	  index = session->user_index_next;
+	  if (session->instance_index == i &&
+	      session->inside_ip.as_u32 == inside_ip.as_u32 &&
+	      (inside_fib_index == CGNAT_INVALID_INDEX ||
+	       session->inside_fib_index == inside_fib_index) &&
+	      !(session->flags & (CGNAT_SESSION_FLAG_DELETING |
+			   CGNAT_SESSION_FLAG_RESERVED)))
+	    vec_add1 (snapshot, *session);
+	}
+    }
+done:
   vlib_worker_thread_barrier_release (cm->vlib_main);
   return snapshot;
 }
@@ -1853,6 +1962,7 @@ cgnat_session_lookup_or_create (cgnat_main_t *cm, cgnat_mapping_t *mapping,
   cgnat_log_session (cm, "SESSION_CREATE", 0,
 		     CGNAT_IPFIX_EVENT_SESSION_CREATE, session);
   cgnat_session_start_timer (cm, session, now);
+  cgnat_session_user_index_add (cm, session);
   return 0;
 }
 
@@ -3128,6 +3238,23 @@ cgnat_session_init (cgnat_main_t *cm, u32 max_sessions, u32 max_mappings)
   vec_validate (cm->session_generation_by_index, max_sessions - 1);
   vec_validate (cm->mapping_generation_by_index, max_mappings - 1);
 
+  /* Eight sessions per bucket at the configured capacity, capped at 1 MiB
+   * for bucket heads.  The per-slot predecessor array is exactly 4 bytes
+   * per reserved session; the successor uses existing structure padding. */
+  u32 user_buckets = 1024;
+  /* pool_alloc_aligned reserves capacity but leaves vec_len(sessions) at
+   * zero until slots are taken.  Size the index from the configured limit. */
+  while (user_buckets < (max_sessions / 8u + !!(max_sessions % 8u)) &&
+	 user_buckets < 262144)
+    user_buckets <<= 1;
+  cm->session_user_bucket_mask = user_buckets - 1;
+  vec_validate_init_empty (cm->session_user_bucket_heads,
+			   user_buckets - 1, CGNAT_INVALID_INDEX);
+  vec_validate_init_empty (cm->session_user_prev_by_index,
+			   max_sessions - 1, CGNAT_INVALID_INDEX);
+  for (i = 0; i < 256; i++)
+    clib_spinlock_init (&cm->session_user_index_locks[i]);
+
   /* One cache line of session counters per vlib thread. */
   vec_validate_aligned (cm->session_counters_per_thread,
 			vlib_get_thread_main ()->n_vlib_mains - 1,
@@ -3208,6 +3335,9 @@ cgnat_session_reset (cgnat_main_t *cm)
   pool_free (cm->mappings);
   pool_free (cm->adf_remotes);
   vec_free (cm->session_generation_by_index);
+  vec_free (cm->session_user_bucket_heads);
+  vec_free (cm->session_user_prev_by_index);
+  cm->session_user_bucket_mask = 0;
   vec_free (cm->mapping_generation_by_index);
   vec_free (cm->adf_remote_generation_by_index);
   vec_free (cm->mapping_reap_queue);
@@ -3234,6 +3364,8 @@ cgnat_session_reset (cgnat_main_t *cm)
     clib_spinlock_free (&cm->mapping_table_locks[i]);
   for (i = 0; i < CGNAT_SESSION_TABLE_LOCK_BUCKETS; i++)
     clib_spinlock_free (&cm->session_table_locks[i]);
+  for (i = 0; i < 256; i++)
+    clib_spinlock_free (&cm->session_user_index_locks[i]);
   for (i = 0; i < CGNAT_ADF_REMOTE_LOCK_BUCKETS; i++)
     clib_spinlock_free (&cm->adf_remote_locks[i]);
   clib_spinlock_free (&cm->mapping_pool_lock);
