@@ -145,7 +145,7 @@ parse_header (ethernet_input_variant_t variant,
 
   *match_flags = SUBINT_CONFIG_VALID | SUBINT_CONFIG_MATCH_0_TAG;
   vlan_count = 0;
-
+#if 0
   if(vnet_buffer(b0)->dont_waste_me != 0)
   {
     ethernet_vlan_header_t *h0;
@@ -193,6 +193,7 @@ parse_header (ethernet_input_variant_t variant,
 
   }
   else
+#endif
   // check for vlan encaps
   if (ethernet_frame_is_tagged (*type))
     {
@@ -1380,8 +1381,8 @@ ethernet_input_inline (vlib_main_t * vm,
 	  /* Speed-path for the untagged case */
 	  if (PREDICT_TRUE (variant == ETHERNET_INPUT_VARIANT_ETHERNET
 			    && !ethernet_frame_is_any_tagged_x2 (type0,
-								 type1))
-                && !(vnet_buffer(b0)->dont_waste_me || vnet_buffer(b1)->dont_waste_me)  )
+								 type1)))
+                //&& !(vnet_buffer(b0)->dont_waste_me || vnet_buffer(b1)->dont_waste_me)  )
 	    {
 	      main_intf_t *intf0;
 	      subint_config_t *subint0;
@@ -1659,8 +1660,8 @@ ethernet_input_inline (vlib_main_t * vm,
 
 	  /* Speed-path for the untagged case */
 	  if (PREDICT_TRUE (variant == ETHERNET_INPUT_VARIANT_ETHERNET
-			    && !ethernet_frame_is_tagged (type0))
-			    && !(vnet_buffer(b0)->dont_waste_me))
+			    && !ethernet_frame_is_tagged (type0)))
+			    //&& !(vnet_buffer(b0)->dont_waste_me))
 	    {
 	      main_intf_t *intf0;
 	      subint_config_t *subint0;
