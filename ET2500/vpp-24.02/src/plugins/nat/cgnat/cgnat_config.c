@@ -5,6 +5,7 @@
  * Licensed under the Apache License, Version 2.0.
  */
 
+#include <vlib/unix/plugin.h>
 #include <vnet/fib/fib_table.h>
 #include <vnet/fib/ip4_fib.h>
 #include <vnet/ip/reass/ip4_sv_reass.h>
@@ -1628,6 +1629,34 @@ cgnat_interface_add_del (u32 sw_if_index, u8 is_inside, u8 is_add)
   return 0;
 }
 
+static int
+cgnat_interface_remove_inside (u32 sw_if_index)
+{
+  cgnat_main_t *cm = &cgnat_main;
+  bool (*get_pppoe_peer) (u32, ip4_address_t *);
+  ip4_address_t inside_ip;
+  u32 inside_fib_index;
+  int rv;
+
+  get_pppoe_peer = vlib_get_plugin_symbol ("linux_cp_plugin.so",
+                                         "lcp_pppoe_session_get_peer_ip4");
+  if (!get_pppoe_peer || !get_pppoe_peer (sw_if_index, &inside_ip))
+    return cgnat_interface_add_del (sw_if_index, 1, 0);
+
+  /* Use the same ingress FIB as the CGNAT policy node. */
+  inside_fib_index =
+    fib_table_get_index_for_sw_if_index (FIB_PROTOCOL_IP4, sw_if_index);
+
+  /* Disable the inside feature and clear its flows before workers resume. */
+  vlib_worker_thread_barrier_sync (cm->vlib_main);
+  rv = cgnat_interface_add_del (sw_if_index, 1, 0);
+  if (!rv)
+    cgnat_session_delete_subscriber (inside_ip, inside_fib_index);
+  vlib_worker_thread_barrier_release (cm->vlib_main);
+
+  return rv;
+}
+
 int
 cgnat_interface_zone_set (u32 sw_if_index, cgnat_interface_role_t role)
 {
@@ -1650,6 +1679,10 @@ cgnat_interface_zone_set (u32 sw_if_index, cgnat_interface_role_t role)
   if (role == old_flags)
     return 0;
   
+  if (old_flags == CGNAT_INTERFACE_ROLE_INSIDE &&
+      role == CGNAT_INTERFACE_ROLE_NONE)
+    return cgnat_interface_remove_inside (sw_if_index);
+
   if (old_flags == CGNAT_INTERFACE_ROLE_NONE)
   {
     return cgnat_interface_add_del (sw_if_index, role == CGNAT_INTERFACE_ROLE_INSIDE, 1);

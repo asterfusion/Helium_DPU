@@ -1235,6 +1235,9 @@ cgnat_session_t *cgnat_session_user_snapshot (ip4_address_t inside_ip,
 					     u32 instance_index,
 					     u32 inside_fib_index);
 u32 cgnat_session_delete_matching (cgnat_session_filter_t *filter);
+/* The caller holds the worker barrier. */
+void cgnat_session_delete_subscriber (ip4_address_t inside_ip,
+                                     u32 inside_fib_index);
 
 int cgnat_pba_alloc_port_locked (u32 instance_index, u32 fib_index,
 				 ip4_address_t private_ip, u16 private_port,
