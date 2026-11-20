@@ -143,6 +143,7 @@ wg_handshake_process (vlib_main_t *vm, wg_main_t *wmp, vlib_buffer_t *b,
   index_t *wg_ifs;
   wg_if_t *wg_if;
   wg_peer_t *peer = NULL;
+  bool trace = (b->flags & VLIB_BUFFER_IS_TRACED) != 0;
 
   void *current_b_data = vlib_buffer_get_current (b);
 
@@ -240,7 +241,8 @@ wg_handshake_process (vlib_main_t *vm, wg_main_t *wmp, vlib_buffer_t *b,
 	    if (!wg_send_handshake_cookie (vm, message->sender_index,
 					   &wg_if->cookie_checker, macs,
 					   &ip_addr_46 (&wg_if->src_ip),
-					   wg_if->port, &src_ip, udp_src_port))
+					   wg_if->port, &src_ip, udp_src_port,
+					   trace))
 	      return WG_INPUT_ERROR_COOKIE_SEND;
 
 	    return WG_INPUT_ERROR_NONE;
@@ -261,7 +263,7 @@ wg_handshake_process (vlib_main_t *vm, wg_main_t *wmp, vlib_buffer_t *b,
 
 	wg_peer_update_endpoint (rp->r_peer_idx, &src_ip, udp_src_port);
 
-	if (PREDICT_FALSE (!wg_send_handshake_response (vm, peer)))
+	if (PREDICT_FALSE (!wg_send_handshake_response (vm, peer, trace)))
 	  {
 	    vlib_node_increment_counter (vm, node_idx,
 					 WG_INPUT_ERROR_HANDSHAKE_SEND, 1);
@@ -277,7 +279,8 @@ wg_handshake_process (vlib_main_t *vm, wg_main_t *wmp, vlib_buffer_t *b,
 	    if (!wg_send_handshake_cookie (vm, resp->sender_index,
 					   &wg_if->cookie_checker, macs,
 					   &ip_addr_46 (&wg_if->src_ip),
-					   wg_if->port, &src_ip, udp_src_port))
+					   wg_if->port, &src_ip, udp_src_port,
+					   trace))
 	      return WG_INPUT_ERROR_COOKIE_SEND;
 
 	    return WG_INPUT_ERROR_NONE;
@@ -312,7 +315,7 @@ wg_handshake_process (vlib_main_t *vm, wg_main_t *wmp, vlib_buffer_t *b,
 
 	    wg_timers_session_derived (peer);
 	    wg_timers_handshake_complete (peer);
-	    if (PREDICT_FALSE (!wg_send_keepalive (vm, peer)))
+	    if (PREDICT_FALSE (!wg_send_keepalive (vm, peer, trace)))
 	      {
 		vlib_node_increment_counter (vm, node_idx,
 					     WG_INPUT_ERROR_KEEPALIVE_SEND, 1);
@@ -719,6 +722,7 @@ wg_input_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
   u16 n_async = 0;
   const u8 is_async = wg_op_mode_is_set_ASYNC ();
   vnet_crypto_async_frame_t *async_frame = NULL;
+  u32 n_trace;
 
   vlib_get_buffers (vm, from, bufs, n_left_from);
   vec_reset_length (ptd->crypto_ops);
@@ -736,8 +740,26 @@ wg_input_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
   u32 *peer_idx = NULL;
   index_t peeri = INDEX_INVALID;
 
+  n_trace = vlib_get_trace_count (vm, node);
+
   while (n_left_from > 0)
     {
+      /*
+       * Anchor the per-node trace here. The wireguard input nodes are
+       * reached by an upstream node which is not traced unless the user
+       * asked for it explicitly, so a trace started at this node has to set
+       * the runtime trace flag and mark the buffer itself.
+       *
+       * Only run on the main thread (thread 0). Packets that cross threads
+       * via handoff would otherwise trigger vlib_add_handoff_trace which
+       * leaks entries on the originating thread's trace pool, and a later
+       * pool realloc on that thread would invalidate pointers currently held
+       * by show trace, leading to a crash in trace_time_cmp.
+       */
+      if (PREDICT_FALSE (vm->thread_index == 0 && n_trace) &&
+	  vlib_trace_start_at_node (vm, node, b[0]))
+	n_trace--;
+
       if (n_left_from > 2)
 	{
 	  u8 *p;
@@ -1227,6 +1249,7 @@ VLIB_REGISTER_NODE (wg4_input_node) =
   .vector_size = sizeof (u32),
   .format_trace = format_wg_input_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .n_errors = ARRAY_LEN (wg_input_error_strings),
   .error_strings = wg_input_error_strings,
   .n_next_nodes = WG_INPUT_N_NEXT,
@@ -1247,6 +1270,7 @@ VLIB_REGISTER_NODE (wg6_input_node) =
   .vector_size = sizeof (u32),
   .format_trace = format_wg_input_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .n_errors = ARRAY_LEN (wg_input_error_strings),
   .error_strings = wg_input_error_strings,
   .n_next_nodes = WG_INPUT_N_NEXT,

@@ -109,6 +109,7 @@ VLIB_REGISTER_NODE (ip4_lookup_node) =
   .name = "ip4-lookup",
   .vector_size = sizeof (u32),
   .format_trace = format_ip4_lookup_trace,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .n_next_nodes = IP_LOOKUP_N_NEXT,
   .next_nodes = IP4_LOOKUP_NEXT_NODES,
 };

@@ -669,6 +669,17 @@ esp_encrypt_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 			 CLIB_CACHE_LINE_BYTES, LOAD);
 	}
 
+      /*
+       * Anchor the per-node trace here: this node builds the esp
+       * packet itself, so it is never reached by a traced upstream node.
+       *
+       * Only on thread 0: async crypto completion can land on a different
+       * worker thread, causing vlib_add_handoff_trace which leaks the
+       * originating thread's pool entries and can corrupt show trace.
+       */
+      if (PREDICT_FALSE (vm->thread_index == 0))
+	vlib_trace_start_at_node (vm, node, b[0]);
+
       vnet_calc_checksums_inline (vm, b[0], b[0]->flags & VNET_BUFFER_F_IS_IP4,
 				  b[0]->flags & VNET_BUFFER_F_IS_IP6);
       vnet_calc_outer_checksums_inline (vm, b[0]);
@@ -1151,6 +1162,7 @@ esp_encrypt_post_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
   u16 nexts[VLIB_FRAME_SIZE], *next = nexts;
   u32 *from = vlib_frame_vector_args (frame);
   u32 n_left = frame->n_vectors;
+  u32 i;
 
   vlib_get_buffers (vm, from, b, n_left);
 
@@ -1160,6 +1172,20 @@ esp_encrypt_post_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
       vlib_prefetch_buffer_header (b[1], LOAD);
       vlib_prefetch_buffer_header (b[2], LOAD);
       vlib_prefetch_buffer_header (b[3], LOAD);
+    }
+
+  /*
+   * Anchor the per-node trace here: this node is not reached by a traced
+   * upstream node when it is used as a trace start point.
+   *
+   * Only on thread 0: the preceding inline encrypt node can run on other
+   * threads and crypto completion can land on yet another worker; the
+   * chain would leak pool entries via vlib_add_handoff_trace.
+   */
+  if (PREDICT_FALSE (vm->thread_index == 0))
+    {
+      for (i = 0; i < n_left; i++)
+	vlib_trace_start_at_node (vm, node, b[i]);
     }
 
   while (n_left > 8)
@@ -1242,6 +1268,7 @@ VLIB_REGISTER_NODE (esp4_encrypt_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_esp_encrypt_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
 
   .n_errors = ESP_ENCRYPT_N_ERROR,
   .error_counters = esp_encrypt_error_counters,
@@ -1268,6 +1295,7 @@ VLIB_REGISTER_NODE (esp4_encrypt_post_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_esp_post_encrypt_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .sibling_of = "esp4-encrypt",
 
   .n_errors = ESP_ENCRYPT_N_ERROR,
@@ -1287,6 +1315,7 @@ VLIB_REGISTER_NODE (esp6_encrypt_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_esp_encrypt_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .sibling_of = "esp4-encrypt",
 
   .n_errors = ESP_ENCRYPT_N_ERROR,
@@ -1305,6 +1334,7 @@ VLIB_REGISTER_NODE (esp6_encrypt_post_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_esp_post_encrypt_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .sibling_of = "esp4-encrypt",
 
   .n_errors = ESP_ENCRYPT_N_ERROR,
@@ -1324,6 +1354,7 @@ VLIB_REGISTER_NODE (esp4_encrypt_tun_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_esp_encrypt_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
 
   .n_errors = ESP_ENCRYPT_N_ERROR,
   .error_counters = esp_encrypt_error_counters,
@@ -1352,6 +1383,7 @@ VLIB_REGISTER_NODE (esp4_encrypt_tun_post_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_esp_post_encrypt_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .sibling_of = "esp4-encrypt-tun",
 
   .n_errors = ESP_ENCRYPT_N_ERROR,
@@ -1371,6 +1403,7 @@ VLIB_REGISTER_NODE (esp6_encrypt_tun_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_esp_encrypt_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
 
   .n_errors = ESP_ENCRYPT_N_ERROR,
   .error_counters = esp_encrypt_error_counters,
@@ -1400,6 +1433,7 @@ VLIB_REGISTER_NODE (esp6_encrypt_tun_post_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_esp_post_encrypt_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .sibling_of = "esp-mpls-encrypt-tun",
 
   .n_errors = ESP_ENCRYPT_N_ERROR,
@@ -1418,6 +1452,7 @@ VLIB_REGISTER_NODE (esp_mpls_encrypt_tun_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_esp_encrypt_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
 
   .n_errors = ESP_ENCRYPT_N_ERROR,
   .error_counters = esp_encrypt_error_counters,
@@ -1445,6 +1480,7 @@ VLIB_REGISTER_NODE (esp_mpls_encrypt_tun_post_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_esp_post_encrypt_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .sibling_of = "esp-mpls-encrypt-tun",
 
   .n_errors = ESP_ENCRYPT_N_ERROR,

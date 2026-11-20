@@ -61,10 +61,37 @@ ip6_lookup_inline (vlib_main_t * vm,
   u32 n_left_from, n_left_to_next, *from, *to_next;
   ip_lookup_next_t next;
   u32 thread_index = vm->thread_index;
+  u32 n_trace;
 
   from = vlib_frame_vector_args (frame);
   n_left_from = frame->n_vectors;
   next = node->cached_next_index;
+
+  /*
+   * Anchor the per-node trace here. ip6-lookup is a mid-graph node and is
+   * often the first node a locally generated packet (wireguard handshake,
+   * ipsec, ...) hits. The dispatcher only sets the runtime trace flag for
+   * packets coming from a traced upstream node, so a trace started at this
+   * node has to set the flag itself.
+   *
+   * Only anchor on thread 0: downstream nodes (wg6-output-tun, esp/ah
+   * crypto) hand off packets to worker threads, which triggers
+   * vlib_add_handoff_trace that leaks entries on the originating thread's
+   * trace pool and can corrupt show trace's vec_sort pointers.
+   */
+  if (PREDICT_FALSE (vm->thread_index == 0))
+    {
+      n_trace = vlib_get_trace_count (vm, node);
+      if (PREDICT_FALSE (n_trace))
+	{
+	  u32 i;
+
+	  for (i = 0; i < n_left_from && n_trace; i++)
+	    if (vlib_trace_start_at_node (vm, node,
+					  vlib_get_buffer (vm, from[i])))
+	      n_trace--;
+	}
+    }
 
   while (n_left_from > 0)
     {

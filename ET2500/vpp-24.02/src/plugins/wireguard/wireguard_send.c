@@ -35,6 +35,15 @@ ip46_enqueue_packet (vlib_main_t *vm, u32 bi0, int is_ip4)
   f->n_vectors = 1;
   to_next[0] = bi0;
 
+  /*
+   * Propagate the trace flag to the lookup node. The dispatcher derives the
+   * runtime trace flag of the next node from the flags of the frame the
+   * packet is handed over in, so a locally generated packet which is being
+   * traced has to carry the flag in its frame.
+   */
+  if (vlib_get_buffer (vm, bi0)->flags & VLIB_BUFFER_IS_TRACED)
+    f->frame_flags |= VLIB_FRAME_TRACE;
+
   vlib_put_frame_to_node (vm, lookup_node_index, f);
 
   return f->n_vectors;
@@ -85,7 +94,7 @@ wg_buffer_prepend_rewrite (vlib_main_t *vm, vlib_buffer_t *b0,
 
 static bool
 wg_create_buffer (vlib_main_t *vm, const u8 *rewrite, const u8 *packet,
-		  u32 packet_len, u32 *bi, u8 is_ip4)
+		  u32 packet_len, u32 *bi, u8 is_ip4, bool trace)
 {
   u32 n_buf0 = 0;
   vlib_buffer_t *b0;
@@ -105,6 +114,17 @@ wg_create_buffer (vlib_main_t *vm, const u8 *rewrite, const u8 *packet,
   b0->flags = 0;
   b0->no_nat = 0;
   b0->acl_index = 0;
+
+  /*
+   * Mark the locally generated packet as traced. The trace flag is handed
+   * over to the lookup node by ip46_enqueue_packet(), so that the whole
+   * egress path of the packet shows up in the trace.
+   */
+  if (trace)
+    {
+      int rc = vlib_trace_buffer_mark (vm, b0, 0 /* follow_chain */);
+      ASSERT (rc == 1 || rc == 0);
+    }
 
   return true;
 }
@@ -197,7 +217,7 @@ wg_send_handshake (vlib_main_t * vm, wg_peer_t * peer, bool is_retry)
   u8 is_ip4 = ip46_address_is_ip4 (&peer->dst.addr);
   u32 bi0 = 0;
   if (!wg_create_buffer (vm, peer->rewrite, (u8 *) &packet, sizeof (packet),
-			 &bi0, is_ip4))
+			 &bi0, is_ip4, false /* trace */))
     return false;
 
   ip46_enqueue_packet (vm, bi0, is_ip4);
@@ -248,7 +268,7 @@ wg_send_handshake_from_mt (u32 peer_idx, bool is_retry)
 }
 
 bool
-wg_send_keepalive (vlib_main_t * vm, wg_peer_t * peer)
+wg_send_keepalive (vlib_main_t * vm, wg_peer_t * peer, bool trace)
 {
   ASSERT (vm->thread_index == 0);
 
@@ -289,7 +309,7 @@ wg_send_keepalive (vlib_main_t * vm, wg_peer_t * peer)
   packet->header.type = MESSAGE_DATA;
 
   if (!wg_create_buffer (vm, peer->rewrite, (u8 *) packet, size_of_packet,
-			 &bi0, is_ip4))
+			 &bi0, is_ip4, trace))
     {
       ret = false;
       goto out;
@@ -305,7 +325,7 @@ out:
 }
 
 bool
-wg_send_handshake_response (vlib_main_t * vm, wg_peer_t * peer)
+wg_send_handshake_response (vlib_main_t * vm, wg_peer_t * peer, bool trace)
 {
   message_handshake_response_t packet;
 
@@ -332,7 +352,7 @@ wg_send_handshake_response (vlib_main_t * vm, wg_peer_t * peer)
 	  u32 bi0 = 0;
 	  u8 is_ip4 = ip46_address_is_ip4 (&peer->dst.addr);
 	  if (!wg_create_buffer (vm, peer->rewrite, (u8 *) &packet,
-				 sizeof (packet), &bi0, is_ip4))
+				 sizeof (packet), &bi0, is_ip4, trace))
 	    return false;
 
 	  ip46_enqueue_packet (vm, bi0, is_ip4);
@@ -348,7 +368,7 @@ wg_send_handshake_cookie (vlib_main_t *vm, u32 sender_index,
 			  cookie_checker_t *cookie_checker,
 			  message_macs_t *macs, ip46_address_t *wg_if_addr,
 			  u16 wg_if_port, ip46_address_t *remote_addr,
-			  u16 remote_port)
+			  u16 remote_port, bool trace)
 {
   message_handshake_cookie_t packet;
   u8 *rewrite;
@@ -367,7 +387,7 @@ wg_send_handshake_cookie (vlib_main_t *vm, u32 sender_index,
 			      is_ip4);
 
   ret = wg_create_buffer (vm, rewrite, (u8 *) &packet, sizeof (packet), &bi0,
-			  is_ip4);
+			  is_ip4, trace);
   vec_free (rewrite);
   if (!ret)
     return false;

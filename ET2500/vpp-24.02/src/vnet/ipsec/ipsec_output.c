@@ -105,6 +105,7 @@ ipsec_output_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
 	  CLIB_PREFETCH (b1, CLIB_CACHE_LINE_BYTES * 2, STORE);
 	  vlib_prefetch_buffer_data (b1, LOAD);
 	}
+
       sw_if_index0 = vnet_buffer (b0)->sw_if_index[VLIB_TX];
       iph_offset = vnet_buffer (b0)->ip.save_rewrite_length;
       ip0 = (ip4_header_t *) ((u8 *) vlib_buffer_get_current (b0)
@@ -185,6 +186,20 @@ ipsec_output_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
 
 	  vlib_prefetch_combined_counter (&ipsec_spd_policy_counters,
 					  thread_index, pi0);
+
+	  /*
+	   * Anchor the per-node trace here: this node builds the ipsec
+	   * packet itself, so it is never reached by a traced upstream node.
+	   * The anchor sits behind the policy match, so that only traffic
+	   * actually matched by an IPsec policy consumes the trace quota
+	   * (this node sits on the ip4/ip6-output feature arc).
+	   *
+	   * Only anchor on thread 0: downstream esp/ah encrypt can hand off
+	   * to worker threads; vlib_add_handoff_trace leaks pool entries on
+	   * the originating thread which can later corrupt show trace.
+	   */
+	  if (PREDICT_FALSE (vm->thread_index == 0))
+	    vlib_trace_start_at_node (vm, node, b0);
 
 	  if (is_ipv6)
 	    {
@@ -304,8 +319,8 @@ ipsec_output_inline (vlib_main_t * vm, vlib_node_runtime_t * node,
       to_next += 1;
       f->n_vectors++;
 
-      if (PREDICT_FALSE (node->flags & VLIB_NODE_FLAG_TRACE) &&
-	  PREDICT_FALSE (b0->flags & VLIB_BUFFER_IS_TRACED))
+      if (PREDICT_FALSE ((node->flags & VLIB_NODE_FLAG_TRACE) &&
+			 (b0->flags & VLIB_BUFFER_IS_TRACED)))
 	{
 	  ipsec_output_trace_t *tr =
 	    vlib_add_trace (vm, node, b0, sizeof (*tr));
@@ -340,6 +355,7 @@ VLIB_REGISTER_NODE (ipsec4_output_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_ipsec_output_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
 
   .n_errors = ARRAY_LEN(ipsec_output_error_strings),
   .error_strings = ipsec_output_error_strings,
@@ -364,6 +380,7 @@ VLIB_REGISTER_NODE (ipsec6_output_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_ipsec_output_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
 
   .n_errors = ARRAY_LEN(ipsec_output_error_strings),
   .error_strings = ipsec_output_error_strings,

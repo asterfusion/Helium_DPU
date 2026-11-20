@@ -754,6 +754,7 @@ VLIB_REGISTER_NODE (ip6_lookup_node) =
   .name = "ip6-lookup",
   .vector_size = sizeof (u32),
   .format_trace = format_ip6_lookup_trace,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .n_next_nodes = IP6_LOOKUP_N_NEXT,
   .next_nodes = IP6_LOOKUP_NEXT_NODES,
 };

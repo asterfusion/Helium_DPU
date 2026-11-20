@@ -518,6 +518,15 @@ wg_output_tun_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	  goto next;
 	}
 
+      /*
+       * Anchor the per-node trace here: this node generates the wireguard
+       * packet itself, so it is never reached by a traced upstream node.
+       * The anchor is placed after the peer/thread checks, so that only
+       * real wireguard traffic consumes the trace quota (this node sits on
+       * the ip4/ip6-output feature arc and sees every outgoing packet).
+       */
+      vlib_trace_start_at_node (vm, node, b[0]);
+
       if (PREDICT_FALSE (!peer->remote.r_current))
 	{
 	  wg_send_handshake_from_mt (peeri, false);
@@ -581,6 +590,9 @@ wg_output_tun_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	      goto out;
 	    }
 	  lb = vlib_buffer_chain_buffer (vm, lb, tmp_bi);
+	  /* Keep the tail buffer in the trace. */
+	  if (b[0]->flags & VLIB_BUFFER_IS_TRACED)
+	    vlib_buffer_copy_trace_flag (vm, b[0], tmp_bi);
 	}
 
       iph_offset = vnet_buffer (b[0])->ip.save_rewrite_length;
@@ -781,6 +793,7 @@ wg_output_tun_post (vlib_main_t *vm, vlib_node_runtime_t *node,
   u16 nexts[VLIB_FRAME_SIZE], *next = nexts;
   u32 *from = vlib_frame_vector_args (frame);
   u32 n_left = frame->n_vectors;
+  u32 i;
 
   index_t peeri = ~0;
 
@@ -793,6 +806,13 @@ wg_output_tun_post (vlib_main_t *vm, vlib_node_runtime_t *node,
       vlib_prefetch_buffer_header (b[2], LOAD);
       vlib_prefetch_buffer_header (b[3], LOAD);
     }
+
+  /*
+   * Anchor the per-node trace here: this node is not reached by a traced
+   * upstream node when it is used as a trace start point.
+   */
+  for (i = 0; i < n_left; i++)
+    vlib_trace_start_at_node (vm, node, b[i]);
 
   while (n_left > 8)
     {
@@ -882,6 +902,7 @@ VLIB_REGISTER_NODE (wg4_output_tun_post_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_wg_output_tun_post_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .sibling_of = "wg4-output-tun",
   .n_errors = ARRAY_LEN (wg_output_error_strings),
   .error_strings = wg_output_error_strings,
@@ -892,6 +913,7 @@ VLIB_REGISTER_NODE (wg6_output_tun_post_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_wg_output_tun_post_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .sibling_of = "wg6-output-tun",
   .n_errors = ARRAY_LEN (wg_output_error_strings),
   .error_strings = wg_output_error_strings,
@@ -930,6 +952,7 @@ VLIB_REGISTER_NODE (wg4_output_tun_node) =
   .vector_size = sizeof (u32),
   .format_trace = format_wg_output_tun_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .n_errors = ARRAY_LEN (wg_output_error_strings),
   .error_strings = wg_output_error_strings,
   .n_next_nodes = WG_OUTPUT_N_NEXT,
@@ -946,6 +969,7 @@ VLIB_REGISTER_NODE (wg6_output_tun_node) =
   .vector_size = sizeof (u32),
   .format_trace = format_wg_output_tun_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
   .n_errors = ARRAY_LEN (wg_output_error_strings),
   .error_strings = wg_output_error_strings,
   .n_next_nodes = WG_OUTPUT_N_NEXT,

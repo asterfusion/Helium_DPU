@@ -63,11 +63,37 @@ ip4_lookup_inline (vlib_main_t * vm,
   vlib_buffer_t *bufs[VLIB_FRAME_SIZE];
   vlib_buffer_t **b = bufs;
   u16 nexts[VLIB_FRAME_SIZE], *next;
+  u32 n_trace;
 
   from = vlib_frame_vector_args (frame);
   n_left = frame->n_vectors;
   next = nexts;
   vlib_get_buffers (vm, from, bufs, n_left);
+
+  /*
+   * Anchor the per-node trace here. ip4-lookup is a mid-graph node and is
+   * often the first node a locally generated packet (wireguard handshake,
+   * ipsec, ...) hits. The dispatcher only sets the runtime trace flag for
+   * packets coming from a traced upstream node, so a trace started at this
+   * node has to set the flag itself.
+   *
+   * Only anchor on thread 0: downstream nodes (wg4-output-tun, esp/ah
+   * crypto) hand off packets to worker threads, which triggers
+   * vlib_add_handoff_trace that leaks entries on the originating thread's
+   * trace pool and can corrupt show trace's vec_sort pointers.
+   */
+  if (PREDICT_FALSE (vm->thread_index == 0))
+    {
+      n_trace = vlib_get_trace_count (vm, node);
+      if (PREDICT_FALSE (n_trace))
+	{
+	  u32 i;
+
+	  for (i = 0; i < n_left && n_trace; i++)
+	    if (vlib_trace_start_at_node (vm, node, bufs[i]))
+	      n_trace--;
+	}
+    }
 
 #if (CLIB_N_PREFETCHES >= 8)
   while (n_left >= 4)

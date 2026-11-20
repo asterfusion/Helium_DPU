@@ -142,7 +142,7 @@ wg_expired_send_keepalive (vlib_main_t * vm, wg_peer_t * peer)
 	  return;
 	}
 
-      wg_send_keepalive (vm, peer);
+      wg_send_keepalive (vm, peer, false /* trace */);
       if (peer->timer_need_another_keepalive)
 	{
 	  peer->timer_need_another_keepalive = false;
@@ -169,7 +169,7 @@ wg_expired_send_persistent_keepalive (vlib_main_t * vm, wg_peer_t * peer)
 	  return;
 	}
 
-      wg_send_keepalive (vm, peer);
+      wg_send_keepalive (vm, peer, false /* trace */);
     }
 }
 

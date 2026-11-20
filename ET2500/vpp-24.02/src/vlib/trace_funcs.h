@@ -142,14 +142,17 @@ void trace_apply_filter (vlib_main_t *vm);
 
 /*
  * Mark buffer as traced and allocate trace buffer.
+ *
+ * 与 vlib_trace_buffer() 的区别：不设置 next frame 上的 trace 标志。
+ * 供"中图"节点（自己造包的节点，如 wireguard / ipsec）作为 trace
+ * 起点使用。
+ *
  * return 1 if the buffer is successfully traced, 0 if not
  * A buffer might not be traced if tracing is off or if the packet did not
  * match the filter.
  */
 always_inline __clib_warn_unused_result int
-vlib_trace_buffer (vlib_main_t * vm,
-		   vlib_node_runtime_t * r,
-		   u32 next_index, vlib_buffer_t * b, int follow_chain)
+vlib_trace_buffer_mark (vlib_main_t * vm, vlib_buffer_t * b, int follow_chain)
 {
   vlib_trace_main_t *tm = &vm->trace_main;
   vlib_trace_header_t **h;
@@ -181,8 +184,6 @@ vlib_trace_buffer (vlib_main_t * vm,
 				     (struct vlib_trace_main_t *) tm);
     }
 
-  vlib_trace_next_frame (vm, r, next_index);
-
   pool_get (tm->trace_buffer_pool, h);
 
   do
@@ -192,6 +193,25 @@ vlib_trace_buffer (vlib_main_t * vm,
 	(vm->thread_index, h - tm->trace_buffer_pool);
     }
   while (follow_chain && (b = vlib_get_next_buffer (vm, b)));
+
+  return 1;
+}
+
+/*
+ * Mark buffer as traced and allocate trace buffer.
+ * return 1 if the buffer is successfully traced, 0 if not
+ * A buffer might not be traced if tracing is off or if the packet did not
+ * match the filter.
+ */
+always_inline __clib_warn_unused_result int
+vlib_trace_buffer (vlib_main_t * vm,
+		   vlib_node_runtime_t * r,
+		   u32 next_index, vlib_buffer_t * b, int follow_chain)
+{
+  if (PREDICT_FALSE (!vlib_trace_buffer_mark (vm, b, follow_chain)))
+    return 0;
+
+  vlib_trace_next_frame (vm, r, next_index);
 
   return 1;
 }
@@ -227,6 +247,53 @@ vlib_set_trace_count (vlib_main_t * vm, vlib_node_runtime_t * rt, u32 count)
 
   ASSERT (count <= tn->limit);
   tn->count = tn->limit - count;
+}
+
+/*
+ * Start per-node tracing at a node which is not an input node.
+ *
+ * Nodes which generate their own packets (wireguard, ipsec, ...) are fed by
+ * an untraced upstream node, hence the dispatcher never sets the runtime
+ * trace flag for them. This helper is the "anchor" for such nodes: it marks
+ * the buffer as traced and enables the runtime trace flag, so that the
+ * node's own trace code runs and the trace flag is propagated to the
+ * downstream nodes.
+ *
+ * The node must have been registered with VLIB_NODE_FLAG_TRACE_SUPPORTED.
+ *
+ * Returns 1 if a trace slot was consumed, 0 otherwise.
+ */
+always_inline u32
+vlib_trace_start_at_node (vlib_main_t * vm, vlib_node_runtime_t * node,
+			  vlib_buffer_t * b)
+{
+  vlib_trace_main_t *tm = &vm->trace_main;
+  u32 n_trace;
+
+  /* Fast path: tracing is disabled. */
+  if (PREDICT_FALSE (tm->trace_enable == 0))
+    return 0;
+
+  n_trace = vlib_get_trace_count (vm, node);
+  if (PREDICT_FALSE (n_trace == 0))
+    return 0;
+
+  /*
+   * Enable the runtime trace flag. The dispatcher only does this for
+   * packets coming from a traced upstream node.
+   */
+  node->flags |= VLIB_NODE_FLAG_TRACE;
+
+  /* Already traced by an upstream node: don't trace it twice. */
+  if (PREDICT_FALSE (b->flags & VLIB_BUFFER_IS_TRACED))
+    return 0;
+
+  if (PREDICT_FALSE (!vlib_trace_buffer_mark (vm, b, 1 /* follow_chain */)))
+    return 0;
+
+  vlib_set_trace_count (vm, node, n_trace - 1);
+
+  return 1;
 }
 
 /* Helper function for nodes which only trace buffer data. */

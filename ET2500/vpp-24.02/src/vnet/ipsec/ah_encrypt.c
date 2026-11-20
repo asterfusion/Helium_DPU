@@ -150,6 +150,17 @@ ah_encrypt_inline (vlib_main_t * vm,
       u8 ip_hdr_size;
       u8 next_hdr_type;
 
+      /*
+       * Anchor the per-node trace here: this node builds the ah
+       * packet itself, so it is never reached by a traced upstream node.
+       *
+       * Only on thread 0: upstream ipsec output feature can run on other
+       * threads and the crypto ops can hand off to workers; the ensuing
+       * vlib_add_handoff_trace leaks pool entries on the originating thread.
+       */
+      if (PREDICT_FALSE (vm->thread_index == 0))
+	vlib_trace_start_at_node (vm, node, b[0]);
+
       if (vnet_buffer (b[0])->ipsec.sad_index != current_sa_index)
 	{
 	  if (current_sa_index != ~0)
@@ -441,6 +452,7 @@ VLIB_REGISTER_NODE (ah4_encrypt_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_ah_encrypt_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
 
   .n_errors = AH_ENCRYPT_N_ERROR,
   .error_counters = ah_encrypt_error_counters,
@@ -465,6 +477,7 @@ VLIB_REGISTER_NODE (ah6_encrypt_node) = {
   .vector_size = sizeof (u32),
   .format_trace = format_ah_encrypt_trace,
   .type = VLIB_NODE_TYPE_INTERNAL,
+  .flags = VLIB_NODE_FLAG_TRACE_SUPPORTED,
 
   .n_errors = AH_ENCRYPT_N_ERROR,
   .error_counters = ah_encrypt_error_counters,
