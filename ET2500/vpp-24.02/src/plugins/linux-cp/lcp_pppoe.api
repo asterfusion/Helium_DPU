@@ -39,6 +39,26 @@ autoreply define lcp_pppoe_update_client_ip4
   bool is_add;
 };
 
+/** \brief Bind or unbind a subscriber policer on the PPP input path. */
+autoreply define lcp_pppoe_policer_input
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u32 policer_index;
+  bool apply;
+};
+
+/** \brief Bind or unbind a subscriber policer on the PPP output path. */
+autoreply define lcp_pppoe_policer_output
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u32 policer_index;
+  bool apply;
+};
+
 typedef lcp_pppoe_stats_result
 {
   i32 retval;

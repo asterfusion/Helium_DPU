@@ -110,6 +110,18 @@ vl_api_ipoe_session_set_state_t_handler (
 }
 
 static void
+vl_api_ipoe_session_set_policer_t_handler (
+  vl_api_ipoe_session_set_policer_t *mp)
+{
+  vl_api_ipoe_session_set_policer_reply_t *rmp;
+  int rv = ipoe_session_set_policer (clib_net_to_host_u64 (mp->index),
+				     ntohl (mp->upstream_index),
+				     ntohl (mp->downstream_index));
+
+  REPLY_MACRO (VL_API_IPOE_SESSION_SET_POLICER_REPLY);
+}
+
+static void
 ipoe_api_decode_qinq_route (u32 route_id, u32 table_id,
 			    const vl_api_ip4_address_t user_ip4,
 			    u32 sw_if_index, ipoe_qinq_route_t *route)

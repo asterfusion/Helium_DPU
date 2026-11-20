@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include <ipoe/ipoe.h>
+#include <vnet/policer/policer.h>
+#include <vnet/policer/police_inlines.h>
 
 static vlib_combined_counter_main_t *
 ipoe_counter_main (ipoe_session_counter_type_t counter_type)
@@ -339,6 +341,8 @@ ipoe_session_add_locked (u64 external_index, u64 generation, u32 sw_if_index,
   session->sw_if_index = sw_if_index;
   session->has_user_mac = has_user_mac;
   session->admin_state = admin_state;
+  session->upstream_policer_index = ~0u;
+  session->downstream_policer_index = ~0u;
   if (qinq && qinq->enabled)
     session->qinq = *qinq;
   session->timer_handle = ~0;
@@ -610,4 +614,56 @@ ipoe_session_expire (u32 session_index)
   vlib_worker_thread_barrier_sync (im->vlib_main);
   ipoe_session_remove_index (session_index, 0);
   vlib_worker_thread_barrier_release (im->vlib_main);
+}
+
+
+int
+ipoe_session_set_policer (u64 external_index, u32 upstream_index,
+			  u32 downstream_index)
+{
+  ipoe_main_t *im = &ipoe_main;
+  vnet_policer_main_t *pm = &vnet_policer_main;
+  uword *p = hash_get (im->session_by_index, (uword) external_index);
+  ipoe_session_t *session;
+
+  if (!p || pool_is_free_index (im->sessions, p[0]))
+    return IPOE_ERROR_NO_SUCH_ENTRY;
+  if ((upstream_index != ~0u &&
+       pool_is_free_index (pm->policers, upstream_index)) ||
+      (downstream_index != ~0u &&
+       pool_is_free_index (pm->policers, downstream_index)))
+    return IPOE_ERROR_INVALID_VALUE;
+
+  session = pool_elt_at_index (im->sessions, p[0]);
+  session->upstream_policer_index = upstream_index;
+  session->downstream_policer_index = downstream_index;
+  return IPOE_OK;
+}
+
+int
+ipoe_session_police (vlib_main_t *vm, vlib_buffer_t *b,
+		     u64 external_index, vlib_dir_t dir, u32 packet_bytes)
+{
+  ipoe_main_t *im = &ipoe_main;
+  uword *p = hash_get (im->session_by_index, (uword) external_index);
+  ipoe_session_t *session;
+  u32 policer_index;
+  u64 now;
+  u8 action;
+
+  if (!p || pool_is_free_index (im->sessions, p[0]))
+    return 1;
+  session = pool_elt_at_index (im->sessions, p[0]);
+  policer_index = dir == VLIB_RX ? session->upstream_policer_index :
+    session->downstream_policer_index;
+  if (policer_index == ~0u)
+    return 0;
+
+  now = clib_cpu_time_now () >> POLICER_TICKS_PER_PERIOD_SHIFT;
+  action = vnet_policer_police (vm, b, policer_index, now,
+				POLICE_CONFORM, false);
+  if (action != QOS_ACTION_DROP)
+    return 0;
+
+  return 1;
 }

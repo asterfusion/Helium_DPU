@@ -29,7 +29,8 @@ typedef enum
   _ (INTERFACE_DISABLED, "IPoE interface disabled output packets")         \
   _ (NO_SESSION, "IPoE output session not found packets")                  \
   _ (SESSION_INACTIVE, "inactive IPoE output session packets")             \
-  _ (ACCESS_MISMATCH, "IPoE output session access mismatch packets")
+  _ (ACCESS_MISMATCH, "IPoE output session access mismatch packets")           \
+  _ (POLICER_DROP, "IPoE output policer drop packets")
 
 typedef enum
 {
@@ -193,10 +194,17 @@ VLIB_NODE_FN (ipoe_output_node) (vlib_main_t *vm,
 					&counter_index, &packet_bytes,
 					&dst_ip, &vlan_depth, &error0);
 	  if (result0 == IPOE_OUTPUT_RESULT_PASS)
-	    ipoe_session_counter_add (counter_index,
-				      IPOE_SESSION_COUNTER_DOWNSTREAM_FORWARD,
-				      packet_bytes);
-	  else if (external_index &&
+    {
+      if (ipoe_session_police (vm, b0, external_index, VLIB_TX,
+                               packet_bytes))
+        {
+          next0 = IPOE_OUTPUT_NEXT_DROP;
+          b0->error = node->errors[IPOE_OUTPUT_ERROR_POLICER_DROP];
+        }
+      else
+        ipoe_session_counter_add (counter_index, IPOE_SESSION_COUNTER_DOWNSTREAM_FORWARD, packet_bytes);
+    }
+  else if (external_index &&
 		   (result0 == IPOE_OUTPUT_RESULT_SESSION_INACTIVE ||
 		    result0 == IPOE_OUTPUT_RESULT_ACCESS_MISMATCH))
 	    ipoe_session_counter_add (counter_index,
