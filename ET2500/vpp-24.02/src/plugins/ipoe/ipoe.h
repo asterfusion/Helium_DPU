@@ -87,6 +87,8 @@ typedef struct
   u32 counter_index;
   u8 has_user_mac;
   u8 admin_state;
+  u32 upstream_policer_index;
+  u32 downstream_policer_index;
   ipoe_qinq_session_t qinq;
 } ipoe_session_t;
 
@@ -193,6 +195,10 @@ int ipoe_session_add_batch (
 int ipoe_session_del (u64 external_index);
 int ipoe_session_set_state (u64 external_index, u64 generation,
 			    u8 admin_state);
+int ipoe_session_set_policer (u64 external_index, u32 upstream_index,
+				      u32 downstream_index);
+int ipoe_session_police (vlib_main_t *vm, vlib_buffer_t *b,
+			 u64 external_index, vlib_dir_t dir, u32 packet_bytes);
 int ipoe_session_flush_interface (u32 sw_if_index);
 void ipoe_session_expire (u32 session_index);
 void ipoe_session_counter_add (u32 counter_index,

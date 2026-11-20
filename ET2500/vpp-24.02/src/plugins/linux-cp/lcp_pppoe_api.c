@@ -104,6 +104,34 @@ vl_api_lcp_pppoe_update_client_ip6_t_handler (
 }
 
 static void
+vl_api_lcp_pppoe_policer_input_t_handler (
+  vl_api_lcp_pppoe_policer_input_t *mp)
+{
+  vl_api_lcp_pppoe_policer_input_reply_t *rmp;
+  int rv;
+
+  VALIDATE_SW_IF_INDEX (mp);
+  rv = lcp_pppoe_policer_input_set (ntohl (mp->sw_if_index),
+				    ntohl (mp->policer_index), mp->apply);
+  BAD_SW_IF_INDEX_LABEL;
+  REPLY_MACRO (VL_API_LCP_PPPOE_POLICER_INPUT_REPLY);
+}
+
+static void
+vl_api_lcp_pppoe_policer_output_t_handler (
+  vl_api_lcp_pppoe_policer_output_t *mp)
+{
+  vl_api_lcp_pppoe_policer_output_reply_t *rmp;
+  int rv;
+
+  VALIDATE_SW_IF_INDEX (mp);
+  rv = lcp_pppoe_policer_output_set (ntohl (mp->sw_if_index),
+				     ntohl (mp->policer_index), mp->apply);
+  BAD_SW_IF_INDEX_LABEL;
+  REPLY_MACRO (VL_API_LCP_PPPOE_POLICER_OUTPUT_REPLY);
+}
+
+static void
 vl_api_lcp_pppoe_update_client_ip4_t_handler (
   vl_api_lcp_pppoe_update_client_ip4_t *mp)
 {

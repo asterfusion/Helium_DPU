@@ -141,6 +141,15 @@ autoreply define ipoe_session_set_state
   bool admin_state;
 };
 
+autoreply define ipoe_session_set_policer
+{
+  u32 client_index;
+  u32 context;
+  u64 index;
+  u32 upstream_index;
+  u32 downstream_index;
+};
+
 autoreply define ipoe_qinq_route_add
 {
   u32 client_index;

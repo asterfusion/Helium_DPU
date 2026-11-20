@@ -30,7 +30,8 @@ typedef enum
   _ (NO_SESSION, "IPoE session not found packets")                         \
   _ (SESSION_INACTIVE, "inactive IPoE session packets")                    \
   _ (ACCESS_MISMATCH, "IPoE session access mismatch packets")              \
-  _ (MAC_MISMATCH, "IPoE session MAC mismatch packets")
+  _ (MAC_MISMATCH, "IPoE session MAC mismatch packets")                         \
+  _ (POLICER_DROP, "IPoE session policer drop packets")
 
 typedef enum
 {
@@ -233,10 +234,17 @@ VLIB_NODE_FN (ipoe_ip4_input_node) (vlib_main_t *vm,
 					     &counter_index, &packet_bytes,
 					     &src_ip, &src_mac, &error0);
 	  if (result0 == IPOE_IP4_RESULT_PASS)
-	    ipoe_session_counter_add (counter_index,
-				      IPOE_SESSION_COUNTER_UPSTREAM_FORWARD,
-				      packet_bytes);
-	  else if (external_index &&
+    {
+      if (ipoe_session_police (vm, b0, external_index, VLIB_RX,
+                               packet_bytes))
+        {
+          next0 = IPOE_IP4_NEXT_DROP;
+          b0->error = node->errors[IPOE_IP4_ERROR_POLICER_DROP];
+        }
+      else
+        ipoe_session_counter_add (counter_index, IPOE_SESSION_COUNTER_UPSTREAM_FORWARD, packet_bytes);
+    }
+  else if (external_index &&
 		   (result0 == IPOE_IP4_RESULT_SESSION_INACTIVE ||
 		    result0 == IPOE_IP4_RESULT_ACCESS_MISMATCH ||
 		    result0 == IPOE_IP4_RESULT_MAC_MISMATCH))
