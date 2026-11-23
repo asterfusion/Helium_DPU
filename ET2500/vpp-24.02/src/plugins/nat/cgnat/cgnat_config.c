@@ -1633,7 +1633,7 @@ static int
 cgnat_interface_remove_inside (u32 sw_if_index)
 {
   cgnat_main_t *cm = &cgnat_main;
-  bool (*get_pppoe_peer) (u32, ip4_address_t *);
+  bool (*get_pppoe_peer) (u32, ip4_address_t *) = 0;
   ip4_address_t inside_ip;
   u32 inside_fib_index;
   int rv;
