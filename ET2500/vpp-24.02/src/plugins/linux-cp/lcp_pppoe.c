@@ -2491,6 +2491,7 @@ VLIB_REGISTER_NODE(lcp_pppoe_punt_node) = {
 char * pppoe_error_strings[] = {
 #define pppoe_error(n,s) s,
     pppoe_error (DECAPSULATED, "good packets decapsulated")
+    pppoe_error (POLICER_DROP, "subscriber policer drop")
     pppoe_error (CONTROL_PLANE, "control plane packet")
     pppoe_error (NO_SUCH_SESSION, "no such sessions")
     pppoe_error (BAD_VER_TYPE, "bad version and type in pppoe header")
@@ -2614,8 +2615,11 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
   u32 next_index = node->cached_next_index;
   pppoe_main_t *pem = &pppoe_main;
   vnet_main_t *vnm = pem->vnet_main;
+  vnet_policer_main_t *pm = &vnet_policer_main;
   u32 thread_index = vm->thread_index;
   u32 pkts_decapsulated = 0;
+  u64 policer_time =
+    clib_cpu_time_now () >> POLICER_TICKS_PER_PERIOD_SHIFT;
   pppoe_entry_key_t cached_key;
   pppoe_entry_result_t cached_result;
   u32 stats_sw_if_index, stats_n_packets, stats_n_bytes;
@@ -2847,6 +2851,20 @@ VLIB_NODE_FN (pppoe_input_node) (vlib_main_t * vm,
               //current same with interface_output, include ethernet+pppoe
               len0 = vlib_buffer_length_in_chain (vm, b0) + b0->current_data
                   - vnet_buffer (b0)->l2_hdr_offset;
+
+              u32 policer_index = ~0u;
+              if (t0->sw_if_index <
+                  vec_len (pm->policer_index_by_sw_if_index[VLIB_RX]))
+                policer_index =
+                  pm->policer_index_by_sw_if_index[VLIB_RX][t0->sw_if_index];
+              if (policer_index != ~0u &&
+                  vnet_policer_police (vm, b0, policer_index, policer_time,
+                                       POLICE_CONFORM, false) == QOS_ACTION_DROP)
+                {
+                  error0 = PPPOE_ERROR_POLICER_DROP;
+                  next0 = PPPOE_INPUT_NEXT_DROP;
+                  goto trace00;
+                }
 
               stats_n_packets += 1;
               stats_n_bytes += len0;

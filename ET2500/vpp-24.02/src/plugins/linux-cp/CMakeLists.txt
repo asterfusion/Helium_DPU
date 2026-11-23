@@ -60,6 +60,7 @@ add_vpp_plugin(linux_cp
   lcp_producer.c
   lcp_node.c
   lcp_pppoe.c
+  lcp_pppoe_qos.c
   lcp_pppoe_api.c
   lcp_mvrp.c
   lcp_rip.c

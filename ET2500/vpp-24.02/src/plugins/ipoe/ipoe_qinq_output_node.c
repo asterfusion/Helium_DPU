@@ -18,6 +18,7 @@ typedef enum
   IPOE_QINQ_OUTPUT_ERROR_SESSION_MISMATCH,
   IPOE_QINQ_OUTPUT_ERROR_ACCESS_MISMATCH,
   IPOE_QINQ_OUTPUT_ERROR_NO_HEADROOM,
+  IPOE_QINQ_OUTPUT_ERROR_POLICER_DROP,
   IPOE_QINQ_OUTPUT_N_ERROR,
 } ipoe_qinq_output_error_t;
 
@@ -29,6 +30,7 @@ static char *ipoe_qinq_output_error_strings[] = {
   "IPoE QinQ DPO session mismatch",
   "IPoE QinQ session access mismatch",
   "IPoE QinQ packet has insufficient headroom",
+  "IPoE QinQ policer drop",
 };
 
 typedef struct
@@ -126,6 +128,13 @@ VLIB_NODE_FN (ipoe_qinq_output_node) (vlib_main_t *vm,
 		  vnet_buffer (b)->sw_if_index[VLIB_TX] =
 		    session->qinq.parent_sw_if_index;
 		  next = IPOE_QINQ_OUTPUT_NEXT_INTERFACE_OUTPUT;
+			  if (ipoe_session_police (vm, b,
+				session->external_index, VLIB_TX, packet_bytes))
+			    {
+			      next = IPOE_QINQ_OUTPUT_NEXT_DROP;
+			      error = IPOE_QINQ_OUTPUT_ERROR_POLICER_DROP;
+			      goto trace_and_enqueue;
+			    }
 		  ipoe_session_counter_add (
 		    session->counter_index,
 		    IPOE_SESSION_COUNTER_DOWNSTREAM_FORWARD, packet_bytes);
@@ -136,7 +145,7 @@ VLIB_NODE_FN (ipoe_qinq_output_node) (vlib_main_t *vm,
 	  if (next == IPOE_QINQ_OUTPUT_NEXT_DROP)
 	    {
 	      b->error = node->errors[error];
-	      if (session)
+	      if (session && error != IPOE_QINQ_OUTPUT_ERROR_POLICER_DROP)
 		ipoe_session_counter_add (
 		  session->counter_index,
 		  IPOE_SESSION_COUNTER_DOWNSTREAM_GATE_DROP, packet_bytes);
