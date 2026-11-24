@@ -192,6 +192,7 @@ typedef ikev2_sa_v2
   u32 sa_index;
   string profile_name[64];
   vl_api_ikev2_state_t state;
+  bool is_initiator;
 
   u64 ispi;
   u64 rspi;
