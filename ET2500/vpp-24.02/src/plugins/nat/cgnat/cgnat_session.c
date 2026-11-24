@@ -1540,6 +1540,39 @@ cgnat_session_delete_matching (cgnat_session_filter_t *filter)
   return deleted;
 }
 
+void
+cgnat_session_delete_subscriber (ip4_address_t inside_ip, u32 inside_fib_index)
+{
+  cgnat_main_t *cm = &cgnat_main;
+  cgnat_session_filter_t filter = {
+    .flags = CGNAT_SESSION_FILTER_INSIDE_IP,
+    .inside_ip = inside_ip,
+  };
+
+  if (!clib_atomic_load_relax_n (&cm->enabled) ||
+      !cm->session_user_bucket_heads ||
+      inside_fib_index == CGNAT_INVALID_INDEX)
+    return;
+
+  for (u32 i = 0; i < vec_len (cm->instances); i++)
+    {
+      u32 bucket = cgnat_session_user_bucket (cm, i, inside_ip);
+      u32 index = cm->session_user_bucket_heads[bucket];
+
+      while (index != CGNAT_INVALID_INDEX)
+	{
+	  cgnat_session_t *session = pool_elt_at_index (cm->sessions, index);
+
+	  /* Deletion unlinks the current node and clears its next index. */
+	  index = session->user_index_next;
+	  if (session->instance_index == i &&
+	      session->inside_fib_index == inside_fib_index &&
+	      cgnat_session_filter_match (session, &filter))
+	    cgnat_session_delete (cm, session, "force_delete");
+	}
+    }
+}
+
 static void
 cgnat_session_process_expired_timers (u32 *expired_timers)
 {

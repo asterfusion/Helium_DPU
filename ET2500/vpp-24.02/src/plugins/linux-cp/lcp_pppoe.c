@@ -203,6 +203,28 @@ lcp_pppoe_update_client_ip6 (u32 sw_if_index,
   return 0;
 }
 
+__clib_export bool
+lcp_pppoe_session_get_peer_ip4 (u32 sw_if_index, ip4_address_t *peer_ip)
+{
+  pppoe_main_t *pem = &pppoe_main;
+  u32 session_index;
+  pppoe_session_t *session;
+
+  if (sw_if_index >= vec_len (pem->session_index_by_sw_if_index))
+    return false;
+
+  session_index = pem->session_index_by_sw_if_index[sw_if_index];
+  if (session_index == ~0 || pool_is_free_index (pem->sessions, session_index))
+    return false;
+
+  session = pool_elt_at_index (pem->sessions, session_index);
+  if (!session->client_route_valid || session->client_ip.ip4.as_u32 == 0)
+    return false;
+
+  *peer_ip = session->client_ip.ip4;
+  return true;
+}
+
 int
 lcp_pppoe_update_client_ip4 (u32 sw_if_index,
 			     const ip46_address_t *client_ip,
