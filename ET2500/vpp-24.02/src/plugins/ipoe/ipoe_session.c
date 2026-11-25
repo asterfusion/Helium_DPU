@@ -56,14 +56,14 @@ ipoe_session_counter_release (ipoe_session_t *session)
 void
 ipoe_session_counter_add (u32 counter_index,
 			  ipoe_session_counter_type_t counter_type,
-			  u32 ip4_bytes)
+			  u32 packet_bytes)
 {
   vlib_combined_counter_main_t *counter_main =
     ipoe_counter_main (counter_type);
 
   ASSERT (counter_main);
   vlib_increment_combined_counter (counter_main, vlib_get_thread_index (),
-				  counter_index, 1, ip4_bytes);
+				  counter_index, 1, packet_bytes);
 }
 
 ipoe_session_t *
@@ -192,10 +192,6 @@ ipoe_session_remove_index (u32 session_index, u8 stop_timer)
     return;
 
   session = pool_elt_at_index (im->sessions, session_index);
-  clib_warning ("ipoe session remove index=%llu generation=%llu "
-		"interface=%u ip=%U",
-		session->external_index, session->generation,
-		session->sw_if_index, format_ip4_address, &session->user_ip4);
   if (stop_timer)
     ipoe_timer_stop (session);
   hash_unset (im->session_by_index, (uword) session->external_index);
@@ -317,12 +313,6 @@ ipoe_session_add_locked (u64 external_index, u64 generation, u32 sw_if_index,
 	  session->admin_state = admin_state;
 	  session->timer_generation++;
 	  ipoe_timer_update (session_index, lease_timeout);
-	  clib_warning ("ipoe session lease update index=%llu generation=%llu "
-			"sw_if_index=%u ip=%U lease_timeout=%u "
-			"lease_expiry=%llu",
-			external_index, generation, sw_if_index,
-			format_ip4_address, user_ip4, lease_timeout,
-			lease_expiry);
 	  return IPOE_OK;
 	}
       return IPOE_ERROR_ALREADY_EXISTS;
@@ -355,12 +345,6 @@ ipoe_session_add_locked (u64 external_index, u64 generation, u32 sw_if_index,
   hash_set (im->session_by_user, (uword) user_key, session_index);
   intf->session_count++;
   ipoe_timer_start (session_index, lease_timeout);
-  clib_warning ("ipoe session add index=%llu generation=%llu "
-		"sw_if_index=%u ip=%U lease_timeout=%u "
-		"lease_expiry=%llu timer_handle=%u",
-		external_index, generation, sw_if_index,
-		format_ip4_address, user_ip4, lease_timeout, lease_expiry,
-		session->timer_handle);
   return IPOE_OK;
 }
 
@@ -391,6 +375,11 @@ ipoe_session_update_locked (u64 external_index, u64 generation,
   session = pool_elt_at_index (im->sessions, session_index);
   if (generation < session->generation)
     return IPOE_ERROR_GENERATION_STALE;
+  if ((session->ip6_binding_count && session->sw_if_index != sw_if_index) ||
+      (session->ip6_qinq_route_count &&
+       (session->sw_if_index != sw_if_index || !qinq || !qinq->enabled ||
+	memcmp (&session->qinq, qinq, sizeof (*qinq)))))
+    return IPOE_ERROR_OBJECT_IN_USE;
 
   rv = ipoe_session_validate (external_index, sw_if_index, user_ip4,
 			      user_mac, &has_user_mac, lease_timeout,
@@ -432,10 +421,6 @@ ipoe_session_update_locked (u64 external_index, u64 generation,
   hash_set (im->session_by_user, (uword) new_user_key, session_index);
   session->timer_generation++;
   ipoe_timer_update (session_index, lease_timeout);
-  clib_warning ("ipoe session update index=%llu generation=%llu "
-		"interface=%u ip=%U",
-		external_index, generation, sw_if_index,
-		format_ip4_address, user_ip4);
   return IPOE_OK;
 }
 
@@ -526,8 +511,9 @@ ipoe_session_del (u64 external_index)
   uword *p = hash_get (im->session_by_index, (uword) external_index);
   if (!p)
     return IPOE_ERROR_NO_SUCH_ENTRY;
-  clib_warning ("ipoe session delete request index=%llu pool_index=%u",
-		external_index, (u32) p[0]);
+  if (pool_elt_at_index (im->sessions, p[0])->ip6_binding_count ||
+      pool_elt_at_index (im->sessions, p[0])->ip6_qinq_route_count)
+    return IPOE_ERROR_OBJECT_IN_USE;
   vlib_worker_thread_barrier_sync (im->vlib_main);
   ipoe_session_remove_index (p[0], 1);
   vlib_worker_thread_barrier_release (im->vlib_main);
@@ -554,8 +540,6 @@ ipoe_session_set_state (u64 external_index, u64 generation, u8 admin_state)
   vlib_worker_thread_barrier_sync (im->vlib_main);
   session->admin_state = admin_state;
   vlib_worker_thread_barrier_release (im->vlib_main);
-  clib_warning ("ipoe session state index=%llu state=%u", external_index,
-		admin_state);
   return IPOE_OK;
 }
 
@@ -605,6 +589,11 @@ ipoe_session_expire (u32 session_index)
       return;
     }
   session->timer_handle = ~0;
+  if (session->ip6_binding_count || session->ip6_qinq_route_count)
+    {
+      session->admin_state = 0;
+      return;
+    }
 #if 0
 	clib_warning ("ipoe session expire index=%llu sw_if_index=%u ip=%U "
 		"lease_expiry=%llu", session->external_index,
@@ -642,18 +631,12 @@ ipoe_session_set_policer (u64 external_index, u32 upstream_index,
 
 int
 ipoe_session_police (vlib_main_t *vm, vlib_buffer_t *b,
-		     u64 external_index, vlib_dir_t dir, u32 packet_bytes)
+		     ipoe_session_t *session, vlib_dir_t dir)
 {
-  ipoe_main_t *im = &ipoe_main;
-  uword *p = hash_get (im->session_by_index, (uword) external_index);
-  ipoe_session_t *session;
   u32 policer_index;
   u64 now;
   u8 action;
 
-  if (!p || pool_is_free_index (im->sessions, p[0]))
-    return 1;
-  session = pool_elt_at_index (im->sessions, p[0]);
   policer_index = dir == VLIB_RX ? session->upstream_policer_index :
     session->downstream_policer_index;
   if (policer_index == ~0u)

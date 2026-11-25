@@ -139,6 +139,27 @@ ipoe_ip4_feature_enable_disable (u32 sw_if_index, u8 enable)
 }
 
 static int
+ipoe_ip6_input_feature_enable_disable (u32 sw_if_index, u8 enable)
+{
+  int rv;
+
+  rv = vnet_l2_feature_enable_disable ("l2-input-ip6",
+				       "ipoe-l2-ip6-input", sw_if_index,
+				       enable, 0, 0);
+  if (rv)
+    return IPOE_ERROR_FEATURE_FAILED;
+  rv = vnet_feature_enable_disable ("ip6-unicast", "ipoe-ip6-input",
+				    sw_if_index, enable, 0, 0);
+  if (rv)
+    {
+      vnet_l2_feature_enable_disable ("l2-input-ip6",
+	"ipoe-l2-ip6-input", sw_if_index, !enable, 0, 0);
+      return IPOE_ERROR_FEATURE_FAILED;
+    }
+  return IPOE_OK;
+}
+
+static int
 ipoe_output_feature_enable_disable (u32 sw_if_index, u8 enable)
 {
   int rv;
@@ -170,7 +191,27 @@ ipoe_output_feature_enable_disable (u32 sw_if_index, u8 enable)
 #endif
       return IPOE_ERROR_FEATURE_FAILED;
     }
+  rv = vnet_l2_feature_enable_disable ("l2-output-ip6",
+				       "ipoe-ip6-output", sw_if_index,
+				       enable, 0, 0);
+  if (rv)
+    goto rollback_ip4;
+  rv = vnet_feature_enable_disable ("ip6-output", "ipoe-ip6-output",
+				    sw_if_index, enable, 0, 0);
+  if (rv)
+    {
+      vnet_l2_feature_enable_disable ("l2-output-ip6",
+	"ipoe-ip6-output", sw_if_index, !enable, 0, 0);
+      goto rollback_ip4;
+    }
   return IPOE_OK;
+
+rollback_ip4:
+  vnet_feature_enable_disable ("ip4-output", "ipoe-output", sw_if_index,
+			       !enable, 0, 0);
+  vnet_l2_feature_enable_disable ("l2-output-ip4", "ipoe-output",
+				  sw_if_index, !enable, 0, 0);
+  return IPOE_ERROR_FEATURE_FAILED;
 }
 
 static int
@@ -185,6 +226,14 @@ ipoe_input_feature_enable_disable (u32 sw_if_index, u8 enable)
   rv = ipoe_ip4_feature_enable_disable (sw_if_index, enable);
   if (rv != IPOE_OK)
     {
+      ipoe_l2_feature_enable_disable (sw_if_index, !enable);
+      return rv;
+    }
+
+  rv = ipoe_ip6_input_feature_enable_disable (sw_if_index, enable);
+  if (rv != IPOE_OK)
+    {
+      ipoe_ip4_feature_enable_disable (sw_if_index, !enable);
       ipoe_l2_feature_enable_disable (sw_if_index, !enable);
       return rv;
     }
@@ -226,6 +275,8 @@ ipoe_interface_enable_disable (u32 sw_if_index, u8 enable,
 
       if (!intf->enabled)
 	return IPOE_OK;
+      ipoe_ip6_binding_flush_interface (sw_if_index);
+      ipoe_qinq_ip6_route_flush_interface (sw_if_index);
       rv = ipoe_session_flush_interface (sw_if_index);
       if (rv != IPOE_OK)
 	return rv;
@@ -289,6 +340,8 @@ ipoe_init (vlib_main_t *vm)
   im->session_by_index = hash_create (0, sizeof (uword));
   im->session_by_user = hash_create (0, sizeof (uword));
   im->qinq_route_by_id = hash_create (0, sizeof (uword));
+  clib_bihash_init_24_8 (&im->ip6_binding_hash, "ipoe-ip6-binding",
+			  1024, 1 << 20);
   im->upstream_forward.stat_segment_name =
     "/ipoe/session/upstream-forward";
   im->downstream_forward.stat_segment_name =

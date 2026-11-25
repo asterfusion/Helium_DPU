@@ -6,8 +6,10 @@
 #include <vnet/vnet.h>
 #include <vnet/ip/format.h>
 #include <vnet/ip/ip4_packet.h>
+#include <vnet/ip/ip6_packet.h>
 #include <vnet/ethernet/ethernet.h>
 #include <vnet/ethernet/qinq.h>
+#include <vppinfra/bihash_24_8.h>
 #include <vppinfra/hash.h>
 #include <vppinfra/tw_timer_1t_3w_1024sl_ov.h>
 
@@ -85,6 +87,8 @@ typedef struct
   u32 timer_handle;
   u32 timer_generation;
   u32 counter_index;
+  u32 ip6_binding_count;
+  u32 ip6_qinq_route_count;
   u8 has_user_mac;
   u8 admin_state;
   u32 upstream_policer_index;
@@ -152,6 +156,29 @@ typedef struct
 
 typedef struct
 {
+  ip6_address_t prefix;
+  u32 sw_if_index;
+  u8 prefix_length;
+  u8 pad[3];
+} ipoe_ip6_binding_key_t;
+
+typedef struct
+{
+  ipoe_ip6_binding_key_t key;
+  u64 external_index;
+} ipoe_ip6_binding_t;
+
+typedef struct
+{
+  ip6_address_t prefix;
+  u64 external_index;
+  u32 table_id;
+  u32 sw_if_index;
+  u8 prefix_length;
+} ipoe_qinq_ip6_route_t;
+
+typedef struct
+{
   vlib_main_t *vlib_main;
   vnet_main_t *vnet_main;
   ipoe_interface_t *interfaces;
@@ -160,6 +187,10 @@ typedef struct
   uword *session_by_user;
   ipoe_qinq_route_t *qinq_routes;
   uword *qinq_route_by_id;
+  clib_bihash_24_8_t ip6_binding_hash;
+  ipoe_ip6_binding_t *ip6_bindings;
+  ipoe_qinq_ip6_route_t *qinq_ip6_routes;
+  u32 ip6_prefix_length_refcount[129];
   u32 *free_counter_indices;
   u32 next_counter_index;
   vlib_combined_counter_main_t upstream_forward;
@@ -198,12 +229,12 @@ int ipoe_session_set_state (u64 external_index, u64 generation,
 int ipoe_session_set_policer (u64 external_index, u32 upstream_index,
 				      u32 downstream_index);
 int ipoe_session_police (vlib_main_t *vm, vlib_buffer_t *b,
-			 u64 external_index, vlib_dir_t dir, u32 packet_bytes);
+			 ipoe_session_t *session, vlib_dir_t dir);
 int ipoe_session_flush_interface (u32 sw_if_index);
 void ipoe_session_expire (u32 session_index);
 void ipoe_session_counter_add (u32 counter_index,
 			       ipoe_session_counter_type_t counter_type,
-			       u32 ip4_bytes);
+			       u32 packet_bytes);
 ipoe_session_t *ipoe_session_lookup_downstream (
   u32 sw_if_index, const ip4_address_t *dst_ip, u64 expected_external_index,
   u8 check_session, ipoe_downstream_lookup_result_t *result);
@@ -225,6 +256,18 @@ int ipoe_qinq_route_add_del (u32 table_id, const ip4_address_t *user_ip4,
 int ipoe_qinq_route_add (const ipoe_qinq_route_t *route);
 int ipoe_qinq_route_update (const ipoe_qinq_route_t *route);
 int ipoe_qinq_route_delete (u32 route_id);
+int ipoe_ip6_binding_add_del (u32 sw_if_index, const ip6_address_t *prefix,
+			      u8 prefix_length, u64 external_index,
+			      u8 is_add);
+ipoe_session_t *ipoe_ip6_binding_lookup (u32 sw_if_index,
+					 const ip6_address_t *address,
+					 u8 *prefix_length);
+void ipoe_ip6_binding_flush_interface (u32 sw_if_index);
+int ipoe_qinq_ip6_route_add_del (u32 table_id,
+				 const ip6_address_t *prefix,
+				 u8 prefix_length, u32 sw_if_index,
+				 u64 external_index, u8 is_add);
+void ipoe_qinq_ip6_route_flush_interface (u32 sw_if_index);
 
 static_always_inline u64
 ipoe_user_key (u32 sw_if_index, const ip4_address_t *user_ip4)

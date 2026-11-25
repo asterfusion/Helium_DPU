@@ -313,6 +313,7 @@ ipoe_show_one_session (vlib_main_t *vm, ipoe_session_t *session)
   vlib_cli_output (vm, "  timer handle:  %u", session->timer_handle);
   vlib_cli_output (vm, "  timer token:   %u", session->timer_generation);
   vlib_cli_output (vm, "  counter index: %u", session->counter_index);
+  vlib_cli_output (vm, "  IPv6 bindings: %u", session->ip6_binding_count);
 }
 
 static void
@@ -495,4 +496,120 @@ VLIB_CLI_COMMAND (show_ipoe_qinq_route_command, static) = {
   .path = "show qinq ipoe route",
   .short_help = "show qinq ipoe route",
   .function = show_ipoe_qinq_route_command_fn,
+};
+
+static clib_error_t *
+ipoe_ip6_binding_command (vlib_main_t *vm, unformat_input_t *input,
+			  vlib_cli_command_t *cmd)
+{
+  ipoe_main_t *im = &ipoe_main;
+  ip6_address_t prefix = {};
+  u64 external_index = 0;
+  u32 sw_if_index = ~0, length = 0;
+  u8 is_add = 0, is_del = 0;
+  int rv;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "add")) is_add = 1;
+      else if (unformat (input, "del")) is_del = 1;
+      else if (unformat (input, "interface %U", unformat_vnet_sw_interface,
+			 im->vnet_main, &sw_if_index)) ;
+      else if (unformat (input, "prefix %U/%u", unformat_ip6_address,
+			 &prefix, &length)) ;
+      else if (unformat (input, "index %llu", &external_index)) ;
+      else return clib_error_return (0, "unknown input `%U'",
+				     format_unformat_error, input);
+    }
+  if ((is_add + is_del) != 1 || sw_if_index == ~0 || !external_index ||
+      !length || length > 128)
+    return clib_error_return (0, "operation, interface, prefix and index are required");
+  rv = ipoe_ip6_binding_add_del (sw_if_index, &prefix, length,
+				 external_index, is_add);
+  return rv ? clib_error_return (0, "IPoE IPv6 binding failed: %s",
+				 ipoe_error_string (rv)) : 0;
+}
+
+VLIB_CLI_COMMAND (ipoe_ip6_binding_cli, static) = {
+  .path = "set ipoe ip6 binding",
+  .short_help = "set ipoe ip6 binding add|del interface <interface> "
+    "prefix <ipv6-prefix> index <external-index>",
+  .function = ipoe_ip6_binding_command,
+};
+
+static clib_error_t *
+show_ipoe_ip6_binding_command (vlib_main_t *vm, unformat_input_t *input,
+			       vlib_cli_command_t *cmd)
+{
+  ipoe_ip6_binding_t *binding;
+  pool_foreach (binding, ipoe_main.ip6_bindings)
+    vlib_cli_output (vm, "interface %U prefix %U/%u index %llu",
+	format_vnet_sw_if_index_name, ipoe_main.vnet_main,
+	binding->key.sw_if_index, format_ip6_address, &binding->key.prefix,
+	binding->key.prefix_length, binding->external_index);
+  return 0;
+}
+
+VLIB_CLI_COMMAND (show_ipoe_ip6_binding_cli, static) = {
+  .path = "show ipoe ip6 binding",
+  .short_help = "show ipoe ip6 binding",
+  .function = show_ipoe_ip6_binding_command,
+};
+
+static clib_error_t *
+ipoe_qinq_ip6_route_command (vlib_main_t *vm, unformat_input_t *input,
+			     vlib_cli_command_t *cmd)
+{
+  ip6_address_t prefix = {};
+  u64 external_index = 0;
+  u32 table_id = 0, sw_if_index = ~0, length = 0;
+  u8 is_add = 0, is_del = 0;
+  int rv;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT)
+    {
+      if (unformat (input, "add")) is_add = 1;
+      else if (unformat (input, "delete")) is_del = 1;
+      else if (unformat (input, "table %u", &table_id)) ;
+      else if (unformat (input, "prefix %U/%u", unformat_ip6_address,
+			 &prefix, &length)) ;
+      else if (unformat (input, "interface %U", unformat_vnet_sw_interface,
+			 ipoe_main.vnet_main, &sw_if_index)) ;
+      else if (unformat (input, "index %llu", &external_index)) ;
+      else return clib_error_return (0, "unknown input `%U'",
+				     format_unformat_error, input);
+    }
+  if ((is_add + is_del) != 1 || !length || length > 128 ||
+	!external_index || (is_add && sw_if_index == ~0))
+    return clib_error_return (0, "operation, prefix and index are required");
+  rv = ipoe_qinq_ip6_route_add_del (table_id, &prefix, length, sw_if_index,
+				    external_index, is_add);
+  return rv ? clib_error_return (0, "IPoE QinQ IPv6 route failed: %s",
+				 ipoe_error_string (rv)) : 0;
+}
+
+VLIB_CLI_COMMAND (ipoe_qinq_ip6_route_cli, static) = {
+  .path = "qinq ipoe ip6 route",
+  .short_help = "qinq ipoe ip6 route add|delete table <id> "
+    "prefix <ipv6-prefix> [interface <qinq-subport>] index <external-index>",
+  .function = ipoe_qinq_ip6_route_command,
+};
+
+static clib_error_t *
+show_ipoe_qinq_ip6_route_command (vlib_main_t *vm, unformat_input_t *input,
+				  vlib_cli_command_t *cmd)
+{
+  ipoe_qinq_ip6_route_t *route;
+  pool_foreach (route, ipoe_main.qinq_ip6_routes)
+    vlib_cli_output (vm, "table %u prefix %U/%u interface %U index %llu",
+	route->table_id, format_ip6_address, &route->prefix,
+	route->prefix_length, format_vnet_sw_if_index_name,
+	ipoe_main.vnet_main, route->sw_if_index, route->external_index);
+  return 0;
+}
+
+VLIB_CLI_COMMAND (show_ipoe_qinq_ip6_route_cli, static) = {
+  .path = "show qinq ipoe route ip6",
+  .short_help = "show qinq ipoe route ip6",
+  .function = show_ipoe_qinq_ip6_route_command,
 };
