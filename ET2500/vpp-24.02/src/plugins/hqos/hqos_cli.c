@@ -623,6 +623,8 @@ hqos_port_add_command_fn (vlib_main_t *vm, unformat_input_t *input, vlib_cli_com
     u32 n_subports_per_port = 8;
     u32 n_max_subport_profiles = 16;
     u32 n_pipes_per_subport = 1024;
+    u32 n_default_subport_pipes_enabled = 0;
+    u32 n_default_subport_max_pipe_profiles = 0;
     u32 n_queue_size = HQOS_DEFAULT_SUBPORT_TC_QSIZE;
     u32 mtu = 9100;
     u32 frame_overhead = 24;
@@ -636,6 +638,8 @@ hqos_port_add_command_fn (vlib_main_t *vm, unformat_input_t *input, vlib_cli_com
         else if (unformat (line_input, "subport %u", &n_subports_per_port));
         else if (unformat (line_input, "max-subport-profile %u", &n_max_subport_profiles));
         else if (unformat (line_input, "pipe-pre-subport %u", &n_pipes_per_subport));
+        else if (unformat (line_input, "default-subport-pipes %u", &n_default_subport_pipes_enabled));
+        else if (unformat (line_input, "default-subport-max-pipe-profiles %u", &n_default_subport_max_pipe_profiles));
         else if (unformat (line_input, "queue-size %u", &n_queue_size));
         else if (unformat (line_input, "mtu %u", &mtu));
         else if (unformat (line_input, "overhead %u", &frame_overhead));
@@ -656,6 +660,8 @@ hqos_port_add_command_fn (vlib_main_t *vm, unformat_input_t *input, vlib_cli_com
                        n_subports_per_port,
                        n_max_subport_profiles,
                        n_pipes_per_subport,
+                       n_default_subport_pipes_enabled,
+                       n_default_subport_max_pipe_profiles,
                        n_queue_size,
                        mtu,
                        frame_overhead,
@@ -676,7 +682,9 @@ done:
 VLIB_CLI_COMMAND (hqos_port_add_command, static) = {
     .path = "hqos port add",
     .short_help = "hqos port add rate <bytes> "
-                  "[subport <num>] [max-subport-profile <num>] [ pipe-pre-subport <num> ] [mtu <value>] [overhead <value>] [queue-size <size>]",
+                  "[subport <num>] [max-subport-profile <num>] [pipe-pre-subport <num>] "
+                  "[default-subport-pipes <num>] [default-subport-max-pipe-profiles <num>] "
+                  "[mtu <value>] [overhead <value>] [queue-size <size>]",
     .function = hqos_port_add_command_fn,
 };
 

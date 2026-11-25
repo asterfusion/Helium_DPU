@@ -281,11 +281,13 @@ int hqos_interface_mapping_user_group_to_hqos_subport(u32 sw_if_index, u32 user_
 int hqos_interface_mapping_user_to_hqos_pipe(u32 sw_if_index, u32 user_id, u32 hqos_pipe_id);
 
 int hqos_port_add(u64 port_rate,
-                  u32 n_subports_per_port, 
-                  u32 n_max_subport_profiles, 
+                  u32 n_subports_per_port,
+                  u32 n_max_subport_profiles,
                   u32 n_pipes_per_subport,
+                  u32 n_default_subport_pipes_enabled,
+                  u32 n_default_subport_max_pipe_profiles,
                   u32 n_queue_size,
-                  u32 mtu, u32 frame_overhead, 
+                  u32 mtu, u32 frame_overhead,
                   u32 *hqos_port_id);
 int hqos_port_del(u32 hqos_port_id);
 int hqos_user_update_queue_mode(u32 user_id, u32 tc_queue_id, bool is_dwrr, u8 weight);
