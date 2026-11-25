@@ -217,9 +217,11 @@ vl_api_hqos_port_add_t_handler (vl_api_hqos_port_add_t * mp)
     u32 hqos_port_id;
 
     rv = hqos_port_add(clib_net_to_host_u64(mp->port_rate),
-                       ntohl(mp->n_subports_per_port), 
-                       ntohl(mp->n_max_subport_profiles), 
-                       ntohl(mp->n_pipes_per_subport), 
+                       ntohl(mp->n_subports_per_port),
+                       ntohl(mp->n_max_subport_profiles),
+                       ntohl(mp->n_pipes_per_subport),
+                       ntohl(mp->n_default_subport_pipes_enabled),
+                       ntohl(mp->n_default_subport_max_pipe_profiles),
                        ntohl(mp->n_queue_size),
                        ntohl(mp->mtu), ntohl(mp->frame_overhead),
                        &hqos_port_id);

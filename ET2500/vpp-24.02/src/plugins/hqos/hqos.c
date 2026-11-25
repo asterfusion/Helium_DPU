@@ -531,12 +531,14 @@ int hqos_interface_enable_disable(u32 sw_if_index, bool is_enable)
     return 0;
 }
 
-int hqos_port_add(u64 port_rate, 
-                  u32 n_subports_per_port, 
-                  u32 n_max_subport_profiles, 
+int hqos_port_add(u64 port_rate,
+                  u32 n_subports_per_port,
+                  u32 n_max_subport_profiles,
                   u32 n_pipes_per_subport,
+                  u32 n_default_subport_pipes_enabled,
+                  u32 n_default_subport_max_pipe_profiles,
                   u32 n_queue_size,
-                  u32 mtu, u32 frame_overhead, 
+                  u32 mtu, u32 frame_overhead,
                   u32 *hqos_port_id)
 {
     int rv;
@@ -562,14 +564,19 @@ int hqos_port_add(u64 port_rate,
         n_pipes_per_subport = hm->hqos_node_max_pipe_per_subport;
     }
 
+    if (n_default_subport_pipes_enabled == 0)
+        n_default_subport_pipes_enabled = n_pipes_per_subport;
+    if (n_default_subport_max_pipe_profiles == 0)
+        n_default_subport_max_pipe_profiles = n_pipes_per_subport;
+
     tmp_port_id = clib_bitmap_first_clear(hm->hqos_port_bitmap);
 
     //default subport profile params
     hqos_sched_subport_profile_params default_subport_profile_params = {
         .tb_rate = port_rate,
         .tb_size = HQOS_DEFAULT_BUCKET_SIZE,
-        .tc_rate = { port_rate, port_rate, port_rate, 
-                     port_rate, port_rate, port_rate, 
+        .tc_rate = { port_rate, port_rate, port_rate,
+                     port_rate, port_rate, port_rate,
                      port_rate, port_rate, port_rate },
         .tc_period = HQOS_DEFAULT_TC_PERIOD,
     };
@@ -599,8 +606,8 @@ int hqos_port_add(u64 port_rate,
     hqos_sched_pipe_params default_pipe_params = {
         .tb_rate = port_rate,
         .tb_size = HQOS_DEFAULT_BUCKET_SIZE,
-        .tc_rate = { port_rate, port_rate, port_rate, 
-                     port_rate, port_rate, port_rate, 
+        .tc_rate = { port_rate, port_rate, port_rate,
+                     port_rate, port_rate, port_rate,
                      port_rate, port_rate, port_rate },
         .tc_period = HQOS_DEFAULT_TC_PERIOD,
         .tc_ov_weight = HQOS_DEFAULT_BE_TC_OV_WEIGHT,
@@ -608,11 +615,11 @@ int hqos_port_add(u64 port_rate,
     };
 
     hqos_sched_subport_params default_subport_params = {
-        .n_pipes_per_subport_enabled = n_pipes_per_subport,
+        .n_pipes_per_subport_enabled = n_default_subport_pipes_enabled,
         .qsize = { n_queue_size, n_queue_size, n_queue_size,
                    n_queue_size, n_queue_size, n_queue_size,
                    n_queue_size, n_queue_size, n_queue_size},
-        .n_max_pipe_profiles = n_pipes_per_subport,
+        .n_max_pipe_profiles = n_default_subport_max_pipe_profiles,
         .n_pipe_profiles = 1,
         .pipe_profiles = &default_pipe_params,
         .cman_params = NULL,

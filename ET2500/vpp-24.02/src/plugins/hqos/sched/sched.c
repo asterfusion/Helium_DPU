@@ -258,18 +258,26 @@ hqos_sched_subport_get_array_base(hqos_sched_subport_params *params,
     u32 size_pipe = n_pipes_per_subport * sizeof(hqos_sched_pipe);
     u32 size_queue = n_subport_pipe_queues * sizeof(hqos_sched_queue);
     u32 size_queue_extra = n_subport_pipe_queues * sizeof(hqos_sched_queue_extra);
+    u32 size_queue_cman = 0;
     u32 size_pipe_profiles = params->n_max_pipe_profiles * sizeof(hqos_sched_pipe_profile);
     u32 size_bmp_array = hqos_bitmap_get_memory_footprint(n_subport_pipe_queues); 
 
     u32 size_per_pipe_queue_array, size_queue_array;
     u32 base, i;
 
+    if (params->cman_params != NULL) {
+        if (params->cman_params->cman_mode == HQOS_SCHED_CMAN_RED)
+            size_queue_cman = n_subport_pipe_queues * sizeof(hqos_red);
+        else if (params->cman_params->cman_mode == HQOS_SCHED_CMAN_PIE)
+            size_queue_cman = n_subport_pipe_queues * sizeof(hqos_pie);
+    }
+
     size_per_pipe_queue_array = 0;
     for (i = 0; i < HQOS_SCHED_TRAFFIC_CLASSES_PER_PIPE; i++) {
         if (i < HQOS_SCHED_TRAFFIC_CLASS_BE)
-            size_per_pipe_queue_array += params->qsize[i] * sizeof(struct vlib_buffer_t *);
+            size_per_pipe_queue_array += params->qsize[i] * sizeof(u32);
         else
-            size_per_pipe_queue_array += HQOS_SCHED_MAX_QUEUES_PER_TC * params->qsize[i] * sizeof(struct vlib_buffer_t *);
+            size_per_pipe_queue_array += HQOS_SCHED_MAX_QUEUES_PER_TC * params->qsize[i] * sizeof(u32);
     }
     size_queue_array = n_pipes_per_subport * size_per_pipe_queue_array;
 
@@ -286,6 +294,10 @@ hqos_sched_subport_get_array_base(hqos_sched_subport_params *params,
     if (array == e_HQOS_SCHED_SUBPORT_ARRAY_QUEUE_EXTRA) return base;
 
     base += CLIB_CACHE_LINE_ROUND(size_queue_extra);
+
+    if (array == e_HQOS_SCHED_SUBPORT_ARRAY_QUEUE_CMAN) return base;
+
+    base += CLIB_CACHE_LINE_ROUND(size_queue_cman);
 
     if (array == e_HQOS_SCHED_SUBPORT_ARRAY_PIPE_PROFILES) return base;
 
@@ -1091,9 +1103,15 @@ hqos_sched_subport_config(hqos_sched_port *port,
         s->pipe = (hqos_sched_pipe *) (s->memory + hqos_sched_subport_get_array_base(params, e_HQOS_SCHED_SUBPORT_ARRAY_PIPE));
         s->queue = (hqos_sched_queue *) (s->memory + hqos_sched_subport_get_array_base(params, e_HQOS_SCHED_SUBPORT_ARRAY_QUEUE));
         s->queue_extra = (hqos_sched_queue_extra *) (s->memory + hqos_sched_subport_get_array_base(params, e_HQOS_SCHED_SUBPORT_ARRAY_QUEUE_EXTRA));
+        if (params->cman_params != NULL) {
+            if (params->cman_params->cman_mode == HQOS_SCHED_CMAN_RED)
+                s->queue_cman.red = (hqos_red *) (s->memory + hqos_sched_subport_get_array_base(params, e_HQOS_SCHED_SUBPORT_ARRAY_QUEUE_CMAN));
+            else if (params->cman_params->cman_mode == HQOS_SCHED_CMAN_PIE)
+                s->queue_cman.pie = (hqos_pie *) (s->memory + hqos_sched_subport_get_array_base(params, e_HQOS_SCHED_SUBPORT_ARRAY_QUEUE_CMAN));
+        }
         s->pipe_profiles = (hqos_sched_pipe_profile *) (s->memory + hqos_sched_subport_get_array_base(params, e_HQOS_SCHED_SUBPORT_ARRAY_PIPE_PROFILES));
         s->bmp_array =  s->memory + hqos_sched_subport_get_array_base( params, e_HQOS_SCHED_SUBPORT_ARRAY_BMP_ARRAY); 
-        s->queue_array = (vlib_buffer_t **) (s->memory + hqos_sched_subport_get_array_base(params, e_HQOS_SCHED_SUBPORT_ARRAY_QUEUE_ARRAY));
+        s->queue_array = (u32 *) (s->memory + hqos_sched_subport_get_array_base(params, e_HQOS_SCHED_SUBPORT_ARRAY_QUEUE_ARRAY));
 
         /* Pipe profile table */
         hqos_sched_subport_config_pipe_profile_table(s, params, port->rate);
@@ -1291,11 +1309,11 @@ hqos_sched_port_enqueue(hqos_sched_port *port, vlib_buffer_t **pkts, u32 n_pkts)
                   *pkt30, *pkt31, 
                   *pkt_last;
 
-    vlib_buffer_t **q00_base, **q01_base, 
-                  **q10_base, **q11_base, 
-                  **q20_base, **q21_base, 
-                  **q30_base, **q31_base, 
-                  **q_last_base;
+    u32 *q00_base, *q01_base,
+                  *q10_base, *q11_base,
+                  *q20_base, *q21_base,
+                  *q30_base, *q31_base,
+                  *q_last_base;
 
     hqos_sched_subport *subport00, *subport01, 
                        *subport10, *subport11, 
@@ -1325,7 +1343,7 @@ hqos_sched_port_enqueue(hqos_sched_port *port, vlib_buffer_t **pkts, u32 n_pkts)
      */
     if (PREDICT_FALSE(n_pkts < 6)) {
         hqos_sched_subport *subports[5];
-        vlib_buffer_t **q_base[5];
+        u32 *q_base[5];
         uint32_t q[5];
 
         /* Prefetch the mbuf structure of each packet */

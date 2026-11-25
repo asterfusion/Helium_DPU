@@ -61,7 +61,7 @@ hqos_sched_subport_pipe_queues(hqos_sched_subport *subport)
     return HQOS_SCHED_QUEUES_PER_PIPE * subport->n_pipes_per_subport_enabled;
 }
 
-static_always_inline vlib_buffer_t **
+static_always_inline u32 *
 hqos_sched_subport_pipe_qbase(hqos_sched_subport *subport, u32 qindex)
 {
     u32 pindex = qindex >> HQOS_SCHED_QUEUES_PER_PIPE_LOG2;
@@ -142,7 +142,7 @@ hqos_sched_subport_free(hqos_sched_port *port, hqos_sched_subport *subport)
     /* Free enqueued vlib_buffer */
     for (qindex = 0; qindex < n_subport_pipe_queues; qindex++) 
     {
-        vlib_buffer_t **bufs = hqos_sched_subport_pipe_qbase(subport, qindex);
+        u32 *bufs = hqos_sched_subport_pipe_qbase(subport, qindex);
         u16 qsize = hqos_sched_subport_pipe_qsize(port, subport, qindex);
         if (qsize != 0) {
             hqos_sched_queue *queue = subport->queue + qindex;
@@ -150,7 +150,7 @@ hqos_sched_subport_free(hqos_sched_port *port, hqos_sched_subport *subport)
             u16 qw = queue->qw & (qsize - 1);
 
             for (; qr != qw; qr = (qr + 1) & (qsize - 1))
-                vlib_buffer_free_one(vm, vlib_get_buffer_index(vm, bufs[qr]));
+                vlib_buffer_free_one(vm, bufs[qr]);
         }
     }
 
@@ -240,11 +240,9 @@ hqos_sched_port_cman_drop(hqos_sched_port *port,
 
     vlib_main_t *vm = hqos_vlib_get_main ();
 
-    hqos_sched_queue_extra *qe;
     u32 tc_index;
 
     tc_index = hqos_sched_port_pipe_tc(port, qindex);
-    qe = subport->queue_extra + qindex;
 
     /* RED */
     if (subport->cman == HQOS_SCHED_CMAN_RED) {
@@ -258,14 +256,14 @@ hqos_sched_port_cman_drop(hqos_sched_port *port,
         if ((red_cfg->min_th | red_cfg->max_th) == 0)
             return 0;
 
-        red = &qe->red;
+        red = subport->queue_cman.red + qindex;
 
         return hqos_red_enqueue(red_cfg, red, qlen, port->time);
     }
 
     /* PIE */
     hqos_pie_config *pie_cfg = &subport->pie_config[tc_index];
-    hqos_pie *pie = &qe->pie;
+    hqos_pie *pie = subport->queue_cman.pie + qindex;
     u32 pkt_len = vlib_buffer_length_in_chain(vm, pkt);
 
     return hqos_pie_enqueue(pie_cfg, pie, qlen, pkt_len, port->time_cpu_cycles);
@@ -277,8 +275,7 @@ hqos_sched_port_red_set_queue_empty_timestamp(hqos_sched_port *port,
                                               u32 qindex)
 {
     if (subport->cman_enabled && subport->cman == HQOS_SCHED_CMAN_RED) {
-        hqos_sched_queue_extra *qe = subport->queue_extra + qindex;
-        hqos_red *red = &qe->red;
+        hqos_red *red = subport->queue_cman.red + qindex;
 
         hqos_red_mark_queue_empty(red, port->time);
     }
@@ -289,8 +286,7 @@ hqos_sched_port_pie_dequeue(hqos_sched_subport *subport,
                             u32 qindex, u32 pkt_len, u32 time) 
 {
     if (subport->cman_enabled && subport->cman == HQOS_SCHED_CMAN_PIE) {
-        hqos_sched_queue_extra *qe = subport->queue_extra + qindex;
-        hqos_pie *pie = &qe->pie;
+        hqos_pie *pie = subport->queue_cman.pie + qindex;
 
         /* Update queue length */
         pie->qlen -= 1;
@@ -325,6 +321,13 @@ hqos_sched_port_enqueue_qptrs_prefetch0(hqos_sched_subport *subport,
     qe = subport->queue_extra + subport_queue_id;
     clib_prefetch_load(qe);
 
+    if (PREDICT_FALSE(subport->cman_enabled)) {
+        if (subport->cman == HQOS_SCHED_CMAN_RED)
+            clib_prefetch_load(subport->queue_cman.red + subport_queue_id);
+        else
+            clib_prefetch_load(subport->queue_cman.pie + subport_queue_id);
+    }
+
     return subport_queue_id;
 }
 
@@ -332,10 +335,10 @@ static_always_inline void
 hqos_sched_port_enqueue_qwa_prefetch0(hqos_sched_port *port,
                                       hqos_sched_subport *subport,
                                       u32 qindex,
-                                      vlib_buffer_t **qbase)
+                                      u32 *qbase)
 {
     hqos_sched_queue *q;
-    vlib_buffer_t **q_qw;
+    u32 *q_qw;
     u16 qsize;
 
     q = subport->queue + qindex;
@@ -351,7 +354,7 @@ static_always_inline int
 hqos_sched_port_enqueue_qwa(hqos_sched_port *port,
                             hqos_sched_subport *subport,
                             u32 qindex,
-                            vlib_buffer_t **qbase,
+                            u32 *qbase,
                             vlib_buffer_t *pkt)
 {
     vlib_main_t *vm = hqos_vlib_get_main ();
@@ -374,7 +377,7 @@ hqos_sched_port_enqueue_qwa(hqos_sched_port *port,
     }
 
     /* Enqueue packet */
-    qbase[q->qw & (qsize - 1)] = pkt;
+    qbase[q->qw & (qsize - 1)] = vlib_get_buffer_index(vm, pkt);
     q->qw++;
 
     /* Activate queue in the subport bitmap */
@@ -736,7 +739,7 @@ hqos_grinder_next_tc(hqos_sched_port *port,
                      hqos_sched_subport *subport, u32 pos)
 {
     hqos_sched_grinder *grinder = subport->grinder + pos;
-    vlib_buffer_t **qbase;
+    u32 *qbase;
     u32 qindex;
     u16 qsize;
 
@@ -984,18 +987,19 @@ hqos_grinder_prefetch_tc_queue_arrays(hqos_sched_subport *subport, u32 pos)
 static_always_inline void
 hqos_grinder_prefetch_vlib_buffer(hqos_sched_subport *subport, u32 pos)
 {
+    vlib_main_t *vm = hqos_vlib_get_main ();
     hqos_sched_grinder *grinder = subport->grinder + pos;
     u32 qpos = grinder->qpos;
-    vlib_buffer_t **qbase = grinder->qbase[qpos];
+    u32 *qbase = grinder->qbase[qpos];
     u16 qsize = grinder->qsize;
     u16 qr = grinder->queue[qpos]->qr & (qsize - 1);
 
-    grinder->pkt = qbase[qr];
+    grinder->pkt = vlib_get_buffer(vm, qbase[qr]);
     vlib_prefetch_buffer_header (grinder->pkt, LOAD);
 
     if (PREDICT_FALSE((qr & 0x7) == 7)) {
         u16 qr_next = (grinder->queue[qpos]->qr + 1) & (qsize - 1);
-        vlib_prefetch_buffer_header(qbase + qr_next, LOAD);
+        vlib_prefetch_buffer_header(vlib_get_buffer(vm, qbase[qr_next]), LOAD);
     }
 }
 
