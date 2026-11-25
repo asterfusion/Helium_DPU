@@ -356,6 +356,7 @@ typedef enum _hqos_sched_subport_array {
     e_HQOS_SCHED_SUBPORT_ARRAY_PIPE = 0,
     e_HQOS_SCHED_SUBPORT_ARRAY_QUEUE,
     e_HQOS_SCHED_SUBPORT_ARRAY_QUEUE_EXTRA,
+    e_HQOS_SCHED_SUBPORT_ARRAY_QUEUE_CMAN,
     e_HQOS_SCHED_SUBPORT_ARRAY_PIPE_PROFILES,
     e_HQOS_SCHED_SUBPORT_ARRAY_BMP_ARRAY,
     e_HQOS_SCHED_SUBPORT_ARRAY_QUEUE_ARRAY,
@@ -369,10 +370,6 @@ typedef struct _hqos_sched_queue {
 
 typedef struct _hqos_sched_queue_extra {
     hqos_sched_queue_stats stats;
-    union {
-        hqos_red red;
-        hqos_pie pie;
-    };
 } hqos_sched_queue_extra;
 
 typedef struct _hqos_sched_pipe_profile {
@@ -401,6 +398,7 @@ typedef struct _hqos_sched_pipe {
 
     /* Pipe profile and flags */
     u32 profile;
+    u8 tc_ov_period_id;
 
     /* Traffic classes (TCs) */
     u64 tc_time; /* time of next update */
@@ -411,7 +409,6 @@ typedef struct _hqos_sched_pipe {
 
     /* TC oversubscription */
     u64 tc_ov_credits;
-    u8 tc_ov_period_id;
 } __attribute__((__aligned__ (CLIB_CACHE_LINE_BYTES))) hqos_sched_pipe;
 
 typedef struct _hqos_sched_subport_profile {
@@ -451,7 +448,7 @@ typedef struct _hqos_sched_grinder {
     /* Current TC */
     u32 tc_index;
     hqos_sched_queue *queue[HQOS_SCHED_MAX_QUEUES_PER_TC];
-    vlib_buffer_t **qbase[HQOS_SCHED_MAX_QUEUES_PER_TC];
+    u32 *qbase[HQOS_SCHED_MAX_QUEUES_PER_TC];
     u32 qindex[HQOS_SCHED_MAX_QUEUES_PER_TC];
     u16 qsize;
     u32 qmask;
@@ -530,10 +527,14 @@ typedef struct _hqos_sched_subport {
     hqos_sched_pipe *pipe;
     hqos_sched_queue *queue;
     hqos_sched_queue_extra *queue_extra;
+    union {
+        hqos_red *red;
+        hqos_pie *pie;
+    } queue_cman;
     hqos_sched_pipe_profile *pipe_profiles;
     u8 *bmp_array;
 
-    vlib_buffer_t **queue_array;
+    u32 *queue_array;
 
     CLIB_CACHE_LINE_ALIGN_MARK(memory);
 

@@ -35,9 +35,9 @@
 
 #define HQOS_NODE_PORT_MAX                (128)
 #define HQOS_NODE_MAX_SUBPORT_PER_PORT    (8)
-#define HQOS_NODE_MAX_PIPE_PER_SUBPORT    (4096)
+#define HQOS_NODE_MAX_PIPE_PER_SUBPORT    (65536)
 
-#define HQOS_MAX_USER                     (1 << 16) //64k
+#define HQOS_MAX_USER                     (1 << 17) //128k
 #define HQOS_MAX_USER_GROUP               (128)
 #define HQOS_MAX_USER_GROUP_PER_PORT      (HQOS_NODE_MAX_SUBPORT_PER_PORT)
 #define HQOS_MAX_USER_PER_USER_GROUP      (HQOS_NODE_MAX_PIPE_PER_SUBPORT)
