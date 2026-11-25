@@ -229,7 +229,7 @@ int ipoe_session_set_state (u64 external_index, u64 generation,
 int ipoe_session_set_policer (u64 external_index, u32 upstream_index,
 				      u32 downstream_index);
 int ipoe_session_police (vlib_main_t *vm, vlib_buffer_t *b,
-			 u64 external_index, vlib_dir_t dir, u32 packet_bytes);
+			 ipoe_session_t *session, vlib_dir_t dir);
 int ipoe_session_flush_interface (u32 sw_if_index);
 void ipoe_session_expire (u32 session_index);
 void ipoe_session_counter_add (u32 counter_index,

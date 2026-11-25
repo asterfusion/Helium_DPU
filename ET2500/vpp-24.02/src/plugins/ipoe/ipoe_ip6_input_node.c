@@ -12,6 +12,7 @@ typedef enum
   IPOE_IP6_INPUT_ERROR_SESSION_EXPIRED,
   IPOE_IP6_INPUT_ERROR_ACCESS_MISMATCH,
   IPOE_IP6_INPUT_ERROR_MAC_MISMATCH,
+  IPOE_IP6_INPUT_ERROR_POLICER_DROP,
   IPOE_IP6_INPUT_N_ERROR,
 } ipoe_ip6_input_error_t;
 
@@ -23,6 +24,7 @@ static char *ipoe_ip6_input_error_strings[] = {
   "expired IPoE IPv6 session packets",
   "IPoE IPv6 session access mismatch packets",
   "IPoE IPv6 session MAC mismatch packets",
+  "IPoE IPv6 session policer drop packets",
 };
 
 typedef enum
@@ -127,6 +129,11 @@ ipoe_ip6_input_inline (vlib_main_t *vm, vlib_node_runtime_t *node,
 	error = IPOE_IP6_INPUT_ERROR_MAC_MISMATCH;
       else
 	{
+	  if (ipoe_session_police (vm, b, session, VLIB_RX))
+	    {
+	      error = IPOE_IP6_INPUT_ERROR_POLICER_DROP;
+	      goto drop;
+	    }
 	  ipoe_session_counter_add (session->counter_index,
 	    IPOE_SESSION_COUNTER_UPSTREAM_FORWARD, bytes);
 	  goto enqueue;

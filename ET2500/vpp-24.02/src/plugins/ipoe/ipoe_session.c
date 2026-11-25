@@ -631,18 +631,12 @@ ipoe_session_set_policer (u64 external_index, u32 upstream_index,
 
 int
 ipoe_session_police (vlib_main_t *vm, vlib_buffer_t *b,
-		     u64 external_index, vlib_dir_t dir, u32 packet_bytes)
+		     ipoe_session_t *session, vlib_dir_t dir)
 {
-  ipoe_main_t *im = &ipoe_main;
-  uword *p = hash_get (im->session_by_index, (uword) external_index);
-  ipoe_session_t *session;
   u32 policer_index;
   u64 now;
   u8 action;
 
-  if (!p || pool_is_free_index (im->sessions, p[0]))
-    return 1;
-  session = pool_elt_at_index (im->sessions, p[0]);
   policer_index = dir == VLIB_RX ? session->upstream_policer_index :
     session->downstream_policer_index;
   if (policer_index == ~0u)

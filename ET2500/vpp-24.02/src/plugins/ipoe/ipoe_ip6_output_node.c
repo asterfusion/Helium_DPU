@@ -10,6 +10,7 @@ typedef enum
   IPOE_IP6_OUTPUT_ERROR_SESSION_INACTIVE,
   IPOE_IP6_OUTPUT_ERROR_SESSION_EXPIRED,
   IPOE_IP6_OUTPUT_ERROR_ACCESS_MISMATCH,
+  IPOE_IP6_OUTPUT_ERROR_POLICER_DROP,
   IPOE_IP6_OUTPUT_N_ERROR,
 } ipoe_ip6_output_error_t;
 
@@ -17,6 +18,7 @@ static char *ipoe_ip6_output_error_strings[] = {
   "malformed IPv6 output packets", "IPoE IPv6 binding not found packets",
   "inactive IPoE IPv6 session packets", "expired IPoE IPv6 session packets",
   "IPoE IPv6 session access mismatch packets",
+  "IPoE IPv6 session policer drop packets",
 };
 
 static_always_inline ip6_header_t *
@@ -102,6 +104,11 @@ VLIB_NODE_FN (ipoe_ip6_output_node) (vlib_main_t *vm,
 	error = IPOE_IP6_OUTPUT_ERROR_ACCESS_MISMATCH;
       else
 	{
+	  if (ipoe_session_police (vm, b, session, VLIB_TX))
+	    {
+	      error = IPOE_IP6_OUTPUT_ERROR_POLICER_DROP;
+	      goto drop;
+	    }
 	  ipoe_session_counter_add (session->counter_index,
 	    IPOE_SESSION_COUNTER_DOWNSTREAM_FORWARD, bytes);
 	  goto enqueue;

@@ -114,7 +114,8 @@ ipoe_ip4_get_l2_header_bytes (vlib_buffer_t *b)
 
 static_always_inline ipoe_ip4_result_t
 ipoe_ip4_check_packet (vlib_main_t *vm, vlib_buffer_t *b,
-		       u64 *external_index, u32 *counter_index,
+		       ipoe_session_t **session_out, u64 *external_index,
+		       u32 *counter_index,
 		       u32 *packet_bytes, ip4_address_t *src_ip,
 		       mac_address_t *src_mac, ipoe_ip4_error_t *error)
 {
@@ -129,6 +130,7 @@ ipoe_ip4_check_packet (vlib_main_t *vm, vlib_buffer_t *b,
   u32 sw_if_index = vnet_buffer (b)->sw_if_index[VLIB_RX];
 
   *external_index = 0;
+  *session_out = 0;
   *counter_index = ~0;
   *packet_bytes = 0;
   src_ip->as_u32 = 0;
@@ -166,6 +168,7 @@ ipoe_ip4_check_packet (vlib_main_t *vm, vlib_buffer_t *b,
       return IPOE_IP4_RESULT_NO_SESSION;
     }
   session = pool_elt_at_index (im->sessions, p[0]);
+  *session_out = session;
   *external_index = session->external_index;
   *counter_index = session->counter_index;
   if (!session->admin_state)
@@ -219,6 +222,7 @@ VLIB_NODE_FN (ipoe_ip4_input_node) (vlib_main_t *vm,
 	  ip4_address_t src_ip;
 	  mac_address_t src_mac;
 	  u64 external_index;
+	  ipoe_session_t *session;
 	  u32 counter_index;
 	  u32 packet_bytes;
 	  u32 next0;
@@ -230,21 +234,23 @@ VLIB_NODE_FN (ipoe_ip4_input_node) (vlib_main_t *vm,
 	  n_left_to_next--;
 
 	  vnet_feature_next (&next0, b0);
-	  result0 = ipoe_ip4_check_packet (vm, b0, &external_index,
-					     &counter_index, &packet_bytes,
-					     &src_ip, &src_mac, &error0);
+	  result0 = ipoe_ip4_check_packet (vm, b0, &session,
+				     &external_index, &counter_index,
+				     &packet_bytes, &src_ip, &src_mac,
+				     &error0);
 	  if (result0 == IPOE_IP4_RESULT_PASS)
-    {
-      if (ipoe_session_police (vm, b0, external_index, VLIB_RX,
-                               packet_bytes))
-        {
-          next0 = IPOE_IP4_NEXT_DROP;
-          b0->error = node->errors[IPOE_IP4_ERROR_POLICER_DROP];
-        }
-      else
-        ipoe_session_counter_add (counter_index, IPOE_SESSION_COUNTER_UPSTREAM_FORWARD, packet_bytes);
-    }
-  else if (external_index &&
+	    {
+	      if (ipoe_session_police (vm, b0, session, VLIB_RX))
+		{
+		  next0 = IPOE_IP4_NEXT_DROP;
+		  b0->error = node->errors[IPOE_IP4_ERROR_POLICER_DROP];
+		}
+	      else
+		ipoe_session_counter_add (
+		  counter_index, IPOE_SESSION_COUNTER_UPSTREAM_FORWARD,
+		  packet_bytes);
+	    }
+	  else if (external_index &&
 		   (result0 == IPOE_IP4_RESULT_SESSION_INACTIVE ||
 		    result0 == IPOE_IP4_RESULT_ACCESS_MISMATCH ||
 		    result0 == IPOE_IP4_RESULT_MAC_MISMATCH))

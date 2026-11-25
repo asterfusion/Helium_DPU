@@ -10,6 +10,7 @@ typedef enum
   IPOE_QINQ_IP6_ERROR_SESSION_EXPIRED,
   IPOE_QINQ_IP6_ERROR_NO_QINQ,
   IPOE_QINQ_IP6_ERROR_NO_HEADROOM,
+  IPOE_QINQ_IP6_ERROR_POLICER_DROP,
   IPOE_QINQ_IP6_N_ERROR,
 } ipoe_qinq_ip6_error_t;
 
@@ -18,6 +19,7 @@ static char *ipoe_qinq_ip6_error_strings[] = {
   "IPoE QinQ IPv6 session mismatch", "inactive IPoE QinQ IPv6 session",
   "expired IPoE QinQ IPv6 session", "IPoE session has no QinQ",
   "IPoE QinQ IPv6 packet has insufficient headroom",
+  "IPoE QinQ IPv6 policer drop",
 };
 
 VLIB_NODE_FN (ipoe_qinq_ip6_output_node) (vlib_main_t *vm,
@@ -65,6 +67,11 @@ VLIB_NODE_FN (ipoe_qinq_ip6_output_node) (vlib_main_t *vm,
 	{
 	  vnet_buffer (b)->sw_if_index[VLIB_TX] =
 	    session->qinq.parent_sw_if_index;
+	  if (ipoe_session_police (vm, b, session, VLIB_TX))
+	    {
+	      error = IPOE_QINQ_IP6_ERROR_POLICER_DROP;
+	      goto enqueue;
+	    }
 	  next = 0;
 	  ipoe_session_counter_add (session->counter_index,
 	    IPOE_SESSION_COUNTER_DOWNSTREAM_FORWARD, bytes);
@@ -73,7 +80,7 @@ enqueue:
       if (next == 1)
 	{
 	  b->error = node->errors[error];
-	  if (session)
+	  if (session && error != IPOE_QINQ_IP6_ERROR_POLICER_DROP)
 	    ipoe_session_counter_add (session->counter_index,
 	      IPOE_SESSION_COUNTER_DOWNSTREAM_GATE_DROP, bytes);
 	}
