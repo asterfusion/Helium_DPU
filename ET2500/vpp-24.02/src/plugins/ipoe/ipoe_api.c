@@ -169,6 +169,56 @@ vl_api_ipoe_qinq_route_delete_t_handler (
   REPLY_MACRO (VL_API_IPOE_QINQ_ROUTE_DELETE_REPLY);
 }
 
+static int
+ipoe_api_decode_ip6_prefix (const vl_api_prefix_t *api_prefix,
+			    ip6_address_t *prefix, u8 *prefix_length)
+{
+  fib_prefix_t fib_prefix;
+
+  ip_prefix_decode (api_prefix, &fib_prefix);
+  if (fib_prefix.fp_proto != FIB_PROTOCOL_IP6 || !fib_prefix.fp_len ||
+      fib_prefix.fp_len > 128)
+    return IPOE_ERROR_INVALID_VALUE;
+  *prefix = fib_prefix.fp_addr.ip6;
+  *prefix_length = fib_prefix.fp_len;
+  return IPOE_OK;
+}
+
+static void
+vl_api_ipoe_ip6_binding_add_del_t_handler (
+  vl_api_ipoe_ip6_binding_add_del_t *mp)
+{
+  vl_api_ipoe_ip6_binding_add_del_reply_t *rmp;
+  ip6_address_t prefix;
+  u8 prefix_length;
+  int rv = ipoe_api_decode_ip6_prefix (&mp->prefix, &prefix,
+				       &prefix_length);
+
+  if (rv == IPOE_OK)
+    rv = ipoe_ip6_binding_add_del (
+      ntohl (mp->sw_if_index), &prefix, prefix_length,
+      clib_net_to_host_u64 (mp->external_index), mp->is_add);
+  REPLY_MACRO (VL_API_IPOE_IP6_BINDING_ADD_DEL_REPLY);
+}
+
+static void
+vl_api_ipoe_qinq_ip6_route_add_del_t_handler (
+  vl_api_ipoe_qinq_ip6_route_add_del_t *mp)
+{
+  vl_api_ipoe_qinq_ip6_route_add_del_reply_t *rmp;
+  ip6_address_t prefix;
+  u8 prefix_length;
+  int rv = ipoe_api_decode_ip6_prefix (&mp->prefix, &prefix,
+				       &prefix_length);
+
+  if (rv == IPOE_OK)
+    rv = ipoe_qinq_ip6_route_add_del (
+      ntohl (mp->table_id), &prefix, prefix_length,
+      ntohl (mp->sw_if_index),
+      clib_net_to_host_u64 (mp->external_index), mp->is_add);
+  REPLY_MACRO (VL_API_IPOE_QINQ_IP6_ROUTE_ADD_DEL_REPLY);
+}
+
 static void
 vl_api_ipoe_session_add_batch_t_handler (
   vl_api_ipoe_session_add_batch_t *mp)
