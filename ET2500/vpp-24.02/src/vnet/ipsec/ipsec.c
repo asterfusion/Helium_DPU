@@ -273,7 +273,8 @@ ipsec_register_esp_backend (
   const char *esp6_decrypt_node_name, const char *esp6_decrypt_tun_node_name,
   const char *esp_mpls_encrypt_node_tun_name,
   check_support_cb_t esp_check_support_cb,
-  add_del_sa_sess_cb_t esp_add_del_sa_sess_cb)
+  add_del_sa_sess_cb_t esp_add_del_sa_sess_cb,
+  update_sa_sess_cb_t esp_update_sa_sess_cb)
 {
   ipsec_esp_backend_t *b;
 
@@ -304,6 +305,7 @@ ipsec_register_esp_backend (
 
   b->check_support_cb = esp_check_support_cb;
   b->add_del_sa_sess_cb = esp_add_del_sa_sess_cb;
+  b->update_sa_sess_cb = esp_update_sa_sess_cb;
 
   return b - im->esp_backends;
 }
@@ -458,7 +460,7 @@ ipsec_init (vlib_main_t * vm)
     vm, im, "crypto engine backend", "esp4-encrypt", "esp4-encrypt-tun",
     "esp4-decrypt", "esp4-decrypt-tun", "esp6-encrypt", "esp6-encrypt-tun",
     "esp6-decrypt", "esp6-decrypt-tun", "esp-mpls-encrypt-tun",
-    ipsec_check_esp_support, NULL);
+    ipsec_check_esp_support, NULL, NULL);
   im->esp_default_backend = idx;
 
   rv = ipsec_select_esp_backend (im, idx);

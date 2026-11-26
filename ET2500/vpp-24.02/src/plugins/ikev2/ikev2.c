@@ -2530,6 +2530,50 @@ ikev2_create_tunnel_interface (vlib_main_t *vm, ikev2_sa_t *sa,
 
 typedef struct
 {
+  u32 local_sa_id;
+  u16 dst_port;
+} ikev2_update_ipsec_sa_port_args_t;
+
+static void
+ikev2_update_ipsec_sa_port_from_main (ikev2_update_ipsec_sa_port_args_t *a)
+{
+  int rv = ipsec_sa_update (a->local_sa_id, IPSEC_UDP_PORT_NONE, a->dst_port,
+			    NULL, 0);
+
+  if (rv)
+    ikev2_log_error ("updating child SA %u destination port to %u failed: %d",
+		     a->local_sa_id, a->dst_port, rv);
+}
+
+static void
+ikev2_update_remote_port (ikev2_sa_t *sa, udp_header_t *udp)
+{
+  ikev2_update_ipsec_sa_port_args_t a;
+  ikev2_child_sa_t *child;
+  u16 dst_port;
+
+  if (sa->is_initiator || !ikev2_natt_active (sa))
+    return;
+
+  dst_port = clib_net_to_host_u16 (udp->src_port);
+  if (sa->dst_port == dst_port)
+    return;
+
+  ikev2_log_warning ("remote UDP port changed from %u to %u", sa->dst_port,
+		     dst_port);
+  sa->dst_port = dst_port;
+
+  a.dst_port = dst_port;
+  vec_foreach (child, sa->childs)
+    {
+      a.local_sa_id = child->local_sa_id;
+      vl_api_rpc_call_main_thread (ikev2_update_ipsec_sa_port_from_main,
+				   (u8 *) &a, sizeof (a));
+    }
+}
+
+typedef struct
+{
   ip46_address_t local_ip;
   ip46_address_t remote_ip;
   u32 remote_sa_id;
@@ -3574,6 +3618,8 @@ ikev2_node_internal (vlib_main_t *vm, vlib_node_runtime_t *node,
 		  slen = ~0;
 		  goto dispatch0;
 		}
+
+	      ikev2_update_remote_port (sa0, udp0);
 
 	      if (sa0->del)
 		{

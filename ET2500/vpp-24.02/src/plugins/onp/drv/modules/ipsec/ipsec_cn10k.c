@@ -144,6 +144,7 @@ cn10k_ipsec_inline_setup (vlib_main_t *vm, cnxk_ipsec_config_t *ic)
 const cnxk_ipsec_ops_t ipsec_10k_ops = {
   .cnxk_ipsec_session_create = cn10k_ipsec_session_create,
   .cnxk_ipsec_session_destroy = cn10k_ipsec_session_destroy,
+  .cnxk_ipsec_session_udp_ports_update = cn10k_ipsec_session_udp_ports_update,
   .cnxk_ipsec_lookaside_setup = cn10k_ipsec_lookaside_setup,
   .cnxk_ipsec_inline_setup = cn10k_ipsec_inline_setup,
 };
