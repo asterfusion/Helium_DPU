@@ -85,6 +85,8 @@ typedef struct
   u32 sw_if_index;
   u32 hw_if_index;
 
+  u32 hqos_user_id;
+
   /* Scheme A: set when a subscriber /32 host route was installed in the FIB
    * during session creation.  The address is client_ip.ip4 and the FIB is
    * decap_fib_index — both already present in this struct.  The route is
@@ -447,6 +449,7 @@ extern int lcp_pppoe_policer_input_set(u32 sw_if_index, u32 policer_index,
 					       bool apply);
 extern int lcp_pppoe_policer_output_set(u32 sw_if_index, u32 policer_index,
 					bool apply);
+extern int lcp_pppoe_hqos_user_set(u32 sw_if_index, u32 user_id, bool enable);
 extern int lcp_pppoe_hw_if_create_one (u32 *hw_if_index_out);
 extern int lcp_pppoe_hw_if_pool_ensure (u32 target, u32 batch);
 extern bool lcp_pppoe_session_get_carrier (u32 session_sw_if_index,

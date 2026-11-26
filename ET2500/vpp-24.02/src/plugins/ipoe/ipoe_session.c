@@ -333,6 +333,7 @@ ipoe_session_add_locked (u64 external_index, u64 generation, u32 sw_if_index,
   session->admin_state = admin_state;
   session->upstream_policer_index = ~0u;
   session->downstream_policer_index = ~0u;
+  session->hqos_user_id = UINT32_MAX;
   if (qinq && qinq->enabled)
     session->qinq = *qinq;
   session->timer_handle = ~0;
@@ -626,6 +627,21 @@ ipoe_session_set_policer (u64 external_index, u32 upstream_index,
   session = pool_elt_at_index (im->sessions, p[0]);
   session->upstream_policer_index = upstream_index;
   session->downstream_policer_index = downstream_index;
+  return IPOE_OK;
+}
+
+int
+ipoe_session_set_hqos_user (u64 external_index, u32 user_id, bool enable)
+{
+  ipoe_main_t *im = &ipoe_main;
+  uword *p = hash_get (im->session_by_index, (uword) external_index);
+  ipoe_session_t *session;
+
+  if (!p || pool_is_free_index (im->sessions, p[0]))
+    return IPOE_ERROR_NO_SUCH_ENTRY;
+
+  session = pool_elt_at_index (im->sessions, p[0]);
+  session->hqos_user_id = enable ? user_id : UINT32_MAX;
   return IPOE_OK;
 }
 

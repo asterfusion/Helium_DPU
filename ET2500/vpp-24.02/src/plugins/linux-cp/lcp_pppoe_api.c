@@ -132,6 +132,20 @@ vl_api_lcp_pppoe_policer_output_t_handler (
 }
 
 static void
+vl_api_lcp_pppoe_hqos_user_t_handler (
+  vl_api_lcp_pppoe_hqos_user_t *mp)
+{
+  vl_api_lcp_pppoe_hqos_user_reply_t *rmp;
+  int rv;
+
+  VALIDATE_SW_IF_INDEX (mp);
+  rv = lcp_pppoe_hqos_user_set (ntohl (mp->sw_if_index),
+				 ntohl (mp->user_id), mp->enable);
+  BAD_SW_IF_INDEX_LABEL;
+  REPLY_MACRO (VL_API_LCP_PPPOE_HQOS_USER_REPLY);
+}
+
+static void
 vl_api_lcp_pppoe_update_client_ip4_t_handler (
   vl_api_lcp_pppoe_update_client_ip4_t *mp)
 {

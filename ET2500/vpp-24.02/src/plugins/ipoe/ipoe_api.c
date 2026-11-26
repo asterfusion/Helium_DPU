@@ -122,6 +122,17 @@ vl_api_ipoe_session_set_policer_t_handler (
 }
 
 static void
+vl_api_ipoe_session_set_hqos_user_t_handler (
+  vl_api_ipoe_session_set_hqos_user_t *mp)
+{
+  vl_api_ipoe_session_set_hqos_user_reply_t *rmp;
+  int rv = ipoe_session_set_hqos_user (clib_net_to_host_u64 (mp->index),
+				       ntohl (mp->user_id), mp->enable);
+
+  REPLY_MACRO (VL_API_IPOE_SESSION_SET_HQOS_USER_REPLY);
+}
+
+static void
 ipoe_api_decode_qinq_route (u32 route_id, u32 table_id,
 			    const vl_api_ip4_address_t user_ip4,
 			    u32 sw_if_index, ipoe_qinq_route_t *route)

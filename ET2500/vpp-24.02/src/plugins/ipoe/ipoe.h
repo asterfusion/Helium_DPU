@@ -93,6 +93,7 @@ typedef struct
   u8 admin_state;
   u32 upstream_policer_index;
   u32 downstream_policer_index;
+  u32 hqos_user_id;
   ipoe_qinq_session_t qinq;
 } ipoe_session_t;
 
@@ -228,6 +229,7 @@ int ipoe_session_set_state (u64 external_index, u64 generation,
 			    u8 admin_state);
 int ipoe_session_set_policer (u64 external_index, u32 upstream_index,
 				      u32 downstream_index);
+int ipoe_session_set_hqos_user (u64 external_index, u32 user_id, bool enable);
 int ipoe_session_police (vlib_main_t *vm, vlib_buffer_t *b,
 			 ipoe_session_t *session, vlib_dir_t dir);
 int ipoe_session_flush_interface (u32 sw_if_index);
@@ -268,6 +270,16 @@ int ipoe_qinq_ip6_route_add_del (u32 table_id,
 				 u8 prefix_length, u32 sw_if_index,
 				 u64 external_index, u8 is_add);
 void ipoe_qinq_ip6_route_flush_interface (u32 sw_if_index);
+
+static_always_inline void
+ipoe_mark_hqos (vlib_buffer_t *b, const ipoe_session_t *session)
+{
+  if (session->hqos_user_id == UINT32_MAX)
+    return;
+  vnet_buffer2 (b)->hqos_user_id = session->hqos_user_id;
+  b->flags |= VLIB_BUFFER_ACL_SET_USER_VALID;
+  b->flags &= ~VLIB_BUFFER_ACL_SET_GUSER_IP_RANGE_VALID;
+}
 
 static_always_inline u64
 ipoe_user_key (u32 sw_if_index, const ip4_address_t *user_ip4)

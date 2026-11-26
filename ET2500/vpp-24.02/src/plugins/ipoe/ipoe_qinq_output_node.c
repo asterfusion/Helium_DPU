@@ -128,6 +128,7 @@ VLIB_NODE_FN (ipoe_qinq_output_node) (vlib_main_t *vm,
 		  vnet_buffer (b)->sw_if_index[VLIB_TX] =
 		    session->qinq.parent_sw_if_index;
 		  next = IPOE_QINQ_OUTPUT_NEXT_INTERFACE_OUTPUT;
+			  ipoe_mark_hqos (b, session);
 			  if (ipoe_session_police (vm, b, session, VLIB_TX))
 			    {
 			      next = IPOE_QINQ_OUTPUT_NEXT_DROP;

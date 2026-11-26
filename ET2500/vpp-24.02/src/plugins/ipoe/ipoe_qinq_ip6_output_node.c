@@ -67,6 +67,7 @@ VLIB_NODE_FN (ipoe_qinq_ip6_output_node) (vlib_main_t *vm,
 	{
 	  vnet_buffer (b)->sw_if_index[VLIB_TX] =
 	    session->qinq.parent_sw_if_index;
+	  ipoe_mark_hqos (b, session);
 	  if (ipoe_session_police (vm, b, session, VLIB_TX))
 	    {
 	      error = IPOE_QINQ_IP6_ERROR_POLICER_DROP;

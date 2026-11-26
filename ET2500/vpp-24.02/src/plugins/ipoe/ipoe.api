@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-option version = "1.3.0";
+option version = "1.4.0";
 
 import "vnet/interface_types.api";
 import "vnet/ip/ip_types.api";
@@ -148,6 +148,15 @@ autoreply define ipoe_session_set_policer
   u64 index;
   u32 upstream_index;
   u32 downstream_index;
+};
+
+autoreply define ipoe_session_set_hqos_user
+{
+  u32 client_index;
+  u32 context;
+  u64 index;
+  u32 user_id;
+  bool enable;
 };
 
 autoreply define ipoe_qinq_route_add

@@ -53,6 +53,24 @@ lcp_pppoe_session_get_carrier (u32 session_sw_if_index,
   return true;
 }
 
+int
+lcp_pppoe_hqos_user_set (u32 sw_if_index, u32 user_id, bool enable)
+{
+  pppoe_main_t *pm = &pppoe_main;
+  pppoe_session_t *session;
+  u32 session_index;
+
+  if (sw_if_index >= vec_len (pm->session_index_by_sw_if_index))
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+  session_index = pm->session_index_by_sw_if_index[sw_if_index];
+  if (session_index == ~0 || pool_is_free_index (pm->sessions, session_index))
+    return VNET_API_ERROR_NO_SUCH_ENTRY;
+
+  session = pool_elt_at_index (pm->sessions, session_index);
+  session->hqos_user_id = enable ? user_id : UINT32_MAX;
+  return 0;
+}
+
 static_always_inline void
 pppoe_session_set_lcp_magic (pppoe_session_t *t, u32 lcp_magic)
 {
@@ -408,6 +426,28 @@ pppoe_build_rewrite (vnet_main_t * vnm,
   return rw;
 }
 
+static void
+pppoe_mark_hqos (const ip_adjacency_t *adj, vlib_buffer_t *b)
+{
+  pppoe_main_t *pm = &pppoe_main;
+  u32 sw_if_index = adj->rewrite_header.sw_if_index;
+  pppoe_session_t *session;
+  u32 session_index;
+
+  if (sw_if_index >= vec_len (pm->session_index_by_sw_if_index))
+    return;
+  session_index = pm->session_index_by_sw_if_index[sw_if_index];
+  if (session_index == ~0 || pool_is_free_index (pm->sessions, session_index))
+    return;
+  session = pool_elt_at_index (pm->sessions, session_index);
+  if (session->hqos_user_id == UINT32_MAX)
+    return;
+
+  vnet_buffer2 (b)->hqos_user_id = session->hqos_user_id;
+  b->flags |= VLIB_BUFFER_ACL_SET_USER_VALID;
+  b->flags &= ~VLIB_BUFFER_ACL_SET_GUSER_IP_RANGE_VALID;
+}
+
 /**
  * @brief Fixup the adj rewrite post encap. Insert the packet's length
  */
@@ -425,6 +465,7 @@ pppoe_fixup (vlib_main_t * vm,
   pppoe0->length = clib_host_to_net_u16 (vlib_buffer_length_in_chain (vm, b0)
 					 - sizeof (pppoe_header_t)
 					 + sizeof (pppoe0->ppp_proto) - len);
+  pppoe_mark_hqos (adj, b0);
 }
 
 static void
@@ -885,6 +926,7 @@ int lcp_pppoe_session_add(u8 *server_mac, u16 ppp_session_id, u32 encap_sw_if_in
 
       pool_get_aligned (pem->sessions, t, CLIB_CACHE_LINE_BYTES);
       clib_memset (t, 0, sizeof (*t));
+      t->hqos_user_id = UINT32_MAX;
 
       t->session_id = ppp_session_id;
       t->encap_if_index = encap_sw_if_index;
@@ -1072,6 +1114,7 @@ lcp_pppoe_session_add_bulk (u8 *server_mac, u16 ppp_session_id,
 
       pool_get_aligned (pem->sessions, t, CLIB_CACHE_LINE_BYTES);
       clib_memset (t, 0, sizeof (*t));
+      t->hqos_user_id = UINT32_MAX;
       t->session_id = ppp_session_id;
       t->encap_if_index = encap_sw_if_index;
       clib_memcpy (t->server_mac, server_mac, 6);
@@ -1249,6 +1292,7 @@ int vnet_pppoe_add_del_session
 
       pool_get_aligned (pem->sessions, t, CLIB_CACHE_LINE_BYTES);
       clib_memset (t, 0, sizeof (*t));
+      t->hqos_user_id = UINT32_MAX;
 
       //clib_memcpy (t->local_mac, hi->hw_address, vec_len (hi->hw_address));
 

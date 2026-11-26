@@ -59,6 +59,15 @@ autoreply define lcp_pppoe_policer_output
   bool apply;
 };
 
+autoreply define lcp_pppoe_hqos_user
+{
+  u32 client_index;
+  u32 context;
+  vl_api_interface_index_t sw_if_index;
+  u32 user_id;
+  bool enable;
+};
+
 typedef lcp_pppoe_stats_result
 {
   i32 retval;

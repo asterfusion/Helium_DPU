@@ -200,6 +200,7 @@ VLIB_NODE_FN (ipoe_output_node) (vlib_main_t *vm,
 					&error0);
 	  if (result0 == IPOE_OUTPUT_RESULT_PASS)
 	    {
+	      ipoe_mark_hqos (b0, session);
 	      if (ipoe_session_police (vm, b0, session, VLIB_TX))
 		{
 		  next0 = IPOE_OUTPUT_NEXT_DROP;

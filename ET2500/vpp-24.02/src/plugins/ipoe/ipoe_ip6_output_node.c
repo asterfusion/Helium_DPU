@@ -104,6 +104,7 @@ VLIB_NODE_FN (ipoe_ip6_output_node) (vlib_main_t *vm,
 	error = IPOE_IP6_OUTPUT_ERROR_ACCESS_MISMATCH;
       else
 	{
+	  ipoe_mark_hqos (b, session);
 	  if (ipoe_session_police (vm, b, session, VLIB_TX))
 	    {
 	      error = IPOE_IP6_OUTPUT_ERROR_POLICER_DROP;
