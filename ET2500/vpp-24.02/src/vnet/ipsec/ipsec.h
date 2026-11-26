@@ -34,6 +34,7 @@
 #define IPSEC_FP_IP6_HASHES_POOL_SIZE 128
 
 typedef clib_error_t *(*add_del_sa_sess_cb_t) (u32 sa_index, u8 is_add);
+typedef clib_error_t *(*update_sa_sess_cb_t) (u32 sa_index);
 typedef clib_error_t *(*check_support_cb_t) (ipsec_sa_t * sa);
 typedef clib_error_t *(*enable_disable_cb_t) (int is_enable);
 
@@ -91,6 +92,7 @@ typedef struct
   u8 *name;
   /* add/del callback */
   add_del_sa_sess_cb_t add_del_sa_sess_cb;
+  update_sa_sess_cb_t update_sa_sess_cb;
   /* check support function */
   check_support_cb_t check_support_cb;
   u32 esp4_encrypt_node_index;
@@ -389,7 +391,8 @@ u32 ipsec_register_esp_backend (
   const char *esp6_decrypt_node_name, const char *esp6_decrypt_tun_node_name,
   const char *esp_mpls_encrypt_tun_node_name,
   check_support_cb_t esp_check_support_cb,
-  add_del_sa_sess_cb_t esp_add_del_sa_sess_cb);
+  add_del_sa_sess_cb_t esp_add_del_sa_sess_cb,
+  update_sa_sess_cb_t esp_update_sa_sess_cb);
 
 int ipsec_select_ah_backend (ipsec_main_t * im, u32 ah_backend_idx);
 int ipsec_select_esp_backend (ipsec_main_t * im, u32 esp_backend_idx);

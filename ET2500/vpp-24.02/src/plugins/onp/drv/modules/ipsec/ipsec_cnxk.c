@@ -119,6 +119,23 @@ cnxk_drv_ipsec_session_destroy (vlib_main_t *vm, uintptr_t ipsec_queue,
 }
 
 i32
+cnxk_drv_ipsec_session_udp_ports_update (vlib_main_t *vm, uintptr_t ipsec_queue,
+					 u32 sa_index)
+{
+  cnxk_ipsec_main_t *im = CNXK_IPSEC_GET_MAIN ();
+  const cnxk_ipsec_ops_t *ipsec_ops = im->ipsec_ops;
+
+  if (!ipsec_ops || !ipsec_ops->cnxk_ipsec_session_udp_ports_update)
+    {
+      cnxk_ipsec_err ("IPsec session UDP port update is not supported");
+      return -1;
+    }
+
+  return ipsec_ops->cnxk_ipsec_session_udp_ports_update (vm, ipsec_queue,
+							 sa_index);
+}
+
+i32
 cnxk_drv_ipsec_inline_setup (vlib_main_t *vm, cnxk_ipsec_config_t *ic)
 {
   cnxk_ipsec_main_t *im = CNXK_IPSEC_GET_MAIN ();
