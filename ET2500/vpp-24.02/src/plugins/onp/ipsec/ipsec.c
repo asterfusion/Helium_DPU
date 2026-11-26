@@ -281,6 +281,31 @@ onp_esp_add_del_sa_sess (u32 sa_index, u8 is_add)
   return 0;
 }
 
+static clib_error_t *
+onp_esp_update_sa_sess (u32 sa_index)
+{
+  onp_ipsec_main_t *im = &onp_ipsec_main;
+  ipsec_sa_t *sa = ipsec_sa_get (sa_index);
+
+  if (!sa)
+    return clib_error_create ("Couldnt find sa using sa_index %d", sa_index);
+
+  if (ipsec_sa_is_set_IS_INBOUND (sa) || !ipsec_sa_is_set_UDP_ENCAP (sa))
+    return 0;
+
+  if (cnxk_drv_ipsec_session_udp_ports_update (
+	vlib_get_main (), im->out_ipsec_queue, sa_index) < 0)
+    {
+      onp_ipsec_err ("IPsec HW UDP port update failed for SA index %u "
+		     "(spi %x, src %u, dst %u)",
+		     sa_index, sa->spi, sa->udp_src_port, sa->udp_dst_port);
+      return clib_error_create (
+	"IPsec HW UDP port update failed for SA index %u", sa_index);
+    }
+
+  return 0;
+}
+
 clib_error_t *
 onp_ipsec_config_parse (onp_config_main_t *conf, unformat_input_t *sub_input)
 {
@@ -344,7 +369,7 @@ onp_ipsec_register_esp_backend (vlib_main_t *vm, onp_ipsec_main_t *oim)
     "onp-esp4-decrypt", "onp-esp4-decrypt-tun", "onp-esp6-encrypt",
     esp6_enc_tun, "onp-esp6-decrypt", "onp-esp6-decrypt-tun",
     "onp-esp-mpls-encrypt-tun", onp_ipsec_check_support,
-    onp_esp_add_del_sa_sess);
+    onp_esp_add_del_sa_sess, onp_esp_update_sa_sess);
 
   rv = ipsec_select_esp_backend (im, idx);
   if (rv)

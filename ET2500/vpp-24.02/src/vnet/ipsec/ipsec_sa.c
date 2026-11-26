@@ -56,6 +56,21 @@ ipsec_call_add_del_callbacks (ipsec_main_t * im, ipsec_sa_t * sa,
   return 0;
 }
 
+static clib_error_t *
+ipsec_call_update_callbacks (ipsec_main_t *im, ipsec_sa_t *sa, u32 sa_index)
+{
+  ipsec_esp_backend_t *eb;
+
+  if (sa->protocol != IPSEC_PROTOCOL_ESP)
+    return 0;
+
+  eb = pool_elt_at_index (im->esp_backends, im->esp_current_backend);
+  if (eb->update_sa_sess_cb)
+    return eb->update_sa_sess_cb (sa_index);
+
+  return 0;
+}
+
 void
 ipsec_mk_key (ipsec_key_t * key, const u8 * data, u8 len)
 {
@@ -299,8 +314,10 @@ ipsec_sa_update (u32 id, u16 src_port, u16 dst_port, const tunnel_t *tun,
   ipsec_main_t *im = &ipsec_main;
   ipsec_sa_t *sa;
   ipsec_sa_outb_rt_t *ort;
+  clib_error_t *err;
   u32 sa_index;
   uword *p;
+  u8 is_updated = 0;
   int rv;
 
   p = hash_get (im->sa_index_by_sa_id, id);
@@ -415,16 +432,30 @@ ipsec_sa_update (u32 id, u16 src_port, u16 dst_port, const tunnel_t *tun,
 				       !ipsec_sa_is_set_IS_TUNNEL_V6 (sa));
 	    }
 	  sa->udp_dst_port = dst_port;
+	  is_updated = 1;
 	  if (ort)
 	    ort->udp_hdr.dst_port = clib_host_to_net_u16 (dst_port);
 	}
       if (src_port != IPSEC_UDP_PORT_NONE && src_port != (sa->udp_src_port))
 	{
 	  sa->udp_src_port = src_port;
+	  is_updated = 1;
 	  if (ort)
 	    ort->udp_hdr.src_port = clib_host_to_net_u16 (src_port);
 	}
     }
+
+  if (is_updated)
+    {
+      err = ipsec_call_update_callbacks (im, sa, sa_index);
+      if (err)
+	{
+	  clib_warning ("IPsec backend SA update failed: %v", err->what);
+	  clib_error_free (err);
+	  return VNET_API_ERROR_SYSCALL_ERROR_1;
+	}
+    }
+
   return (0);
 }
 
@@ -568,6 +599,17 @@ ipsec_sa_add_and_lock (u32 id, u32 spi, ipsec_protocol_t proto,
       return VNET_API_ERROR_UNIMPLEMENTED;
     }
 
+  if (ipsec_sa_is_set_UDP_ENCAP (sa))
+    {
+      if (dst_port == IPSEC_UDP_PORT_NONE)
+	dst_port = UDP_DST_PORT_ipsec;
+      if (src_port == IPSEC_UDP_PORT_NONE)
+	src_port = UDP_DST_PORT_ipsec;
+
+      sa->udp_dst_port = dst_port;
+      sa->udp_src_port = src_port;
+    }
+
   err = ipsec_call_add_del_callbacks (im, sa, sa_index, 1);
   if (err)
     {
@@ -612,13 +654,6 @@ ipsec_sa_add_and_lock (u32 id, u32 spi, ipsec_protocol_t proto,
 
   if (ipsec_sa_is_set_UDP_ENCAP (sa))
     {
-      if (dst_port == IPSEC_UDP_PORT_NONE)
-	dst_port = UDP_DST_PORT_ipsec;
-      if (src_port == IPSEC_UDP_PORT_NONE)
-	src_port = UDP_DST_PORT_ipsec;
-
-      sa->udp_dst_port = dst_port;
-      sa->udp_src_port = src_port;
       if (ort)
 	{
 	  ort->udp_hdr.src_port = clib_host_to_net_u16 (src_port);

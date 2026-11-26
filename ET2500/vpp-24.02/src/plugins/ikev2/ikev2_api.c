@@ -337,6 +337,7 @@ send_sa_v2 (ikev2_sa_t *sa, vl_api_ikev2_sa_v2_dump_t *mp, u32 api_sa_index)
     if (vec_len (p->name) < size_data)
       size_data = vec_len (p->name);
     clib_memcpy (rsa->profile_name, p->name, size_data);
+    rsa->is_initiator = sa->is_initiator;
 
     rsa->state = ikev2_state_encode (sa->state);
 

@@ -47,6 +47,9 @@ i32 cn10k_ipsec_session_create (vlib_main_t *vm, uintptr_t ipsec_queue,
 i32 cn10k_ipsec_session_destroy (vlib_main_t *vm, uintptr_t ipsec_queue,
 				 u32 sa_index);
 
+i32 cn10k_ipsec_session_udp_ports_update (vlib_main_t *vm,
+					  uintptr_t ipsec_queue, u32 sa_index);
+
 static_always_inline u32
 cn10k_ipsec_sess_itf_idx_get (cnxk_ipsec_session_t *session)
 {

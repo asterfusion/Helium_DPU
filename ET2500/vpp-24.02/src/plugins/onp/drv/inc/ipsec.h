@@ -63,6 +63,10 @@ i32 cnxk_drv_ipsec_session_create (vlib_main_t *vm, uintptr_t ipsec_queue,
 i32 cnxk_drv_ipsec_session_destroy (vlib_main_t *vm, uintptr_t ipsec_queue,
 				    u32 sa_index);
 
+i32 cnxk_drv_ipsec_session_udp_ports_update (vlib_main_t *vm,
+					     uintptr_t ipsec_queue,
+					     u32 sa_index);
+
 i32 cnxk_drv_ipsec_session_reassembly_set (vlib_main_t *vm, u32 sa_index);
 
 #define onp_ptd_ipsec(ptd) (&ptd->ipsec)
