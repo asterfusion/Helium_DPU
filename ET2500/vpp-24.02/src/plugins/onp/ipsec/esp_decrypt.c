@@ -236,6 +236,9 @@ onp_esp_dec_post_process (vlib_main_t *vm, ipsec_sa_t *sa, vlib_buffer_t *b,
   bool is_chain_buf = 0;
   esp_footer_t *f;
 
+  if (ipsec_sa_is_set_UDP_ENCAP (sa))
+    vlib_buffer_advance (chained_buffer, -sizeof (udp_header_t));
+
   ip4_header_t *ip4 = vlib_buffer_get_current (chained_buffer);
   if ((ip4->ip_version_and_header_length & 0xf0) == 0x40)
   {

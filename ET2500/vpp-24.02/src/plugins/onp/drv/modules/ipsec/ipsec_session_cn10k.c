@@ -220,6 +220,9 @@ cn10k_ipsec_sa_common_param_fill (union roc_ot_ipsec_sa_word2 *w2,
   for (i = 0; i < (int) (ROC_CTX_MAX_CKEY_LEN / sizeof (u64)); i++)
     tmp_key[i] = clib_net_to_host_u64 (tmp_key[i]);
 
+  if (ipsec_sa_is_set_UDP_ENCAP (sa))
+    w2->s.encap_type = ROC_IE_OT_SA_ENCAP_UDP;
+
   w2->s.spi = sa->spi;
 
   return 0;
@@ -334,6 +337,12 @@ cn10k_ipsec_outb_session_update (vlib_main_t *vm,
 
   out_sa->w2.u64 = w2.u64;
 
+  if (ipsec_sa_is_set_UDP_ENCAP (sa))
+    {
+      out_sa->w10.s.udp_src_port = sa->udp_src_port;
+      out_sa->w10.s.udp_dst_port = sa->udp_dst_port;
+    }
+
   if (ipsec_sa_is_set_IS_TUNNEL (sa))
     {
       if (sa->tunnel.t_encap_decap_flags &
@@ -356,6 +365,8 @@ cn10k_ipsec_outb_session_update (vlib_main_t *vm,
   cnxk_wmb ();
 
   cnxk_ipsec_sa_len_precalc (sa, &sess->encap);
+  if (ipsec_sa_is_set_UDP_ENCAP (sa))
+    sess->encap.partial_len += sizeof (udp_header_t);
 
   cn10k_ipsec_common_inst_param_fill (vm, out_sa, sess);
 
@@ -592,6 +603,56 @@ cn10k_ipsec_session_create (vlib_main_t *vm, uintptr_t ipsec_queue,
   /* Initialize the ITF details in ipsec_session for tunnel SAs */
   if (ipsec_sa_is_set_IS_TUNNEL (sa))
     session->itf_sw_idx = ~0;
+
+  return 0;
+}
+
+i32
+cn10k_ipsec_session_udp_ports_update (vlib_main_t *vm, uintptr_t ipsec_queue,
+				      u32 sa_index)
+{
+  cnxk_crypto_queue_t *ipsec_queue_local = (cnxk_crypto_queue_t *) ipsec_queue;
+  cnxk_ipsec_main_t *im = CNXK_IPSEC_GET_MAIN ();
+  ipsec_sa_t *sa = ipsec_sa_get (sa_index);
+  cn10k_ipsec_session_t *session;
+  struct roc_ot_ipsec_outb_sa *out_sa;
+  int rv;
+
+  if (!sa || ipsec_sa_is_set_IS_INBOUND (sa) ||
+      !ipsec_sa_is_set_UDP_ENCAP (sa))
+    return 0;
+
+  session = vec_elt (im->inline_ipsec_sessions, sa_index);
+  if (!session)
+    return -1;
+
+  out_sa = &session->out_sa;
+  out_sa->w10.s.udp_src_port = sa->udp_src_port;
+  out_sa->w10.s.udp_dst_port = sa->udp_dst_port;
+  cnxk_wmb ();
+
+  if (im->ipsec_offloads & CNXK_IPSEC_OFFLOAD_FLAG_INL_OUTBOUND)
+    {
+      rv = cn10k_pktio_inl_dev_outb_ctx_write (
+	vm, &out_sa->w10, &out_sa->w10, sizeof (out_sa->w10));
+      if (rv)
+	{
+	  cnxk_ipsec_err ("Could not update inline outbound UDP ports");
+	  return rv;
+	}
+    }
+
+  if (im->ipsec_offloads & CNXK_IPSEC_OFFLOAD_FLAG_LOOKASIDE)
+    {
+      rv = roc_cpt_ctx_write (&ipsec_queue_local->lf, &out_sa->w10,
+			      &out_sa->w10, sizeof (out_sa->w10));
+      if (rv)
+	{
+	  cnxk_ipsec_err ("Could not update lookaside outbound UDP ports");
+	  return -1;
+	}
+      roc_cpt_lf_ctx_flush (&ipsec_queue_local->lf, out_sa, false);
+    }
 
   return 0;
 }

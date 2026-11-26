@@ -26,6 +26,9 @@ typedef struct cnxk_drv_ipsec_ops
 				    u32 sa_index, u64 mode);
   i32 (*cnxk_ipsec_session_destroy) (vlib_main_t *vm, uintptr_t ipsec_queue,
 				     u32 sa_index);
+  i32 (*cnxk_ipsec_session_udp_ports_update) (vlib_main_t *vm,
+					      uintptr_t ipsec_queue,
+					      u32 sa_index);
   i32 (*cnxk_ipsec_lookaside_setup) (vlib_main_t *vm, cnxk_ipsec_config_t *ic);
   i32 (*cnxk_ipsec_inline_setup) (vlib_main_t *vm, cnxk_ipsec_config_t *ic);
 } cnxk_ipsec_ops_t;
